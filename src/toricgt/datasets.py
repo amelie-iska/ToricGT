@@ -28,6 +28,7 @@ class DatasetSpec:
     expected_rows: int | None = None
     file_name: str | None = None
     raw_url: str | None = None
+    forced_split: str | None = None
 
     @property
     def key(self) -> str:
@@ -93,6 +94,57 @@ DATASET_SPECS: tuple[DatasetSpec, ...] = (
         language="en",
         url="https://hf.co/datasets/openai/gsm8k",
         expected_rows=8_792,
+    ),
+    DatasetSpec(
+        name="openai/frontierscience",
+        config="default",
+        splits=("test",),
+        loader="datasets",
+        task_family="openai_frontierscience_eval",
+        role="FrontierScience expert-level scientific benchmark; evaluation-only, never training",
+        license="apache-2.0",
+        language="en",
+        url="https://hf.co/datasets/openai/frontierscience",
+        expected_rows=160,
+        forced_split="test",
+    ),
+    DatasetSpec(
+        name="openai/healthbench",
+        config="default",
+        splits=("test",),
+        loader="datasets",
+        task_family="openai_healthbench_eval",
+        role="HealthBench rubric-based health evaluation; evaluation-only by default",
+        license="mit",
+        language="multilingual",
+        url="https://hf.co/datasets/openai/healthbench",
+        expected_rows=5_000,
+        forced_split="test",
+    ),
+    DatasetSpec(
+        name="openai/healthbench-professional",
+        config="default",
+        splits=("test",),
+        loader="datasets",
+        task_family="openai_healthbench_professional_eval",
+        role="HealthBench Professional physician-response rubric evaluation; evaluation-only by default",
+        license="mit",
+        language="multilingual",
+        url="https://hf.co/datasets/openai/healthbench-professional",
+        expected_rows=525,
+        forced_split="test",
+    ),
+    DatasetSpec(
+        name="openai/graphwalks",
+        config="default",
+        splits=("train",),
+        loader="datasets",
+        task_family="openai_graphwalks",
+        role="OpenAI GraphWalks multi-hop directed graph reasoning benchmark and augmentation source",
+        license="mit",
+        language="en",
+        url="https://hf.co/datasets/openai/graphwalks",
+        expected_rows=1_150,
     ),
     *(
         DatasetSpec(
@@ -352,6 +404,8 @@ def first_string(record: dict[str, Any], keys: Iterable[str]) -> str:
 
 
 def messages_to_text(value: Any, role: str | None = None) -> str:
+    if isinstance(value, dict) and isinstance(value.get("messages"), list):
+        value = value["messages"]
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
@@ -373,6 +427,20 @@ def messages_to_text(value: Any, role: str | None = None) -> str:
         if isinstance(content, str) and content.strip():
             parts.append(content.strip())
     return "\n\n".join(parts)
+
+
+def rubric_items_to_text(value: Any) -> str:
+    if not isinstance(value, list):
+        return ""
+    parts: list[str] = []
+    for idx, item in enumerate(value):
+        if not isinstance(item, dict):
+            continue
+        criterion = str(item.get("criterion") or item.get("criterion_text") or "").strip()
+        points = item.get("points")
+        if criterion:
+            parts.append(f"rubric_{idx}: {criterion} ({points} pts)")
+    return "\n".join(parts)
 
 
 def extract_answer_from_solution(solution: str) -> str:
@@ -411,6 +479,42 @@ def make_graph_json(question: str, reasoning: str, answer: str, task_family: str
     return compact_json({"task_family": task_family, "nodes": nodes, "edges": edges})
 
 
+def make_graphwalks_graph_json(prompt: str, answer_nodes: Any, problem_type: str) -> str:
+    edge_matches = re.findall(r"^([A-Za-z0-9_.:-]+)\s*->\s*([A-Za-z0-9_.:-]+)\s*$", prompt, flags=re.MULTILINE)
+    operation_match = re.search(r"Operation:\s*(.*?)\s*(?:Final Answer:|$)", prompt, flags=re.DOTALL)
+    operation = operation_match.group(1).strip() if operation_match else problem_type
+    answer_list = [str(item) for item in answer_nodes] if isinstance(answer_nodes, list) else []
+    node_names = sorted({node for edge in edge_matches for node in edge} | set(answer_list))
+    nodes: list[dict[str, Any]] = [
+        {"id": f"node_{idx:04d}", "type": "graph_node", "text": name}
+        for idx, name in enumerate(node_names)
+    ]
+    id_by_name = {name: f"node_{idx:04d}" for idx, name in enumerate(node_names)}
+    edges: list[dict[str, Any]] = []
+    for idx, (src, dst) in enumerate(edge_matches):
+        edges.append(
+            {
+                "source": id_by_name[src],
+                "target": id_by_name[dst],
+                "type": "directed_edge",
+                "edge_index": idx,
+            }
+        )
+    nodes.append({"id": "operation", "type": "operation", "text": operation[:4000]})
+    for answer_idx, name in enumerate(answer_list):
+        node_id = id_by_name.get(name)
+        if node_id is not None:
+            edges.append({"source": "operation", "target": node_id, "type": "returns_answer_node", "rank": answer_idx})
+    return compact_json(
+        {
+            "task_family": "openai_graphwalks",
+            "problem_type": problem_type,
+            "nodes": nodes,
+            "edges": edges,
+        }
+    )
+
+
 def simhash_prefix(text: str, bits: int = 64, prefix_bits: int = 16) -> str:
     words = canonical_text(text).split()
     if not words:
@@ -442,6 +546,14 @@ def family_key(spec: DatasetSpec, record: dict[str, Any], question: str, answer:
         return str(record.get("id") or record.get("contest_id") or question)
     if spec.name == "open-r1/OpenR1-Math-220k":
         return str(record.get("uuid") or question)
+    if spec.name == "openai/frontierscience":
+        return str(record.get("task_group_id") or question or answer)
+    if spec.name == "openai/healthbench":
+        return str(record.get("prompt_id") or question or answer)
+    if spec.name == "openai/healthbench-professional":
+        return str(record.get("id") or question or answer)
+    if spec.name == "openai/graphwalks":
+        return stable_hash(str(record.get("prompt") or "") + str(record.get("problem_type") or ""))
     if spec.name == "unimorph/universal_morphologies":
         return f"{record.get('lemma','')}::{record.get('form','')}"
     if spec.name == "Sefaria/Rabbinic-Hebrew-English-Pairs":
@@ -573,6 +685,30 @@ def normalize_record(
         answer = str(record.get("answer") or "")
         solution = str(record.get("sft_trace") or answer)
         reasoning = solution
+    if spec.name == "openai/frontierscience":
+        question = str(record.get("problem") or "")
+        answer = str(record.get("answer") or "")
+        solution = answer
+        reasoning = str(record.get("subject") or "")
+    if spec.name == "openai/healthbench":
+        prompt_text = messages_to_text(record.get("prompt"))
+        rubrics = rubric_items_to_text(record.get("rubrics"))
+        question = prompt_text
+        answer = rubrics
+        solution = rubrics
+        reasoning = rubrics
+    if spec.name == "openai/healthbench-professional":
+        question = messages_to_text(record.get("conversation"))
+        answer = str(record.get("physician_response") or "")
+        rubrics = rubric_items_to_text(record.get("rubric_items"))
+        solution = "\n\n".join(part for part in (answer, rubrics) if part)
+        reasoning = rubrics
+    if spec.name == "openai/graphwalks":
+        question = str(record.get("prompt") or "")
+        answer_nodes = record.get("answer_nodes")
+        answer = compact_json(answer_nodes if isinstance(answer_nodes, list) else [])
+        solution = answer
+        reasoning = str(record.get("problem_type") or "")
     if spec.name in {"lamm-mit/graph-reasoning-messages-11K", "Gryphe/Opus-4.6-Reasoning-24k"}:
         messages = record.get("messages")
         user_text = messages_to_text(messages, role="user")
@@ -608,7 +744,7 @@ def normalize_record(
     sim_prefix = simhash_prefix(normalized)
     group_source = f"{spec.task_family}::{family_key(spec, record, question, answer)}::{sim_prefix}"
     group_hash = stable_hash(canonical_text(group_source))
-    split = assign_split(group_hash)
+    split = spec.forced_split or assign_split(group_hash)
     record_id = stable_hash(f"{spec.key}::{source_split}::{source_index}::{content_hash}")
     quality_flags = {
         "empty_question": not bool(question.strip()),
@@ -641,7 +777,9 @@ def normalize_record(
         "reasoning": reasoning,
         "metadata_json": compact_json(record),
         "text": text,
-        "graph_json": make_graph_json(question, reasoning or solution, answer, spec.task_family),
+        "graph_json": make_graphwalks_graph_json(question, record.get("answer_nodes"), str(record.get("problem_type") or ""))
+        if spec.name == "openai/graphwalks"
+        else make_graph_json(question, reasoning or solution, answer, spec.task_family),
         "content_hash": content_hash,
         "group_hash": group_hash,
         "split": split,

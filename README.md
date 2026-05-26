@@ -89,6 +89,10 @@ The full data research and segmentation plan is in [planning/DATA.md](/home/iska
 - `open-r1/OpenR1-Math-220k`
 - `open-r1/codeforces-cots`
 - `openai/gsm8k`
+- `openai/frontierscience` (eval-only)
+- `openai/healthbench` (eval-only)
+- `openai/healthbench-professional` (eval-only)
+- `openai/graphwalks`
 - `EleutherAI/hendrycks_math`
 - `HuggingFaceH4/MATH-500`
 - `terrycraddock/Tree_Of_Thoughts_BASE_24k`
@@ -111,6 +115,10 @@ The Hebrew/Jewish-text slice intentionally uses Sefaria and UniMorph Hebrew sour
 The frontier-reasoning slice prioritizes open or permissively licensed public traces, especially gpt-oss-120b text distillations. Logprob-only gpt-oss sidecar data is reserved for optional reward/GFlowNet work after tokenizer alignment.
 
 The NVIDIA/Nemotron slice adds procedurally verifiable reasoning, safety-label justification traces, and physical/temporal scene reasoning. Larger NVIDIA PhysicalAI spatial and PhysicsNeMo CFD datasets are documented in `planning/CYCLIC-EXPERT-GFLOWNET-PLAN.md` as opt-in graph-adapter sources rather than default text curation.
+
+Additional OpenAI benchmark and graph-reasoning notes, plus the proposed
+SauravMaheshkar higher-order simplicial augmentation plan, are in
+[planning/DATA-II.md](/home/iska/Documents/amelie/bio/ToricGT/planning/DATA-II.md).
 
 Create a bounded sample curation:
 
