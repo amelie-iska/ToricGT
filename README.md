@@ -573,6 +573,18 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --output-dir outputs/projections/oai-step2000-to-50000
 ```
 
+For earlier checkpoints, keep the same command and change the target/output:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/project_pg_loss.py \
+  --wandb-run amelie-iska-math/toricgt-parameter-golf/gbmw7z3a \
+  --fit-through-step 2000 \
+  --target-step 10000 \
+  --metrics train/loss train/bpb \
+  --output-dir outputs/projections/oai-step2000-to-10000
+```
+
 Export a compressed artifact from either a graph checkpoint or a dense
 random-order checkpoint:
 

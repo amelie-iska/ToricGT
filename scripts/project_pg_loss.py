@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Example:
+#   conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+#     python scripts/project_pg_loss.py \
+#     --wandb-run amelie-iska-math/toricgt-parameter-golf/gbmw7z3a \
+#     --fit-through-step 2000 \
+#     --target-step 50000 \
+#     --metrics train/loss train/bpb \
+#     --output-dir outputs/projections/oai-step2000-to-50000
+#
+# Change --target-step to any positive optimizer step, such as 5000, 10000,
+# 25000, or 50000.  The script does not touch training; it only reads W&B or
+# local CSV/JSONL history and writes projection plots/summaries.
 """Project Parameter-Golf loss/BPB at an arbitrary step from early history.
 
 The projection is intentionally conservative.  It fits several monotone
