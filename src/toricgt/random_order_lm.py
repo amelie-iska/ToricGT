@@ -48,6 +48,20 @@ class RandomOrderLMConfig:
     gflownet_num_actions: int = 8
     gflownet_hidden_dim: int = 128
     gflownet_action_scale: float = 0.05
+    use_bigram_hash: bool = True
+    bigram_hash_buckets: int = 4096
+    bigram_hash_weight: float = 0.35
+    use_caseops_features: bool = True
+    caseops_weight: float = 0.35
+    use_smear_gate: bool = True
+    smear_temperature_min: float = 0.55
+    smear_temperature_max: float = 1.75
+    use_toric_memory: bool = True
+    toric_memory_slots: int = 32
+    toric_memory_weight: float = 0.08
+    aux_mtp_offsets: int = 2
+    contrastive_temperature: float = 0.2
+    trajectory_flow_viscosity: float = 0.05
     target_artifact_bytes: int = 15_600_000
     byte_offset: int = 4
     pad_token_id: int = 0
@@ -167,6 +181,12 @@ class DenseRandomOrderToricLM(nn.Module):
         self.token_embedding = nn.Embedding(config.vocab_size + 1, config.d_model)
         self.position_embedding = nn.Embedding(config.max_seq_len, config.d_model)
         self.toric_phase = nn.Linear(4, config.d_model, bias=False)
+        self.bigram_hash = (
+            nn.Embedding(config.bigram_hash_buckets, config.d_model)
+            if config.use_bigram_hash and config.bigram_hash_buckets > 0
+            else None
+        )
+        self.caseops = nn.Linear(10, config.d_model, bias=False) if config.use_caseops_features else None
         self.drop = nn.Dropout(config.dropout)
         self.blocks = nn.ModuleList(
             [
@@ -185,6 +205,22 @@ class DenseRandomOrderToricLM(nn.Module):
             ]
         )
         self.norm = nn.LayerNorm(config.d_model)
+        self.smear_gate = (
+            nn.Sequential(
+                nn.LayerNorm(config.d_model),
+                nn.Linear(config.d_model, 1),
+            )
+            if config.use_smear_gate
+            else None
+        )
+        if config.use_toric_memory and config.toric_memory_slots > 0:
+            self.toric_memory_key = nn.Linear(6, config.d_model, bias=False)
+            self.toric_memory_query = nn.Linear(config.d_model, config.d_model, bias=False)
+            self.toric_memory_value = nn.Parameter(torch.empty(config.toric_memory_slots, config.d_model))
+        else:
+            self.toric_memory_key = None
+            self.toric_memory_query = None
+            self.toric_memory_value = None
         if config.use_gflownet_policy:
             self.gflownet_policy = nn.Sequential(
                 nn.LayerNorm(config.d_model),
@@ -211,7 +247,12 @@ class DenseRandomOrderToricLM(nn.Module):
         else:
             self.output = nn.Linear(config.d_model, config.vocab_size, bias=False)
             self.output_bias = None
+        self.aux_mtp_heads = nn.ModuleList(
+            [nn.Linear(config.d_model, config.vocab_size) for _ in range(max(0, config.aux_mtp_offsets))]
+        )
         self.apply(self._init_module)
+        if self.toric_memory_value is not None:
+            nn.init.normal_(self.toric_memory_value, mean=0.0, std=0.02)
         nn.init.zeros_(self.output_bias) if self.output_bias is not None else None
 
     def _init_module(self, module: nn.Module) -> None:
@@ -244,6 +285,54 @@ class DenseRandomOrderToricLM(nn.Module):
             dim=-1,
         )
 
+    def _bigram_hash_ids(self, previous_tokens: torch.Tensor, target_positions: torch.Tensor) -> torch.Tensor:
+        """Hash strict-prefix byte context and target location into small buckets.
+
+        At reveal step ``k``, ``previous_tokens[:, k]`` is the token revealed at
+        step ``k-1`` and the shifted context below is the token revealed at
+        step ``k-2``.  This makes the feature prefix-causal while giving the
+        compact Parameter-Golf model a cheap n-gram-like memory.
+        """
+
+        if self.bigram_hash is None:
+            raise RuntimeError("bigram hash is disabled")
+        previous_previous = torch.empty_like(previous_tokens)
+        previous_previous[:, 0] = self.bos_token_id
+        if previous_tokens.shape[1] > 1:
+            previous_previous[:, 1:] = previous_tokens[:, :-1]
+        step_ids = torch.arange(previous_tokens.shape[1], device=previous_tokens.device).view(1, -1)
+        hashed = (
+            previous_previous.to(torch.int64) * 1_000_003
+            + previous_tokens.to(torch.int64) * 917_609
+            + target_positions.to(torch.int64) * 65_537
+            + step_ids.to(torch.int64) * 32_771
+        )
+        return torch.remainder(hashed, self.config.bigram_hash_buckets).to(torch.long)
+
+    def _caseops_features(self, previous_tokens: torch.Tensor) -> torch.Tensor:
+        """Return byte-class operator features from already revealed tokens."""
+
+        byte = previous_tokens.to(torch.float32) - float(self.config.byte_offset)
+        valid = ((byte >= 0) & (byte <= 255)).to(torch.float32)
+        lower = ((byte >= ord("a")) & (byte <= ord("z"))).to(torch.float32)
+        upper = ((byte >= ord("A")) & (byte <= ord("Z"))).to(torch.float32)
+        digit = ((byte >= ord("0")) & (byte <= ord("9"))).to(torch.float32)
+        space = ((byte == ord(" ")) | (byte == ord("\t"))).to(torch.float32)
+        newline = ((byte == ord("\n")) | (byte == ord("\r"))).to(torch.float32)
+        punctuation = (
+            ((byte >= ord("!")) & (byte <= ord("/")))
+            | ((byte >= ord(":")) & (byte <= ord("@")))
+            | ((byte >= ord("[")) & (byte <= ord("`")))
+            | ((byte >= ord("{")) & (byte <= ord("~")))
+        ).to(torch.float32)
+        high_bit = (byte >= 128).to(torch.float32)
+        bos = (previous_tokens == self.bos_token_id).to(torch.float32)
+        norm_byte = torch.where(valid.bool(), byte / 255.0, torch.zeros_like(byte))
+        return torch.stack(
+            [norm_byte, valid, lower, upper, digit, space, newline, punctuation, high_bit, bos],
+            dim=-1,
+        )
+
     def _causal_mask(self, length: int, device: torch.device) -> torch.Tensor:
         mask = torch.ones(length, length, dtype=torch.bool, device=device).tril()
         return mask.view(1, 1, length, length)
@@ -263,6 +352,12 @@ class DenseRandomOrderToricLM(nn.Module):
         x = self.token_embedding(previous_tokens)
         x = x + self.position_embedding(target_positions.clamp(0, self.config.max_seq_len - 1))
         x = x + self.toric_phase(self._phase_features(target_positions).to(device=x.device, dtype=x.dtype))
+        if self.bigram_hash is not None:
+            hash_ids = self._bigram_hash_ids(previous_tokens, target_positions)
+            x = x + self.config.bigram_hash_weight * self.bigram_hash(hash_ids)
+        if self.caseops is not None:
+            features = self._caseops_features(previous_tokens).to(device=x.device, dtype=x.dtype)
+            x = x + self.config.caseops_weight * self.caseops(features)
         x = self.drop(x)
         mask = self._causal_mask(length, device=previous_tokens.device)
         for _ in range(max(1, self.config.recurrent_passes)):
@@ -274,6 +369,53 @@ class DenseRandomOrderToricLM(nn.Module):
         if self.output is None:
             return F.linear(hidden, self.token_embedding.weight[: self.config.vocab_size], self.output_bias)
         return self.output(hidden)
+
+    def _apply_smear_gate(
+        self,
+        hidden: torch.Tensor,
+        logits: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if self.smear_gate is None:
+            return logits, None
+        raw = self.smear_gate(hidden).squeeze(-1).float()
+        lo = float(self.config.smear_temperature_min)
+        hi = float(self.config.smear_temperature_max)
+        if hi <= lo:
+            raise ValueError("smear_temperature_max must be greater than smear_temperature_min")
+        temperature = lo + (hi - lo) * torch.sigmoid(raw)
+        scaled = logits.float() / temperature.unsqueeze(-1).clamp_min(1e-4)
+        return scaled.to(dtype=logits.dtype), temperature
+
+    def _toric_memory_basis(self, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        slots = torch.arange(self.config.toric_memory_slots, device=device, dtype=torch.float32)
+        theta = 2 * math.pi * self.config.theta * slots
+        beta = 2 * math.pi * self.config.beta * slots
+        cocycle = theta + beta + 2 * math.pi * self.config.theta * slots.square()
+        basis = torch.stack(
+            [
+                torch.sin(theta),
+                torch.cos(theta),
+                torch.sin(beta),
+                torch.cos(beta),
+                torch.sin(cocycle),
+                torch.cos(theta - beta),
+            ],
+            dim=-1,
+        )
+        return basis.to(dtype=dtype)
+
+    def _toric_memory_context(self, hidden: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor] | None:
+        if self.toric_memory_key is None or self.toric_memory_query is None or self.toric_memory_value is None:
+            return None
+        basis = self._toric_memory_basis(hidden.device, hidden.dtype)
+        keys = F.normalize(self.toric_memory_key(basis), dim=-1)
+        queries = F.normalize(self.toric_memory_query(hidden), dim=-1)
+        scores = torch.matmul(queries, keys.transpose(0, 1)) * math.sqrt(hidden.shape[-1])
+        weights = F.softmax(scores.float(), dim=-1).to(dtype=hidden.dtype)
+        context = torch.matmul(weights, self.toric_memory_value.to(dtype=hidden.dtype))
+        entropy = -(weights.float().clamp_min(1e-8) * weights.float().clamp_min(1e-8).log()).sum(dim=-1)
+        entropy = entropy.mean() / math.log(max(2, self.config.toric_memory_slots))
+        return context, entropy
 
     def _gflownet_context(
         self,
@@ -322,11 +464,21 @@ class DenseRandomOrderToricLM(nn.Module):
             hidden_for_logits = hidden + self.config.gflownet_action_scale * aux["context"]
         else:
             hidden_for_logits = hidden
+        toric_memory = self._toric_memory_context(hidden_for_logits)
+        toric_memory_entropy = None
+        if toric_memory is not None:
+            toric_context, toric_memory_entropy = toric_memory
+            hidden_for_logits = hidden_for_logits + self.config.toric_memory_weight * toric_context
         logits = self._project_logits(hidden_for_logits)
+        logits, smear_temperature = self._apply_smear_gate(hidden_for_logits, logits)
         if not return_aux:
             return logits
         out: dict[str, torch.Tensor] = {"logits": logits, "hidden": hidden}
         out.update({key: value for key, value in aux.items() if key != "context"})
+        if smear_temperature is not None:
+            out["smear_temperature"] = smear_temperature.mean()
+        if toric_memory_entropy is not None:
+            out["toric_memory_entropy"] = toric_memory_entropy.float()
         if self.gflownet_flow is not None:
             out["flow_log"] = self.gflownet_flow(hidden).squeeze(-1)
         return out
@@ -342,6 +494,22 @@ class DenseRandomOrderToricLM(nn.Module):
         per_token_nll = F.cross_entropy(flat_logits, flat_targets, reduction="none").view_as(target_tokens)
         loss = per_token_nll.mean()
         out: dict[str, torch.Tensor] = {"loss": loss}
+        hidden = aux.get("hidden")
+        if hidden is not None and self.aux_mtp_heads:
+            mtp_losses = []
+            for offset, head in enumerate(self.aux_mtp_heads, start=1):
+                if target_tokens.shape[1] <= offset:
+                    continue
+                offset_logits = head(hidden[:, :-offset, :])
+                offset_targets = target_tokens[:, offset:]
+                mtp_losses.append(
+                    F.cross_entropy(
+                        offset_logits.reshape(-1, offset_logits.shape[-1]),
+                        offset_targets.reshape(-1),
+                    )
+                )
+            if mtp_losses:
+                out["mtp_loss"] = torch.stack(mtp_losses).mean()
         if "action_logprob" in aux and self.gflownet_log_z is not None:
             log_reward = -per_token_nll.detach()
             tb_error = self.gflownet_log_z + aux["action_logprob"].float() - log_reward.float()
@@ -352,6 +520,29 @@ class DenseRandomOrderToricLM(nn.Module):
             out["gflownet_entropy"] = aux["policy_entropy"].float()
         if "action_diversity" in aux:
             out["gflownet_action_diversity"] = aux["action_diversity"].float()
+        if "smear_temperature" in aux:
+            out["smear_temperature"] = aux["smear_temperature"].float()
+        if "toric_memory_entropy" in aux:
+            out["toric_memory_entropy"] = aux["toric_memory_entropy"].float()
+        hidden = aux.get("hidden")
+        if hidden is not None and hidden.shape[0] > 1:
+            pooled = F.normalize(hidden.mean(dim=1).float(), dim=-1)
+            sim = pooled @ pooled.transpose(0, 1) / max(float(self.config.contrastive_temperature), 1e-4)
+            labels = torch.arange(pooled.shape[0], device=pooled.device)
+            out["contrastive_loss"] = F.cross_entropy(sim, labels)
+        if hidden is not None and hidden.shape[1] > 2:
+            velocity = hidden[:, 1:, :].float() - hidden[:, :-1, :].float()
+            acceleration = velocity[:, 1:, :] - velocity[:, :-1, :]
+            kinetic = velocity.pow(2).mean()
+            viscous = acceleration.pow(2).mean()
+            norm_variation = hidden.float().norm(dim=-1).var(dim=1, unbiased=False).mean()
+            out["trajectory_flow_loss"] = (
+                viscous
+                + float(self.config.trajectory_flow_viscosity) * kinetic
+                + 0.001 * norm_variation
+            )
+            out["trajectory_kinetic_energy"] = kinetic.detach()
+            out["trajectory_viscous_dissipation"] = viscous.detach()
         return out
 
     def forward(
@@ -437,6 +628,92 @@ class DenseRandomOrderToricLM(nn.Module):
         return out
 
     @torch.no_grad()
+    def score_with_bias_adaptation(
+        self,
+        tokens: torch.Tensor,
+        sample_ids: torch.Tensor | None = None,
+        pass_id: int = 0,
+        permutation: torch.Tensor | None = None,
+        lr: float = 0.025,
+        decay: float = 0.98,
+        clip: float = 3.0,
+        gflownet_samples: int = 1,
+    ) -> dict[str, torch.Tensor]:
+        """Evaluate a legal score-before-update output-bias adapter.
+
+        The base model computes prefix-causal log probabilities.  A per-sequence
+        bias vector is then updated only after each revealed target has been
+        scored.  This is a small, deterministic test-time adaptation analogue:
+        it can improve local byte frequencies without touching deployment
+        weights or reading future bytes.
+        """
+
+        batch = random_order_batch(
+            tokens,
+            seed=self.config.seed,
+            sample_ids=sample_ids,
+            pass_id=pass_id,
+            bos_token_id=self.bos_token_id,
+            permutation=permutation,
+        )
+        sample_log_probs = []
+        for sample in range(max(1, gflownet_samples)):
+            aux = self.forward_from_previous(
+                batch.previous_tokens,
+                batch.target_positions,
+                sample_gflownet=self.config.use_gflownet_policy and gflownet_samples > 1,
+                return_aux=True,
+            )
+            if not isinstance(aux, dict):
+                raise RuntimeError("expected auxiliary output")
+            sample_log_probs.append(F.log_softmax(aux["logits"].float(), dim=-1))
+        base_log_probs = torch.logsumexp(torch.stack(sample_log_probs, dim=0), dim=0) - math.log(
+            max(1, gflownet_samples)
+        )
+        bias = torch.zeros(tokens.shape[0], self.config.vocab_size, device=tokens.device, dtype=base_log_probs.dtype)
+        losses = []
+        for step in range(tokens.shape[1]):
+            adapted_log_probs = F.log_softmax(base_log_probs[:, step, :] + bias, dim=-1)
+            target = batch.target_tokens[:, step]
+            losses.append(-adapted_log_probs.gather(-1, target.unsqueeze(-1)).squeeze(-1))
+            probs = adapted_log_probs.exp()
+            probs.scatter_add_(1, target.unsqueeze(-1), -torch.ones_like(target, dtype=probs.dtype).unsqueeze(-1))
+            bias = (decay * bias - lr * probs).clamp(-clip, clip)
+        loss = torch.stack(losses, dim=1).mean()
+        return {
+            "loss": loss,
+            "bpb": loss / math.log(2),
+            "bias_norm": bias.norm(dim=-1).mean(),
+        }
+
+    @torch.no_grad()
+    def causal_future_permutation_error(
+        self,
+        tokens: torch.Tensor,
+        step: int | None = None,
+        permutation: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Measure whether future token changes alter the current-step logits."""
+
+        if tokens.ndim != 2:
+            raise ValueError("tokens must have shape [batch, length]")
+        length = tokens.shape[1]
+        if step is None:
+            step = max(0, length // 2)
+        if not 0 <= step < length:
+            raise ValueError("step must be in range")
+        if permutation is None:
+            permutation = torch.arange(length, device=tokens.device).view(1, -1).expand(tokens.shape[0], -1)
+        mutated = tokens.clone()
+        if step + 1 < length:
+            future = mutated[:, step + 1 :].flip(dims=[1])
+            mutated[:, step + 1 :] = torch.remainder(future + 17, max(1, self.config.vocab_size - self.config.byte_offset))
+            mutated[:, step + 1 :] = mutated[:, step + 1 :].clamp_min(self.config.byte_offset)
+        out_a = self(tokens, permutation=permutation, return_order=True)
+        out_b = self(mutated, permutation=permutation, return_order=True)
+        return (out_a["logits"][:, step, :] - out_b["logits"][:, step, :]).float().abs().max()
+
+    @torch.no_grad()
     def sample_random_order(
         self,
         length: int,
@@ -476,11 +753,17 @@ class DenseRandomOrderToricLM(nn.Module):
         return asdict(self.config)
 
 
-def estimate_uncompressed_quantized_bytes(model: nn.Module, bits: Literal[4, 6, 8] = 8) -> int:
+def estimate_uncompressed_quantized_bytes(
+    model: nn.Module,
+    bits: Literal[4, 6, 8] = 8,
+    exclude_prefixes: tuple[str, ...] = ("aux_",),
+) -> int:
     """Conservative tensor-only byte estimate before zip compression."""
 
     total_bits = 0
-    for tensor in model.state_dict().values():
+    for name, tensor in model.state_dict().items():
+        if any(name.startswith(prefix) for prefix in exclude_prefixes):
+            continue
         if torch.is_floating_point(tensor):
             total_bits += tensor.numel() * bits
         else:

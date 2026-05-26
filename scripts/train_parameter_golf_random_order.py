@@ -17,6 +17,7 @@ from typing import Any
 import pyarrow.parquet as pq
 import torch
 import yaml
+from torch.nn import functional as F
 from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 from tqdm.auto import tqdm
 
@@ -29,7 +30,20 @@ from toricgt.random_order_lm import (
 )
 
 
-TEXT_COLUMNS = ("text", "question", "reasoning", "solution", "answer", "graph_json")
+TEXT_COLUMNS = (
+    "text",
+    "question",
+    "reasoning",
+    "solution",
+    "answer",
+    "graph_json",
+    "dataset",
+    "task_family",
+    "language",
+    "role",
+    "metadata_json",
+    "quality_flags_json",
+)
 
 
 def read_yaml(path: str | None) -> dict[str, Any]:
@@ -60,6 +74,8 @@ class ParquetByteChunkDataset(IterableDataset):
         shuffle_files: bool = True,
         include_graph_projection: bool = True,
         graph_projection_max_chars: int = 4096,
+        coprime_row_stride: bool = True,
+        document_separator: str = "\n\n",
     ) -> None:
         super().__init__()
         self.files = sorted(glob.glob(parquet_glob))
@@ -71,6 +87,20 @@ class ParquetByteChunkDataset(IterableDataset):
         self.shuffle_files = shuffle_files
         self.include_graph_projection = include_graph_projection
         self.graph_projection_max_chars = graph_projection_max_chars
+        self.coprime_row_stride = coprime_row_stride
+        self.document_separator = document_separator
+        self._separator_bytes = byte_encode(document_separator, byte_offset=byte_offset) if document_separator else []
+
+    def _stride_rows(self, rows: list[dict[str, Any]], epoch: int, worker_id: int) -> list[dict[str, Any]]:
+        if not self.coprime_row_stride or len(rows) <= 2:
+            return rows
+        size = len(rows)
+        stride = (self.seed + 2 * epoch + 2_003 * worker_id + 7_919) % size
+        stride = max(1, stride)
+        while math.gcd(stride, size) != 1:
+            stride = (stride + 1) % size or 1
+        start = (self.seed * 1_315_423_911 + epoch * 1_000_003 + worker_id * 65_537) % size
+        return [rows[(start + index * stride) % size] for index in range(size)]
 
     def _graph_projection(self, graph_json: Any) -> str:
         if not self.include_graph_projection or not isinstance(graph_json, str) or not graph_json.strip():
@@ -108,10 +138,12 @@ class ParquetByteChunkDataset(IterableDataset):
         return "\n".join(parts)[: self.graph_projection_max_chars]
 
     def _row_text(self, row: dict[str, Any]) -> str:
+        domain_prefix = self._domain_prefix(row)
         primary = row.get("text")
         graph_text = self._graph_projection(row.get("graph_json"))
         if isinstance(primary, str) and primary.strip():
-            return f"{primary}\n\n{graph_text}" if graph_text else primary
+            body = f"{primary}\n\n{graph_text}" if graph_text else primary
+            return f"{domain_prefix}\n{body}" if domain_prefix else body
         parts = []
         for column in ("question", "reasoning", "solution", "answer"):
             value = row.get(column)
@@ -119,7 +151,36 @@ class ParquetByteChunkDataset(IterableDataset):
                 parts.append(value)
         if graph_text:
             parts.append(graph_text)
+        if domain_prefix:
+            parts.insert(0, domain_prefix)
         return "\n\n".join(parts)
+
+    def _domain_prefix(self, row: dict[str, Any]) -> str:
+        fields = []
+        for key in ("dataset", "task_family", "language", "role"):
+            value = row.get(key)
+            if isinstance(value, str) and value.strip():
+                fields.append(value.lower())
+        for key in ("metadata_json", "quality_flags_json"):
+            value = row.get(key)
+            if isinstance(value, str) and value.strip():
+                fields.append(value[:512].lower())
+        haystack = " ".join(fields)
+        tags = []
+        rules = [
+            ("<domain:math>", ("math", "algebra", "geometry", "proof", "theorem", "gsm8k", "hendrycks")),
+            ("<domain:code>", ("code", "program", "python", "algorithm", "codeforces")),
+            ("<domain:graph>", ("graph", "walk", "dag", "node", "edge", "got", "tree_of_thought")),
+            ("<domain:hebrew>", ("hebrew", "rabbinic", "sefaria", "unimorph", "morphology")),
+            ("<domain:biomed>", ("health", "medical", "medicine", "biomed", "clinical", "doctor")),
+            ("<domain:biochem>", ("protein", "enzyme", "ligand", "molecule", "drug", "chem", "structure")),
+            ("<domain:physics>", ("physics", "biophysics", "spatial", "mechanics", "cfd", "fluid")),
+            ("<domain:toric>", ("toric", "tropical", "coxeter", "braid", "noncommutative")),
+        ]
+        for tag, needles in rules:
+            if any(needle in haystack for needle in needles):
+                tags.append(tag)
+        return " ".join(dict.fromkeys(tags))
 
     def __iter__(self):
         worker = get_worker_info()
@@ -138,11 +199,14 @@ class ParquetByteChunkDataset(IterableDataset):
                 for batch in parquet.iter_batches(batch_size=self.rows_per_batch, columns=available):
                     table = batch.to_pydict()
                     rows = [dict(zip(table, values)) for values in zip(*table.values())]
+                    rows = self._stride_rows(rows, epoch=epoch, worker_id=worker_id)
                     buffer: list[int] = []
                     for row in rows:
                         text = self._row_text(row)
                         if not text:
                             continue
+                        if buffer and self._separator_bytes:
+                            buffer.extend(self._separator_bytes)
                         buffer.extend(byte_encode(text, byte_offset=self.byte_offset))
                         while len(buffer) >= self.seq_len:
                             chunk = buffer[: self.seq_len]
@@ -201,6 +265,8 @@ def build_loader(
     vocab_size: int,
     include_graph_projection: bool,
     graph_projection_max_chars: int,
+    coprime_row_stride: bool,
+    document_separator: str,
 ) -> DataLoader:
     if synthetic or not glob.glob(parquet_glob):
         dataset = SyntheticByteChunkDataset(seq_len=seq_len, vocab_size=vocab_size, seed=seed)
@@ -215,6 +281,8 @@ def build_loader(
             shuffle_files=repeat,
             include_graph_projection=include_graph_projection,
             graph_projection_max_chars=graph_projection_max_chars,
+            coprime_row_stride=coprime_row_stride,
+            document_separator=document_separator,
         )
     return DataLoader(
         dataset,
@@ -234,6 +302,20 @@ def cosine_lr(step: int, base_lr: float, warmup_steps: int, max_steps: int) -> f
         return base_lr * float(step + 1) / max(1, warmup_steps)
     progress = min(1.0, (step - warmup_steps) / max(1, max_steps - warmup_steps))
     return 0.5 * base_lr * (1.0 + math.cos(math.pi * progress))
+
+
+def quantization_grid_loss(named_params: list[tuple[str, torch.nn.Parameter]], bits: int) -> torch.Tensor:
+    """Lightweight QAT pull toward the current symmetric quantization grid."""
+
+    if not named_params:
+        raise ValueError("named_params must be non-empty when QAT is enabled")
+    qmax = 2 ** (bits - 1) - 1
+    losses = []
+    for _, param in named_params:
+        scale = param.detach().float().abs().amax().clamp_min(1e-8) / qmax
+        target = torch.round(param.detach().float() / scale).clamp(-qmax, qmax) * scale
+        losses.append(F.mse_loss(param.float(), target))
+    return torch.stack(losses).mean()
 
 
 def save_checkpoint(
@@ -270,9 +352,13 @@ def evaluate(
     pass_id: int,
     order_samples: int,
     gflownet_samples: int,
+    score_first_bias_lr: float,
+    score_first_bias_decay: float,
+    score_first_bias_clip: float,
 ) -> dict[str, float]:
     model.eval()
     losses = []
+    bias_norms = []
     iterator = iter(loader)
     amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
     use_amp = device.type == "cuda" and precision in {"bf16", "fp16"}
@@ -282,18 +368,49 @@ def evaluate(
         sample_ids = batch["sample_ids"].to(device, non_blocking=True)
         sample_losses = []
         for sample in range(max(1, order_samples)):
-            with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp):
-                out = model(
-                    tokens,
-                    sample_ids=sample_ids,
-                    pass_id=pass_id + index * 997 + sample,
-                    sample_gflownet=gflownet_samples > 1,
-                    gflownet_samples=max(1, gflownet_samples),
-                )
+            if score_first_bias_lr > 0:
+                with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp):
+                    out = model.score_with_bias_adaptation(
+                        tokens,
+                        sample_ids=sample_ids,
+                        pass_id=pass_id + index * 997 + sample,
+                        lr=score_first_bias_lr,
+                        decay=score_first_bias_decay,
+                        clip=score_first_bias_clip,
+                        gflownet_samples=max(1, gflownet_samples),
+                    )
+                bias_norms.append(out["bias_norm"].float())
+            else:
+                with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp):
+                    out = model(
+                        tokens,
+                        sample_ids=sample_ids,
+                        pass_id=pass_id + index * 997 + sample,
+                        sample_gflownet=gflownet_samples > 1,
+                        gflownet_samples=max(1, gflownet_samples),
+                    )
             sample_losses.append(out["loss"].float())
         losses.append(torch.stack(sample_losses).mean())
     loss = torch.stack(losses).mean().item()
-    return {"loss": loss, "bpb": loss / math.log(2)}
+    metrics = {"loss": loss, "bpb": loss / math.log(2)}
+    if bias_norms:
+        metrics["bias_norm"] = torch.stack(bias_norms).mean().item()
+    return metrics
+
+
+@torch.no_grad()
+def causal_audit(
+    model: DenseRandomOrderToricLM,
+    tokens: torch.Tensor,
+    max_len: int = 32,
+) -> float:
+    was_training = model.training
+    model.eval()
+    clipped = tokens[:1, : min(max_len, tokens.shape[1])].detach()
+    error = float(model.causal_future_permutation_error(clipped).detach().cpu())
+    if was_training:
+        model.train()
+    return error
 
 
 def parse_args() -> argparse.Namespace:
@@ -328,6 +445,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-graph-projection", action="store_true")
     parser.add_argument("--no-graph-projection", action="store_true")
     parser.add_argument("--graph-projection-max-chars", type=int)
+    parser.add_argument("--coprime-row-stride", action="store_true")
+    parser.add_argument("--no-coprime-row-stride", action="store_true")
+    parser.add_argument("--document-separator")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--attention", choices=["softmax", "tropical", "tropical_ring", "hybrid"])
     parser.add_argument("--ring-block-size", type=int)
@@ -340,7 +460,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gflownet-action-scale", type=float)
     parser.add_argument("--gflownet-loss-weight", type=float)
     parser.add_argument("--gflownet-entropy-weight", type=float)
+    parser.add_argument("--use-bigram-hash", action="store_true")
+    parser.add_argument("--no-bigram-hash", action="store_true")
+    parser.add_argument("--bigram-hash-buckets", type=int)
+    parser.add_argument("--bigram-hash-weight", type=float)
+    parser.add_argument("--use-caseops-features", action="store_true")
+    parser.add_argument("--no-caseops-features", action="store_true")
+    parser.add_argument("--caseops-weight", type=float)
+    parser.add_argument("--use-smear-gate", action="store_true")
+    parser.add_argument("--no-smear-gate", action="store_true")
+    parser.add_argument("--smear-temperature-min", type=float)
+    parser.add_argument("--smear-temperature-max", type=float)
+    parser.add_argument("--aux-mtp-offsets", type=int)
+    parser.add_argument("--mtp-loss-weight", type=float)
+    parser.add_argument("--qat-loss-weight", type=float)
+    parser.add_argument("--qat-bits", type=int, choices=[4, 6, 8])
+    parser.add_argument("--qat-max-tensors", type=int)
+    parser.add_argument("--contrastive-loss-weight", type=float)
+    parser.add_argument("--trajectory-flow-loss-weight", type=float)
+    parser.add_argument("--eval-score-first-bias-lr", type=float)
+    parser.add_argument("--eval-score-first-bias-decay", type=float)
+    parser.add_argument("--eval-score-first-bias-clip", type=float)
+    parser.add_argument("--causal-audit-interval", type=int)
     parser.add_argument("--export-bits", type=int, choices=[4, 6, 8])
+    parser.add_argument("--quantization-mode", choices=["tensor", "row"])
+    parser.add_argument("--artifact-compression", choices=["deflated", "bzip2", "lzma"])
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--no-wandb", action="store_true")
     parser.add_argument("--wandb-project")
@@ -390,6 +534,44 @@ def main() -> None:
         gflownet_action_scale=args.gflownet_action_scale
         if args.gflownet_action_scale is not None
         else config_get(file_config, "model", "gflownet_action_scale", 0.05),
+        use_bigram_hash=(
+            False
+            if args.no_bigram_hash
+            else bool(args.use_bigram_hash or config_get(file_config, "model", "use_bigram_hash", True))
+        ),
+        bigram_hash_buckets=args.bigram_hash_buckets
+        if args.bigram_hash_buckets is not None
+        else config_get(file_config, "model", "bigram_hash_buckets", 4096),
+        bigram_hash_weight=args.bigram_hash_weight
+        if args.bigram_hash_weight is not None
+        else config_get(file_config, "model", "bigram_hash_weight", 0.35),
+        use_caseops_features=(
+            False
+            if args.no_caseops_features
+            else bool(args.use_caseops_features or config_get(file_config, "model", "use_caseops_features", True))
+        ),
+        caseops_weight=args.caseops_weight
+        if args.caseops_weight is not None
+        else config_get(file_config, "model", "caseops_weight", 0.35),
+        use_smear_gate=(
+            False
+            if args.no_smear_gate
+            else bool(args.use_smear_gate or config_get(file_config, "model", "use_smear_gate", True))
+        ),
+        smear_temperature_min=args.smear_temperature_min
+        if args.smear_temperature_min is not None
+        else config_get(file_config, "model", "smear_temperature_min", 0.55),
+        smear_temperature_max=args.smear_temperature_max
+        if args.smear_temperature_max is not None
+        else config_get(file_config, "model", "smear_temperature_max", 1.75),
+        use_toric_memory=config_get(file_config, "model", "use_toric_memory", True),
+        toric_memory_slots=config_get(file_config, "model", "toric_memory_slots", 32),
+        toric_memory_weight=config_get(file_config, "model", "toric_memory_weight", 0.08),
+        contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
+        trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
+        aux_mtp_offsets=args.aux_mtp_offsets
+        if args.aux_mtp_offsets is not None
+        else config_get(file_config, "model", "aux_mtp_offsets", 2),
         target_artifact_bytes=config_get(file_config, "model", "target_artifact_bytes", 15_600_000),
         byte_offset=config_get(file_config, "model", "byte_offset", 4),
         use_soft_moe=False,
@@ -443,6 +625,46 @@ def main() -> None:
         if args.gflownet_entropy_weight is not None
         else config_get(file_config, "training", "gflownet_entropy_weight", 0.001)
     )
+    mtp_loss_weight = (
+        args.mtp_loss_weight if args.mtp_loss_weight is not None else config_get(file_config, "training", "mtp_loss_weight", 0.05)
+    )
+    qat_loss_weight = (
+        args.qat_loss_weight if args.qat_loss_weight is not None else config_get(file_config, "training", "qat_loss_weight", 1e-6)
+    )
+    qat_bits = args.qat_bits if args.qat_bits is not None else config_get(file_config, "training", "qat_bits", 6)
+    qat_max_tensors = (
+        args.qat_max_tensors if args.qat_max_tensors is not None else config_get(file_config, "training", "qat_max_tensors", 16)
+    )
+    contrastive_loss_weight = (
+        args.contrastive_loss_weight
+        if args.contrastive_loss_weight is not None
+        else config_get(file_config, "training", "contrastive_loss_weight", 0.01)
+    )
+    trajectory_flow_loss_weight = (
+        args.trajectory_flow_loss_weight
+        if args.trajectory_flow_loss_weight is not None
+        else config_get(file_config, "training", "trajectory_flow_loss_weight", 0.002)
+    )
+    eval_score_first_bias_lr = (
+        args.eval_score_first_bias_lr
+        if args.eval_score_first_bias_lr is not None
+        else config_get(file_config, "training", "eval_score_first_bias_lr", 0.025)
+    )
+    eval_score_first_bias_decay = (
+        args.eval_score_first_bias_decay
+        if args.eval_score_first_bias_decay is not None
+        else config_get(file_config, "training", "eval_score_first_bias_decay", 0.98)
+    )
+    eval_score_first_bias_clip = (
+        args.eval_score_first_bias_clip
+        if args.eval_score_first_bias_clip is not None
+        else config_get(file_config, "training", "eval_score_first_bias_clip", 3.0)
+    )
+    causal_audit_interval = (
+        args.causal_audit_interval
+        if args.causal_audit_interval is not None
+        else config_get(file_config, "training", "causal_audit_interval", 1000)
+    )
     ckpt_interval = (
         args.ckpt_interval if args.ckpt_interval is not None else config_get(file_config, "training", "ckpt_interval", 1_000)
     )
@@ -459,6 +681,14 @@ def main() -> None:
         args.graph_projection_max_chars
         if args.graph_projection_max_chars is not None
         else config_get(file_config, "data", "graph_projection_max_chars", 4096)
+    )
+    coprime_row_stride = (
+        False
+        if args.no_coprime_row_stride
+        else bool(args.coprime_row_stride or config_get(file_config, "data", "coprime_row_stride", True))
+    )
+    document_separator = (
+        args.document_separator if args.document_separator is not None else config_get(file_config, "data", "document_separator", "\n\n")
     )
     train_glob = args.train_parquet_glob or config_get(
         file_config, "data", "train_parquet_glob", "data/curated_hf_shards/train/*.parquet"
@@ -482,12 +712,16 @@ def main() -> None:
 
     params = parameter_count(model)
     export_bits = args.export_bits or config_get(file_config, "export", "bits", 8)
+    quantization_mode = args.quantization_mode or config_get(file_config, "export", "quantization_mode", "row")
+    artifact_compression = args.artifact_compression or config_get(file_config, "export", "compression", "lzma")
     estimated_tensor_bytes = estimate_uncompressed_quantized_bytes(model, bits=export_bits)
     report = write_artifact(
         model,
         checkpoint_dir / "initial_parameter_golf_artifact.zip",
         config=model.config_dict(),
         bits=export_bits,
+        quantization_mode=quantization_mode,
+        compression=artifact_compression,
     )
     if report.bytes_total > PARAMETER_GOLF_BYTE_LIMIT:
         raise RuntimeError(f"initial artifact exceeds Parameter-Golf cap: {report.bytes_total} bytes")
@@ -505,6 +739,8 @@ def main() -> None:
         vocab_size=model_config.vocab_size,
         include_graph_projection=include_graph_projection,
         graph_projection_max_chars=graph_projection_max_chars,
+        coprime_row_stride=coprime_row_stride,
+        document_separator=document_separator,
     )
     val_loader = build_loader(
         parquet_glob=val_glob,
@@ -519,6 +755,8 @@ def main() -> None:
         vocab_size=model_config.vocab_size,
         include_graph_projection=include_graph_projection,
         graph_projection_max_chars=graph_projection_max_chars,
+        coprime_row_stride=coprime_row_stride,
+        document_separator=document_separator,
     )
 
     use_wandb = bool(args.wandb or config_get(file_config, "logging", "wandb", False)) and not args.no_wandb
@@ -542,16 +780,32 @@ def main() -> None:
                     "eval_gflownet_samples": eval_gflownet_samples,
                     "gflownet_loss_weight": gflownet_loss_weight,
                     "gflownet_entropy_weight": gflownet_entropy_weight,
+                    "mtp_loss_weight": mtp_loss_weight,
+                    "qat_loss_weight": qat_loss_weight,
+                    "qat_bits": qat_bits,
+                    "qat_max_tensors": qat_max_tensors,
+                    "contrastive_loss_weight": contrastive_loss_weight,
+                    "trajectory_flow_loss_weight": trajectory_flow_loss_weight,
+                    "eval_score_first_bias_lr": eval_score_first_bias_lr,
+                    "eval_score_first_bias_decay": eval_score_first_bias_decay,
+                    "eval_score_first_bias_clip": eval_score_first_bias_clip,
+                    "causal_audit_interval": causal_audit_interval,
                 },
                 "data": {
                     "include_graph_projection": include_graph_projection,
                     "graph_projection_max_chars": graph_projection_max_chars,
+                    "coprime_row_stride": coprime_row_stride,
+                    "document_separator": document_separator,
                 },
                 "artifact": {
                     "initial_bytes": report.bytes_total,
                     "estimated_tensor_bytes": estimated_tensor_bytes,
                     "limit": PARAMETER_GOLF_BYTE_LIMIT,
                     "bits": export_bits,
+                    "quantization_mode": quantization_mode,
+                    "compression": artifact_compression,
+                    "deployment_parameters": report.deployment_parameters,
+                    "excluded_tensors": report.excluded_tensors,
                 },
             },
             tags=["parameter-golf", "random-order-ar", "dense", "tropical-ring", "toricgt"],
@@ -571,11 +825,22 @@ def main() -> None:
             "checkpoint_dir": str(checkpoint_dir),
             "include_graph_projection": include_graph_projection,
             "graph_projection_max_chars": graph_projection_max_chars,
+            "coprime_row_stride": coprime_row_stride,
+            "document_separator": document_separator,
+            "quantization_mode": quantization_mode,
+            "artifact_compression": artifact_compression,
+            "deployment_parameters": report.deployment_parameters,
+            "excluded_tensors": report.excluded_tensors,
         },
         indent=2,
     ))
 
     iterator = iter(train_loader)
+    qat_named_params = [
+        item
+        for item in sorted(model.named_parameters(), key=lambda pair: pair[1].numel(), reverse=True)
+        if item[1].requires_grad and not item[0].startswith("aux_") and item[1].ndim >= 2
+    ][: max(0, int(qat_max_tensors))]
     amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
     use_amp = device.type == "cuda" and precision in {"bf16", "fp16"}
     progress = tqdm(range(start_step + 1, steps + 1), initial=start_step, total=steps, desc="parameter-golf-random-order")
@@ -588,6 +853,14 @@ def main() -> None:
         step_gflownet_loss = 0.0
         step_gflownet_entropy = 0.0
         step_gflownet_diversity = 0.0
+        step_mtp_loss = 0.0
+        step_qat_loss = 0.0
+        step_contrastive_loss = 0.0
+        step_trajectory_flow_loss = 0.0
+        step_trajectory_kinetic = 0.0
+        step_trajectory_viscous = 0.0
+        step_smear_temperature = 0.0
+        step_toric_memory_entropy = 0.0
         lr_step = cosine_lr(step, lr, warmup_steps, steps)
         for group in optimizer.param_groups:
             group["lr"] = lr_step
@@ -606,7 +879,23 @@ def main() -> None:
                 micro_loss = out["loss"]
                 gflownet_loss = out.get("gflownet_loss", torch.zeros((), device=device))
                 gflownet_entropy = out.get("gflownet_entropy", torch.zeros((), device=device))
-                total_micro_loss = micro_loss + gflownet_loss_weight * gflownet_loss - gflownet_entropy_weight * gflownet_entropy
+                mtp_loss = out.get("mtp_loss", torch.zeros((), device=device))
+                qat_loss = (
+                    quantization_grid_loss(qat_named_params, bits=qat_bits)
+                    if qat_loss_weight > 0 and qat_named_params
+                    else torch.zeros((), device=device)
+                )
+                contrastive_loss = out.get("contrastive_loss", torch.zeros((), device=device))
+                trajectory_flow_loss = out.get("trajectory_flow_loss", torch.zeros((), device=device))
+                total_micro_loss = (
+                    micro_loss
+                    + gflownet_loss_weight * gflownet_loss
+                    - gflownet_entropy_weight * gflownet_entropy
+                    + mtp_loss_weight * mtp_loss
+                    + qat_loss_weight * qat_loss
+                    + contrastive_loss_weight * contrastive_loss
+                    + trajectory_flow_loss_weight * trajectory_flow_loss
+                )
                 loss = total_micro_loss / grad_accum
             loss.backward()
             step_loss += float(micro_loss.detach().cpu())
@@ -614,16 +903,35 @@ def main() -> None:
             step_gflownet_loss += float(gflownet_loss.detach().cpu())
             step_gflownet_entropy += float(gflownet_entropy.detach().cpu())
             step_gflownet_diversity += float(out.get("gflownet_action_diversity", torch.zeros(())).detach().cpu())
+            step_mtp_loss += float(mtp_loss.detach().cpu())
+            step_qat_loss += float(qat_loss.detach().cpu())
+            step_contrastive_loss += float(contrastive_loss.detach().cpu())
+            step_trajectory_flow_loss += float(trajectory_flow_loss.detach().cpu())
+            step_trajectory_kinetic += float(out.get("trajectory_kinetic_energy", torch.zeros(())).detach().cpu())
+            step_trajectory_viscous += float(out.get("trajectory_viscous_dissipation", torch.zeros(())).detach().cpu())
+            step_smear_temperature += float(out.get("smear_temperature", torch.zeros(())).detach().cpu())
+            step_toric_memory_entropy += float(out.get("toric_memory_entropy", torch.zeros(())).detach().cpu())
         step_loss /= grad_accum
         step_total_loss /= grad_accum
         step_gflownet_loss /= grad_accum
         step_gflownet_entropy /= grad_accum
         step_gflownet_diversity /= grad_accum
+        step_mtp_loss /= grad_accum
+        step_qat_loss /= grad_accum
+        step_contrastive_loss /= grad_accum
+        step_trajectory_flow_loss /= grad_accum
+        step_trajectory_kinetic /= grad_accum
+        step_trajectory_viscous /= grad_accum
+        step_smear_temperature /= grad_accum
+        step_toric_memory_entropy /= grad_accum
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         running_loss = 0.97 * running_loss + 0.03 * step_loss if running_loss else step_loss
         bpb = step_loss / math.log(2)
         progress.set_postfix(loss=f"{step_loss:.4f}", bpb=f"{bpb:.3f}", gfn=f"{step_gflownet_loss:.3f}", lr=f"{lr_step:.2e}")
+        audit_error = None
+        if causal_audit_interval > 0 and step % causal_audit_interval == 0:
+            audit_error = causal_audit(model, tokens)
 
         if step % log_interval == 0:
             metrics = {
@@ -638,10 +946,29 @@ def main() -> None:
                 "train/gflownet_action_diversity": step_gflownet_diversity,
                 "train/gflownet_loss_weight": gflownet_loss_weight,
                 "train/gflownet_entropy_weight": gflownet_entropy_weight,
+                "train/mtp_loss": step_mtp_loss,
+                "train/mtp_loss_weight": mtp_loss_weight,
+                "train/qat_loss": step_qat_loss,
+                "train/qat_loss_weight": qat_loss_weight,
+                "train/qat_bits": qat_bits,
+                "train/contrastive_loss": step_contrastive_loss,
+                "train/contrastive_loss_weight": contrastive_loss_weight,
+                "train/trajectory_flow_loss": step_trajectory_flow_loss,
+                "train/trajectory_flow_loss_weight": trajectory_flow_loss_weight,
+                "train/trajectory_kinetic_energy": step_trajectory_kinetic,
+                "train/trajectory_viscous_dissipation": step_trajectory_viscous,
+                "train/smear_temperature": step_smear_temperature,
+                "train/toric_memory_entropy": step_toric_memory_entropy,
                 "artifact/initial_bytes": report.bytes_total,
                 "artifact/estimated_tensor_bytes": estimated_tensor_bytes,
+                "artifact/deployment_parameters": report.deployment_parameters,
+                "artifact/excluded_tensors": report.excluded_tensors,
                 "model/parameters": params,
+                "data/coprime_row_stride": float(coprime_row_stride),
+                "eval/score_first_bias_lr": eval_score_first_bias_lr,
             }
+            if audit_error is not None:
+                metrics["audit/future_permutation_logit_error"] = audit_error
             if device.type == "cuda":
                 metrics["system/vram_allocated_gb"] = torch.cuda.memory_allocated(device) / 1e9
                 metrics["system/vram_reserved_gb"] = torch.cuda.memory_reserved(device) / 1e9
@@ -658,13 +985,19 @@ def main() -> None:
                 pass_id=step * 100_000,
                 order_samples=eval_order_samples,
                 gflownet_samples=eval_gflownet_samples,
+                score_first_bias_lr=eval_score_first_bias_lr,
+                score_first_bias_decay=eval_score_first_bias_decay,
+                score_first_bias_clip=eval_score_first_bias_clip,
             )
             metrics = {
                 "val/loss": val["loss"],
                 "val/bpb": val["bpb"],
                 "val/order_samples": eval_order_samples,
                 "val/gflownet_samples": eval_gflownet_samples,
+                "val/score_first_bias_lr": eval_score_first_bias_lr,
             }
+            if "bias_norm" in val:
+                metrics["val/score_first_bias_norm"] = val["bias_norm"]
             print(json.dumps({"step": step, **metrics}, indent=2))
             if wandb_run is not None:
                 wandb_run.log(metrics, step=step)
@@ -697,6 +1030,8 @@ def main() -> None:
         checkpoint_dir / "final_parameter_golf_artifact.zip",
         config=model.config_dict(),
         bits=export_bits,
+        quantization_mode=quantization_mode,
+        compression=artifact_compression,
     )
     print(json.dumps(asdict(final_artifact), indent=2))
     if wandb_run is not None:
@@ -704,6 +1039,8 @@ def main() -> None:
             {
                 "artifact/final_bytes": final_artifact.bytes_total,
                 "artifact/within_limit": float(final_artifact.within_limit),
+                "artifact/final_deployment_parameters": final_artifact.deployment_parameters,
+                "artifact/final_excluded_tensors": final_artifact.excluded_tensors,
                 "val/best_bpb": best_val,
             },
             step=steps,

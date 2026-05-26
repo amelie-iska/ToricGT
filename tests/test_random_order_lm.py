@@ -24,6 +24,8 @@ def tiny_config(**overrides):
         "ring_block_size": 8,
         "seed": 11,
         "byte_offset": 4,
+        "bigram_hash_buckets": 64,
+        "aux_mtp_offsets": 1,
     }
     values.update(overrides)
     return RandomOrderLMConfig(**values)
@@ -60,6 +62,12 @@ def test_dense_random_order_lm_loss_and_generation_shapes():
     out = model(tokens, sample_ids=torch.arange(3), return_order=True)
     assert out["logits"].shape == (3, 12, cfg.vocab_size)
     assert out["loss"].isfinite()
+    assert out["mtp_loss"].isfinite()
+    assert out["smear_temperature"].isfinite()
+    assert out["toric_memory_entropy"].isfinite()
+    assert out["contrastive_loss"].isfinite()
+    assert out["trajectory_flow_loss"].isfinite()
+    assert out["trajectory_kinetic_energy"].isfinite()
     assert out["permutation"].shape == tokens.shape
     generated = model.eval().sample_random_order(length=10, seed=99, sample_id=0, top_k=8)
     assert generated.shape == (10,)
@@ -90,6 +98,17 @@ def test_gflownet_adapter_preserves_score_before_update():
     out_a = model(tokens_a, permutation=permutation, return_order=True)
     out_b = model(tokens_b, permutation=permutation, return_order=True)
     assert torch.allclose(out_a["logits"][:, 4], out_b["logits"][:, 4], atol=1e-6)
+
+
+def test_score_first_bias_adaptation_is_finite_and_prefix_safe():
+    cfg = tiny_config(vocab_size=48, use_gflownet_policy=True, gflownet_num_actions=4, gflownet_hidden_dim=16)
+    model = DenseRandomOrderToricLM(cfg).eval()
+    permutation = torch.arange(8, dtype=torch.long).view(1, 8)
+    tokens = torch.tensor([[4, 5, 6, 7, 8, 9, 10, 11]])
+    out = model.score_with_bias_adaptation(tokens, permutation=permutation, lr=0.05, gflownet_samples=2)
+    assert out["loss"].isfinite()
+    assert out["bias_norm"].isfinite()
+    assert model.causal_future_permutation_error(tokens, permutation=permutation) < 1e-5
 
 
 def test_byte_roundtrip():

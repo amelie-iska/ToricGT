@@ -21,7 +21,13 @@ configuration. It keeps the research model's ToricGT bias while adapting to the
 | Attention | lower softmax, upper tropical-ring attention |
 | PolarQuant | 8-bit KV perturbation in eval/export checks |
 | Graph data | compact `graph_json` node/edge projection appended to byte stream |
-| GFlowNet | 8-action prefix-visible embedding policy with TB surrogate |
+| Domain tags | math, code, graph, Hebrew, biomed, biochem, biophysics, toric |
+| GFlowNet | 16-action prefix-visible embedding policy with TB surrogate |
+| Cheap byte features | BigramHash, CaseOps byte classes, SmearGate confidence |
+| Toric memory | 32 compact irrational clock/shift/cocycle slots |
+| Auxiliary heads | 2 offset multi-token heads plus contrastive hidden regularization, stripped from export |
+| Evaluation scaling | random orders, GFlowNet samples, and score-first bias adaptation |
+| Export | bit-packed 6-bit row quantization with LZMA |
 | Soft-MoE | off for the contest track; still on by default in the graph research model |
 | Artifact target | `15,600,000` bytes, below the `16,000,000` byte cap |
 
@@ -40,7 +46,8 @@ about 1.638B supervised byte targets, plus validation passes every 500 steps.
 There is no separate unsupervised-only phase in this config. GFlowNet-style
 training runs as an auxiliary objective on all 50,000 steps with
 `gflownet_loss_weight: 0.01`; validation uses `eval_gflownet_samples: 2` by
-default and inference config can raise that to 4+ when runtime permits. The
+default, plus score-first output-bias adaptation at `0.025`; inference config
+can raise random-order and GFlowNet samples to 4+ when runtime permits. The
 full graph model's richer embedding-space GFlowNet remains in `train.full_30m_*`.
 
 ### Graph Research Track

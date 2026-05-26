@@ -15,9 +15,23 @@ model:
   polarquant_kv_bits: 8
   polarquant_train: false
   use_gflownet_policy: true
-  gflownet_num_actions: 8
-  gflownet_hidden_dim: 128
-  gflownet_action_scale: 0.05
+  gflownet_num_actions: 16
+  gflownet_hidden_dim: 192
+  gflownet_action_scale: 0.06
+  use_bigram_hash: true
+  bigram_hash_buckets: 4096
+  bigram_hash_weight: 0.35
+  use_caseops_features: true
+  caseops_weight: 0.35
+  use_smear_gate: true
+  smear_temperature_min: 0.55
+  smear_temperature_max: 1.75
+  use_toric_memory: true
+  toric_memory_slots: 32
+  toric_memory_weight: 0.08
+  contrastive_temperature: 0.2
+  trajectory_flow_viscosity: 0.05
+  aux_mtp_offsets: 2
   target_artifact_bytes: 15600000
 
 data:
@@ -27,9 +41,11 @@ data:
   num_workers: 2
   include_graph_projection: true
   graph_projection_max_chars: 4096
+  coprime_row_stride: true
+  document_separator: "\n\n"
 
 training:
-  checkpoint_dir: checkpoints/parameter_golf_random_order_dense
+  checkpoint_dir: checkpoints/parameter_golf_oai_dense
   max_steps: 50000
   batch_size: 2
   grad_accum_steps: 16
@@ -46,12 +62,24 @@ training:
   eval_gflownet_samples: 2
   gflownet_loss_weight: 0.01
   gflownet_entropy_weight: 0.001
+  mtp_loss_weight: 0.05
+  qat_loss_weight: 0.000001
+  qat_bits: 6
+  qat_max_tensors: 16
+  contrastive_loss_weight: 0.01
+  trajectory_flow_loss_weight: 0.002
+  eval_score_first_bias_lr: 0.025
+  eval_score_first_bias_decay: 0.98
+  eval_score_first_bias_clip: 3.0
+  causal_audit_interval: 1000
   ckpt_interval: 1000
 
 export:
-  bits: 8
+  bits: 6
+  quantization_mode: row
+  compression: lzma
 
 logging:
   wandb: true
   project: toricgt-parameter-golf
-  run_name: dense-random-order-toricgt-gflownet
+  run_name: oai-dense-random-order-toricgt-gflownet

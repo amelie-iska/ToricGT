@@ -45,7 +45,7 @@
 \maketitle
 
 \begin{abstract}
-We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The research model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and uses permutation-equivariant Soft-MoE routing in upper graph blocks.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate OpenAI Parameter-Golf track projects byte chunks to random-order graph positions and trains a dense recurrent micro language model with tied embeddings, toric position phases, tropical-ring attention, and byte-accounted int8 export.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, artifact bytes, BPB, and GFlowNet diversity rather than scalar accuracy alone.
+We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The research model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and uses permutation-equivariant Soft-MoE routing in upper graph blocks.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate OpenAI Parameter-Golf track projects byte chunks to random-order graph positions and trains a dense recurrent micro language model with tied embeddings, toric position phases, tropical-ring attention, compact noncommutative-toric memory, strict-prefix GFlowNet graph-of-thought actions, BigramHash/CaseOps byte features, SmearGate confidence, stripped multi-token auxiliary heads, score-first test-time bias adaptation, and bit-packed 6-bit row-quantized export.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, artifact bytes, BPB, and GFlowNet diversity rather than scalar accuracy alone.
 \end{abstract}
 
 \section{Introduction}
@@ -134,6 +134,35 @@ is the exposed face of the lifted polytope $\Conv\{(a_r,b_r)\}_r$ under the line
   \label{fig:toric-condensed}
 \end{figure}
 
+\paragraph{Finite noncommutative-toric memory.}
+Let $\theta,\beta$ be rationally independent.  The competition adapter stores a small memory bank indexed by
+\begin{equation}
+  m_s=(\sin 2\pi s\theta,\cos 2\pi s\theta,\sin 2\pi s\beta,\cos 2\pi s\beta,
+  \sin(2\pi s\theta+2\pi s\beta+2\pi s^2\theta),\cos(2\pi s(\theta-\beta))).
+\end{equation}
+The quadratic phase term is a finite cocycle surrogate: it gives a compact, byte-accounted way to expose clock/shift-like projective phase structure without claiming a faithful finite representation of an irrational rotation algebra.  Queries attend to these slots by cosine attention and add a small residual before logits.
+
+\begin{proposition}[Ergodic phase coverage]
+If $1,\theta,\beta$ are rationally independent, the sequence $(s\theta,s\beta)\bmod1$ is equidistributed on $\mathbb T^2$.  Consequently, finite prefixes of the toric memory supply low-discrepancy phase probes as the number of slots grows.
+\end{proposition}
+
+\begin{proof}
+This is Kronecker-Weyl equidistribution.  For any nonzero $k\in\mathbb Z^2$, rational independence gives $k_1\theta+k_2\beta\notin\mathbb Z$, so the exponential averages $n^{-1}\sum_{s<n}\exp(2\pi i s(k_1\theta+k_2\beta))$ vanish.  Weyl's criterion implies equidistribution.
+\end{proof}
+
+\paragraph{Hidden-flow regularization.}
+Embedding reasoning paths are treated as discrete flows $h_0,\ldots,h_T$.
+Let $u_t=h_t-h_{t-1}$ and $\Delta u_t=u_t-u_{t-1}$.  The competition branch adds
+\begin{align}
+  \mathcal L_{\mathrm{flow}}
+  &=
+  \Eop_t\|\Delta u_t\|_2^2
+  +\nu \Eop_t\|u_t\|_2^2 \nonumber\\
+  &\quad
+  +10^{-3}\operatorname{Var}_t\|h_t\|_2.
+\end{align}
+This is not a fluid simulation.  It is a Navier--Stokes-inspired discrete dissipation prior: high-frequency trajectory oscillations are penalized, but smooth transport through embedding space remains cheap.  The regularizer improves the stability of long GFlowNet reasoning paths and provides kinetic-energy and viscous-dissipation diagnostics for the 3D trajectory and energy-landscape plots.
+
 \section{Training And Evaluation}
 
 The supervised objective combines node, edge, and graph losses with equivariance, torus, tropical-margin, Hebrew morphology, Soft-MoE, cache, and distillation terms:
@@ -168,7 +197,7 @@ Parameter-Golf BPB/bytes & compactness and scoring compliance \\
 
 \section{Parameter-Golf Track}
 
-The contest-facing model is not the full graph encoder.  It is a dense random-order byte model with tied embeddings, recurrent block reuse, toric target-position phases, lower softmax attention, upper tropical-ring attention, compact prefix-visible GFlowNet action sampling, and byte-accounted int8 export.  The artifact budget is
+The contest-facing model is not the full graph encoder.  It is a dense random-order byte model with tied embeddings, recurrent block reuse, toric target-position phases, lower softmax attention, upper tropical-ring attention, compact prefix-visible GFlowNet action sampling, noncommutative-toric memory slots, and byte-accounted export.  The artifact budget is
 \begin{equation}
   B_{\mathrm{art}}=B_{\mathrm{code}}+B_{\mathrm{weights}}+B_{\mathrm{tokenizer}}+B_{\mathrm{metadata}}
   \le16{,}000{,}000.
@@ -178,6 +207,8 @@ For a byte chunk $b=(b_1,\ldots,b_T)$, sample a content-independent order $\pi\i
   q_\theta(b\mid \pi)=\prod_{k=1}^Tq_\theta(b_{\pi_k}\mid b_{\pi_{<k}},\pi_{\le k}).
 \end{equation}
 BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  A byte-safe GFlowNet policy samples latent graph-of-thought action embeddings from the prefix-visible hidden state, and validation can average multiple action samples.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.  Curated \texttt{graph\_json} records are projected into compact node/edge byte traces so graph structure is visible to this adapter.
+
+The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.
 
 Operationally, the first serious BPB target is $1.20$--$1.22$, a strong run is $1.16$--$1.19$, an excellent run is $1.13$--$1.15$, and $\le1.12$ is exceptional under OpenAI's public recap.  Claims below $1.10$ BPB should trigger strict leakage, tokenizer, and score-before-update audits.
 

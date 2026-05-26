@@ -1,8 +1,11 @@
 model:
-  checkpoint: checkpoints/parameter_golf_random_order_dense/best.pt
+  checkpoint: checkpoints/parameter_golf_oai_dense/best.pt
   order_samples: 4
   gflownet_samples: 4
   use_gflownet_policy: true
+  score_first_bias_lr: 0.025
+  score_first_bias_decay: 0.98
+  score_first_bias_clip: 3.0
   seed_policy: content_independent_per_chunk
   random_seed_base: 17
   max_seq_len: 1024
@@ -16,6 +19,7 @@ evaluation:
   device: cuda
   report_bpb: true
   report_order_diversity: true
+  report_score_first_bias: true
 
 generation:
   length: 512

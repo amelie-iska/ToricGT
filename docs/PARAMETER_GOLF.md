@@ -16,11 +16,19 @@ changes.
 - Order policy: content-independent random permutation per byte chunk/sample.
 - Graph projection: curated `graph_json` rows are serialized to compact
   node/edge traces and appended to the byte stream.
-- GFlowNet: compact prefix-visible embedding action policy with eight latent
+- GFlowNet: compact prefix-visible embedding action policy with sixteen latent
   graph-of-thought actions, a trajectory-balance surrogate, entropy logging,
   and multi-sample evaluation.
+- Competition feature path: BigramHash strict-prefix context embeddings,
+  CaseOps byte-class features, SmearGate confidence, stripped multi-token
+  auxiliary heads, coprime row striding, score-first output-bias adaptation,
+  contrastive hidden-state regularization, compact noncommutative-toric memory,
+  compact domain tags for math/code/graph/Hebrew/biomed/biochem/biophysics
+  records, QAT grid regularization, and causal future-byte audits.
 - Soft-MoE: off for the contest track; still default for the graph research
   encoder.
+- Export: bit-packed 6-bit row quantization with LZMA by default; auxiliary
+  heads are excluded from the artifact.
 - PolarQuant: optional 8-bit KV perturbation in evaluation/export checks.
 
 ## Why Random-Order AR
@@ -52,6 +60,14 @@ proxy is the detached next-byte log likelihood, plus entropy and action
 diversity diagnostics. Evaluation can average several sampled action
 trajectories and several random orders; this is test-time scaling over legal
 internal randomness, not validation adaptation.
+
+The `oai` branch also exposes a score-first output-bias adapter for validation
+and challenge-style evaluation. The base model first scores a token from a
+prefix-causal distribution, records the loss, and only then updates a tiny
+per-sequence byte bias from the just-scored target. This gives a legal
+test-time adaptation mechanism without changing model weights or reading
+future bytes. The causal audit mutates future bytes and verifies that current
+logits are unchanged.
 
 Curated graph data is used by serializing `graph_json` into compact records:
 `node id=... type=... text=...` and `edge source->target type=...`. This keeps
@@ -92,22 +108,37 @@ The default training config has graph projection and GFlowNet sampling enabled:
 ```yaml
 data:
   include_graph_projection: true
+  coprime_row_stride: true
 training:
   gflownet_loss_weight: 0.01
   gflownet_entropy_weight: 0.001
   eval_gflownet_samples: 2
+  mtp_loss_weight: 0.05
+  eval_score_first_bias_lr: 0.025
 model:
   use_gflownet_policy: true
-  gflownet_num_actions: 8
+  gflownet_num_actions: 16
+  use_bigram_hash: true
+  use_caseops_features: true
+  use_smear_gate: true
+  use_toric_memory: true
+  aux_mtp_offsets: 2
+  contrastive_temperature: 0.2
+export:
+  bits: 6
+  quantization_mode: row
+  compression: lzma
 ```
 
 Export:
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/export_parameter_golf_artifact.py \
-  --checkpoint checkpoints/parameter_golf_random_order_dense/best.pt \
+  --checkpoint checkpoints/parameter_golf_oai_dense/best.pt \
   --output outputs/parameter_golf/toricgt_artifact.zip \
-  --bits 8
+  --bits 6 \
+  --quantization-mode row \
+  --compression lzma
 ```
 
 Minimal local validation:
@@ -125,6 +156,8 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
 - The training script does not read validation rows during optimization.
 - Evaluation derives fresh content-independent random orders for each batch.
 - GFlowNet actions are sampled from prefix-visible hidden states only.
+- Score-first bias adaptation updates only after a token loss is recorded.
+- Auxiliary multi-token heads are training-only and stripped from exports.
 - The artifact audit runs before training and fails if the compressed export is
   above the challenge cap.
 - `keys.txt`, checkpoints, and logs are not intended for git commits.

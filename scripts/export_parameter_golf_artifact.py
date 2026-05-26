@@ -18,7 +18,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", default="outputs/parameter_golf/toricgt_artifact.zip")
-    parser.add_argument("--bits", type=int, choices=[4, 6, 8], default=8)
+    parser.add_argument("--bits", type=int, choices=[4, 6, 8], default=6)
+    parser.add_argument("--quantization-mode", choices=["tensor", "row"], default="row")
+    parser.add_argument("--compression", choices=["deflated", "bzip2", "lzma"], default="lzma")
     args = parser.parse_args()
 
     payload = torch.load(args.checkpoint, map_location="cpu")
@@ -30,7 +32,14 @@ def main() -> None:
         cfg = ModelConfig(**payload["config"])
         model = ToricTokenGT(cfg)
     model.load_state_dict(payload["model"])
-    report = write_artifact(model, Path(args.output), config=payload["config"], bits=args.bits)
+    report = write_artifact(
+        model,
+        Path(args.output),
+        config=payload["config"],
+        bits=args.bits,
+        quantization_mode=args.quantization_mode,
+        compression=args.compression,
+    )
     print(report)
 
 

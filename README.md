@@ -515,11 +515,22 @@ for 14 effective block applications. Random target orders are derived from a
 fixed run seed plus per-chunk/sample ids, so each new input gets a new
 content-independent order while reproducible runs remain possible. A small
 GFlowNet-style action policy is enabled by default: each prefix-visible hidden
-state samples one of eight latent graph-of-thought actions, adds a tiny
+state samples one of sixteen latent graph-of-thought actions, adds a tiny
 embedding residual before prediction, and trains with a trajectory-balance
 surrogate plus entropy diagnostics. Validation/test-time scaling can average
 multiple random orders and multiple GFlowNet action samples without reading
 future bytes.
+
+The `oai` competition branch adds the OpenAI-retrospective-inspired fast path:
+BigramHash context embeddings, CaseOps byte-class features, SmearGate
+input-dependent confidence, stripped multi-token auxiliary heads, coprime row
+striding, score-first output-bias adaptation during validation, causal
+future-byte audits, lightweight quantization-aware grid regularization,
+contrastive hidden-state regularization in place of JEPA, compact
+noncommutative-toric memory slots, compact domain tags for math, code, graph,
+Hebrew, biomedicine, biochemistry, biophysics, and toric tasks, and bit-packed
+6-bit row quantized LZMA exports. JEPA is deliberately excluded from this branch per the current
+experiment scope.
 
 Reference BPB target bands for the OpenAI Parameter Golf setting:
 
@@ -546,9 +557,11 @@ random-order checkpoint:
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/export_parameter_golf_artifact.py \
-  --checkpoint checkpoints/parameter_golf_random_order_dense/best.pt \
+  --checkpoint checkpoints/parameter_golf_oai_dense/best.pt \
   --output outputs/parameter_golf/toricgt_artifact.zip \
-  --bits 8
+  --bits 6 \
+  --quantization-mode row \
+  --compression lzma
 ```
 
 This remains a byte-accounting scaffold for local experiments. The final
@@ -561,7 +574,10 @@ challenge evaluator round-trip once the candidate checkpoint is selected.
 conda run -n tokengt env PYTHONPATH=src python scripts/visualize.py --output-dir outputs/visualizations
 ```
 
-This writes unit-circle braid frames and a tropical decision-boundary plot.
+This writes unit-circle braid frames, a tropical decision-boundary plot,
+interactive and static 3D embedding-space graph-of-thought trajectories,
+Ramachandran-style reasoning torsion plots, and energy/fitness landscapes
+whose low-energy basins represent high-quality terminal reasoning states.
 
 ## Toric Music
 
