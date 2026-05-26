@@ -15,7 +15,10 @@ from tqdm.auto import tqdm
 def write_dataset_card(curated_dir: Path, destination: Path, repo_id: str) -> None:
     report_path = curated_dir / "split_report.json"
     report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+    niqqud_path = curated_dir / "niqqud_report.json"
+    niqqud_report = json.loads(niqqud_path.read_text(encoding="utf-8")) if niqqud_path.exists() else {}
     stats = report.get("stats", {})
+    niqqud = niqqud_report.get("aggregate", {})
     lines = [
         "---",
         "license: other",
@@ -46,6 +49,7 @@ def write_dataset_card(curated_dir: Path, destination: Path, repo_id: str) -> No
         "- `manifest.json`",
         "- `split_report.json`",
         "- `split_report.md`",
+        "- `niqqud_report.json`",
         "",
         "## Split Summary",
         "",
@@ -54,6 +58,15 @@ def write_dataset_card(curated_dir: Path, destination: Path, repo_id: str) -> No
         f"- Train rows: `{stats.get('split_counts', {}).get('train', 'unknown')}`",
         f"- Validation rows: `{stats.get('split_counts', {}).get('validation', 'unknown')}`",
         f"- Test rows: `{stats.get('split_counts', {}).get('test', 'unknown')}`",
+        "",
+        "## Hebrew Niqqud Policy",
+        "",
+        "Hebrew/Jewish-source rows preserve upstream niqqud where present. The curation does not synthesize vowels into unpointed source text by default; unpointed Hebrew is flagged for filtering or later vetted restoration.",
+        "",
+        f"- Hebrew rows: `{niqqud.get('hebrew_rows', 'unknown')}`",
+        f"- Pointed Hebrew rows: `{niqqud.get('pointed_hebrew_rows', 'unknown')}`",
+        f"- Unpointed upstream Hebrew rows: `{niqqud.get('unpointed_hebrew_rows', 'unknown')}`",
+        "- Strict pointed-Hebrew runs should filter out rows where `has_hebrew_without_niqqud=true` inside `quality_flags_json`.",
         "",
         "## License Notes",
         "",
