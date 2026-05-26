@@ -14,6 +14,10 @@ model:
   ring_block_size: 256
   polarquant_kv_bits: 8
   polarquant_train: false
+  use_gflownet_policy: true
+  gflownet_num_actions: 8
+  gflownet_hidden_dim: 128
+  gflownet_action_scale: 0.05
   target_artifact_bytes: 15600000
 
 data:
@@ -21,6 +25,8 @@ data:
   val_parquet_glob: data/curated_hf_shards/validation/*.parquet
   rows_per_batch: 128
   num_workers: 2
+  include_graph_projection: true
+  graph_projection_max_chars: 4096
 
 training:
   checkpoint_dir: checkpoints/parameter_golf_random_order_dense
@@ -37,6 +43,9 @@ training:
   eval_interval: 500
   eval_batches: 20
   eval_order_samples: 1
+  eval_gflownet_samples: 2
+  gflownet_loss_weight: 0.01
+  gflownet_entropy_weight: 0.001
   ckpt_interval: 1000
 
 export:
@@ -45,4 +54,4 @@ export:
 logging:
   wandb: true
   project: toricgt-parameter-golf
-  run_name: dense-random-order-toricgt
+  run_name: dense-random-order-toricgt-gflownet

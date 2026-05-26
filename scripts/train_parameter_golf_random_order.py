@@ -58,6 +58,8 @@ class ParquetByteChunkDataset(IterableDataset):
         seed: int = 17,
         repeat: bool = True,
         shuffle_files: bool = True,
+        include_graph_projection: bool = True,
+        graph_projection_max_chars: int = 4096,
     ) -> None:
         super().__init__()
         self.files = sorted(glob.glob(parquet_glob))
@@ -67,16 +69,56 @@ class ParquetByteChunkDataset(IterableDataset):
         self.seed = seed
         self.repeat = repeat
         self.shuffle_files = shuffle_files
+        self.include_graph_projection = include_graph_projection
+        self.graph_projection_max_chars = graph_projection_max_chars
+
+    def _graph_projection(self, graph_json: Any) -> str:
+        if not self.include_graph_projection or not isinstance(graph_json, str) or not graph_json.strip():
+            return ""
+        try:
+            payload = json.loads(graph_json)
+        except json.JSONDecodeError:
+            return graph_json[: self.graph_projection_max_chars]
+        if not isinstance(payload, dict):
+            return str(payload)[: self.graph_projection_max_chars]
+        nodes = payload.get("nodes", [])
+        edges = payload.get("edges", [])
+        targets = payload.get("targets", {})
+        parts = ["<graph>"]
+        if isinstance(nodes, list):
+            for node in nodes[:96]:
+                if not isinstance(node, dict):
+                    continue
+                node_id = str(node.get("id", ""))[:48]
+                node_type = str(node.get("type", ""))[:48]
+                node_text = str(node.get("text", node.get("label", node.get("payload", ""))))[:220]
+                parts.append(f"node id={node_id} type={node_type} text={node_text}")
+        if isinstance(edges, list):
+            for edge in edges[:160]:
+                if not isinstance(edge, dict):
+                    continue
+                src = str(edge.get("source", edge.get("src", "")))[:48]
+                dst = str(edge.get("target", edge.get("dst", "")))[:48]
+                edge_type = str(edge.get("type", edge.get("label", "")))[:48]
+                parts.append(f"edge {src}->{dst} type={edge_type}")
+        if isinstance(targets, dict) and targets:
+            parts.append("targets " + json.dumps(targets, ensure_ascii=False, sort_keys=True)[:512])
+        elif isinstance(targets, list) and targets:
+            parts.append("targets " + json.dumps(targets[:16], ensure_ascii=False)[:512])
+        return "\n".join(parts)[: self.graph_projection_max_chars]
 
     def _row_text(self, row: dict[str, Any]) -> str:
         primary = row.get("text")
+        graph_text = self._graph_projection(row.get("graph_json"))
         if isinstance(primary, str) and primary.strip():
-            return primary
+            return f"{primary}\n\n{graph_text}" if graph_text else primary
         parts = []
         for column in ("question", "reasoning", "solution", "answer"):
             value = row.get(column)
             if isinstance(value, str) and value.strip():
                 parts.append(value)
+        if graph_text:
+            parts.append(graph_text)
         return "\n\n".join(parts)
 
     def __iter__(self):
@@ -157,6 +199,8 @@ def build_loader(
     repeat: bool,
     synthetic: bool,
     vocab_size: int,
+    include_graph_projection: bool,
+    graph_projection_max_chars: int,
 ) -> DataLoader:
     if synthetic or not glob.glob(parquet_glob):
         dataset = SyntheticByteChunkDataset(seq_len=seq_len, vocab_size=vocab_size, seed=seed)
@@ -169,6 +213,8 @@ def build_loader(
             seed=seed,
             repeat=repeat,
             shuffle_files=repeat,
+            include_graph_projection=include_graph_projection,
+            graph_projection_max_chars=graph_projection_max_chars,
         )
     return DataLoader(
         dataset,
@@ -223,6 +269,7 @@ def evaluate(
     precision: str,
     pass_id: int,
     order_samples: int,
+    gflownet_samples: int,
 ) -> dict[str, float]:
     model.eval()
     losses = []
@@ -236,7 +283,13 @@ def evaluate(
         sample_losses = []
         for sample in range(max(1, order_samples)):
             with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp):
-                out = model(tokens, sample_ids=sample_ids, pass_id=pass_id + index * 997 + sample)
+                out = model(
+                    tokens,
+                    sample_ids=sample_ids,
+                    pass_id=pass_id + index * 997 + sample,
+                    sample_gflownet=gflownet_samples > 1,
+                    gflownet_samples=max(1, gflownet_samples),
+                )
             sample_losses.append(out["loss"].float())
         losses.append(torch.stack(sample_losses).mean())
     loss = torch.stack(losses).mean().item()
@@ -268,14 +321,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-interval", type=int)
     parser.add_argument("--eval-batches", type=int)
     parser.add_argument("--eval-order-samples", type=int)
+    parser.add_argument("--eval-gflownet-samples", type=int)
     parser.add_argument("--ckpt-interval", type=int)
     parser.add_argument("--num-workers", type=int)
     parser.add_argument("--rows-per-batch", type=int)
+    parser.add_argument("--include-graph-projection", action="store_true")
+    parser.add_argument("--no-graph-projection", action="store_true")
+    parser.add_argument("--graph-projection-max-chars", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--attention", choices=["softmax", "tropical", "tropical_ring", "hybrid"])
     parser.add_argument("--ring-block-size", type=int)
     parser.add_argument("--polarquant-kv-bits", type=int)
     parser.add_argument("--polarquant-train", action="store_true")
+    parser.add_argument("--use-gflownet-policy", action="store_true")
+    parser.add_argument("--no-gflownet-policy", action="store_true")
+    parser.add_argument("--gflownet-num-actions", type=int)
+    parser.add_argument("--gflownet-hidden-dim", type=int)
+    parser.add_argument("--gflownet-action-scale", type=float)
+    parser.add_argument("--gflownet-loss-weight", type=float)
+    parser.add_argument("--gflownet-entropy-weight", type=float)
     parser.add_argument("--export-bits", type=int, choices=[4, 6, 8])
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--no-wandb", action="store_true")
@@ -312,6 +376,20 @@ def main() -> None:
         if args.polarquant_kv_bits is not None
         else config_get(file_config, "model", "polarquant_kv_bits", 8),
         polarquant_train=bool(args.polarquant_train or config_get(file_config, "model", "polarquant_train", False)),
+        use_gflownet_policy=(
+            False
+            if args.no_gflownet_policy
+            else bool(args.use_gflownet_policy or config_get(file_config, "model", "use_gflownet_policy", True))
+        ),
+        gflownet_num_actions=args.gflownet_num_actions
+        if args.gflownet_num_actions is not None
+        else config_get(file_config, "model", "gflownet_num_actions", 8),
+        gflownet_hidden_dim=args.gflownet_hidden_dim
+        if args.gflownet_hidden_dim is not None
+        else config_get(file_config, "model", "gflownet_hidden_dim", 128),
+        gflownet_action_scale=args.gflownet_action_scale
+        if args.gflownet_action_scale is not None
+        else config_get(file_config, "model", "gflownet_action_scale", 0.05),
         target_artifact_bytes=config_get(file_config, "model", "target_artifact_bytes", 15_600_000),
         byte_offset=config_get(file_config, "model", "byte_offset", 4),
         use_soft_moe=False,
@@ -350,12 +428,37 @@ def main() -> None:
         if args.eval_order_samples is not None
         else config_get(file_config, "training", "eval_order_samples", 2)
     )
+    eval_gflownet_samples = (
+        args.eval_gflownet_samples
+        if args.eval_gflownet_samples is not None
+        else config_get(file_config, "training", "eval_gflownet_samples", 2)
+    )
+    gflownet_loss_weight = (
+        args.gflownet_loss_weight
+        if args.gflownet_loss_weight is not None
+        else config_get(file_config, "training", "gflownet_loss_weight", 0.01)
+    )
+    gflownet_entropy_weight = (
+        args.gflownet_entropy_weight
+        if args.gflownet_entropy_weight is not None
+        else config_get(file_config, "training", "gflownet_entropy_weight", 0.001)
+    )
     ckpt_interval = (
         args.ckpt_interval if args.ckpt_interval is not None else config_get(file_config, "training", "ckpt_interval", 1_000)
     )
     workers = args.num_workers if args.num_workers is not None else config_get(file_config, "data", "num_workers", 2)
     rows_per_batch = (
         args.rows_per_batch if args.rows_per_batch is not None else config_get(file_config, "data", "rows_per_batch", 128)
+    )
+    include_graph_projection = (
+        False
+        if args.no_graph_projection
+        else bool(args.include_graph_projection or config_get(file_config, "data", "include_graph_projection", True))
+    )
+    graph_projection_max_chars = (
+        args.graph_projection_max_chars
+        if args.graph_projection_max_chars is not None
+        else config_get(file_config, "data", "graph_projection_max_chars", 4096)
     )
     train_glob = args.train_parquet_glob or config_get(
         file_config, "data", "train_parquet_glob", "data/curated_hf_shards/train/*.parquet"
@@ -400,6 +503,8 @@ def main() -> None:
         repeat=True,
         synthetic=args.synthetic,
         vocab_size=model_config.vocab_size,
+        include_graph_projection=include_graph_projection,
+        graph_projection_max_chars=graph_projection_max_chars,
     )
     val_loader = build_loader(
         parquet_glob=val_glob,
@@ -412,6 +517,8 @@ def main() -> None:
         repeat=True,
         synthetic=args.synthetic,
         vocab_size=model_config.vocab_size,
+        include_graph_projection=include_graph_projection,
+        graph_projection_max_chars=graph_projection_max_chars,
     )
 
     use_wandb = bool(args.wandb or config_get(file_config, "logging", "wandb", False)) and not args.no_wandb
@@ -432,6 +539,13 @@ def main() -> None:
                     "weight_decay": weight_decay,
                     "warmup_steps": warmup_steps,
                     "eval_order_samples": eval_order_samples,
+                    "eval_gflownet_samples": eval_gflownet_samples,
+                    "gflownet_loss_weight": gflownet_loss_weight,
+                    "gflownet_entropy_weight": gflownet_entropy_weight,
+                },
+                "data": {
+                    "include_graph_projection": include_graph_projection,
+                    "graph_projection_max_chars": graph_projection_max_chars,
                 },
                 "artifact": {
                     "initial_bytes": report.bytes_total,
@@ -455,6 +569,8 @@ def main() -> None:
             "train_glob": train_glob,
             "val_glob": val_glob,
             "checkpoint_dir": str(checkpoint_dir),
+            "include_graph_projection": include_graph_projection,
+            "graph_projection_max_chars": graph_projection_max_chars,
         },
         indent=2,
     ))
@@ -468,6 +584,10 @@ def main() -> None:
         model.train()
         optimizer.zero_grad(set_to_none=True)
         step_loss = 0.0
+        step_total_loss = 0.0
+        step_gflownet_loss = 0.0
+        step_gflownet_entropy = 0.0
+        step_gflownet_diversity = 0.0
         lr_step = cosine_lr(step, lr, warmup_steps, steps)
         for group in optimizer.param_groups:
             group["lr"] = lr_step
@@ -476,25 +596,48 @@ def main() -> None:
             tokens = batch["tokens"].to(device, non_blocking=True)
             sample_ids = batch["sample_ids"].to(device, non_blocking=True)
             with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp):
-                out = model(tokens, sample_ids=sample_ids, pass_id=step * grad_accum + accum_idx)
+                out = model(
+                    tokens,
+                    sample_ids=sample_ids,
+                    pass_id=step * grad_accum + accum_idx,
+                    sample_gflownet=model_config.use_gflownet_policy and gflownet_loss_weight > 0,
+                    gflownet_samples=1,
+                )
                 micro_loss = out["loss"]
-                loss = micro_loss / grad_accum
+                gflownet_loss = out.get("gflownet_loss", torch.zeros((), device=device))
+                gflownet_entropy = out.get("gflownet_entropy", torch.zeros((), device=device))
+                total_micro_loss = micro_loss + gflownet_loss_weight * gflownet_loss - gflownet_entropy_weight * gflownet_entropy
+                loss = total_micro_loss / grad_accum
             loss.backward()
             step_loss += float(micro_loss.detach().cpu())
+            step_total_loss += float(total_micro_loss.detach().cpu())
+            step_gflownet_loss += float(gflownet_loss.detach().cpu())
+            step_gflownet_entropy += float(gflownet_entropy.detach().cpu())
+            step_gflownet_diversity += float(out.get("gflownet_action_diversity", torch.zeros(())).detach().cpu())
         step_loss /= grad_accum
+        step_total_loss /= grad_accum
+        step_gflownet_loss /= grad_accum
+        step_gflownet_entropy /= grad_accum
+        step_gflownet_diversity /= grad_accum
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         running_loss = 0.97 * running_loss + 0.03 * step_loss if running_loss else step_loss
         bpb = step_loss / math.log(2)
-        progress.set_postfix(loss=f"{step_loss:.4f}", bpb=f"{bpb:.3f}", lr=f"{lr_step:.2e}")
+        progress.set_postfix(loss=f"{step_loss:.4f}", bpb=f"{bpb:.3f}", gfn=f"{step_gflownet_loss:.3f}", lr=f"{lr_step:.2e}")
 
         if step % log_interval == 0:
             metrics = {
                 "train/loss": step_loss,
+                "train/total_loss": step_total_loss,
                 "train/loss_ema": running_loss,
                 "train/bpb": bpb,
                 "train/lr": lr_step,
                 "train/grad_norm": float(grad_norm.detach().cpu()),
+                "train/gflownet_loss": step_gflownet_loss,
+                "train/gflownet_entropy": step_gflownet_entropy,
+                "train/gflownet_action_diversity": step_gflownet_diversity,
+                "train/gflownet_loss_weight": gflownet_loss_weight,
+                "train/gflownet_entropy_weight": gflownet_entropy_weight,
                 "artifact/initial_bytes": report.bytes_total,
                 "artifact/estimated_tensor_bytes": estimated_tensor_bytes,
                 "model/parameters": params,
@@ -514,8 +657,14 @@ def main() -> None:
                 precision=precision,
                 pass_id=step * 100_000,
                 order_samples=eval_order_samples,
+                gflownet_samples=eval_gflownet_samples,
             )
-            metrics = {"val/loss": val["loss"], "val/bpb": val["bpb"]}
+            metrics = {
+                "val/loss": val["loss"],
+                "val/bpb": val["bpb"],
+                "val/order_samples": eval_order_samples,
+                "val/gflownet_samples": eval_gflownet_samples,
+            }
             print(json.dumps({"step": step, **metrics}, indent=2))
             if wandb_run is not None:
                 wandb_run.log(metrics, step=step)

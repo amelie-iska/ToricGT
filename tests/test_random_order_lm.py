@@ -65,6 +65,33 @@ def test_dense_random_order_lm_loss_and_generation_shapes():
     assert generated.shape == (10,)
 
 
+def test_gflownet_adapter_losses_and_multi_sample_scaling():
+    cfg = tiny_config(vocab_size=48, use_gflownet_policy=True, gflownet_num_actions=4, gflownet_hidden_dim=16)
+    model = DenseRandomOrderToricLM(cfg)
+    tokens = torch.randint(4, cfg.vocab_size, (2, 10))
+    out = model(tokens, sample_ids=torch.arange(2), sample_gflownet=True)
+    assert out["loss"].isfinite()
+    assert out["gflownet_loss"].isfinite()
+    assert out["gflownet_entropy"].isfinite()
+    assert 0.0 <= float(out["gflownet_action_diversity"]) <= 1.0
+
+    scaled = model(tokens, sample_ids=torch.arange(2), gflownet_samples=3)
+    assert scaled["logits"].shape == (2, 10, cfg.vocab_size)
+    assert scaled["loss"].isfinite()
+    assert scaled["single_sample_loss"].isfinite()
+
+
+def test_gflownet_adapter_preserves_score_before_update():
+    cfg = tiny_config(use_gflownet_policy=True, gflownet_num_actions=4, gflownet_hidden_dim=16)
+    model = DenseRandomOrderToricLM(cfg).eval()
+    permutation = torch.arange(8, dtype=torch.long).view(1, 8)
+    tokens_a = torch.tensor([[4, 5, 6, 7, 8, 9, 10, 11]])
+    tokens_b = torch.tensor([[4, 5, 6, 7, 20, 21, 22, 23]])
+    out_a = model(tokens_a, permutation=permutation, return_order=True)
+    out_b = model(tokens_b, permutation=permutation, return_order=True)
+    assert torch.allclose(out_a["logits"][:, 4], out_b["logits"][:, 4], atol=1e-6)
+
+
 def test_byte_roundtrip():
     text = "ToricGT \u05db\u05bc\u05b8\u05ea\u05b7\u05d1"
     tokens = byte_encode(text, byte_offset=4)

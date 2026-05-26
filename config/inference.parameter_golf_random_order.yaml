@@ -1,6 +1,8 @@
 model:
   checkpoint: checkpoints/parameter_golf_random_order_dense/best.pt
   order_samples: 4
+  gflownet_samples: 4
+  use_gflownet_policy: true
   seed_policy: content_independent_per_chunk
   random_seed_base: 17
   max_seq_len: 1024

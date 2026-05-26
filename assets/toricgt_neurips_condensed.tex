@@ -168,7 +168,7 @@ Parameter-Golf BPB/bytes & compactness and scoring compliance \\
 
 \section{Parameter-Golf Track}
 
-The contest-facing model is not the full graph encoder.  It is a dense random-order byte model with tied embeddings, recurrent block reuse, toric target-position phases, lower softmax attention, upper tropical-ring attention, and byte-accounted int8 export.  The artifact budget is
+The contest-facing model is not the full graph encoder.  It is a dense random-order byte model with tied embeddings, recurrent block reuse, toric target-position phases, lower softmax attention, upper tropical-ring attention, compact prefix-visible GFlowNet action sampling, and byte-accounted int8 export.  The artifact budget is
 \begin{equation}
   B_{\mathrm{art}}=B_{\mathrm{code}}+B_{\mathrm{weights}}+B_{\mathrm{tokenizer}}+B_{\mathrm{metadata}}
   \le16{,}000{,}000.
@@ -177,7 +177,7 @@ For a byte chunk $b=(b_1,\ldots,b_T)$, sample a content-independent order $\pi\i
 \begin{equation}
   q_\theta(b\mid \pi)=\prod_{k=1}^Tq_\theta(b_{\pi_k}\mid b_{\pi_{<k}},\pi_{\le k}).
 \end{equation}
-BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.
+BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  A byte-safe GFlowNet policy samples latent graph-of-thought action embeddings from the prefix-visible hidden state, and validation can average multiple action samples.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.  Curated \texttt{graph\_json} records are projected into compact node/edge byte traces so graph structure is visible to this adapter.
 
 \section{Next Iteration}
 

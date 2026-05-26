@@ -19,7 +19,7 @@ Current validated status:
 - CPU tests: `pytest -q tests` passes.
 - CPU implementation validation: default Soft-MoE, tropical-ring attention, embedding-space GFlowNet trajectory balance, and finite rotation-algebra checks run without meaningful VRAM use.
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
-- Parameter-Golf dense random-order scaffold: the default 12.9M-parameter byte model exports as a 12.86MB int8 compressed artifact, below the 16,000,000 byte cap.
+- Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - The full curation job writes leakage-controlled train/validation/test Parquet splits under `data/curated/`; validate it with `scripts/inspect_curated_data.py` before launching long training.
 
 ## What Is Here
@@ -42,7 +42,7 @@ Local implementation:
 - `src/toricgt/synthetic.py`: synthetic rotation-algebra and tropical shortest-path curriculum records.
 - `src/toricgt/polar_cache.py`: recursive polar encode/decode utilities for optional KV-cache compression experiments.
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
-- `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track.
+- `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
 - `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.
@@ -498,6 +498,9 @@ It stays close to ToricGT by projecting byte chunks to random-order graph
 positions, adding toric phase features, using lower softmax plus upper
 tropical-ring attention, recurrently reusing blocks for extra effective depth,
 and auditing int8 PolarQuant-style KV perturbations during evaluation/export.
+It also projects `graph_json` records into compact node/edge byte traces so
+graph-of-thought supervision participates in the same byte-level training
+stream used by the competition model.
 
 Train the default dense random-order model:
 
@@ -510,7 +513,13 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
 fixed run seed plus per-chunk/sample ids, so each new input gets a new
-content-independent order while reproducible runs remain possible.
+content-independent order while reproducible runs remain possible. A small
+GFlowNet-style action policy is enabled by default: each prefix-visible hidden
+state samples one of eight latent graph-of-thought actions, adds a tiny
+embedding residual before prediction, and trains with a trajectory-balance
+surrogate plus entropy diagnostics. Validation/test-time scaling can average
+multiple random orders and multiple GFlowNet action samples without reading
+future bytes.
 
 Watch a tmux run:
 

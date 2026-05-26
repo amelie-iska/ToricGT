@@ -44,6 +44,10 @@ class RandomOrderLMConfig:
     use_soft_moe: bool = False
     polarquant_kv_bits: int = 0
     polarquant_train: bool = False
+    use_gflownet_policy: bool = True
+    gflownet_num_actions: int = 8
+    gflownet_hidden_dim: int = 128
+    gflownet_action_scale: float = 0.05
     target_artifact_bytes: int = 15_600_000
     byte_offset: int = 4
     pad_token_id: int = 0
@@ -181,6 +185,26 @@ class DenseRandomOrderToricLM(nn.Module):
             ]
         )
         self.norm = nn.LayerNorm(config.d_model)
+        if config.use_gflownet_policy:
+            self.gflownet_policy = nn.Sequential(
+                nn.LayerNorm(config.d_model),
+                nn.Linear(config.d_model, config.gflownet_hidden_dim),
+                nn.GELU(),
+                nn.Linear(config.gflownet_hidden_dim, config.gflownet_num_actions),
+            )
+            self.gflownet_action_embedding = nn.Embedding(config.gflownet_num_actions, config.d_model)
+            self.gflownet_flow = nn.Sequential(
+                nn.LayerNorm(config.d_model),
+                nn.Linear(config.d_model, config.gflownet_hidden_dim),
+                nn.GELU(),
+                nn.Linear(config.gflownet_hidden_dim, 1),
+            )
+            self.gflownet_log_z = nn.Parameter(torch.zeros(()))
+        else:
+            self.gflownet_policy = None
+            self.gflownet_action_embedding = None
+            self.gflownet_flow = None
+            self.gflownet_log_z = None
         if config.weight_tying:
             self.output = None
             self.output_bias = nn.Parameter(torch.zeros(config.vocab_size))
@@ -224,7 +248,7 @@ class DenseRandomOrderToricLM(nn.Module):
         mask = torch.ones(length, length, dtype=torch.bool, device=device).tril()
         return mask.view(1, 1, length, length)
 
-    def forward_from_previous(
+    def _backbone_hidden(
         self,
         previous_tokens: torch.Tensor,
         target_positions: torch.Tensor,
@@ -244,10 +268,91 @@ class DenseRandomOrderToricLM(nn.Module):
         for _ in range(max(1, self.config.recurrent_passes)):
             for block in self.blocks:
                 x = block(x, mask=mask, token_mask=None)
-        x = self.norm(x)
+        return self.norm(x)
+
+    def _project_logits(self, hidden: torch.Tensor) -> torch.Tensor:
         if self.output is None:
-            return F.linear(x, self.token_embedding.weight[: self.config.vocab_size], self.output_bias)
-        return self.output(x)
+            return F.linear(hidden, self.token_embedding.weight[: self.config.vocab_size], self.output_bias)
+        return self.output(hidden)
+
+    def _gflownet_context(
+        self,
+        hidden: torch.Tensor,
+        sample: bool,
+    ) -> dict[str, torch.Tensor]:
+        if self.gflownet_policy is None or self.gflownet_action_embedding is None:
+            return {}
+        policy_logits = self.gflownet_policy(hidden)
+        policy_logits_f = policy_logits.float()
+        policy_log_probs = F.log_softmax(policy_logits_f, dim=-1)
+        policy_probs = policy_log_probs.exp()
+        entropy = -(policy_probs * policy_log_probs).sum(dim=-1)
+        if sample:
+            flat_logits = policy_logits_f.reshape(-1, policy_logits_f.shape[-1])
+            action_ids = torch.distributions.Categorical(logits=flat_logits).sample().view(policy_logits.shape[:-1])
+            action_logprob = policy_log_probs.gather(-1, action_ids.unsqueeze(-1)).squeeze(-1)
+            context = self.gflownet_action_embedding(action_ids)
+            action_mass = F.one_hot(action_ids, num_classes=self.config.gflownet_num_actions).float().mean(dim=(0, 1))
+        else:
+            action_ids = policy_probs.argmax(dim=-1)
+            action_logprob = policy_log_probs.gather(-1, action_ids.unsqueeze(-1)).squeeze(-1)
+            context = torch.matmul(policy_probs.to(dtype=hidden.dtype), self.gflownet_action_embedding.weight.to(hidden.dtype))
+            action_mass = policy_probs.mean(dim=(0, 1))
+        action_mass = action_mass.clamp_min(1e-8)
+        diversity = -(action_mass * action_mass.log()).sum() / math.log(max(2, self.config.gflownet_num_actions))
+        return {
+            "context": context.to(dtype=hidden.dtype),
+            "policy_logits": policy_logits,
+            "policy_entropy": entropy.mean(),
+            "action_ids": action_ids,
+            "action_logprob": action_logprob,
+            "action_diversity": diversity,
+        }
+
+    def forward_from_previous(
+        self,
+        previous_tokens: torch.Tensor,
+        target_positions: torch.Tensor,
+        sample_gflownet: bool = False,
+        return_aux: bool = False,
+    ) -> torch.Tensor | dict[str, torch.Tensor]:
+        hidden = self._backbone_hidden(previous_tokens, target_positions)
+        aux = self._gflownet_context(hidden, sample=sample_gflownet)
+        if aux:
+            hidden_for_logits = hidden + self.config.gflownet_action_scale * aux["context"]
+        else:
+            hidden_for_logits = hidden
+        logits = self._project_logits(hidden_for_logits)
+        if not return_aux:
+            return logits
+        out: dict[str, torch.Tensor] = {"logits": logits, "hidden": hidden}
+        out.update({key: value for key, value in aux.items() if key != "context"})
+        if self.gflownet_flow is not None:
+            out["flow_log"] = self.gflownet_flow(hidden).squeeze(-1)
+        return out
+
+    def _supervised_and_gflownet_losses(
+        self,
+        aux: dict[str, torch.Tensor],
+        target_tokens: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        logits = aux["logits"]
+        flat_logits = logits.reshape(-1, logits.shape[-1])
+        flat_targets = target_tokens.reshape(-1)
+        per_token_nll = F.cross_entropy(flat_logits, flat_targets, reduction="none").view_as(target_tokens)
+        loss = per_token_nll.mean()
+        out: dict[str, torch.Tensor] = {"loss": loss}
+        if "action_logprob" in aux and self.gflownet_log_z is not None:
+            log_reward = -per_token_nll.detach()
+            tb_error = self.gflownet_log_z + aux["action_logprob"].float() - log_reward.float()
+            out["gflownet_loss"] = tb_error.pow(2).mean()
+        elif "flow_log" in aux:
+            out["gflownet_loss"] = (aux["flow_log"].float() + per_token_nll.detach().float()).pow(2).mean()
+        if "policy_entropy" in aux:
+            out["gflownet_entropy"] = aux["policy_entropy"].float()
+        if "action_diversity" in aux:
+            out["gflownet_action_diversity"] = aux["action_diversity"].float()
+        return out
 
     def forward(
         self,
@@ -256,6 +361,8 @@ class DenseRandomOrderToricLM(nn.Module):
         pass_id: int = 0,
         permutation: torch.Tensor | None = None,
         return_order: bool = False,
+        sample_gflownet: bool = False,
+        gflownet_samples: int = 1,
     ) -> dict[str, torch.Tensor]:
         batch = random_order_batch(
             tokens,
@@ -265,13 +372,59 @@ class DenseRandomOrderToricLM(nn.Module):
             bos_token_id=self.bos_token_id,
             permutation=permutation,
         )
-        logits = self.forward_from_previous(batch.previous_tokens, batch.target_positions)
-        loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), batch.target_tokens.reshape(-1))
+        if self.config.use_gflownet_policy and gflownet_samples > 1:
+            sample_losses = []
+            sample_logps = []
+            entropies = []
+            diversities = []
+            last_aux: dict[str, torch.Tensor] | None = None
+            for _ in range(gflownet_samples):
+                aux = self.forward_from_previous(
+                    batch.previous_tokens,
+                    batch.target_positions,
+                    sample_gflownet=True,
+                    return_aux=True,
+                )
+                if not isinstance(aux, dict):
+                    raise RuntimeError("expected auxiliary output")
+                losses = self._supervised_and_gflownet_losses(aux, batch.target_tokens)
+                logp = F.log_softmax(aux["logits"], dim=-1).gather(-1, batch.target_tokens.unsqueeze(-1)).squeeze(-1)
+                sample_logps.append(logp)
+                sample_losses.append(losses["loss"])
+                if "gflownet_entropy" in losses:
+                    entropies.append(losses["gflownet_entropy"])
+                if "gflownet_action_diversity" in losses:
+                    diversities.append(losses["gflownet_action_diversity"])
+                last_aux = aux
+            mixture_logp = torch.logsumexp(torch.stack(sample_logps, dim=0), dim=0) - math.log(gflownet_samples)
+            loss = -mixture_logp.mean()
+            logits = last_aux["logits"] if last_aux is not None else torch.empty(0, device=tokens.device)
+            aux_losses: dict[str, torch.Tensor] = {
+                "loss": loss,
+                "single_sample_loss": torch.stack(sample_losses).mean(),
+            }
+            if entropies:
+                aux_losses["gflownet_entropy"] = torch.stack(entropies).mean()
+            if diversities:
+                aux_losses["gflownet_action_diversity"] = torch.stack(diversities).mean()
+        else:
+            aux = self.forward_from_previous(
+                batch.previous_tokens,
+                batch.target_positions,
+                sample_gflownet=sample_gflownet and self.config.use_gflownet_policy,
+                return_aux=True,
+            )
+            if not isinstance(aux, dict):
+                raise RuntimeError("expected auxiliary output")
+            logits = aux["logits"]
+            aux_losses = self._supervised_and_gflownet_losses(aux, batch.target_tokens)
+            loss = aux_losses["loss"]
         out: dict[str, torch.Tensor] = {
             "logits": logits,
             "loss": loss,
             "bpb": loss.detach() / math.log(2),
         }
+        out.update({key: value for key, value in aux_losses.items() if key != "loss"})
         if return_order:
             out.update(
                 {
@@ -292,17 +445,23 @@ class DenseRandomOrderToricLM(nn.Module):
         temperature: float = 1.0,
         top_k: int | None = None,
         device: torch.device | str | None = None,
+        sample_gflownet: bool | None = None,
     ) -> torch.Tensor:
         """Generate one sequence by filling a random target-position order."""
 
         if device is None:
             device = next(self.parameters()).device
+        if sample_gflownet is None:
+            sample_gflownet = self.config.use_gflownet_policy
         order = random_order_permutation(length, seed=seed, sample_id=sample_id, device=device).view(1, length)
         previous = torch.full((1, length), self.config.pad_token_id, dtype=torch.long, device=device)
         previous[:, 0] = self.bos_token_id
         generated = torch.full((1, length), self.config.pad_token_id, dtype=torch.long, device=device)
         for step in range(length):
-            logits = self.forward_from_previous(previous, order)[:, step, :] / max(temperature, 1e-6)
+            logits = self.forward_from_previous(previous, order, sample_gflownet=sample_gflownet)
+            if isinstance(logits, dict):
+                logits = logits["logits"]
+            logits = logits[:, step, :] / max(temperature, 1e-6)
             if top_k is not None and top_k > 0:
                 values, _ = logits.topk(min(top_k, logits.shape[-1]), dim=-1)
                 logits = logits.masked_fill(logits < values[:, -1:], torch.finfo(logits.dtype).min)
