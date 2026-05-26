@@ -134,11 +134,38 @@ conda run -n tokengt env PYTHONPATH=src python scripts/enrich_hebrew_niqqud.py \
   --batch-size 32768
 ```
 
-This preserves existing niqqud and marks Hebrew rows with `has_niqqud`, `has_hebrew_without_niqqud`, and related counts in `quality_flags_json`. It does not fabricate vowels for unpointed Hebrew; use `--drop-unpointed-hebrew` only for a strict pointed-Hebrew subset. Add `--update-metadata` only when you explicitly need the same niqqud payload embedded into `metadata_json`; that is slower for large Sefaria rows.
+Then write the coverage audit:
+
+```bash
+conda run -n tokengt env PYTHONPATH=src python scripts/report_hebrew_niqqud.py \
+  --curated-dir data/curated
+```
+
+This preserves existing niqqud and marks Hebrew rows with `has_niqqud`, `has_hebrew_without_niqqud`, and related counts in `quality_flags_json`. It does not fabricate vowels for unpointed Hebrew; use `--drop-unpointed-hebrew` only for a strict pointed-Hebrew subset. Add `--update-metadata` only when you explicitly need the same niqqud payload embedded into `metadata_json`; that is slower for large Sefaria rows. Current audit: `3,564,756` rows contain Hebrew, `2,868` are pointed from upstream source text, and `3,561,888` are unpointed upstream rows that are explicitly flagged for filtering or later vetted restoration.
 
 The current full curation contains `5,790,736` records and about `14.52B` estimated whitespace tokens. The split is `4,633,582 / 578,319 / 578,835` rows for train/validation/test. The repaired GoT Math shard contributes `518,439` graph-of-thought records, and Hebrew rows carry niqqud coverage flags.
 
-Publish split Parquet files to a public Hugging Face dataset repo using the local credential store:
+Publish split Parquet files to a public Hugging Face dataset repo using the local credential store. For large uploads, prefer the resumable CLI path:
+
+```bash
+HF_HUB_ENABLE_HF_TRANSFER=1 HF_XET_HIGH_PERFORMANCE=1 \
+conda run --no-capture-output -n tokengt hf upload-large-folder \
+  AmelieSchreiber/toricgt-curated-splits \
+  data/curated \
+  --type dataset \
+  --no-private \
+  --num-workers 8 \
+  --include "README.md" \
+  --include "train.parquet" \
+  --include "validation.parquet" \
+  --include "test.parquet" \
+  --include "manifest.json" \
+  --include "split_report.json" \
+  --include "split_report.md" \
+  --include "niqqud_report.json"
+```
+
+The Python helper performs the same logical upload for smaller runs:
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/publish_hf_dataset.py \

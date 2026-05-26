@@ -1353,6 +1353,8 @@ Opus reasoning 24k & default & Apache-2.0 & high-quality reasoning style transfe
 
 The important loader details are pragmatic.  The UniMorph Hub repository may contain an old dataset script, so the Hebrew file should be downloaded directly from the UniMorph GitHub source when the current \texttt{datasets} package rejects the script.  The GoT and ToT sources are raw JSON/JSONL rather than conventional multi-shard builders, so the curation script downloads and streams them directly.  The Hebrew/Jewish-text slice intentionally uses Sefaria and UniMorph Hebrew sources rather than Christian-branded biblical-language datasets when the experimental goal is Jewish Hebrew/rabbinic coverage.
 
+Hebrew rows are niqqud-aware.  The curation policy is to preserve pointed Hebrew when the upstream source provides it, prefer same-consonant pointed variants when an equivalent field is present, and explicitly flag unpointed Hebrew rather than synthesize vowels into attested source text.  The current audit finds $3{,}564{,}756$ rows containing Hebrew, of which $2{,}868$ are pointed upstream rows and $3{,}561{,}888$ are unpointed upstream rows.  Strict pointed-Hebrew runs should filter out records with \texttt{has\_hebrew\_without\_niqqud=true}; broader Jewish-text pretraining can retain them while making the missing-vowel status visible to the model and to evaluation reports.
+
 \subsection{Normalized record schema}
 
 Every curated row should contain:
