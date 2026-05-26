@@ -159,7 +159,7 @@ class ParquetByteChunkDataset(IterableDataset):
 
 
 class SyntheticByteChunkDataset(IterableDataset):
-    """Fallback dataset for command and CUDA smoke checks."""
+    """Fallback dataset for command and CUDA validation checks."""
 
     def __init__(self, seq_len: int, vocab_size: int, seed: int = 17) -> None:
         super().__init__()

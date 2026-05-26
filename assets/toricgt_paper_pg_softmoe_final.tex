@@ -1476,6 +1476,8 @@ A safe starting microarchitecture for the implemented dense track is
 \end{equation}
 with tied embeddings, recurrent block tying, hybrid softmax/tropical-ring attention, a tiny $A=8$ action GFlowNet policy, and no stored expert bank.  In the current artifact audit this gives about $13.0$M stored scalars and an int8 compressed artifact around $12.94$MB, leaving margin below $16{,}000{,}000$ bytes for code and metadata.  If $P_{\mathrm{fp}}$ is the uncompressed scalar count, then int8 export roughly permits $P_{\mathrm{fp}}<16$M minus code overhead; int6 export roughly permits $P_{\mathrm{fp}}<21$M before entropy compression; int4 export permits more parameters but is less stable unless quantization-aware training is strong.  These are engineering estimates; the actual gate is the serialized artifact size.
 
+For experimental triage, use explicit BPB bands.  Runs above $1.35$ BPB are debugging runs.  A range of $1.25$--$1.35$ indicates a functional but noncompetitive small language model.  A range of $1.20$--$1.22$ is the first serious target because it is near the naive baseline reported in OpenAI's challenge recap.  A range of $1.16$--$1.19$ is strong; $1.13$--$1.15$ is excellent; and $\le1.12$ BPB is exceptional or SOTA-class under the public recap.  Any claim below $1.10$ BPB should be treated as a possible breakthrough only after strict tokenizer, leakage, and score-before-update audits.  Since the record-track rules require statistically meaningful improvement, single-run changes below roughly $0.007$ BPB should not be interpreted as reliable without repeated runs.
+
 \begin{proposition}[Depth recurrence improves effective computation without increasing stored block parameters]
 Let a block $\Psi_\theta$ be applied $r$ times with shared parameters.  The stored parameter count is $|\theta|$, while the effective computational depth is $r$.  If $\Psi_\theta$ is token equivariant, then $\Psi_\theta^r$ is token equivariant.
 \end{proposition}
@@ -1551,7 +1553,7 @@ records/<name>/
 Before opening a pull request, run:
 \begin{verbatim}
 python train_gpt.py --dry_run_size_check
-python train_gpt.py --quick_train --max_steps 20
+python train_gpt.py --minimal_train_check --max_steps 20
 python train_gpt.py --roundtrip_quantize
 python train_gpt.py --eval_only --assert_no_network
 \end{verbatim}
@@ -1979,7 +1981,7 @@ For Hebrew records, node types include \texttt{root}, \texttt{radical}, \texttt{
 Setting & Value & Notes \\
 \midrule
 \endhead
-Smoke model & 2 layers, $d=64$ & CPU-only shape and equivariance tests \\
+Validation model & 2 layers, $d=64$ & CPU-only shape and equivariance tests \\
 8M model & 6 layers, $d=256$ & first real training run \\
 15M model & 8 layers, $d=384$ & preferred single-4090 target \\
 35M model & 12 layers, $d=512$ & checkpointing and careful memory profiling \\

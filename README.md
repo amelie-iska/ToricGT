@@ -521,6 +521,18 @@ surrogate plus entropy diagnostics. Validation/test-time scaling can average
 multiple random orders and multiple GFlowNet action samples without reading
 future bytes.
 
+Reference BPB target bands for the OpenAI Parameter Golf setting:
+
+| Validation BPB | Meaning |
+| ---: | --- |
+| `>1.35` | Debugging only; not competitive. |
+| `1.25-1.35` | Functional small LM, below serious leaderboard quality. |
+| `1.20-1.22` | Reasonable first competition target, around the naive baseline range reported by OpenAI. |
+| `1.16-1.19` | Strong candidate; real modeling/compression value. |
+| `1.13-1.15` | Excellent, near top-tier territory. |
+| `<=1.12` | Exceptional/SOTA-class target based on OpenAI's published recap. |
+| `<1.10` | Breakthrough-class, requiring especially careful leakage and scoring audits. |
+
 Watch a tmux run:
 
 ```bash

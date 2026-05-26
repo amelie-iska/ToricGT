@@ -93,4 +93,4 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
 ```
 
 Use `--device cpu` for a non-GPU check, or `--synthetic --batches 2 --budgets 1 2`
-for a tiny smoke run that does not auto-curate held-out data.
+for a tiny local validation run that does not auto-curate held-out data.

@@ -344,7 +344,7 @@ Before enabling these datasets:
 2. implement a `simplicial_hypergraph` task family;
 3. add graph conversion tests for face/coface incidence;
 4. add temporal leakage tests;
-5. add small CPU-only persistence smoke tests;
+5. add small CPU-only persistence validation tests;
 6. add one bounded CUDA capacity test with simplex tokens enabled;
 7. run an ablation against ordinary clique expansion without simplex tokens.
 

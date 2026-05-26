@@ -58,6 +58,25 @@ Curated graph data is used by serializing `graph_json` into compact records:
 graph structure visible to the byte model while preserving the self-contained
 artifact and avoiding a second evaluator-side graph dependency.
 
+## BPB Targets
+
+Lower BPB is better. Use these target bands when judging local runs before
+doing official challenge-style reproduction:
+
+| Validation BPB | Interpretation |
+| ---: | --- |
+| `>1.35` | Debugging only. |
+| `1.25-1.35` | Functional but not yet competitive. |
+| `1.20-1.22` | Reasonable first target; roughly the naive baseline range reported by OpenAI. |
+| `1.16-1.19` | Strong candidate. |
+| `1.13-1.15` | Excellent and near top-tier. |
+| `<=1.12` | Exceptional/SOTA-class target based on OpenAI's published recap. |
+| `<1.10` | Breakthrough-class; require strict leakage, tokenizer, and scoring audits. |
+
+For record-quality claims, require multiple runs and enough evidence that the
+improvement is larger than run-to-run variance. Treat single-run changes below
+about `0.007 BPB` as noise unless confirmed independently.
+
 ## Commands
 
 Train:
@@ -91,7 +110,7 @@ conda run -n tokengt env PYTHONPATH=src python scripts/export_parameter_golf_art
   --bits 8
 ```
 
-Smoke test:
+Minimal local validation:
 
 ```bash
 conda run --no-capture-output -n tokengt env PYTHONPATH=src \

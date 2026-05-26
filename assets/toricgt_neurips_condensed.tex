@@ -179,6 +179,8 @@ For a byte chunk $b=(b_1,\ldots,b_T)$, sample a content-independent order $\pi\i
 \end{equation}
 BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  A byte-safe GFlowNet policy samples latent graph-of-thought action embeddings from the prefix-visible hidden state, and validation can average multiple action samples.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.  Curated \texttt{graph\_json} records are projected into compact node/edge byte traces so graph structure is visible to this adapter.
 
+Operationally, the first serious BPB target is $1.20$--$1.22$, a strong run is $1.16$--$1.19$, an excellent run is $1.13$--$1.15$, and $\le1.12$ is exceptional under OpenAI's public recap.  Claims below $1.10$ BPB should trigger strict leakage, tokenizer, and score-before-update audits.
+
 \section{Next Iteration}
 
 The next ToricGT iteration should use toric geometry as a training signal.  First, freeze the trained checkpoint and build empirical toric shadows: occupied fan cells, fitted slopes, active-face margins, and bend magnitudes.  Second, add synthetic toric tasks: Newton-polytope active-face prediction, Cartier-divisor bend prediction, toric ideal relation checks, and ReLU fan realization tests.  Third, attach low-rank quantized toric probes and optimize
