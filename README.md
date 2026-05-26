@@ -10,10 +10,9 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 
 <p align="center">
   <a href="./assets/toricgt_paper_pg_softmoe_final.tex"><img src="https://img.shields.io/badge/arXiv-94133F?style=for-the-badge&logo=arxiv" alt="arXiv"/></a>
-  <a href="https://github.com/amelie-iska/ToricGT/"><img src="https://img.shields.io/badge/📝%20Blog-007A87?style=for-the-badge&logoColor=white" alt="Blog"/></a>
+  <a href="https://github.com/amelie-iska/ToricGT/"><img src="https://img.shields.io/badge/📝%20Blog-007A87?style=for-the-badge&logoColor=white" alt="GitHub"/></a>
   <a href="https://huggingface.co/blog/AmelieSchreiber/toricgt"><img src="https://img.shields.io/badge/HuggingFace-DE9B35.svg?style=for-the-badge&logo=HuggingFace" alt="HF"/></a>
 </p>
-
 
 Current validated status:
 
