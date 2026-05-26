@@ -93,6 +93,17 @@ For record-quality claims, require multiple runs and enough evidence that the
 improvement is larger than run-to-run variance. Treat single-run changes below
 about `0.007 BPB` as noise unless confirmed independently.
 
+## Local Wallclock Equivalence
+
+The current workstation is an RTX 4090 24GB with a Ryzen 9 9950X3D.  A
+challenge budget of `10 min` on an `8xH100` node is estimated as about `4 h`
+locally, with a realistic range of `3-6 h` depending on H100 form factor,
+parallel efficiency, data loading, and kernel shape.  The current dense
+random-order exploratory run is slower by design: observed throughput is about
+`4.64 s/step`, so `50,000` local steps is roughly `64-65 h` before allowing for
+validation/checkpoint overhead.  A local challenge-equivalent probe is therefore
+about `2.3k-4.7k` steps on this machine.
+
 ## Commands
 
 Train:
@@ -101,6 +112,18 @@ Train:
 conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   python scripts/train_parameter_golf_random_order.py \
   --config config/train.parameter_golf_random_order_dense.yaml
+```
+
+Project early loss and BPB to any requested checkpoint:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/project_pg_loss.py \
+  --wandb-run amelie-iska-math/toricgt-parameter-golf/gbmw7z3a \
+  --fit-through-step 2000 \
+  --target-step 50000 \
+  --metrics train/loss train/bpb \
+  --output-dir outputs/projections/oai-step2000-to-50000
 ```
 
 The default training config has graph projection and GFlowNet sampling enabled:

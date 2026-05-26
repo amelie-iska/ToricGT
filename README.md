@@ -544,11 +544,33 @@ Reference BPB target bands for the OpenAI Parameter Golf setting:
 | `<=1.12` | Exceptional/SOTA-class target based on OpenAI's published recap. |
 | `<1.10` | Breakthrough-class, requiring especially careful leakage and scoring audits. |
 
+Hardware-time translation for the current workstation:
+
+| Reference budget | Best current-machine estimate | Notes |
+| --- | ---: | --- |
+| `10 min` on `8xH100` | `4.0 h` central estimate, roughly `3-6 h` plausible range | Based on dense bf16 tensor/memory throughput ratios between an 8-H100 node and the local RTX 4090 24GB, with overhead for data loading, smaller local batch geometry, and less optimized single-GPU kernels. |
+| current `50,000` local-step run | `64-65 h` at the observed `4.64 s/step`, roughly `60-72 h` with validation/checkpoint overhead | This is a long local research run, not a claim that the same schedule fits the official challenge wallclock. |
+| local challenge-equivalent probe | about `2.3k-4.7k` local steps | At `4.64 s/step`, this is the local step count corresponding to the `3-6 h` estimate above. Use the projection script at these target steps and at `50k` for the long-run extrapolation. |
+
 Watch a tmux run:
 
 ```bash
-tmux attach -t toricgt_pg_random_order
-tail -f logs/parameter_golf_random_order.log
+tmux attach -t toricgt_pg_oai
+tail -f logs/parameter_golf_oai_random_order.log
+```
+
+Project loss and BPB from an early W&B window without interrupting training.
+The target step can be any positive value, so the same script can estimate
+step 5k, 10k, 25k, or 50k from the first 2k steps:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/project_pg_loss.py \
+  --wandb-run amelie-iska-math/toricgt-parameter-golf/gbmw7z3a \
+  --fit-through-step 2000 \
+  --target-step 50000 \
+  --metrics train/loss train/bpb \
+  --output-dir outputs/projections/oai-step2000-to-50000
 ```
 
 Export a compressed artifact from either a graph checkpoint or a dense
