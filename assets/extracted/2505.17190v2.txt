@@ -1,0 +1,3406 @@
+arXiv:2505.17190v2 [cs.LG] 23 Oct 2025
+
+Tropical Attention:
+Neural Algorithmic Reasoning for Combinatorial
+Algorithms
+
+Baran Hashemi
+Origins Data Science Lab
+Technical University of Munich
+Munich, Germany
+baran.hashemi@tum.de
+
+Kurt Pasque
+Naval Postgraduate School
+Monterey, California
+kurt.pasque@nps.edu
+
+Chris Teska
+Naval Postgraduate School
+Monterey, California
+christopher.teska@nps.edu
+
+Ruriko Yoshida
+Naval Postgraduate School
+Monterey, California
+ryoshida@nps.edu
+
+Abstract
+Can algebraic geometry enhance the sharpness, robustness, and interpretability
+of modern neural reasoning models by equipping them with a mathematically
+grounded inductive bias? To answer this, we introduce Tropical Attention, an attention mechanism grounded in tropical geometry that lifts the attention kernel into
+tropical projective space, where reasoning is piecewise-linear and 1-Lipschitz, thus
+preserving the polyhedral decision structure inherent to combinatorial reasoning.
+We prove that Multi-Head Tropical Attention (MHTA) stacks universally approximate tropical circuits and realize tropical transitive closure through composition,
+achieving polynomial resource bounds without invoking recurrent mechanisms.
+These guarantees explain why the induced polyhedral decision boundaries remain
+sharp and scale-invariant, rather than smoothed by Softmax. Empirically, we show
+that Tropical Attention delivers stronger out-of-distribution generalization in both
+length and value, with high robustness against perturbative noise, and substantially
+faster inference with fewer parameters compared to Softmax-based and recurrent
+attention baselines, respectively. For the first time, we push the domain of neural
+algorithmic reasoning beyond PTIME problems to NP-hard/complete problems,
+paving the way toward sharper and more expressive Large Reasoning Models
+(LRMs) capable of tackling complex combinatorial challenges in Phylogenetics,
+Cryptography, Particle Physics, and Mathematical Discovery. The code is available
+at https://github.com/Baran-phys/Tropical-Attention/.
+
+1
+
+Introduction
+
+The tropical semiring T := (R ∪ {−∞}, max, +) (or its “min-plus” variant) replaces ordinary
+addition by maximum and multiplication by addition [1]. Polynomials over this semiring evaluate
+to piecewise-linear, polyhedral functions. These are the main objects of study in tropical geometry
+that translates algebraic geometry into combinatorics, turning varieties into polyhedral complexes,
+with wide applications across the intersection of matroid theory, combinatorial optimization, auction
+theory, enumerative geometry [1–5], and recently Machine Learning [6–13]. Because it analyses the
+entire polyhedral structure of solutions rather than a single Euclidean point, tropical geometry is a
+natural mathematical language for algorithms that must reason over families of inputs, particularly
+39th Conference on Neural Information Processing Systems (NeurIPS 2025).
+
+n=8
+
+n=16
+
+0
+
+1
+
+n=32
+
+n=64
+
+0
+
+0
+
+0
+
+0
+
+2
+
+5
+
+10
+
+20
+
+10
+
+20
+
+40
+
+4
+
+2
+
+n=128
+
+0.45
+
+0.40
+
+0.35
+400
+
+6
+
+3
+
+n=1024
+
+0
+
+200
+
+15
+
+30
+
+60
+
+10
+
+20
+
+40
+
+80
+
+12
+
+25
+
+50
+
+100
+
+30
+
+60
+
+120
+
+0.30
+
+8
+
+4
+
+0.25
+
+600
+
+5
+
+0.20
+
+6
+
+800
+0.15
+
+14
+
+7
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+12
+
+14
+
+0
+
+0
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+1000
+0
+
+0
+
+0
+
+0
+
+5
+
+10
+
+20
+
+10
+
+20
+
+40
+
+20
+
+40
+
+60
+
+80
+
+100
+
+120
+
+0.10
+0
+
+200
+
+400
+
+600
+
+800
+
+1000
+
+0
+0.16
+
+2
+
+1
+
+4
+
+2
+
+0.12
+400
+
+6
+
+3
+
+0.14
+
+200
+
+15
+
+30
+
+60
+
+10
+
+20
+
+40
+
+80
+
+12
+
+25
+
+50
+
+100
+
+30
+
+60
+
+120
+
+0.10
+
+8
+
+4
+
+0.08
+600
+
+5
+
+6
+
+7
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+0
+
+1
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+12
+
+14
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+0
+
+0
+
+0
+
+2
+
+5
+
+10
+
+20
+
+10
+
+20
+
+40
+
+15
+
+30
+
+60
+
+10
+
+20
+
+40
+
+80
+
+12
+
+25
+
+50
+
+100
+
+30
+
+60
+
+120
+
+20
+
+40
+
+60
+
+80
+
+100
+
+120
+
+0
+
+200
+
+400
+
+600
+
+800
+
+1000
+
+0
+
+0.16
+
+0.14
+200
+0.12
+
+0.10
+
+400
+
+6
+
+3
+
+0.04
+
+1000
+0
+
+0
+
+4
+
+2
+
+0.06
+
+800
+
+0.02
+
+14
+
+0.08
+
+8
+
+4
+
+600
+
+5
+
+6
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+0.04
+
+0.02
+
+14
+
+7
+
+0.06
+
+800
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+12
+
+14
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+1000
+0
+
+20
+
+40
+
+60
+
+80
+
+100
+
+120
+
+0
+
+200
+
+400
+
+600
+
+800
+
+1000
+
+Figure 1: (top) Tropical Attention with sharp attention maps on learning the notorious 1 Quickselect
+algorithm, showcasing a size-invariance and OOD lengths generalization behavior far beyond training
+(8 → 1024). In contrast, both (middle) adaptive-softmax and (bottom) vanilla-softmax heads dilute
+and uniformly disperse as sequence length grows, failing to generalize. Each column evaluates the
+models on a new batch of independently drawn inputs of increasing length. Since the position of the
+target k-th element is different in each batch, the pattern of attention naturally changes to reflect the
+new data.
+
+Combinatorial Tasks
+
+Baseline Transformers Universal Transformers (UT)
+Vanilla
+
+Vanilla w/ ACT
+
+Adaptive w/ ACT
+
+±2.06
+
+42.75
+41.06±1.76
+4.66±5.98
+60.75±2.49
+51.30±3.91
+21.13±2.45
+80.55±2.91
+80.00±0.82
+9.25±1.86
+
+±0.96
+
+48.25
+39.18±2.59
+22.89±2.49
+64.25±1.09
+56.50±2.22
+22.75±5.25
+91.90±5.52
+79.75±0.50
+17.98±2.29
+
+43.37
+54.57
+37.05
+64.07
+74.68
+41.43
+80.01
+81.12
+17.33
+
+53.83
+55.04
+40.44
+63.28
+70.81
+42.05
+91.13
+81.67
+23.67
+
+97.00±1.15
+60.00±2.09
+77.06±3.78
+66.01±1.55
+89.25±3.49
+87.50±6.45
+96.73±3.50
+82.75±1.59
+42.52±1.47
+
+Floyd–Warshall
+12.81±4.03
+FractionalKnapsack 0.88±0.06
+
+1.31±0.36
+0.86±0.08
+
+7.59
+0.83
+
+0.97
+0.85
+
+0.81±0.08
+0.66±0.10
+
+ConvexHull
+Knapsack
+Quickselect
+BinPacking
+SCC
+SubsetSum
+BalancedPartition
+3SUM
+MinCoinChange
+
+Adaptive
+
+Tropical
+Transformer
+
+Table 1: Out-of-distribution Micro-F1 score (top) and MSE for regression tasks (bottom) under
+Length OOD test. The Tropical Transformer outperforms all baselines, across combinatorial
+tasks while delivering 3×-9× faster inference and using ∼ 20% fewer parameters than Universal
+Transformer (UT) [17] baselines with iterative attention that approximate the closure.
+
+those generating such polyhedral structures. Dynamic programming (DP) exemplifies this connection.
+It is a cornerstone for numerous combinatorial optimization problems. The structure of these problems
+allows DP value functions to be described as piecewise-linear functions, forming polyhedral structures.
+They are just recursively constructed circuits over tropical semirings. Each such circuits, namely
+tropical circuits, compute monomials as feasible solutions over the underlying semiring making the
+DP update step effectively linear within this algebraic framework [14, 15].
+Many combinatorial optimization problems are specified by a family of these optimal solutions.
+For example, shortest-path algorithms such as Floyd-Warshall explicitly manifest this as tropical
+1
+
+The challenge by Michael Galkin [16]
+
+2
+
+matrix products and closures, and their feasible solutions trace the faces of a polyhedral complex in
+parameter space [18]. More broadly, if candidate solutions to combinatorial algorithms are monomials
+(linear segments) in tropical space, then the computation is just a circuit of tropical gates. Several
+combinatorial algorithms like shortest paths [19, 20], change making [21, 22], knapsack [23–25],
+are nothing but recursively constructed tropical circuits. So the tropical circuit model can give
+us a bridge between combinatorial optimization and neural architectures to perform sharp,
+piecewise-linear, and polyhedral computations, offering a representation around which we can
+align the attention mechanism at the core of Transformer reasoning.
+However, vanilla Transformers [26] are misaligned to this objective. Softmax-normalized dot-product
+attention lives in Euclidean geometry and produces smooth, quadratic decision boundaries. This
+smoothness blurs the hard arg max / arg min structure on which combinatorial algorithms rely. As
+input length grows, softmax distributions can disperse, resulting in an increasingly flat probability
+distribution, a.k.a, dispersion [27] or attention fading [28]. Moreover, the exponential sensitivity of
+softmax makes logits vulnerable to small ℓ∞ perturbations, harming adversarial robustness. As a
+result, Transformers equipped with softmax attention fail to extrapolate beyond the training regime of
+input length or magnitude on combinatorial tasks. For non-algorithmic reasoning tasks, even though
+injecting positional information [29–31] can alleviate the length extrapolation issue, we believe that
+the core of the issue lies within the attention mechanism itself.
+Our Contribution: As a result, we propose Tropical Attention, a novel attention mechanism that
+incorporates tropical algebraic geometry to perform reasoning and information routing in tropical
+projective space. In tropical projective space, the attention scores are governed by the tropical Hilbert
+projective metric; consequently, the induced map is piecewise-linear, idempotent in the aggregation,
+and non-expansive (1-Lipschitz). In particular, Tropical Attention preserves the polyhedral structure
+characteristic of combinatorial value functions while inheriting the projective invariance and shortestpath geometry captured by the Hilbert metric [5]. Our viewpoint is aligned with Neuroalgebraic
+Geometry [32], in which neural computations are modeled by algebraic and tropical structures acting
+on polyhedral complexes. The mechanism is drop-in for standard Transformer blocks where reasoning
+occurs in tropical projective space and then returns to Euclidean coordinates for subsequent layers, so
+training and architectures remain unchanged.
+We show that multi-head Tropical Attention (MHTA) realizes the target class of dynamic programs and
+approximates tropical circuits with tropical transitive closure. In particular, our expressivity theorems
+construct MHTA stacks that simulate tropical circuits without super-polynomial blow-ups in network
+size or the requirement for recurrent reasoning [17]. In other words, MHTA has sufficient capacity to
+approximate closure by absorbing the feasible solutions into its tropical polyhedral stratification, thus
+avoiding recurrent hidden state refinement [33].
+Empirically on combinatorial tasks, including NP-hard/complete problems, this alignment translates
+into stronger out-of-distribution generalization together with substantial inference-time and parameter
+efficiencies relative to recurrent-style baselines. This study, also for the first time extends the
+applicability of Neural Algorithmic Reasoning [34] beyond the polynomial-time solvable problems
+to NP-hard/complete combinatorial optimization problems, such as Knapsack, Bin Packing, and
+Balanced Partition problems.
+
+2
+
+Background and Related Work
+
+2.1
+
+Out-of-Distribution Generalization
+
+An important measure of a supervised learning model’s reasoning is its ability to generalize to inputs
+that differ fundamentally from those encountered during training. This is known as out-of-distribution
+(OOD) generalization. Following [35] notations formally, let X denote the feature space and Y be
+the label set. A model h : X → Y is learned from training examples drawn independently and
+identically distributed from a training distribution Dtr over X × Y. Given a distinct test distribution
+Dte on the same space, we define the OOD risk as, RDte (h) := E(x,y)∼Dte [ℓ(h(x), y)], where ℓ
+|S|
+
+is a loss function. Its empirical estimate on a finite sample S drawn from Dte (i.e., S ∼ Dte ) is,
+b S (h) := 1 P
+R
+ℓ(h(x), y).
+|S|
+
+(x,y)∈S
+
+3
+
+We say that the model h OOD-generalizes from Dtr to Dte if its OOD risk RDte (h) remains
+comparable to its in-distribution risk RDtr (h), indicating minimal performance degradation despite
+the distributional shift. In the context of neural algorithmic reasoning, three main types of deviation
+between Dtr and Dte are important in measuring a model’s capabilities:
+1. Length Generalization Both distributions draw their numerical
+entries from the same range
+nmax
+but the test sequences are strictly longer, Dte (X ) ⊊ R>0
+with nmax > ntr . Here, a good
+performance indicates that the network has learned a parallel or recursive scheme that scales with
+input size rather than memorizing a fixed shallow circuit.
+2. Value generalization
+The two distributions share the same support with respect to sequence length
+
+
+but supp Dte (X ) contains magnitudes never encountered during training, i.e. supp Dte (X ) \
+supp Dtr (X ) ̸= ∅ . For arithmetic or DP-style tasks, value generalization is the clearest evidence
+that the model has learned the rule rather than the lookup table of seen inputs.
+3. Perturbative-noise generalization Noisy data, whether arising from measurement error, adversarial
+attack, or any other source, often causes models to make mistakes and must be accounted for in
+model design. To test noise robustness, Dte is obtained from Dtr by an ℓp -bounded, perturbation map
+A : X → X such that xptb = A(x) with ∥xptb − x∥p ≤ ε. Robust generalization demands that the
+risk remains low even under the worst allowed A. This regime probes the stability and smoothness of
+the learned function of the architecture. The perturbative noise robustness of Neural Algorithmic
+Reasoning models is very important for many real-world systems, especially for cryptographic
+schemes [36].
+Length, value, and perturbative noise generalization stress complementary facets of algorithmic
+competence [37, 38]. Thus, a model as a true reasoning circuit [39, 40] that excels simultaneously in
+all three regimes offers strong evidence of having internalized the underlying combinatorial procedure
+rather than a brittle statistical surrogate.
+2.2
+
+Softmax Self-Attention Mechanism
+
+⊤
+⊤
+⊤
+Given an input sequence X = x1 , . . . , xN ∈ RN ×dx , let Q = XWQ
+, K = XWK
+, V = XWV⊤ ,
+d×dx
+dv ×dx
+where the parameter matrices satisfy WQ , WK ∈ R
+and WV ∈ R
+. Denote by q⊤
+i and
+⊤
+kj the i-th and j-th rows of Q and K, respectively, and τ > 0 for a temperature parameter. Vanilla
+self-attention computes, for every token i,
+
+N
+X
+
+exp ⟨qi , kj ⟩/τ
+hi =
+αij vj ,
+αij = softmaxτ ⟨qi , kj ⟩ := PN
+ , i = 1, . . . , N, (1)
+t=1 exp ⟨qi , kt ⟩/τ
+j=1
+where the softmax is applied independently to each row of the score matrix QK⊤ . The temperature τ
+modulates the sharpness of the resulting probability vector, as τ → 0 the weights approach a one-hot
+selection, whereas large τ yields an almost uniform mixture. Equation 1 measures similarity with the
+Euclidean inner product, which is spherically invariant, meaning that every coordinate contributes
+equally, regardless of its algorithmic significance. Despite it’s success in many tasks [26, 41], its
+geometric and numerical properties are ill-suited to algorithmic reasoning [35, 42]. We summarize
+the main shortcomings.
+1. Inherent blurriness The exponential map assigns a non-zero weight to every token; even at
+low temperatures the second-largest term remains strictly positive. As problem size grows, the gap
+between the top two logits often decreases (e.g. when costs are drawn from a common distribution),
+so the resulting distribution cannot converge to a one-hot vector. In practice this leads to soft rather
+than decisive selections, hampering tasks that require exact order statistics [27, 28]. Recent diagnostic
+suites show that large language models fail on simple tasks of finding minima and second-minima
+even within In Distribution (ID) length tests [43, 44]. The attention kernel’s inability to sharpen with
+scale is a primary culprit.
+2. Sensitivity to small perturbations Because softmax(z) ∝ ez , a perturbation of size δ in the
+largest logit changes the corresponding weight by a multiplicative factor eδ . An adversary who
+can alter a single entry of QK⊤ /τ by O(log N ) may invert the ranking of two tokens, propagating
+an O(1) error to downstream activations [45, 46]. This ℓ∞ -fragility persists even after common
+stabilisers such as temperature scaling or normalization layers [45].
+4
+
+3. Mismatch with polyhedral decision boundaries In a combinatorial optimization the value
+function is a tropical polynomial—piecewise linear with faces aligned to coordinate hyperplanes
+[5, 47]. The quadratic forms generated by Euclidean dot products carve the domain into spherical
+caps [48] rather than polyhedral cones; reproducing a DP recurrence therefore demands exponentially
+many heads or layers unless the desired structure is injected by hand.
+4. Temperature–gradient dilemma Driving the distribution toward a hard arg max necessitates
+lowering the temperature parameter τ . Yet as τ → 0 the Jacobian of the softmax grows like τ −1 ,
+causing gradient explosion/vanishing [49]. Careful schedule tuning or gradient clipping becomes
+mandatory [45], adding hyper-parameter overhead.
+2.3
+
+Neural Algorithmic Reasoning
+
+The problem of bridging symbolic algorithms and differentiable models has become known as Neural
+Algorithmic Reasoning (NAR). Neural Algorithmic Reasoning involves developing neural models and
+learning procedures to facilitate the internalization of algorithms directly in models’ weights. Starting
+from early work [34] that aimed to demonstrate the applicability of Graph Neural Networks (GNNs)
+to approximate classical algorithms [50], the community has subsequently developed and expanded
+further in different directions [42, 51–58]. Some notable applications are constructing [59] and
+enumerating [60] combinatorial structures of a particular type [59], and dynamic programming [40, 61].
+A fundamental objective of NAR is to achieve robust out-of-distribution (OOD) generalization through
+algorithmic alignment. Typically, models are trained and validated on small sets/sequences/graphs
+and tested on larger sets/sequences/graphs. This is inspired by classical algorithms’ size-invariance,
+where correctness of the solution is maintained irrespective of the input size. Our work pursues this
+objective from a fresh, tropical geometric angle and provides universality guarantees and expressivity
+for an attention core within the NAR framework.
+Recent work exclusively tried to quantify NAR failures when test sequences are longer [37, 38] or
+numerically larger [35], but have not assessed noise robustness scenarios. Perturbative noise itself
+is also of importance since real-world deployments must withstand the worst-case inputs and noise.
+Robustness in this setting is a test for whether a model has internalized genuine algorithmic structure
+rather than superficial statistical cues. Hence, we introduce perturbative-noise generalization as a
+third pillar for NAR benchmarking and show that Tropical Transformer demonstrates systematic gains
+across all three axes.
+Based on the past related works, one can establish a demand for an attention mechanism that (i) is
+expressive and respects the underlying geometric structure of combinatorial algorithms, (ii) mitigates
+softmax dispersion that hampers OOD generalization, and (iii) delivers OOD noise robustness
+benefits. Tropical Attention positions itself at this intersection, drawing on a decade of tropical
+geometric insights to advance neural algorithmic reasoning. To best of our knowledge, this level of
+incorporating Tropical algebraic geometry (not just pre-post processing arithmetic [13, 40, 62])
+to define a new mathematically grounded reasoning architecture has not been done before.
+
+3
+
+Tropical Attention: Reasoning in Tropical projective space
+
+Tropical Attention arises from combinatorial algorithm alignment, that is information exchange
+is governed by order statistics, namely maxima, minima, and interval widths rather than absolute
+magnitudes. These operations live naturally in the tropical semiring, whose idempotence, translation
+covariance, and projective scale invariance match the properties of tropical geometry and it’s
+computational mirror, tropical circuits. By contrast, the dot-product–softmax kernel depends on
+absolute scale and temperature, yields smooth (quadratic) decision boundaries, and exhibits dispersion
+as sequence length grows, thereby blurring the sharp structure required for decisive reasoning.
+Our goal is to replace the dot–product, Softmax-based kernel of vanilla self-attention with a reasoning
+core that (i) takes place in the tropical polyhedral complex (ii) preserves the piecewise-linear geometry
+of combinatorial problems, and (iii) inherits the 1–Lipschitz robustness of tropical linear maps. To
+do so, we perform a tropicalization map of queries, keys, and values to piecewise-linear projective
+spaces carved out by polyhedral constraints, compute attention weights with the tropical Hilbert
+projective metric (See Appendix B and [5] for details on tropical algebraic geometry.), aggregate by a
+tropical matrix–vector product, and finally map the result back to Euclidean space so that the rest of the
+5
+
+original algorithm (e.g Transformer) modular stack is untouched. We present the framework relating
+robustness and piecewise-linearity of maps and show how our proposed scheme offers improvements
+on OOD generalization tasks.
+Let X ∈ RN ×d be the token embedding of the input. We define the tropicalization map by going to
+an amoeba representation of the input with a learnable valuation map, Φ : RN ×d → (TPd−1 )N
+
+Φλ (X)i = Ui − max Uir .1d , where U = log max(0, X) ∈ RN ×d
+(2)
+1≤r≤d
+
+for each row i ∈ 1, . . . , N . The constant shift enforces maxi ϕλ (x)i = ϵ, so the output of ϕλ always
+lies in the tropical simplex, ∆ d−1 := z ∈ Rd maxi zi = ϵ , where every vector is projectively
+equivalent to exactly one point in the tropical simplex. In other words, Φ is a section of the quotient
+Rd /R1.
+Lemma 3.1. For every embedded coordinate i ∈ [N ], the function
+(
+
+
+log(x) − λ, x > 0,
+vλ (x) := ϕλ (x) i =
+−∞,
+x ≤ 0,
+where ϕλ is a (projective) valuation map. Hence the shifted map ve(x) = vλ (x)+λ = log(max(0, x))
+is an Archimedean valuation in the classical sense, and Φ is a matrix-valued valuation modulo
+tropical scalars; its image lies in the tropical simplex.
+After mapping each input token to tropical projective space, Z = ϕλ (X) ∈ TPN ×d−1 , we compute
+attention independently across H heads.
+Definition 3.1 (Multi-head Tropical Attention (MHTA)). Let dk = d/H be a fixed head dimension.
+(h)
+(h)
+(h)
+Then, for every head (h ∈ [H] one can choose learnable matrices WQ , WK , WV ∈ Rdk ×d
+(h)⊤
+
+and define the tropical linear projections [7] Q(h) = Z ⊙ WQ
+
+(h)⊤
+
+, K(h) = Z ⊙ WK , V(h) =
+
+(h)⊤
+
+Z ⊙ WV where ⊙ denotes max–plus matrix multiplication, (A ⊙ B)ij = maxt {Ait + Btj }.
+Then, using dH the tropical Hilbert projective metric, defined in B.4, we will have the tropical attention
+score
+(h)
+(h)
+(h) 
+Sij = − dH qi , kj ,
+i, j ∈ [N ],
+that comes with Projective Invariance and Non-expansiveness condition (discussed in B.4). Thereafter,
+the head outputs are aggregated via tropical matrix–vector product,
+(h)
+
+Ci
+
+=
+
+N
+M
+j=1
+
+(h)
+
+Sij
+
+(h)
+
+⊙ vj
+
+ (h)
+(h)
+= max Sij + vj ,
+j
+
+i ∈ [N ].
+
+The tropical context picks the value that best aligns projectively with the query. Then, the contexts per
+head, will be mapped to the Euclidean domain via a smooth
+ inverse map (devaluation )ψ(z) = exp(z),
+and concatenated back to the original dimension, H = ψ(C(1) ) ∥ . . . ∥ ψ(C(H) ) ∈ RN ×d .
+Why Tropical Attention? Every operation inside MHTA is piecewise linear and aligned with
+tropical geometry (not just tropical arithmetic). Hence the entire network computes a tropical
+polygonal map whose cells are polyhedral cut out by hyperplanes. This is aligned with combinatorial
+algorithms, whose solutions correspond to a vertex of a polytope and every decision boundary is a
+facet. Training a transformer with Tropical attention therefore starts from a hypothesis space that
+already mirrors the solution structure of a combinatorial algorithms. That is what we call a polyhedral
+inductive bias. By contrast, Euclidean softmax attention inserts an exponential map, blurring the sharp
+decisions on their input data. Classical transformers modulate the entropy–versus–sharpness trade-off
+through a temperature parameter in the softmax; MHTA sharpness is built in and temperature-free.
+Moreover, since every intermediate representation of MHTA lies in the projective simplex ∆d−1 ,
+going through arg max is well-defined (no equal maxima except on a set of measure 0) and is stable
+by global scaling meaning that shifting the entire vector by λ ∈ Rd does not alter which index attains
+the maximum. In other words, only relative relations between inputs matter, thus Tropical attention is
+inherently robust against distribution shifts.
+Furthermore, each MHTA head can function as a tropical gate in a tropical circuit. A tropical
+circuit is a finite acyclic digraph whose input vertices store either a variable or a non-negative real
+6
+
+constant, while every internal vertex has in-degree two and outputs the maximum or the sum of its
+two predecessors. The circuit’s size is the number of internal gates. Classical pure DP algorithms
+are recursive tropical circuits of this kind; consequently, lower bounds for tropical circuits translate
+directly into limits for such DP schemes. An MHTA head can also be interpreted as a single
+tropical gate. A single head implements the composite transformation (u, v) 7−→ maxj { Sij + vj },
+where the score Sij itself is obtained through several applications of max and + gates. The outer
+maximization provides the ⊕-gate, while the summand vj furnishes a ⊙-gate acting on two variable
+inputs. Thus every head is a compact, differentiable wrapper around the two tropical primitives,
+and a full multi-head layer is simply a collection of such gates operating in parallel on a shared
+input tape, creating a tropical transitive closure. Training a multi-layer MHTA therefore amounts
+to discovering how these gates should be wired together, rather than coaxing a Euclidean softmax
+kernel to emulate max–plus algebra indirectly. As a result of developing MHTA, we prove that it is
+a universal approximator of max-plus dynamic programming for combinatorial optimization with
+closure (Theorem C.3, Corollary C.3.1, and Theorem 3.2).
+Theorem 3.2 (Simulation of max–plus dynamic programs). Let (S, E) be a finite directed acyclic
+graph with |S| = N vertices and edge weights {wuv }(u,v)∈E ⊂ T. Fix a source vertex v0 ∈ S and
+consider the max–plus Bellman recursion
+M
+
+dv (t + 1) =
+wuv ⊙ du (t) ,
+dv (0) = δv,v0 , t ∈ N.
+u: (u,v)∈E
+
+Theorem 3.2, Theorem C.3, and Theorems C.4 and C.5 show upper bounds, i.e., sufficient conditions,
+of T and N such that a stack of T MHTA layers and N heads can approximate any horizon tropical
+circuit for a dynamic program.
+Remark 3.1. A shallow MHTA is sufficiently expressive to approximate the tropical transitiveclosure map, and thereby avoids explicit recurrence, to encode a very rich polyhedral geometry
+of combinatorial algorithmic reasoning into attention and provide a non-recurrent (one-shot)
+solution. However, in the worst-case scenario, the non-recurrent representation requires head-width
+proportional to the number of active path monomials up to O(n2 2k ). Depth-(T) stacks realize the
+same computation with polynomial resources by distributing the computation across layers.
+In other words, Tropical Attention has sufficient capacity to approximate closure by absorbing
+the feasible solutions into its tropical polyhedral stratification, thus avoiding explicit recurrence.
+Consequently, a MHTA module learns the closure directly rather than implementing the
+recurrence step by step. By contrast, Recurrent Transformers such as the Universal Transformer [17]
+incorporate a depth-wise recurrence to learn the hidden state representation per token. The recurrent
+function evolves in parallel across token positions while exchanging information through self-attention.
+In the next section, Section 4, we show that, Tropical Transformer provides a stronger out-ofdistribution generalization than Universal Transformer with Dynamic Halting mechanism, while
+delivering substantially faster inference with much fewer parameters.
+
+4
+
+Experiments
+
+We evaluate Tropical transformers on eleven combinatorial tasks (see E), several of which are NPhard/complete problems, and the the Long Range Arena (LRA) benchmark [63], a standard for testing
+transformers on long-sequence tasks across text, image, and math domains. For each combinatorial
+task we measure three complementary forms of out-of-distribution (OOD) generalization: Length
+OOD (longer inputs), Value OOD (unseen magnitudes), and noise robustness (perturbed inputs). A
+procedure to compare between vanilla attention and Tropical Attention is described in Appendix D.
+For our experiments we custom generated both train and test datasets following procedures from the
+canonical algorithmic reasoning benchmark CLRS [43]. This decision was due largely to the absence
+of NP-hard and NP-complete problems in the CLRS benchmark, but also because our framework
+is designed for sequence and set-based data modalities and our OOD evaluation includes two extra
+new evaluation pipelines, adversarial perturbations and value generalization. All datasets, generation
+scripts, and OOD protocols are described in Appendix E and F.
+For our experiment we consider three variants, (i) Vanilla: Standard transformer encoder with
+softmax dot-product attention. (ii) Adaptive: Transformer equipped with adaptive softmax attention
+from [27]. (iii) Tropical, which every attention block is replaced by MHTA. For length OOD tests,
+7
+
+we also compare with 32-step Universal Transformer (UT) with dynamic halting, as a recurrent
+attention model, under the vanilla softmax and adaptive-temperature softmax kernels. To ensure a
+fair comparison, all variants share identical backbone hyperparameters: depth, width, and number
+of heads. The only architectural difference is the attention kernel. Crucially, no model sees OOD
+examples during optimization. We follow a uniform procedure in which each model is trained from
+scratch under the same training regime with task specific fixed input sequence lengths and value
+ranges.
+Out-of-Distribution Protocols In order to assess OOD generalization, we construct three stress
+tests: (i) Length OOD – inputs drawn from the same value range but with longer input sequence
+lengths. (ii) Value OOD – the input sequence lengths are fixed and the values are sampled from
+an increasingly large range (for example, if the models trained on inputs sampled from the range
+[−5, 5] an out of distribution evaluation would be inputs sampled from the range [−10, 10]). (iii)
+Perturbative noise OOD – the input sequence lengths are fixed and the values are from the same
+input range, but a subset of the input values are perturbed randomly.
+
+5
+
+Results and Discussion
+
+Section 2.2 elaborated why and how softmax self-attention - and its descendants - are incapable
+of generalizing to OOD inputs in combinatorial problems, and Section 3 discussed why Tropical
+Attention can generalize in the combinatorial regime. With our experimentation, we seek to show if
+and, if so, how Tropical Attention generalizes in this domain.
+To answer if Tropical Attention generalizes, we
+report the numerical results of our experimen- Table 2: Average inference time per sample across
+tation in Tables 1 and 3. The Tropical attention all tasks and parameter count.
+architecture achieves superior OOD performance
+CPU (ms) GPU (ms) Params.
+to both the Vanilla and Adaptive softmax atten- Model
+tion. Notably, this out performance can be seen Vanilla UT w/ ACT
+6.285
+0.027
+50,242
+in both regression and classification combinato- Adaptive UT w/ ACT 7.898
+0.018
+50,242
+0.003 40,961
+rial tasks and across OOD protocols, validating Tropical Transformer 1.949
+our theoretical results from Section 3. The Tropical architecture’s ability to generalize well across OOD protocols and problem sets, especially the
+notorious Quickselect, suggests that instead of simply learning the specific data it is trained on, these
+purpose-built models learn the underlying polyhedral structure of the combinatorial algorithm. The
+results, from Tables 1 and 2, demonstrate two key findings. MHTA shows a strong performance,
+even when compared against an iterative attention class of transformers with a dynamic Adaptive
+Computation Time (ACT) mechanism where they can approximate an algorithmic closure, the Tropical
+Attention model still achieves better OOD performance across all algorithmic tasks. The more
+interesting results are that our model achieves these results while being on average 3×-9× faster at
+inference and using 20% fewer parameters than the Universal Transformer baselines. Evaluating on
+the Long Range Arena (LRA) benchmark as shown in Table 4, Tropical Transformer achieves highly
+competitive, State-of-the-art (SOTA) results, placing second overall in average accuracy across the
+benchmark’s tasks. This performance shows that the benefits of Tropical Attention stand as a viable
+and powerful mechanism for general-purpose sequence modeling.
+In order to understand how Tropical Attention outperforms, we explore the tropical Attention maps
+relative to vanilla and adaptive attention maps for both Quickselect and Knapsack. On the Quickselect
+task the goal is to find the k-th smallest elements. For such tasks, maintaining focus means the
+ability to allocate a high attention score to the correct items, creating sharp spikes in the heatmap.
+Contrarily, losing focus means the attention uniformly disperses across elements, with no single item
+receiving a high score. Figure 1, which depicts attention maps as sequence length increases for all
+models, shows that the vanilla and adaptive models exhibit attention fading. In contrast, the Tropical
+Attention consistently shows bright, distinct bands, indicating it continues to allocate sharp attention
+even at larger length sequences. Figure 2, replicating visualizations from [27], depicts a normalized
+attentional head for the Quickselect task for a batch of 32 sets, over the 8 items with the largest keys
+by the ℓ2 -norm. If the head operates correctly, it must allocate sharp attention to the position of k-th
+smallest element. Again, we see that the attention on both softmax models quickly dilute/disperse as
+sequence length grows OOD while the tropical Attention maintains focus.
+8
+
+Table 3: Out-of-distribution performance under Value OOD and Perturbative Noise tests. Top:
+Micro-F1 for classification tasks; Bottom: MSE for regression tasks.
+Value OOD
+Algorithmic Tasks
+
+Perturbative Noise
+
+Vanilla
+
+Adaptive
+
+Tropical
+
+Vanilla
+
+Adaptive
+
+ConvexHull
+Knapsack
+Quickselect
+BinPacking
+SCC
+SubsetSum
+BalancedPartition
+3SUM
+MinCoinChange
+
+±3.59
+
+±3.10
+
+22.75
+23.77
+38.87±3.43 26.92±1.33
+74.22±2.30 74.30±1.99
+67.26±3.70 74.23±1.51
+78.51±3.08 81.38±2.62
+34.75±6.60 28.50±10.12
+63.40±4.29 56.57±1.18
+26.00±3.16 26.25±3.50
+23.64±4.07
+2.20±1.13
+
+±1.71
+
+34.25
+49.67±2.01
+71.10±3.11
+78.54±1.89
+74.86±5.01
+79.25±5.38
+55.76±5.63
+22.00±2.16
+33.18±5.64
+
+±2.22
+
+±2.16
+
+Tropical
+
+90.75
+91.00
+96.00±2.16
+67.85±3.19 68.36±3.51 74.67±3.13
+33.87±7.11 34.82±4.79 57.22±5.01
+55.38±5.10 60.64±3.92 61.19±4.33
+70.00±5.98 71.33±1.96 69.86±4.17
+3.75±1.50
+3.00±1.63 72.75±10.01
+±2.66
+51.06
+57.06±1.08 57.29±1.33
+47.50±9.47 49.25±9.22 65.25±3.59
+22.12±2.75 18.44±4.49 33.75±4.89
+
+Floyd–Warshall
+FractionalKnapsack
+
+87.68±5.65
+0.24±0.12
+
+56.30±3.04
+0.17±0.03
+
+55.30±4.36
+0.08±0.03
+
+7.54±3.63
+0.05±0.02
+
+5.29±2.56
+0.03±0.01
+
+4.39±1.62
+0.02±0.01
+
+Similarly, Figure 3 depicts length OOD on the full attention head for the Knapsack problem, a classic
+dynamic program corresponding to tropical circuits. Each model begins sharp in distribution, but
+the Tropical Attention head maintains the same activation pattern across each input length, strongly
+suggesting it has learned and internalized the underlying combinatorial problem and polyhedral
+structure vice the specific training data indicated by the vanilla and adaptive fading attention patterns.
+n=8
+
+n=16
+
+n=32
+
+n=64
+
+n=128
+
+n=1024
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+5
+
+5
+
+5
+
+5
+
+5
+
+5
+
+10
+
+10
+
+10
+
+10
+
+10
+
+10
+
+15
+
+15
+
+15
+
+15
+
+15
+
+15
+
+20
+
+20
+
+20
+
+20
+
+20
+
+20
+
+25
+
+25
+
+25
+
+25
+
+25
+
+25
+
+0.35
+
+0.30
+
+sample #
+
+0.25
+
+0.20
+
+0.15
+
+0.10
+
+0.05
+
+30
+
+30
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+30
+0
+
+1
+
+2
+
+ranked key 1→8
+
+3
+
+4
+
+5
+
+6
+
+7
+
+30
+0
+
+1
+
+2
+
+ranked key 1→8
+
+n=8
+
+3
+
+4
+
+5
+
+6
+
+7
+
+30
+0
+
+1
+
+2
+
+ranked key 1→8
+
+n=16
+
+3
+
+4
+
+5
+
+6
+
+7
+
+30
+0
+
+1
+
+2
+
+ranked key 1→8
+
+n=32
+
+3
+
+4
+
+5
+
+6
+
+7
+
+0
+
+1
+
+ranked key 1→8
+
+n=64
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+ranked key 1→8
+
+n=128
+
+n=1024
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+5
+
+5
+
+5
+
+5
+
+5
+
+5
+
+10
+
+10
+
+10
+
+10
+
+10
+
+10
+
+15
+
+15
+
+15
+
+15
+
+15
+
+15
+
+20
+
+20
+
+20
+
+20
+
+20
+
+20
+
+25
+
+25
+
+25
+
+25
+
+25
+
+25
+
+0.40
+
+0.35
+
+0.30
+
+sample #
+
+0.25
+
+0.20
+
+0.15
+
+0.10
+
+0.05
+30
+
+30
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+30
+0
+
+1
+
+2
+
+ranked key 1→8
+
+3
+
+4
+
+5
+
+6
+
+7
+
+30
+0
+
+1
+
+2
+
+ranked key 1→8
+
+n=8
+
+3
+
+4
+
+5
+
+6
+
+7
+
+30
+0
+
+1
+
+2
+
+ranked key 1→8
+
+n=16
+
+3
+
+4
+
+5
+
+6
+
+7
+
+30
+0
+
+1
+
+2
+
+ranked key 1→8
+
+n=32
+
+3
+
+4
+
+5
+
+6
+
+7
+
+0
+
+1
+
+ranked key 1→8
+
+n=64
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+ranked key 1→8
+
+n=128
+
+n=1024
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+5
+
+5
+
+5
+
+5
+
+5
+
+5
+
+10
+
+10
+
+10
+
+10
+
+10
+
+10
+
+15
+
+15
+
+15
+
+15
+
+15
+
+15
+
+20
+
+20
+
+20
+
+20
+
+20
+
+20
+
+25
+
+25
+
+25
+
+25
+
+25
+
+25
+
+sample #
+
+0.35
+
+0.30
+
+0.25
+
+0.20
+
+0.15
+
+0.10
+
+0.05
+
+30
+
+30
+
+30
+
+30
+
+30
+
+30
+0.00
+
+0
+
+1
+
+2
+
+3
+
+4
+
+ranked key 1→8
+
+5
+
+6
+
+7
+
+0
+
+1
+
+2
+
+3
+
+4
+
+ranked key 1→8
+
+5
+
+6
+
+7
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+0
+
+ranked key 1→8
+
+1
+
+2
+
+3
+
+4
+
+ranked key 1→8
+
+5
+
+6
+
+7
+
+0
+
+1
+
+2
+
+3
+
+4
+
+ranked key 1→8
+
+5
+
+6
+
+7
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+ranked key 1→8
+
+Figure 2: Stacked attention head representations for Quickselect under (a) Vanilla, (b) Adaptive,
+and (c) Tropical models. Each model was trained on length 8 sequences and was evaluated from Left
+to Right on length 16 to 1024 sequences. Each image was generated by a batch of 32 inputs. The
+columns are the 8 largest keys by ℓ2 -norm. Heatmap values are the attention of the row item at the
+column key.
+
+9
+
+Table 4: We report classification accuracy for each task and the average accuracy across all tasks. All
+results are taken from their respective papers, except for Adaptive Softmax, which we re-implemented
+and evaluated.
+Models
+
+ListOps
+
+Text
+
+Retrieval
+
+Image
+
+Pathfinder
+
+Avg.
+
+Complexity
+
+Transformer [26]
+Longformer [64]
+Linformer [65]
+Performer [66]
+Elliptical [67]
+Fourierformer [68]
+MEGA [69]
+AdaptiveSoft. [27]
+
+36.37
+35.63
+35.70
+18.01
+37.8
+40.73
+63.14
+47.15
+
+64.27
+62.85
+53.94
+65.40
+65.6
+75.02
+90.43
+75.52
+
+57.46
+56.89
+52.27
+53.82
+80.3
+85.35
+91.25
+79.56
+
+42.44
+42.22
+38.56
+42.77
+40.2
+53.17
+90.44
+51.58
+
+71.40
+69.71
+76.34
+77.50
+73.2
+83.43
+96.01
+80.94
+
+54.39
+53.46
+51.36
+51.41
+61.24
+67.54
+86.25
+66.95
+
+O(n2 )
+O(n)
+O(n)
+O(n)
+O(n2 )
+O(n log n)
+O(n log n)
+O(n2 )
+
+Tropical Transformer
+
+68.65
+
+70.13
+
+64.82
+
+60.04
+
+97.33
+
+72.79
+
+O(n2 )
+
+n=8
+
+n=16
+
+0
+
+1
+
+n=32
+
+n=64
+
+0
+
+0
+
+0
+
+0
+
+2
+
+5
+
+10
+
+20
+
+10
+
+20
+
+40
+
+4
+
+2
+
+n=128
+
+0.8
+
+0.7
+
+0.6
+400
+
+6
+
+3
+
+n=1024
+
+0
+
+200
+
+60
+
+30
+
+15
+
+0.5
+
+8
+
+4
+
+600
+
+5
+
+6
+
+10
+
+20
+
+40
+
+80
+
+12
+
+25
+
+50
+
+100
+
+14
+
+7
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+12
+
+14
+
+0
+
+0
+
+2
+
+1
+
+120
+
+60
+
+30
+0
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+0
+
+0
+
+0
+
+0
+
+5
+
+10
+
+20
+
+10
+
+20
+
+40
+
+20
+
+40
+
+60
+
+80
+
+100
+
+120
+
+0.2
+0
+
+200
+
+400
+
+600
+
+800
+
+1000
+
+0
+
+0.200
+
+0.175
+200
+0.150
+
+0.125
+
+400
+
+6
+
+3
+
+0.3
+
+1000
+
+60
+
+4
+
+2
+
+0.4
+
+800
+
+15
+
+30
+
+60
+
+20
+
+40
+
+80
+
+25
+
+50
+
+100
+
+30
+
+60
+
+120
+
+0.100
+
+8
+
+4
+
+600
+10
+
+5
+
+12
+
+6
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+0
+
+1
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+12
+
+14
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+1000
+0
+
+0
+
+0
+
+0
+
+0
+
+2
+
+5
+
+10
+
+20
+
+10
+
+20
+
+40
+
+4
+
+2
+
+20
+
+40
+
+60
+
+80
+
+100
+
+120
+
+0
+
+200
+
+400
+
+600
+
+800
+
+1000
+
+0
+
+0.25
+
+200
+
+0.20
+
+400
+
+6
+
+3
+
+0.050
+
+0.025
+
+14
+
+7
+
+0.075
+
+800
+
+15
+
+30
+
+60
+
+10
+
+20
+
+40
+
+80
+
+12
+
+25
+
+50
+
+100
+
+30
+
+60
+
+120
+
+0.15
+
+8
+
+4
+
+600
+
+5
+
+6
+
+14
+
+7
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+12
+
+14
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+0.10
+
+800
+
+0.05
+
+1000
+0
+
+20
+
+40
+
+60
+
+80
+
+100
+
+120
+
+0
+
+200
+
+400
+
+600
+
+800
+
+1000
+
+Figure 3: (top) Tropical Attention with sharp attention maps on learning the Knapsack algorithm,
+showcasing a size-invariance and OOD lengths generalization behavior far beyond training (16 →
+1024). In contrast, both (middle) adaptive-softmax and (bottom) vanilla-softmax heads dilute and
+disperse as sequence length grows, failing to generalize.
+
+6
+
+Conclusion
+
+We introduced Tropical Attention, replacing softmax-normalized dot–product attention with an
+attention mechanism that operates in tropical projective space. On the theory side, we showed that
+multi-head Tropical Attention (MHTA) simulates tropical circuits and realizes tropical transitive
+closure via finite-depth compositions, with polynomial resource bounds (Theorem C.3, Corollary
+C.3.1, Theorem 3.2). These guarantees provide a principled account of scale-invariance and sharp,
+polyhedral decision boundaries, properties that are essential for reasoning models expected to
+generalize beyond their training distribution. Empirically, across various combinatorial problems,
+Tropical transformer achieved SOTA out-of-distribution generalization, and delivered stronger noise
+robustness, while being much faster at inference with fewer parameters than the recurrent/iterative
+attention baselines. These findings carry an important message for both neural algorithmic reasoning
+(NAR) and Large Reasoning Model (LRM) communities: tropicalization of reasoning and going
+beyond softmax not only enriches the algorithmic power of attention mechanisms but also yields
+tangible gains on reasoning tasks. We believe Tropical Attention opens compelling avenues for
+hybrid semiring architectures and for leveraging tropical geometry to reason over discrete structures
+within deep learning systems. Future work will explore sparse tropical kernels and applications to
+graph-theoretic domains, aiming for ever-stronger generalization guarantees in neural algorithm and
+reasoning synthesis.
+10
+
+Acknowledgments and Disclosure of Funding
+This research was supported by the Excellence Cluster ORIGINS, funded by the Deutsche Forschungsgemeinschaft (DFG, German Research Foundation) under Germany’s Excellence Strategy – EXC2094-390783311. B.H extends his gratitude to the organizers and the wonderful instructors, Marta
+Panizzut and Margarida Melo, of the 2024 Trieste Algebraic Geometry Summer School (TAGSS)
+on Tropical Geometry, where the idea of the project was sparked. K.P., C.T. and R.Y. are partially
+supported by NSF Division of Mathematical Sciences: Statistics Program DMS 2409819.
+
+References
+[1] Diane Maclagan and Bern Sturfels. Introduction to Tropical Geometry. American Mathematical Society,
+2015. 1, B.3
+[2] Federico Ardila and Mike Develin. Tropical hyperplane arrangements and oriented matroids, 2007.
+[3] Federico Ardila-Mantilla, Christopher Eur, and Raul Penaguiao. The tropical critical points of an affine
+matroid. SIAM Journal on Discrete Mathematics, 38(2):1930–1942, 2024.
+[4] Alex Fink and Felipe Rincón. Stiefel tropical linear spaces, 2015.
+[5] Michael Joswig. Essentials of Tropical Convexity. American Mathematical Society, 2021. 1, 1, 2.2, 3
+[6] Kurt Pasque, Christopher Teska, Ruriko Yoshida, Keiji Miura, and Jefferson Huang. Tropical decision
+boundaries for neural networks are robust against adversarial attacks, 2024. 1
+[7] Ruriko Yoshida, Georgios Aliatimis, and Keiji Miura. Tropical neural networks and its applications to
+classifying phylogenetic trees. In 2024 International Joint Conference on Neural Networks (IJCNN), pages
+1–9, 2024. 3.1
+[8] Ruriko Yoshida, Leon Zhang, and Xu Zhang. Tropical principal component analysis and its application to
+phylogenetics, 2017.
+[9] Petros Maragos, Vasileios Charisopoulos, and Emmanouil Theodosis. Tropical geometry and machine
+learning. Proceedings of the IEEE, 109(5):728–755, 2021.
+[10] Marie-Charlotte Brandenburg, Georg Loho, and Guido Montúfar. The real tropical geometry of neural
+networks. arXiv preprint arXiv:2403.11871, 2024.
+[11] Liwen Zhang, Gregory Naitzat, and Lek-Heng Lim. Tropical geometry of deep neural networks. In Jennifer
+Dy and Andreas Krause, editors, Proceedings of the 35th International Conference on Machine Learning,
+volume 80 of Proceedings of Machine Learning Research, pages 5824–5832. PMLR, 10–15 Jul 2018.
+[12] Christoph Hertrich and Leon Sering. Relu neural networks of polynomial size for exact maximum flow
+computation. In International Conference on Integer Programming and Combinatorial Optimization, pages
+187–202. Springer, 2023.
+[13] Davide Bacciu, Francesco Landolfi, and Danilo Numeroso. A tropical view of graph neural networks.
+ESANN 2023 proceedings, 2023. 1, 2.3
+[14] Stéphane Gaubert. Tropical considerations in dynamic programming. Presentation at Optimization, Games,
+and Dynamics, Institut Henri Poincaré, Paris, November 2011. Based on joint work with Akian, Guterman,
+Allamigeon, Katz, Vigeral, McEneaney, and Qu. 1, B
+[15] Stasys Jukna. Lower bounds for tropical circuits and dynamic programs. Theory of Computing Systems,
+57(1):160–194, October 2014. 1, C.1
+[16] Michael Galkin. Graph & Geometric ML in 2024: Where we are and what’s next, 2024. Medium Article. 1
+[17] Mostafa Dehghani, Stephan Gouws, Oriol Vinyals, Jakob Uszkoreit, and Łukasz Kaiser. Universal
+transformers. arXiv preprint arXiv:1807.03819, 2018. 1, 1, 3
+[18] Michael Joswig and Benjamin Schröter. Parametric shortest-path algorithms via tropical geometry.
+Mathematics of Operations Research, 47(3):2065–2081, August 2022. 1
+[19] Mehryar Mohri. Semiring frameworks and algorithms for shortest-distance problems. Journal of Automata,
+Languages and Combinatorics, 7(3):321–350, 2002. 1
+
+11
+
+[20] Peter Höfner and Bernhard Möller. Dijkstra, floyd and warshall meet kleene. Formal Aspects of Computing,
+24(4):459–476, 2012. 1
+[21] Marek Cygan, Marcin Mucha, Karol Węgrzycki, and Michał Włodarczyk. On problems equivalent to
+(min,+)-convolution. ACM Transactions on Algorithms (TALG), 15(1):1–25, 2019. 1
+[22] Timothy M Chan and Qizheng He. More on change-making and related problems. Journal of Computer
+and System Sciences, 124:159–169, 2022. 1
+[23] Silvano Martello, David Pisinger, and Paolo Toth. New trends in exact algorithms for the 0–1 knapsack
+problem. European Journal of Operational Research, 123(2):325–332, 2000. 1
+[24] Karl Bringmann and Alejandro Cassis. Faster 0-1-knapsack via near-convex min-plus-convolution. arXiv
+preprint arXiv:2305.01593, 2023.
+[25] Kyriakos Axiotis and Christos Tzamos. Capacitated dynamic programming: Faster knapsack and graph
+algorithms. arXiv preprint arXiv:1802.06440, 2018. 1
+[26] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz
+Kaiser, and Illia Polosukhin. Attention is all you need, 2023. 1, 2.2, 4
+[27] Petar Veličković, Christos Perivolaropoulos, Federico Barbero, and Razvan Pascanu. softmax is not enough
+(for sharp out-of-distribution), 2024. 1, 2.2, 4, 5, 4
+[28] Ken M. Nakanishi. Scalable-softmax is superior for attention, 2025. 1, 2.2
+[29] Yutao Sun, Li Dong, Barun Patra, Shuming Ma, Shaohan Huang, Alon Benhaim, Vishrav Chaudhary, Xia
+Song, and Furu Wei. A length-extrapolatable transformer, 2022. 1
+[30] Ofir Press, Noah A. Smith, and Mike Lewis. Train short, test long: Attention with linear biases enables
+input length extrapolation, 2022.
+[31] Shaoxiong Duan, Yining Shi, and Wei Xu. From interpolation to extrapolation: Complete length
+generalization for arithmetic transformers, 2024. 1
+[32] Giovanni Luca Marchetti, Vahid Shahverdi, Stefano Mereta, Matthew Trager, and Kathlén Kohn. An
+invitation to neuroalgebraic geometry. arXiv e-prints, pages arXiv–2501, 2025. 1
+[33] Matteo Tiezzi, Michele Casoni, Alessandro Betti, Tommaso Guidi, Marco Gori, and Stefano Melacci. On
+the resurgence of recurrent models for long sequences–survey and research opportunities in the transformer
+era. arXiv preprint arXiv:2402.08132, 2024. 1
+[34] Petar Veličković, Rex Ying, Matilde Padovano, Raia Hadsell, and Charles Blundell. Neural execution of
+graph algorithms. In International Conference on Learning Representations, 2020. 1, 2.3
+[35] Artur Back de Luca, George Giapitzakis, Shenghao Yang, Petar Veličković, and Kimon Fountoulakis.
+Positional attention: Expressivity and learnability of algorithmic computation, 2025. 2.1, 2.2, 2.3
+[36] Pawan Kumar Pradhan, Sayan Rakshit, and Sujoy Datta. Lattice based cryptography : Its applications,
+areas of interest & future scope. In 2019 3rd International Conference on Computing Methodologies and
+Communication (ICCMC), pages 988–993, 2019. 2.1
+[37] Robert R. Nerem, Samantha Chen, Sanjoy Dasgupta, and Yusu Wang. Graph neural networks extrapolate
+out-of-distribution for shortest paths, 2025. 2.1, 2.3
+[38] Sadegh Mahdavi, Kevin Swersky, Thomas Kipf, Milad Hashemi, Christos Thrampoulidis, and Renjie Liao.
+Towards better out-of-distribution generalization of neural algorithmic reasoning tasks, 2023. 2.1, 2.3
+[39] Xihan Li, Xing Li, Lei Chen, Xing Zhang, Mingxuan Yuan, and Jun Wang. Circuit transformer: A
+transformer that preserves logical equivalence, 2025. 2.1
+[40] Andrew Joseph Dudzik and Petar Veličković. Graph neural networks are dynamic programmers. In Alice H.
+Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho, editors, Advances in Neural Information
+Processing Systems, 2022. 2.1, 2.3
+[41] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas
+Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszkoreit, and
+Neil Houlsby. An image is worth 16x16 words: Transformers for image recognition at scale, 2021. 2.2
+[42] Gleb Rodionov and Liudmila Prokhorenkova. Discrete neural algorithmic reasoning, 2025. 2.2, 2.3
+
+12
+
+[43] Larisa Markeeva, Sean McLeish, Borja Ibarz, Wilfried Bounsi, Olga Kozlova, Alex Vitvitskyi, Charles
+Blundell, Tom Goldstein, Avi Schwarzschild, and Petar Veličković. The clrs-text algorithmic reasoning
+language benchmark, 2024. 2.2, 4
+[44] Euan Ong and Petar Veličković. Learnable commutative monoids for graph neural networks, 2022. 2.2
+[45] Hao Xuan, Bokai Yang, and Xingyu Li. Exploring the impact of temperature scaling in softmax for
+classification and adversarial robustness, 2025. 2.2
+[46] Gihyun Kim, Juyeop Kim, and Jong-Seok Lee. Exploring adversarial robustness of vision transformers in
+the spectral perspective, 2023. 2.2
+[47] Stasys Jukna. Tropical circuit complexity. Limits of Pure Dynamic Programming/by Stasys Jukna.-, 2023.
+2.2
+[48] Stefan K. Nielsen, Laziz U. Abdullaev, Rachel S. Y. Teo, and Tan M. Nguyen. Elliptical attention, 2024. 2.2
+[49] Akhil Kedia, Mohd Abbas Zaidi, Sushil Khyalia, Jungho Jung, Harshith Goka, and Haejun Lee. Transformers
+get stable: An end-to-end signal propagation theory for language models, 2024. 2.2
+[50] Petar Veličković and Charles Blundell. Neural algorithmic reasoning. Patterns, 2(7):100273, July 2021. 2.3
+[51] Hefei Li, Chao Peng, Chenyang Xu, and Zhengfeng Yang. Open-book neural algorithmic reasoning. In The
+Thirty-eighth Annual Conference on Neural Information Processing Systems, 2024. 2.3
+[52] Gleb Rodionov and Liudmila Prokhorenkova. Neural algorithmic reasoning without intermediate supervision.
+In Thirty-seventh Conference on Neural Information Processing Systems, 2023.
+[53] Dobrik Georgiev Georgiev, Danilo Numeroso, Davide Bacciu, and Pietro Lio. Neural algorithmic reasoning
+for combinatorial optimisation. In The Second Learning on Graphs Conference, 2023.
+[54] Dobrik Georgiev Georgiev, JJ Wilson, Davide Buffelli, and Pietro Lio. Deep equilibrium algorithmic
+reasoning. In The Thirty-eighth Annual Conference on Neural Information Processing Systems, 2024.
+[55] Montgomery Bohde, Meng Liu, Alexandra Saxton, and Shuiwang Ji. On the markov property of neural
+algorithmic reasoning: Analyses and methods. In The Twelfth International Conference on Learning
+Representations, 2024.
+[56] Kaijia Xu and Petar Veličković. Recurrent aggregators in neural algorithmic reasoning. In The Third
+Learning on Graphs Conference, 2024.
+[57] Wilfried Bounsi, Borja Ibarz, Andrew Joseph Dudzik, Jessica B Hamrick, Larisa Markeeva, Alex Vitvitskyi,
+Razvan Pascanu, and Petar Veličković. Transformers meet neural algorithmic reasoners, 2025.
+[58] Borja Ibarz, Vitaly Kurin, George Papamakarios, Kyriacos Nikiforou, Mehdi Bennani, Róbert Csordás,
+Andrew Joseph Dudzik, Matko Bošnjak, Alex Vitvitskyi, Yulia Rubanova, Andreea Deac, Beatrice
+Bevilacqua, Yaroslav Ganin, Charles Blundell, and Petar Veličković. A generalist neural algorithmic learner.
+In The First Learning on Graphs Conference, 2022. 2.3
+[59] Yunhui Jang, Dongwoo Kim, and Sungsoo Ahn. Graph generation with $k^2$-trees. In The Twelfth
+International Conference on Learning Representations, 2024. 2.3
+[60] Baran Hashemi, Roderic Guigo Corominas, and Alessandro Giacchetto. Can transformers do enumerative
+geometry? In The Thirteenth International Conference on Learning Representations, 2025. 2.3
+[61] Borja Ibarz, Vitaly Kurin, George Papamakarios, Kyriacos Nikiforou, Mehdi Bennani, Róbert Csordás,
+Andrew Joseph Dudzik, Matko Bošnjak, Alex Vitvitskyi, Yulia Rubanova, Andreea Deac, Beatrice
+Bevilacqua, Yaroslav Ganin, Charles Blundell, and Petar Veličković. A generalist neural algorithmic learner.
+In Bastian Rieck and Razvan Pascanu, editors, Proceedings of the First Learning on Graphs Conference,
+volume 198 of Proceedings of Machine Learning Research, pages 2:1–2:23. PMLR, 09–12 Dec 2022. 2.3
+[62] Andrew Joseph Dudzik, Tamara von Glehn, Razvan Pascanu, and Petar Veličković. Asynchronous
+algorithmic alignment with cocycles. In Learning on Graphs Conference, pages 3–1. PMLR, 2024. 2.3
+[63] Yi Tay, Mostafa Dehghani, Samira Abnar, Yikang Shen, Dara Bahri, Philip Pham, Jinfeng Rao, Liu Yang,
+Sebastian Ruder, and Donald Metzler. Long range arena: A benchmark for efficient transformers. In
+International Conference on Learning Representations, 2020. 4
+[64] Iz Beltagy, Matthew E Peters, and Arman Cohan. Longformer: The long-document transformer. arXiv
+preprint arXiv:2004.05150, 2020. 4
+
+13
+
+[65] Sinong Wang, Belinda Z Li, Madian Khabsa, Han Fang, and Hao Ma. Linformer: Self-attention with linear
+complexity. arXiv preprint arXiv:2006.04768, 2020. 4
+[66] Krzysztof Choromanski, Valerii Likhosherstov, David Dohan, Xingyou Song, Andreea Gane, Tamas Sarlos,
+Peter Hawkins, Jared Davis, Afroz Mohiuddin, Lukasz Kaiser, et al. Rethinking attention with performers.
+arXiv preprint arXiv:2009.14794, 2020. 4
+[67] Stefan Nielsen, Laziz Abdullaev, Rachel SY Teo, and Tan Nguyen. Elliptical attention. Advances in Neural
+Information Processing Systems, 37:109748–109789, 2024. 4
+[68] Tan Nguyen, Minh Pham, Tam Nguyen, Khai Nguyen, Stanley J Osher, and Nhat Ho. Transformer with
+fourier integral attentions. arXiv preprint arXiv:2206.00206, 2022. 4
+[69] Xuezhe Ma, Chunting Zhou, Xiang Kong, Junxian He, Liangke Gui, Graham Neubig, Jonathan May, and
+Luke Zettlemoyer. Mega: Moving average equipped gated attention. arXiv preprint arXiv:2209.10655,
+2022. 4
+[70] Roan Talbut, Daniele Tramontano, Yueqi Cao, Mathias Drton, and Anthea Monod. Probability metrics for
+tropical spaces of different dimensions, 2024. 2
+[71] MARIANNE AKIAN, STÉPHANE GAUBERT, and ALEXANDER GUTERMAN. Tropical polyhedra
+are equivalent to mean payoff games. International Journal of Algebra and Computation, 22(01):1250001,
+February 2012. B
+[72] Roger D. Nussbaum. Convexity and log convexity for the spectral radius. Linear Algebra and its Applications,
+73:59–122, 1986. Department of Mathematics, Rutgers University. B
+[73] Michael Joswig and Benjamin Schröter. Parametric shortest-path algorithms via tropical geometry.
+Mathematics of Operations Research, 47(3):2065–2081, 2022. C.5.1
+[74] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen,
+Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban Desmaison, Andreas Köpf, Edward Yang, Zach
+DeVito, Martin Raison, Alykhan Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu Fang, Junjie Bai, and
+Soumith Chintala. Pytorch: An imperative style, high-performance deep learning library, 2019. F
+[75] Wes McKinney. Data structures for statistical computing in python. In Proceedings of the 9th Python in
+Science Conference, SciPy ’10, pages 51 – 56. SciPy, 2010. F
+[76] F. Pedregosa, G. Varoquaux, A. Gramfort, V. Michel, B. Thirion, O. Grisel, M. Blondel, P. Prettenhofer,
+R. Weiss, V. Dubourg, J. Vanderplas, A. Passos, D. Cournapeau, M. Brucher, M. Perrot, and E. Duchesnay.
+Scikit-learn: Machine learning in Python. Journal of Machine Learning Research, 12:2825–2830, 2011. F
+[77] Charles R. Harris, K. Jarrod Millman, Stéfan J. van der Walt, Ralf Gommers, Pauli Virtanen, David
+Cournapeau, Eric Wieser, Julian Taylor, Sebastian Berg, Nathaniel J. Smith, Robert Kern, Matti Picus,
+Stephan Hoyer, Marten H. van Kerkwijk, Matthew Brett, Allan Haldane, Jaime Fernández del Río,
+Mark Wiebe, Pearu Peterson, Pierre Gérard-Marchant, Kevin Sheppard, Tyler Reddy, Warren Weckesser,
+Hameer Abbasi, Christoph Gohlke, and Travis E. Oliphant. Array programming with NumPy. Nature,
+585(7825):357–362, September 2020. F
+
+A
+
+Limitations
+
+Although Tropical Attention is out performing in almost all algorithmic tasks, this study was conducted on
+combinatorial algorithms and we have not yet demonstrated how Tropical transformers can scale to perform on
+generative and autoregressive next-token prediction language tasks. In particular, the computational and memory
+overhead introduced by tropical operations and the tropical Hilbert metric could incur nontrivial runtime costs or
+scaling challenges.
+
+B
+
+Tropical Geometry
+
+
+The most fundamental component of tropical algebraic geometry is the tropical semiring T := R∪{−∞}, ⊕, ⊙ .
+The two operations ⊕ and ⊙, called tropical addition and tropical multiplication respectively, are defined as
+follows.
+Definition B.1. For x, y ∈ R, their tropical sum is x ⊕ y := max{x, y}; their tropical product is x ⊙ y := x + y;
+the tropical quotient of x over y is x ⊘ y := x − y.
+
+14
+
+For any x ∈ R, we have −∞ ⊕ x = 0 ⊙ x = x and −∞ ⊙ x = −∞. Thus −∞ is the tropical additive identity
+and 0 is the tropical multiplicative identity. Furthermore, these operations satisfy the usual laws of arithmetic,
+namely associativity, commutativity, and distributivity. The set R ∪ {−∞} is therefore a semiring under the
+operations ⊕ and ⊙. While it is not a ring since it lacks an additive inverse, one may nonetheless generalize
+many algebraic objects over the tropical semiring, the study of these, in a nutshell, constitutes the subject of
+tropical algebra. In order to have a transition from classical arithmetic to tropical arithmetic we need a series of
+transition maps, which is referred to as tropicalization.
+Definition B.2. (The valuation map) Let d ∈ N and write Rd the field of real numbers. A valuation on R is a
+function val : R → R ∪ −∞ satisfying the following three axioms:
+1. val(a) = −∞ ⇐⇒ a = 0;
+2. val(ab) = val(a) + val(b);
+3. val(a + b) ≤ max{val(a), val(b)} ∀ a, b ∈ R.
+One approach to tropical geometry, is to define a tropical variety as a shadow of an algebraic variety that involves
+logarithmic limit sets. Classically, the amoeba of a variety is its image under taking the coordinate-wise logarithm
+of the absolute value of any point on the variety [14]. The logarithm turns ordinary multiplication into tropical
+addition:
+val(x⊙y) = val(x) + val(y),
+x, y ∈ R>0 ,
+and satisfies the sub-additive inequality val(x+y) ≤ max{val(x), val(y)}+log 2. Hence val is a Archimedean
+log map up to a harmless additive constant. For an input X ⊂ Rd we call
+Trop(X) := val(X) ⊂ Td
+its tropicalization. All subsequent reasoning, including attention weight computations, will take place in this
+max-plus space. When X is a smooth manifold, Trop(X) is typically a curved domain whose “tentacles” encode
+asymptotic directions of X. Passing to the max-plus algebra straightens those curves into polyhedral pieces,
+providing the piecewise-linear structure on which our Tropical Attention operates.
+Definition B.3. (The tropical projective space [1].) We regard Td as a semimodule over the tropical semiring
+by coordinate-wise operations. Introduce
+1d+1 := (1, . . . , 1) ∈ Rd+1 ,
+
+Td+1 := (R ∪ {−∞})d+1 \ {−∞}d+1 .
+
+Declare two points x, y ∈ Td+1 projectively equivalent, written x ∼ y, if there is a scalar λ ∈ R such that
+y = x + λ1d+1 . The quotient
+
+TPd := Td+1 ∼
+is the tropical projective space. See [1] for more details on tropical geometry.
+Every class has a unique representative with maximal coordinate equal to 0, so TPd identifies with the standard
+simplex ∆d := {w ∈ Rd+1 | maxi wi = 0}. Attention weights produced by the softmax surrogate live in the
+Euclidean simplex; Tropical Attention will instead output points of ∆d interpreted tropically, guaranteeing sharp
+arg max behavior.
+Definition B.4. (The tropical Hilbert projective metric.) For x := (x1 , . . . , xd+1 ), y := (y1 , . . . , yd+1 ) ∈ Td+1
+put
+
+
+
+dH (x, y) := max(xi − yi ) − min(xi − yi ) = diam x ⊘ y ,
+i
+
+i
+
+where x ⊘ y denotes the coordinate-wise tropical quotient (x1 − y1 , . . . , xd+1 − yd+1 ) and diam its range.
+The metric descends to TPd and enjoys two key properties:
+1. Projective invariance. dH (x + c1d+1 , y + c1d+1 ) = dH (x, y) for all c ∈ R.
+maps [70]. Every tropical linear map A : Td+1 → Tm+1 is
+2. Non-expansiveness of max-plus-affine
+
+1-Lipschitz: dH Ax, Ay ≤ dH (x, y).
+These facts, due to Nussbaum and further developed by Akian–Gaubert, furnish tight robustness guarantees,
+perturbing the inputs by ϵ in Hilbert distance changes the output of any compositional stack of tropical linear
+layers by at most ϵ [71, 72].
+
+C
+
+Proofs
+
+Proof of lemma 3.1. If ϕλ is a valuation map, hence for all a, b ∈ R, we have
+
+15
+
+1. vλ (0) = −∞;
+2. vλ (ab) = vλ (a) + vλ (b) − λ;
+3. vλ (a + b) ≤ max{ vλ (a), vλ (b)}.
+Property (i) is immediate from the definition. For a, b > 0, (ii) follows from log(ab) = log a + log b:
+
+
+vλ (ab) = log(ab) − λ = log a − λ + log b − λ + λ = vλ (a) + vλ (b) − λ.
+If either factor is non-positive, both sides equal −∞. For (iii), note that when a, b > 0 we have
+log(a + b) ≤ max{log a, log b} + log 2,
+so subtracting λ preserves the inequality; if a ≤ 0 or b ≤ 0 the claim is trivial. Adding back the constant λ to vλ
+eliminates the offset in (ii) while leaving (i)–(iii) unchanged, yielding the classical valuation ve. Collecting the d
+coordinate-wise maps gives the vector-valued projection ϕλ : Rd → ∆d−1 , which is therefore a valuation map
+up to the projective (constant-shift) equivalence native to tropical geometry.
+The main theorem here establishes that MHTA is an expressive tropically universal approximator of max-plus
+dynamic programming for combinatorial optimization such that every function that can be computed by a finite
+max–plus circuit admits a realization by a finite-depth MHTA stack. The proof proceeds in three stages. First we
+show that a single head can act as a tropical max gate. Second, we demonstrate that an H-head block can realize
+a tropical map by computing finitely many such maxima in parallel. Finally, we prove by structural induction that
+stacking a finite number of blocks suffices to emulate an arbitrary max–plus circuit. With the first lemma we
+want to show that a single head can realize a weighted tropical max gate.
+Lemma C.1 (Head–level Weighted ⊕ gate). Let J be a finite index set and let {xj }j∈J ⊂ T and {wj }j∈J ⊂ T.
+There exists an attention head h∗ ∈ [H], a query–token index i∗ ∈ [N ] \ {t(j) | j ∈ J}, and distinct seq indices
+t(j) ∈ [N ] such that, after one forward pass, the context returned at i∗ is equal to
+M
+
+
+(h∗ )
+ci∗
+=
+xj ⊙ wj = max xj + wj .
+(3)
+j∈J
+
+j∈J
+
+Proof. For a fix h∗ and i∗ , for every j ∈ J, let’s select a distinct token position t(j). Then one can define the value
+(h∗ )
+(h∗ )
+(h∗ )
+vectors by v t(j) := xj ⊙ wj and vr
+:= −∞ for all r ∈
+/ {t(j)}. To enforce (3) it suffices to make si∗ t(j) = 0
+
+L
+(h∗ )
+(h∗ )
+for j ∈ J and si∗ r = −∞ otherwise, because then ci∗ = j∈J 0 ⊙ (xj ⊙ wj ) = maxj∈J (xj + wj ).
+One can write every query / key vector in block form u = (u(1) , u(2) ) ∈ Tdk −1 × T. Fix arbitrary first blocks
+u(1) and arrange
+
+
+(h∗ )
+(h∗ )
+qi∗ = 0, . . . , 0, 0 ,
+kt(j) = 0, . . . , 0, 0 , j ∈ J,
+(h∗ )
+(h∗ ) 
+(h∗ )
+so that dH qi∗ , kt(j) = 0 and hence si∗ t(j) = 0. For every irrelevant token r ∈
+/ {t(j)} set
+
+∗
+)
+= 0, . . . , 0, −Γr ,
+k(h
+r
+
+Γr ≫ 0,
+(h∗ )
+
+(h∗ ) 
+
+so that the last coordinate differs from that of the query by Γr ; consequently dH qi∗ , kr
+
+= Γr and
+(h )
+si∗ r = −Γr . Choosing Γr large enough drives the score to −∞ in the semiring, ensuring that irrelevant tokens
+∗
+
+do not influence the context. Equation (3) follows.
+Lemma C.2 (Tropical affine layer). Let A ∈ TM ×N and b ∈ TM . Embed x = (x1 , . . . , xN ) ∈ TN as the
+values of tokens t(1), . . . , t(N ) and add one bias token ib whose value is fixed to 0. There exists an MHTA layer
+with H = M heads and dk = 2 such that, for each m ∈ [M ],
+(m)
+
+c im =
+
+N
+M
+
+Amj ⊙ xj
+
+
+
+⊕ bm ,
+
+j=1
+
+where im is the query token of head m.
+Proof. For m ∈
+L[M ] and head h = m, we can apply Lemma C.1 with J = {1, . . . , N }, input xj and weights
+Amj to obtain j (Amj ⊙ xj ). Let the bias relevant to every head by assigning its key identical to the query,
+(m)
+
+(m)
+
+whence sim ib = 0 for all m. Then, we give it value bm in head m alone via WV . The context becomes the
+L
+maximum of j (Amj ⊙ xj ) and bm , completing the proof.
+
+16
+
+Definition C.1 (Tropical circuit [15]). A tropical circuit is a finite directed acyclic graph whose source nodes
+are labelled by variables z1 , . . . , zn ∈ T and whose internal nodes are labelled either by the operation tropical
+addition (u, v) 7→ u ⊕ v = max{u, v} or by the operation tropical multiplication (u, v) 7→ u ⊙ v = u + v.
+The circuit computes a map f : Tn → Tm whose m outputs are designated sinks. A circuit is layered if every
+edge points from layer ℓ to layer ℓ + 1 for some topological layering {L0 , . . . , LL }. We write depth(C) = L
+and size(C) = |C| for the number of internal gates.
+Because tropical multiplication distributes over tropical addition, every such circuit computes a tropical
+polynomial, namely a tropical sum ⊕ of finitely many monomials, each monomial being a tropical product ⊙
+(classical summation) of a subset of the indeterminates plus a constant. A tropical polynomial in variables
+z = (z1 , . . . , zn ) has an expression of the form
+P (z) =
+
+K 
+n
+n
+
+n
+o
+M
+K
+X
+⊙e
+ck ⊙
+zj kj = max ck +
+ekj zj ,
+k=1
+
+k≤K
+
+j=1
+
+j=1
+
+where ck ∈ T and ekj ∈ N. Thus P is already the maximum of finitely many affine forms in z. Lemma C.2
+therefore applies directly.
+Theorem C.3 (Single–layer universality for tropical polynomials).
+Let P : Tn → Tm be a vector-valued
+L
+tropical polynomial map whose m coordinates are Pℓ (z) = k≤Kℓ (Aℓk ⊙ z) ⊕ bℓk . There exists a single
+P
+MHTA layer with H = m
+ℓ=1 Kℓ heads and dk ≥ 2 whose tropical output (the collection of all head contexts
+before the de-valuation ψ = exp) equals P (z).
+Proof. For each output coordinate ℓ one can allocate Kℓ heads, one per affine term Aℓk ⊙ z ⊕ bℓk . Lemma C.2
+shows that affine map in head (ℓ, k), depositing its value at a fresh query token iℓk . Because the score of an
+irrelevant head is −∞, the contexts written to those tokens are ignored by all other heads. Finally, putting an
+aggregation head per output ℓ whose query token reads all tokens iℓk with score 0 and returns their ⊕, namely
+maxk (Aℓk ⊙ z ⊕ bℓk ) = Pℓ (z). No de-valuation is applied inside the tropical computation, so the result equals
+P (z) in the max–plus semiring.
+Corollary C.3.1 (Depth–L universality). Let F : Tn → Tm be the output of a layered tropical circuit of depth
+L. Then, there exists an MHTA stack of L successive layers which, on every x ∈ (R>0 )n , produces
+
+C(L) (x) = F val(x) .
+Proof. We can apply Theorem C.3 to each P (i) in succession, feeding the contexts of layer i (still in tropical
+form) as the inputs to layer i + 1. Because no Euclidean de-valuation occurs after all MHTA layers, the tropical
+composition is preserved.
+Theorem C.4 (Simulation of max–plus Dynamic Programs). Let (S, E) be a finite directed acyclic graph with
+|S| = N nodes and weighted edges {wuv }(u,v)∈E ⊂ T. For t ∈ N define
+
+M 
+dv (t + 1) =
+wuv ⊙ du (t) ,
+dv (0) = δv,v0 ,
+u: (u,v)∈E
+
+where v0 ∈ S is the source node. For every finite horizon T there exists a MHTA of depth T and N heads per
+layer such that the token values at layer t equal the vector dv (t) v∈S for all t ≤ T .
+Proof. If we label the tokens by the vertices of S, at layer t we store dv (t) in the value field of token v. To
+obtain dv (t + 1) let head h = v whose query token is v. Then, one can apply Lemma C.1 with index set
+J = { u | (u, v) ∈ E}, input scalars xu = du (t) and weights wuv , thereby producing dv (t + 1) as context at
+token v. Since every head acts on em disjoint query tokens, all v ∈ S are updated in parallel. Repeating for T
+layers unrolls the dynamic program, hence layer T realizes the horizon-T value vector.
+Let (Γ = (V, E)) be a directed graph with (|V | = n) and tropical weighted adjacency matrix (D ∈ Tn×n ).
+For k ≥ 0 the tropical power D⊙k encodes path weights of length k. Fix a horizon T ∈ N and set the finite
+Kleene star
+T
+−1
+M
+D∗(T ) ; :=;
+D⊙k ∈ Tn×n .
+k=0
+n
+
+For v0 ∈ T the horizon-T value vector is vT = D
+
+∗(T )
+
+⊗ v0 .
+
+17
+
+Theorem C.5 (MHTA learns tropical transitive closure). Given Γ = (V, E) with |V | = n and adjacency
+D ∈ Tn×n , for every T ∈ N there exists an MHTA stack of depth T with n heads per layer and head dimension
+dk such that the token values at layer t equal vt ∈ Tn and
+vt+1 ; =; D ⊗ vt
+
+(t = 0, 1, . . . , T − 1).
+
+In particular, the output at layer T equals vT = D∗(T ) ⊗ v0 .
+Proof. Indexing tokens by (V ) and store (vt (u)) as the value on token (u) at depth (t), we fix (v ∈ V ) and
+in layer (t), we assign head (h = v) whose query is token (v). Then, we apply Lemma B.1 to the index set
+(Jv = u ∈ V : (u, v) ∈ E) with inputs (xu = vt (u)) and weights (wuv = Dvu ). The head returns at its query
+token
+M
+
+wuv ⊙ xu ; =; max Dvu + vt (u); =; (D ⊗ vt )(v); =; vt+1 (v).
+u:(u,v)∈E
+
+u∈Jv
+
+All (v ∈ V ) update in parallel because heads use disjoint query tokens; thus (n) heads suffice in each layer.
+Iterating over t = 0, . . . , T −1 yields (vT ), and by the path–semiring semantics we have (vT = D∗(T ) ⊗v0 ).
+Corollary C.5.1. In a tropical semiring and under the assumption that no negative cycle exist, shortest paths
+exist and are cycle-free, so their lengths are realized by paths of at most (n − 1) arcs; consequently the infinite
+Kleene star truncates at (n − 1) [73]. Thus, every shortest path uses at most (n − 1) arcs, hence
+D∗ ; =; I ⊕ D ⊕ · · · ⊕ D⊙(n−1) ; =; D∗(n) .
+Therefore the MHTA stack of with depth T ≥ n − 1 learns (D∗ ⊗ v0 ).
+In the embedding space of MHTA, the feasible domain is a polyhedron in parameter space on which shortest
+paths exist and the Kleene star is well-defined. The MHTA stack thus implements Bellman steps in the parameter
+space, thus the combinatorics of feasible solutions are absorbed in the polyhedral stratification. In particular, the
+map (v0 , θ) 7→ D∗(T ) (θ) ⊗ v0 is a tropical polynomial, and the Tropical Attention has a sufficient ability to
+learn such maps without recurrence. Hence, in principle, MHTA can learn the closure map itself rather than the
+step-by-step recurrence.
+
+D
+
+Comparison between vanilla attention and Tropical Attention
+
+In this section, we compare the algorithmic view between vanilla attention and Tropical Attention.
+
+Algorithm 1 Comparison between vanilla attention and Tropical Attention
+
+function ATTENTION(X : n × d)
+Q, K, V ← linear X .chunk(3)
+
+e ← einsum id, jd → ij, Q, K
+A
+√
+
+e
+A ← softmax A/
+d, −1
+
+O ← einsum ij, jd → id, A, V
+
+return linear O
+end function
+
+E
+
+function TROP _ ATTENTION(X : n × d) 
+Q′ , K′ , V′ ← log ReLU linear X
+_chunk(3)
+
+λ ← Parameter N
+Q ← Q′ − λ, K ← K′ − λ, V ← V′ − λ
+(Q) 
+Qbtd = max Qbtj + Wdj
+j
+(K) 
+Kbtd = max Kbtj + Wdj
+j
+(V ) 
+Vbtd = max Vbtj + Wdj
+j
+
+
+∀i, j : Dbij ← maxd Qbid − Kbjd − mind Qbid − Kbjd
+S ← −D
+
+∀i, d : Cbid ← maxj Sbij + Vbjd
+O ← exp(C) 
+return linear O
+end function
+
+Dataset Details
+
+Our evaluation suite covers eleven canonical problems2 :
+
+Floyd–Warshall Dataset. Each example is a weighted directed graph with nonnegative edge weights; we
+compute the all-pairs shortest-path distances with the Floyd–Warshall algorithm and use the resulting distance
+matrix as the regression target. Inputs are the flattened (zero-filled for missing edges) weight matrix with
+positional indices.
+2
+
+Code used to generate data can be found in our public repository: https://github.com/Baran-phys/
+Tropical-Attention/blob/main/dataloaders.py
+
+18
+
+QuickSelect Dataset. Each example is an unsorted list of integers together with an order statistic k; the
+label is a token-wise binary mask marking all positions that contain the k-th smallest value. Inputs provide
+per-element features (value and k or a normalized rank proxy) in the original list order.
+
+3SUM–Decision Dataset. Each example consists of a list of integers and a target T ; the label is 1 if any
+three distinct elements sum to T , and 0 otherwise. Inputs present per-token pairs [xi , T ] so the model can
+condition each element on the common target.
+
+Subset–Sum–Decision Dataset. Each example is a list of integers and a target T ; the label indicates
+whether some subset sums exactly to T . Inputs again use per-token pairs [xi , T ], and labels are computed by an
+exact dynamic-programming subset-sum solver.
+Balanced Partition Dataset. Given a multiset of integers, the goal is to split it into two subsets with
+minimal absolute difference of sums; the label is a token-wise 0/1 membership vector for one optimal subset
+(chosen deterministically). Ground truth is produced via a standard DP over achievable partial sums with a
+traceback to a canonical solution.
+
+0–1 Knapsack Dataset. Each instance provides item pairs (vi , wi ) and a capacity C; the label is a token-wise
+0/1 mask for an optimal item set that maximizes total value under the weight budget. We compute ground truth
+with an exact dynamic-programming solver and repeat C on every token as an input feature.
+
+Fractional Knapsack Dataset. Each instance also provides (vi , wi ) and a capacity C; the label is a
+per-item fraction in [0, 1] from the optimal fractional solution. Ground truth is computed by the canonical greedy
+algorithm that takes items in decreasing value-to-weight ratio.
+
+Convex Hull Dataset. Each example is a set of 2-D points; the label is 1 for points on the convex hull and 0
+otherwise. Hull membership is determined with a standard monotone chain construction.
+
+Strongly Connected Components (SCC) Dataset. Each example is a directed graph; the label is a
+
+flattened n × n matrix where entry (i, j) is 1 iff nodes i and j belong to the same strongly connected component.
+The graphs are generated Erdős–Rényi. However, to make the dataset more challenging, we also added curvature
+to the graph by adding communities to the graph. We obtain SCC memberships using a graph library routine and
+expose adjacency plus positional indices as inputs.
+
+Bin Packing Dataset. Each example supplies item sizes and a single bin capacity; the label is a token-wise
+0/1 indicator of whether an item starts a new bin under First-Fit Decreasing applied to the clean sizes. Inputs
+include each item’s size, the shared capacity, and a normalized position index after sorting.
+
+Minimum Coin Change (0/1) Dataset. Each instance contains a multiset of coin values and a target
+amount T ; the label is a token-wise 0/1 mask for one optimal solution using the fewest coins (or the all-zero
+mask if no solution exists). Ground truth is computed with an exact dynamic-programming solver with traceback.
+
+F
+
+Training & Evaluation Protocol
+
+This appendix complements the experimental setup outlined in Sec. 4. We focus on the conceptual pipeline. The
+low-level engineering choices (e.g. logging cadence, file formats) are documented in the public code repository3 .
+The primary packages utilized in constructing our experiment is Pytorch [74], Pandas and Scipy [75], SciKitLearn
+[76], and Numpy [77]. The basic workflow is described below:
+1. Dataset generation. For the selected combinatorial task we generate input and output pairs using the
+hyperparameters in Table 5
+2. Model instantiation. A shallow Transformer encoder—configured with 1 layer, 2 attention heads and
+hidden width 64—is equipped with one of three attention mechanisms: Vanilla, Tropical, or Adaptive.
+3. Optimization. We train for Nepoch epochs using AdamW (10−3 , constant, no warm-up). We use one
+NVIDIA Tesla V100 GPU to train each model. Models trained with a sufficiently large batch size
+(500) training over 10M samples, took approximately 2.5 minutes to train. For more memory intensive
+graph models, our training time was approximately 45 minutes given small batch sizes of 16. The
+objective is chosen per-task:
+• BCE with logits – pooled binary tasks,
+3
+
+https://github.com/Baran-phys/Tropical-Attention/
+
+19
+
+• token-wise BCE,
+• mean-squared error – regression tasks.
+Nepoch = 100
+4. Evaluation. After training we reload the final checkpoint, generate a new test set, and compute (i)
+mean loss for regression tasks and (ii) F1 for classification tasks on the generated test set. We evaluate
+our models on in-distribution data (data generated using the same hyperparameters as during training)
+and on out-of-distribution (OOD) data using the hyperparameters described in Table 5 using the OOD
+protocol described in Section 4. For Length OOD, all models were trained on sequence length of 8 and
+we evaluated them at sequence length of 64, with the exception of the graph problems (FloydWarshall
+and SCC), which were evaluated on sequence length of 16. For Perturbative Noise OOD, each input
+was perturbed with probability 0.5 with a random integer sampled from the task’s perturbative noise
+range.
+
+Table 5: Training hyperparameters and data ranges for each combinatorial task. Each task was trained
+with 10M samples, learning rate of 0.0001, input sequence length of 8, and no perturbations. The
+ranges in the table are used to draw random integer values for the given parameter within the data
+generation portion of the training.
+Dataset
+SubsetSumDecision
+Knapsack
+FractionalKnapsack
+MinCoinChange
+Quickselect
+BalancedPartition
+BinPacking
+ConvexHull
+ThreeSumDecision
+FloydWarshall
+SCC 4
+
+4
+
+Epochs
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+
+Target Range
+
+Weight Range
+
+Value Range
+
+OOD Value Range
+
+Perturbative Noise Range
+
+(1,10)
+(10,20)
+(10,20)
+(10,20)
+N/A
+N/A
+(10,30)
+N/A
+(-75,75)
+N/A
+N/A
+
+N/A
+(1,10)
+(1,10)
+N/A
+N/A
+N/A
+N/A
+N/A
+N/A
+N/A
+N/A
+
+(-5,5)
+(1,10)
+(1,10)
+(1,10)
+(1,10)
+(1,10)
+(1,10)
+(0,10)
+(-20,20)
+(1,15)
+0.001
+
+(-20,20)
+(11,21)
+(11,21)
+(11,21)
+(11,21)
+(11,100)
+(11,100)
+(11,21)
+(-375,375)
+(16,30)
+0.1
+
+(10,30)
+(10,30)
+(1,5)
+(1,5)
+(1,5)
+(10,30)
+(10,30)
+(1,5)
+(40,60)
+(1,10)
+N/A
+
+SCC uses a connectivity probability rather than an integer input value, hence the small decimal for Value
+Ranges and N/A for perturbatiove noise range. For perturbative noise range the connectivity switches with
+given perturbation probability.
+
+20
+
+

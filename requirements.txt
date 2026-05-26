@@ -1,0 +1,11 @@
+datasets>=2.19
+huggingface_hub>=0.23
+matplotlib>=3.8
+networkx>=3.2
+numpy>=1.26
+pandas>=2.2
+pyarrow>=15
+scikit-learn>=1.4
+torch>=2.2
+tqdm>=4.66
+wandb>=0.16

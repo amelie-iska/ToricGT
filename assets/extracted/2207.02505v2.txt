@@ -1,0 +1,2659 @@
+Pure Transformers are Powerful Graph Learners
+
+arXiv:2207.02505v2 [cs.LG] 22 Oct 2022
+
+Jinwoo Kim1∗ Tien Dat Nguyen1 Seonwoo Min2 Sungjun Cho2
+Moontae Lee2,3 Honglak Lee2† Seunghoon Hong1,2†
+1
+KAIST 2 LG AI Research 3 University of Illinois Chicago
+
+Abstract
+We show that standard Transformers without graph-specific modifications can lead
+to promising results in graph learning both in theory and practice. Given a graph, we
+simply treat all nodes and edges as independent tokens, augment them with token
+embeddings, and feed them to a Transformer. With an appropriate choice of token
+embeddings, we prove that this approach is theoretically at least as expressive as an
+invariant graph network (2-IGN) composed of equivariant linear layers, which is
+already more expressive than all message-passing Graph Neural Networks (GNN).
+When trained on a large-scale graph dataset (PCQM4Mv2), our method coined
+Tokenized Graph Transformer (TokenGT) achieves significantly better results
+compared to GNN baselines and competitive results compared to Transformer
+variants with sophisticated graph-specific inductive bias. Our implementation is
+available at https://github.com/jw9730/tokengt.
+
+1
+
+Introduction
+
+In recent years, Transformer [68] has served as a versatile architecture in a broad class of machine
+learning problems, such as natural language processing [17, 7], computer vision [18], and reinforcement learning [9], to name a few. It is because the fully-attentional structure of Transformer is general
+and powerful enough to take, process, and relate inputs and outputs of arbitrary structures, eliminating
+a need for data- and task-specific inductive bias to be baked into the network architecture. Combined
+with large-scale training, it opens up a new chapter for building a versatile model that can solve a wide
+range of problems involving diverse data modalities and even a mixture of modalities [31, 30, 57].
+In graph learning domain, inspired by the breakthroughs, multiple works tried combining selfattention into graph neural network (GNN) architecture where message passing was previously
+dominant [50]. As global self-attention across nodes cannot reflect the graph structure, however, these
+methods introduce graph-specific architectural modifications. This includes restricting self-attention
+to local neighborhoods [69, 51, 19], using global self-attention in conjunction with message-passing
+GNN [58, 43, 34], and injecting edge information into global self-attention via attention bias [72,
+78, 29, 54]. Despite decent performance, such modifications can be a limiting constraint in terms of
+versatility, especially considering future integration to multi-task and multi-modal general-purpose
+attentional architectures [31]. In addition, deviating from pure self-attention, these methods may
+inherit the issues of message-passing such as oversmoothing [40, 8, 52], and become incompatible
+with useful engineering techniques e.g., linear attention [65] developed for standard self-attention.
+Instead, we explore the opposite direction of applying a standard Transformer directly for graphs. For
+this, we treat all nodes and edges as independent tokens, augment them with appropriate token-wise
+embeddings, and feed the tokens as input to the standard Transformer. The model operates identically
+to Transformers used in language and vision; each node or edge is treated as a token, identical to the
+words in a sentence or patches of an image [68, 18]. Perhaps surprisingly, we show that this simple
+approach yields a powerful graph learner both in theory and practice.
+∗
+†
+
+Work done during an internship at LG AI Research.
+Equal corresponding authors.
+
+36th Conference on Neural Information Processing Systems (NeurIPS 2022).
+
+Tokenized Graph Transformer (TokenGT)
+Prediction
+
+Transformer Encoder
+
+Type
+Identifiers
+
+v2
+v1
+
+v4
+
+Node
+Identifiers
+
+v
+
+e
+
+[node] [edge]
+
+1
+
+2
+
+3
+
+4
+
+orthonormal
+
+v
+
+e
+
+v
+
+e
+
+v
+
+e
+
+v
+
+e
+
+1
+1
+
+1
+2
+
+2
+2
+
+2
+3
+
+3
+3
+
+3
+4
+
+4
+4
+
+4
+2
+
+v3
+
+Node and Edge Tokens
+with Token-wise Embedding
+
+Input Graph
+
+[graph]
+
+Figure 1: Overview of Tokenized Graph Transformer (TokenGT). We treat all nodes and edges of an
+input graph as independent tokens, augment them with orthonormal node identifiers and trainable
+type identifiers, and feed them to a standard Transformer encoder. For graph-level prediction, we
+follow the common practice [17, 18] of using an extra trainable [graph] token.
+As a key theoretical result, we prove that with appropriate token-wise embeddings, self-attention over
+the node and edge tokens can approximate any permutation equivariant linear operator on a graph [47].
+Remarkably, we show that a very simple choice of embedding composed of node identifiers and
+type identifiers is sufficient for accurate approximation. This provides a solid theoretical guarantee
+that, with the embeddings and enough attention heads, a Transformer is at least as expressive as a
+second-order invariant graph network (2-IGN) [47, 34], which is already more expressive than all
+message-passing GNNs [21]. This also immediately grants the model with the expressive power at
+least as good as the 2-dimensional Weisfeiler-Lehman (WL) graph isomorphism test [46], which is
+often sufficient for real-world graph data [83]. We further extend our theoretical result to hypergraphs
+with order-k hyperedges, showing that a Transformer with order-k generalized token embeddings is
+at least as expressive as k-IGN and, consequently k-WL test.
+We test our model, named Tokenized Graph Transformer (TokenGT), mainly on the PCQM4Mv2
+large-scale quantum chemical property prediction dataset containing 3.7M molecular graphs [27].
+Even though TokenGT involves minimal graph-specific architectural modifications, it performs
+significantly better than all GNN baselines, showing that the advantages of Transformer architecture
+combined with large-scale training surpass the benefit of hard inductive bias of GNNs. Furthermore,
+TokenGT achieves competitive performance compared to Transformer variants with strong graphspecific modifications [78, 29, 54]. Finally, we demonstrate that TokenGT can naturally utilize
+efficient approximations in Transformers in contrast to these variants, using kernel attention [11] that
+enables linear computation cost without much degradation in performance.
+
+2
+
+Tokenized Graph Transformer (TokenGT)
+
+In this section, we present the Tokenized Graph Transformer (TokenGT), a pure Transformer architecture for graphs with token-wise embeddings composed of node identifiers and type identifiers
+(Figure 1). Our goal in this section is to provide a practical overview – for theoretical analysis of the
+architecture, we guide the readers to Section 3.
+Let G = (V, E) an input graph with n nodes V = {v1 , ..., vn } and m edges E = {e1 , ..., em } ⊆
+V 2 , associated with features XV ∈ Rn×C and XE ∈ Rm×C , respectively. We treat each node
+and edge as an independent token (thus (n + m) tokens in total) and construct their features by
+X = [XV ; XE ] ∈ R(n+m)×C . A naïve way to process a graph is to directly provide the tokens X
+as input to a Transformer, but it is inappropriate as graph connectivity is discarded. To thoroughly
+represent graph structure, we augment the tokens X with token-wise embeddings, more specifically
+orthonormal node identifiers used for representing the connectivity of the tokens and trainable type
+identifiers that encode whether a token is a node or an edge. Despite the simplicity, we show that a
+Transformer applied on these embeddings is a theoretically powerful graph learner.
+2
+
+Node Identifiers The first component of token-wise embedding is the orthonormal node identifier
+that we use to represent the connectivity structure given in the input graph.
+For a given input graph G = (V, E), we first produce n node-wise orthonormal vectors P ∈ Rn×dp
+that we refer to as node identifiers. Then, we augment the tokens X with node identifiers as follows.
+• For each node v ∈ V, we augment the token Xv as [Xv , Pv , Pv ].
+• For each edge (u, v) ∈ E, we augment the token X(u,v) as [X(u,v) , Pu , Pv ].
+Intuitively, a Transformer operating on the augmented tokens can fully recognize the connectivity
+structure of the graph since comparing the node identifiers between a pair of tokens reveals their
+incidence information. For instance, we can tell if an edge e = (u, v) is connected with a node k
+through dot-product (attention) since [Pu , Pv ][Pk , Pk ]> = 1 if and only if k ∈ (u, v) and 0
+otherwise. This allows the Transformer to identify and exploit the connectivity structure of a graph,
+for instance by putting more weights on incident pairs when the local operation is important.
+Notably, as the node identifiers P are only required to be orthonormal, we have a large degree of
+freedom in implementation choices. We outline two practical methods below as examples. Their
+implementation details can be found in Appendix A.3.1.
+• Orthogonal random features (ORFs), e.g., rows of random orthogonal matrix Q ∈ Rn×n
+obtained with QR decomposition of random Gaussian matrix G ∈ Rn×n [79, 12].
+• Laplacian eigenvectors obtained from eigendecomposition of graph Laplacian matrix, i.e.,
+rows of U from ∆ = I−D−1/2 AD−1/2 = U> ΛU, where A ∈ Rn×n is adjacency matrix,
+D is degree matrix, and Λ, U correspond to eigenvalues and eigenvectors respectively [20].
+Among the two methods, node identifiers generated as ORFs do not encode any information about
+the graph structure as they are entirely random. This means the Transformer that operates on the
+ORF-based node identifiers needs to compile and recognize graph structure only from the incidence
+information provided by the node identifiers. Although this is challenging, perhaps surprisingly, we
+empirically show in Section 5 that Transformers are strong enough to learn meaningful structural
+representations out of ORF-based node identifiers and outperform GNNs on large-scale task.
+In contrast to ORFs, Laplacian eigenvectors provide a kind of graph positional embeddings (graph
+PEs) that describes the distance between nodes on a graph. Due to the positional information, it
+yields better performance compared to ORFs in our experiments in Section 5. One interesting aspect
+of Laplacian eigenvectors is that they can be viewed as a generalization of sinusoidal positional
+embeddings of NLP Transformers to graphs, as the eigenvectors of 1D chain graphs are sine and
+cosine functions [20]. Thus, by choosing Laplacian eigenvectors as node identifiers, our approach can
+be interpreted as a direct extension of the NLP Transformer for inputs involving relational structures.
+Type Identifiers The second component of token-wise embedding is the trainable type identifier
+that encodes whether a token is node or edge. For a given input graph G = (V, E), we first prepare a
+trainable parameter matrix E = [EV ; EE ] ∈ R2×de that contains two type identifiers EV and EE for
+nodes and edges respectively. Then, we further augment the tokens with type identifiers as follows.
+• For each node v ∈ V, we augment the token [Xv , Pv , Pv ] as [Xv , Pv , Pv , EV ].
+• For each edge (u, v) ∈ E, we augment the token [X(u,v) , Pu , Pv ] as [X(u,v) , Pu , Pv , EE ].
+These embeddings provide information on whether a given token is a node or an edge, which is
+critical, e.g., when an attention head tries to attend specifically to node tokens and ignore edge tokens.
+Main Transformer With node identifiers and type identifiers, we obtain augmented token features
+Xin ∈ R(n+m)×(C+2dp +de ) , which is further projected by a trainable matrix win ∈ R(C+2dp +de )×d
+to be an input to Transformer. For graph-level prediction, we prepend a special token [graph]
+with trainable embedding X[graph] ∈ Rd similar to BERT [17] and ViT [18]. We utilize the
+feature of [graph] token at the output of the encoder as the graph representation, on which a
+linear prediction head is applied to produce the final graph-level prediction. Overall, the tokens
+Z(0) = [X[graph] ; Xin win ] ∈ R(1+n+m)×d are used as the input to the main encoder. As an encoder,
+we adopt the standard Transformer [68], which is an alternating stack of multihead self-attention
+layers (MSA) and feedforward MLP layers. We provide further details in Appendix A.1.1.
+3
+
+Inductive Bias Similar to Transformers in language and vision [17, 18], Tokenized Graph Transformer treats input nodes and edges as independent tokens and applies self-attention to them. This approach leads to much less inductive bias than current GNNs, where the sparse graph structure, or more
+fundamentally, permutation symmetry of graphs is deliberately baked into each layer [21, 47, 46, 34].
+For TokenGT, such information is provided entirely as a part of input using token-wise embeddings,
+and the model has to learn how to interpret and utilize the information from data. Although such
+weak inductive bias might raise questions on the expressiveness of the model, our theoretical analysis
+in Section 3 shows that TokenGT is a powerful graph learner thanks to the token-wise embeddings
+and expressive power of self-attention. For example, we show that TokenGT is more expressive than
+all message-passing GNNs under the framework of Gilmer et al. (2017) [21].
+
+3
+
+Theoretical Analysis
+
+We now present our theory. Our key result is that TokenGT, a standard Transformer with node and
+type identifiers presented in Section 2, is provably at least as expressive as the second-order Invariant
+Graph Network (2-IGN [47]), which is built upon all possible permutation equivariant linear layers
+on a graph. This provides solid theoretical guarantees for TokenGT, such as being at least as powerful
+as the 2-WL graph isomorphism test and more expressive than all message-passing GNNs. Our theory
+is based on a general framework on hypergraphs represented as higher-order tensors, which leads to
+the formulation of order-k TokenGT that is at least as expressive as order-k IGN (k-IGN [47]).
+3.1
+
+Preliminary: Permutation Symmetry and Invariant Graph Networks
+
+Representing and Processing Sets and (Hyper)Graphs For a set of n nodes, we often represent
+their features as X ∈ Rn×d where Xi ∈ Rd is the feature of the i-th node. The set is unordered and,
+therefore, should be treated invariant to the renumbering of the nodes. Let Sn the symmetric group or
+the group of permutations π on [n] = {1, ..., n}. By π · X we denote permuting rows of X with π,
+i.e., (π · X)i = Xπ−1 (i) . Here, X and π · X represent the identical set for all π ∈ Sn .
+k
+
+Generally, we consider (hyper)graphs represented as order-k tensor X ∈ Rn ×d with feature Xi =
+Xi1 ,...,ik ∈ Rd attached to (hyper)edge represented as multi-index i = (i1 , ..., ik ) ∈ [n]k . Similar
+to sets, the tensor should be treated invariant to node renumbering by any π ∈ Sn that acts on X
+by (π · X)i = Xπ−1 (i) where π −1 (i) = (π −1 (i1 ), ..., π −1 (ik )). That is, X and π · X represent the
+identical (hyper)graph for all π. Due to such symmetry, to build a function F (X) ≈ T for tensor X
+and target T , a suitable way is to make them invariant F (π · X) = F (X) when the target is a vector
+k
+or equivariant F (π · X) = π · F (X) when the target is also a tensor, for all X ∈ Rn ×d and π ∈ Sn .
+k
+
+In our theoretical analysis, we work on order-k dense tensor representation X ∈ Rn ×d of a graph as
+they can represent node features (k = 1), edge features (k = 2), or hyperedge features (k > 2) in
+a unified manner. This is interchangeable but slightly different from the sparse representation of a
+graph with edge set E used in Section 2. Nevertheless, in Section 5 we empirically verify that our key
+theoretical findings work equally well for dense and sparse graphs.
+Invariant Graph Network We mainly develop our theoretical analysis upon Invariant Graph
+Networks (IGNs) [47, 46], a family of expressive graph networks derived from the permutation
+symmetry of tensor representation of graphs. Here we provide a summary. In general, we define:
+k
+
+Definition 1. An order-k Invariant Graph Network (k-IGN) is a function Fk : Rn ×d0 → R written
+as the following:
+(T )
+
+(1)
+
+Fk = MLP ◦ Lk→0 ◦ Lk→k ◦ σ ◦ ... ◦ σ ◦ Lk→k ,
+
+(1)
+
+k
+k
+(t)
+where each Lk→k is equivariant linear layer [47] from Rn ×dt−1 to Rn ×dt , σ is activation function,
+k
+and Lk→0 is a invariant linear layer from Rn ×dT to R.
+
+A body of previous work have shown appealing theoretical properties of k-IGN, including universal
+approximation [48] and alignment to k-Weisfeiler-Lehman (k-WL) graph isomorphism test [46, 10].
+In particular, it is known that k-IGNs are theoretically at least as powerful as the k-WL test [46]. It is
+also known that 2-IGNs are already more expressive [47, 34] than all message-passing GNNs under
+the framework of Gilmer et al. (2017) [21].
+4
+
+The core building block of IGN is invariant and equivariant linear layers [47] with maximal expressiveness while respecting node permutation symmetry. The layers are defined as follows:
+k
+
+l
+
+0
+
+Definition 2. An equivariant linear layer is a function Lk→l : Rn ×d → Rn ×d written as follows
+k
+for order-k input X ∈ Rn ×d :
+XX µ
+X
+Lk→l (X)i =
+Bi,j Xj wµ +
+Cλi bλ ,
+(2)
+µ
+l
+
+j
+
+λ
+d×d0
+
+k
+
+0
+
+where i ∈ [n] , j ∈ [n] are multi-indices, wµ ∈ R
+, bλ ∈ Rd are weight and bias parameters,
+l+k
+l
+and Bµ ∈ Rn and Cλ ∈ Rn are binary basis tensors corresponding to order-(l + k) and order-l
+equivalence classes µ and λ, respectively. Invariant linear layer is a special case of Lk→l with l = 0.
+We provide the definition of the equivalence classes and basis tensors in Appendix A.1.1. For now, it
+is sufficient to know that the basis tensors are binary tensors that form the orthogonal basis of the
+full space of linear equivariant layers. In general, in Eq. (2) it is known that there exists bell(k + l)
+number of basis tensors Bµ for the weight and bell(l) number of basis tensors Cλ for the bias.
+3.2
+
+Can Self-Attention Approximate Equivariant Basis?
+
+Now, we present an intuition that connects Transformer (Section 2) and equivariant linear layer (Definition 2). For that, we write out the multihead self-attention layer as follows:
+!
+H X
+Q
+K >
+X
+Xw
+(Xw
+)
+h
+√ h
+MSA(X)i =
+αhij Xj whV whO where αh = softmax
+,
+(3)
+dH
+h=1 j
+where H is number of heads, dH is head size, and whQ , whK ∈ Rd×dH , whV ∈ Rd×dv whO ∈ Rdv ×d .
+Our intuition is that the weighted sum of values with self-attention matrix αh in Eq. (3) is analogous
+to the masked sum with basis tensor Bµ in Eq. (2) up to normalization. This naturally leads to the
+k
+k
+following question: for a given equivariant layer Lk→k : Rn ×d → Rn ×d , can we use a Transformer
+N ×d0
+N ×d0
+layer with multihead self-attention MSA : R
+→R
+with N = nk to accurately approximate
+Lk→k by having H = bell(2k) attention heads approximate each equivariant basis Bµ ?
+We show that this can be possible, but only if we provide appropriate auxiliary information to input.
+For example, let us consider first-order layer L1→1 . The layer has bell(2) = 2 basis tensors Bµ1 = I
+and Bµ2 = 11> − I for the weight, and bell(1) = 1 basis tensor Cλ1 = 1 for the bias. Given an
+input set X ∈ Rn×d it computes the following with w1 , w2 ∈ Rd×d , b ∈ Rd :
+L1→1 (X) = IXw1 + (11> − I)Xw2 + 1b> .
+µ1
+
+(4)
+1
+
+Now consider approximating basis tensor B = I with an attention matrix α . The approximation is
+accurate when i-th query always only attends to i-th key and ignores the rest. To achieve the attention
+structure consistently, i.e., agnostic to input X, we need to provide auxiliary input that self-attention
+can "latch onto" to faithfully approximate α1 ≈ I. Without this, attention must entirely rely on the
+inputs X, which is unreliable and can lead to approximation failure, e.g., when X has repeated rows.
+For the auxiliary information, we prepare n node-wise orthonormal vectors P ∈ Rn×dp (note that this
+is identical to node identifiers in Section 2), and augment the input to Xin = [X, P] ∈ Rn×(d+d√p ) .
+Let us assume that the query and key projections in Eq. (3) ignore X and only leave P scaled by a
+with a > 0. Then attention matrix is computed as α1 = softmax(S) where Sij = aP>
+i Pj . Here,
+due to the orthonormality of P, we have P>
+P
+=
+1
+only
+if
+i
+=
+j
+and
+otherwise
+0,
+which
+leads to
+j
+i
+S = aI. With a → ∞ by scaling up the query and key projection weights, the softmax becomes
+arbitrarily close to the hardmax operator, and we obtain the following:
+α1 = softmax(aI) → I as a → ∞.
+(5)
+Thus, self-attention can utilize the auxiliary information P to achieve an input-agnostic approximation
+of α1 to I. Notably, we can achieve a similar approximation for Bµ2 = 11> − I using the same P
+by flipping the sign of keys, which gives α2 = softmax(−aI) due to orthonormality. By sending
+a → ∞, now attention from the i-th query to the i-th key is suppressed, and we obtain the following:
+1
+α2 = softmax (−aI) →
+(11> − I) as a → ∞.
+(6)
+n−1
+5
+
+Note that this approximation is accurate only up to row normalization as rows of α2 always sum
+to one due to softmax, while Bµ2 = 11> − I is binary. In our proofs of the theoretical results, we
+perform appropriate denormalization with MLP after MSA to achieve an accurate approximation.
+Overall, we see that simple auxiliary input P suffices for two attention heads to approximate the
+equivariant basis of L1→1 accurately. We now question the following. Given appropriate auxiliary
+information as input, can a Transformer layer with bell(2k) attention heads accurately approximate
+Lk→k by having each head approximate each equivariant basis Bµ ? What would be the sufficient
+auxiliary input? We answer the question by showing that, with (order-k generalized) node and type
+identifiers presented in Section 2, Transformer layers can accurately approximate equivariant layers
+Lk→k via input-agnostic head-wise approximation of each equivariant basis.
+3.3
+
+Pure Transformers are Powerful Graph Learners
+
+We now present our main theoretical results that extend the discussions in Section 3.2 to any order k.
+Note that k = 2 corresponds to TokenGT for graphs presented in Section 2. With k > 2, we naturally
+extend TokenGT to hypergraphs. All proofs can be found in Appendix A.1.
+k
+
+We first introduce generalized node and type identifiers (Section 2) for order-k tensors X ∈ Rn ×d .
+We define the node identifier P ∈ Rn×dp as an orthonormal matrix with n rows, and the type
+identifier as a trainable matrix E ∈ Rbell(k)×de that contains bell(k) rows Eγ1 , ..., Eγbell(k) , each of
+which is designated for an order-k equivalence class γ. Then, we augment each entry of input tensor
+as [Xi1 ,...,ik , Pi1 , ..., Pik , Eγ ] where (i1 , ..., ik ) ∈ γ.
+Let us exemplify. For k = 1 (sets), each i-th entry is augmented as [Xi , Pi , Eγ1 ], consistent with our
+discussion in Section 3.2. For k = 2 (graphs), each (i, i)-th entry is augmented as [Xii , Pi , Pi , Eγ1 ]
+and each (i, j)-th entry (i 6= j) is augmented as [Xij , Pi , Pj , Eγ2 ]. This is consistent with TokenGT
+in Section 2, which augments nodes with EV = Eγ1 and edges with EE = Eγ2 .
+k
+
+With node and type identifiers, we obtain augmented order-k tensor Xin ∈ Rn ×(d+kdp +de ) . We use
+a trainable projection win ∈ R(d+kdp +de )×dT to map them to hidden dimension dT of a Transformer.
+We now show that self-attention on Xin win can accurately approximate equivariant basis:
+k
+
+Lemma 1. For all X ∈ Rn ×d and their augmentation Xin , self-attention coefficients αh (Eq. (3))
+2k
+computed with Xin win can approximate any basis tensor Bµ ∈ Rn of order-k equivariant linear
+layer Lk→k (Definition 2) to arbitrary precision up to normalization.
+Consequently, with the node and type identifiers, a collection of bell(2k) attention heads can approximate the collection of all basis tensors of order-k equivariant layer. This leads to the following:
+k
+
+Theorem 1. For all X ∈ Rn ×d and their augmentation Xin , a Transformer layer with bell(2k)
+self-attention heads that operates on Xin win can approximate an order-k equivariant linear layer
+Lk→k (X) (Definition 2) to arbitrary precision.
+While the approximation in Lemma 1 is only accurate up to normalization over inputs (keys) due to
+softmax normalization, for the approximation in Theorem 1 we perform appropriate denormalization
+using MLP after multihead self-attention and can obtain an accurate approximation.
+By extending the result to multiple layers, we arrive at the following:
+k
+
+Theorem 2. For all X ∈ Rn ×d and their augmentation Xin , a Transformer composed of T layers
+that operates on Xin win followed by sum-pooling and MLP can approximate an k-IGN Fk (X)
+(Definition 1) to arbitrary precision.
+This directly leads to the following corollary:
+Corollary 1. A Transformer on node and type identifiers in Theorem 2 is at least as expressive as
+k-IGN composed of order-k equivariant linear layers.
+Corollary 1 allows us to draw previous theoretical results on the expressiveness of k-IGN [46, 47, 34]
+and use them to lower-bound the provable expressiveness of a standard Transformer:
+Corollary 2. A Transformer on node and type identifiers in Theorem 2 is at least as powerful as
+k-WL graph isomorphism test and is more expressive than all message-passing GNNs within the
+framework of Gilmer et al. (2017) [21].
+6
+
+4
+
+Related Work
+
+We outline relevant work including equivariant neural networks, theory on expressive power of
+Transformers and their connection to modeling equivariance, and Transformers for graphs.
+Equivariant Neural Networks A machine learning task is often invariant or equivariant to specific
+symmetry of input data, e.g., image classification is invariant to the translation of an input image. A
+large body of literature advocated baking the invariance or equivariance into a neural network as a
+type of inductive bias (e.g., translation equivariance of image convolution), showing that it reduces
+the number of parameters and improves generalization for a wide range of learning tasks involving
+various geometric structures [13, 14, 73, 66, 49, 53, 60, 6, 34, 39]. Ravanbakhsh et al. (2017) [56]
+showed that any equivariant layer for discrete group actions is equivalent to a specific parameter
+sharing structure. Zaheer et al. (2017) [82] and Maron et al. (2019) [47] derived the parameter sharing
+for node permutation-symmetric data (sets and (hyper)graphs), which gives the maximally expressive
+equivariant linear layers and k-IGN in Section 3.1. The work on equivariant neural networks underlie
+our theory of how a standard Transformer can be a powerful learner for sets and (hyper)graphs.
+Expressive Power of Transformers and Its Connection to Equivariance Recent work involving
+Transformers often focus on minimizing the domain- and task-specific inductive bias and scaling the
+model and data so that any useful computation structure can be learned [18, 31, 30, 7, 17, 9, 39]. The
+success of this approach is, to some degree, attributed to the high expressive power of Transformers
+that allows learning diverse functions suited for the data at hand [81, 39, 3, 4, 41]. Recent theory has
+shown that Transformers are expressive enough to even model certain equivariant functions [1, 15, 39].
+Andreoli et al. (2019) [1] cast self-attention and convolution into a unified framework using basis
+tensors similar to ones in Section 3.1. Cordonnier et al. (2020) [15] advanced the idea and showed
+that Transformers with relative positional encodings can approximate any image convolution layers.
+Lee et al. (2019) [39] and Kim et al. (2021) [34] showed that Transformers can model equivariant
+linear layers for sets [82], which can be viewed as the first-order case of our theory (see Section 3.2).
+To our knowledge, our work is the first to show that standard Transformers are expressive enough to
+provably model maximally expressive equivariant layers and k-IGN for (hyper)graphs with k ≥ 2.
+Transformers for Graphs Unlike in language and vision, developing Transformers for graphs
+is challenging due to (1) the presence of edge connectivity and (2) the absence of canonical node
+ordering that prevents adopting simple positional encodings [50]. To incorporate the connectivity
+of edges, early methods restricted self-attention to local neighborhoods (thus reducing to messagepassing) [19, 51, 69] or used global self-attention with auxiliary message-passing modules [58, 43].
+As message-passing suffers from limited expressive power [77] and oversmoothing [40, 8, 52], recent
+works often discard them and use global self-attention on nodes with heuristic modifications to
+process edges [78, 29, 54, 38, 42]. Ying et al. (2021) [78] proposed to inject edge encoding based on
+shortest paths through self-attention bias. Kreuzer et al. (2021) [38] proposed to incorporate edges
+into self-attention matrix via elementwise multiplication. On the contrary, we leave the self-attention
+unmodified and provide both nodes and edges with certain token-wise embeddings (Section 2) as
+its input. To incorporate graph structure into nodes, on the other hand, some approaches focus on
+developing graph positional encoding, e.g., based on Laplacian eigenvectors [20, 42, 38]. While
+these can be directly incorporated into our work via auxiliary node identifiers for better performance,
+we leave this as future work. We further note that current graph Transformers that utilize Laplacian
+positional encoding rely heavily on heuristic edge encoding [29, 38] while ours does not. Another
+closely related approach is the Higher-order Transformer [34] which generalizes k-IGN with masked
+self-attention. While it is highly complex to implement due to hard-coded head-wise equivariant
+masks, our method can be implemented effortlessly using any available implementation of standard
+Transformer. Furthermore, our method is more flexible as the model can choose to use different
+attention heads to focus on a specific equivariant operator (e.g., local propagation) if needed. We
+further discuss the difficulty in applying linear attention to graph Transformers in Appendix A.2.
+
+5
+
+Experiments
+
+We first conduct a synthetic experiment that directly confirms our key claims in Lemma 1 (Section 3).
+Then, we empirically explore the capability of Tokenized Graph Transformer (TokenGT) (Section 2)
+using the PCQM4Mv2 large-scale quantum chemistry regression dataset [27]. We further present
+experiments on transductive node classification datasets involving large graphs in Appendix A.4.3.
+7
+
+Table 1: Second-order equivariant basis approximation. We report average and standard deviation
+of L2 error averaged over heads over 3 runs. For Random/ORF (first-order), we sample random
+embeddings independently for each token.
+node id.
+×
+×
+Random (first-order)
+ORF (first-order)
+Random
+ORF
+Laplacian eigenvector
+Random
+ORF
+Laplacian eigenvector
+No embedding
+
+type id.
+×
+
+×
+×
+×
+
+Type id. only
+
+dense input
+train L2 ↓
+test L2 ↓
+47.95 ± 0.600 53.93 ± 1.426
+32.38 ± 0.448 40.06 ± 1.202
+32.19 ± 0.476 32.49 ± 3.687
+32.35 ± 0.369 39.87 ± 1.263
+5.909 ± 0.019 5.548 ± 0.090
+5.472 ± 0.035 5.143 ± 0.078
+1.899 ± 3.050 1.702 ± 2.912
+0.375 ± 0.009 0.234 ± 0.011
+0.080 ± 0.001
+0.009 ± 5e-5
+0.053 ± 1.5e-5 0.005 ± 1e-4
+Node id. only
+
+sparse input
+train L2 ↓
+test L2 ↓
+29.88 ± 0.450 34.70 ± 1.167
+15.92 ± 0.275 20.39 ± 0.765
+15.87 ± 0.247 16.56 ± 0.904
+15.87 ± 0.247 16.56 ± 0.908
+8.152 ± 0.042 8.270 ± 0.285
+7.167 ± 0.025 7.190 ± 0.217
+0.288 ± 0.019 0.064 ± 0.010
+0.990 ± 0.108 0.875 ± 0.042
+0.129 ± 0.002 0.011 ± 0.002
+0.101 ± 0.003 0.019 ± 0.007
+
+Node id. + type id.
+
+Equivariant basis
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Self-attention matrix αh
+
+Basis tensor Bµ
+
+Figure 2: Self-attention maps learned under various node and type identifier configurations for two
+target equivariant basis tensors (out of 15). For better visualization, we clamp the entries by 0.01.
+Self-attention learns acute patterns coherent to equivariant basis when orthonormal node identifiers
+and type identifiers are both provided as input. More images can be found in Appendix A.4.1.
+5.1
+
+Approximating Second-Order Equivariant Basis
+
+As in Theorem 1 and 2 (Section 3), our argument on the expressive power of TokenGT relies on
+its capability to approximate order-k permutation equivariant linear layers Lk→k (Definition 2).
+Specifically, Lemma 1 states that such capability depends on the ability of each self-attention head
+α1 , ..., αH (Eq. (3)) to accurately approximate each equivariant basis Bµ1 , ..., Bµbell(2k) (Definition 2)
+up to normalization.
+We verify this claim for k = 2 (second-order; graphs) in a synthetic setup using Barabási-Albert
+random graphs. We use a multihead self-attention layer (Eq. (3)) with bell(2 + 2) = 15 heads and
+explicitly supervise head-wise attention scores αh to approximate each (normalized) equivariant
+basis tensor Bµh by minimizing L2 loss. Having the layer hyperparameters fixed, we provide
+different combinations of node and type identifiers, and test if multihead self-attention can jointly
+approximate all 15 equivariant basis on unseen graphs. We experiment with both dense and sparse
+graph representations; for graphs with n nodes and m edges, the dense graph considers all n2 pairwise edges as input as in Section 3, whereas the sparse graph considers only the present m edges as
+in Section 2. Further details can be found in Appendix A.3.2.
+We outline the results in Table 1. Consistent with Lemma 1, self-attention achieves accurate approximation of equivariant basis only when both the orthonormal node identifiers and type identifiers are
+given. Here, Laplacian eigenvectors (Lap, ) often yield slightly better results than orthogonal random features (ORF, ) presumably due to less stochasticity. Interestingly, we see that self-attention
+transfers the learned (pseudo-)equivariant self-attention structure to unseen graphs near perfectly.
+8
+
+Table 2: Results on PCQM4Mv2 large-scale graph regression benchmark. We report the Mean
+Absolute Error (MAE) on the validation set, and report MAE on the unavailable test set if possible.
+
+TokenGT (ORF)
+
+4
+
+Mean attention distance (hops)
+
+Mean attention distance (hops)
+
+method
+# parameters valid MAE ↓
+Message-passing GNNs
+GCN [27]
+2.0M
+0.1379
+GIN [27]
+3.8M
+0.1195
+GAT
+6.7M
+0.1302
+GCN-VN [27]
+4.9M
+0.1153
+GIN-VN [27]
+6.7M
+0.1083
+GAT-VN
+6.7M
+0.1192
+GAT-VN (large)
+55.2M
+0.1361
+Transformers with strong graph-specific modifications
+Graphormer [63]
+48.3M
+0.0864
+EGT [29]
+89.3M
+0.0869
+GRPE [54]
+46.2M
+0.0890
+Pure Transformers
+Transformer
+48.5M
+0.2340
+TokenGT (ORF)
+48.6M
+0.0962
+TokenGT (Lap)
+48.5M
+0.0910
+TokenGT (Lap) + Performer
+48.5M
+0.0935
+
+3
+2
+Head 1
+...
+
+1
+
+Head 32
+0
+
+0
+
+10
+5
+Network depth (layer)
+
+test-dev MAE ↓
+
+asymptotics
+
+0.1398
+0.1218
+N/A
+0.1152
+0.1084
+N/A
+N/A
+
+O(n + m)
+O(n + m)
+O(n + m)
+O(n + m)
+O(n + m)
+O(n + m)
+O(n + m)
+
+N/A
+0.0872
+0.0898
+
+O(n2 )
+O(n2 )
+O(n2 )
+
+N/A
+N/A
+0.0919
+N/A
+
+O((n + m)2 )
+O((n + m)2 )
+O((n + m)2 )
+O(n + m)
+
+TokenGT (Lap)
+
+4
+3
+2
+
+Head 1
+...
+
+1
+
+Head 32
+0
+
+0
+
+10
+5
+Network depth (layer)
+
+Figure 3: Attention distance by head and network depth. Each dot shows mean attention distance in
+hops across graphs of a head at a layer. The visualization is inspired by Dosovitskiy et al. (2020) [18].
+More images can be found in Appendix A.4.2.
+Non-orthogonal random embeddings lead to inaccurate approximation (Random, ), highlighting
+the importance of orthogonality of node identifiers. The approximation is also inaccurate when we
+sample ORF Pt independently for each token t (ORF (first-order), ) instead of using concatenated
+node identifiers [Pu , Pv ] for token (u, v). This supports our argument in Section 2 that the incidence
+information implicitly provided via node identifiers plays a key role in approximation.
+In Figure 2, we provide a visualization of self-attention maps learned under various node and type
+identifier choices. Additional results can be found in Appendix A.4.1.
+5.2
+
+Large-Scale Graph Learning
+
+An exclusive characteristic of TokenGT is its minimal graph-specific inductive bias, which requires it
+to learn internal computation structure largely from data. As such models are commonly known to
+work well with large-scale data [68, 18], we explore the capability of TokenGT on the PCQM4Mv2
+quantum chemistry regression dataset [27], one of the current largest with 3.7M molecular graphs.
+For TokenGT, we use both node and type identifiers, and use main Transformer encoder configuration based on Graphormer [78] with 12 layers, 768 hidden dimension, and 32 attention heads.
+We try both ORF and Laplacian eigenvector as node identifiers, and denote corresponding models as TokenGT (ORF) and TokenGT (Lap) respectively. As an ablation, we also experiment
+with the same Transformer without node and type identifiers, which we denote as Transformer.
+Finally, we apply the kernel attention [11] that approximates the attention computation to linear
+cost (TokenGT (Lap) + Performer). We use AdamW optimizer with (β1 , β2 ) = (0.99, 0.999) and
+weight decay 0.1, and 60k learning rate warmup steps followed by linear decay over 1M iteration with
+batch size 1024. For fine-tuning, we use 1k warmup, 0.1M training steps, and cosine learning rate
+decay. We train the models on 8 RTX 3090 GPUs for 3 days. Further details are in Appendix A.3.3.
+9
+
+We provide the results in Table 2. A standard Transformer on the node and edge tokens cannot
+recognize graph structure and shows low performance (0.2340 valid MAE). Yet, the picture changes
+as soon as we augment the tokens with node and type identifiers. Notably, TokenGT (ORF) achieves
+0.0962 MAE, which is already better than all GNN baselines. This is a somewhat surprising result, as
+both ORF and the Transformer are not aware of graph structures. This implies Transformer is strong
+enough to learn to interpret and reason over the incidence structure of tokens provided only implicitly
+by the node and type identifiers. By further switching to Laplacian eigenvectors that encode position
+on graphs [20], we observe a performance boost to 0.0910 MAE, competitive to Transformers
+with sophisticated graph-specific modifications (e.g., shortest path-based spatial encoding [78]).
+While such methods inject graph structure into attention matrix via bias term and therefore strictly
+require O(n2 ) cost, TokenGT enables adopting kernelization for pure self-attention [11], resulting in
+TokenGT (Lap) + Performer with the best performance among O(n + m) models (0.0935 MAE).
+Further discussion on the empirical performance of TokenGT can be found in Appendix A.5.
+While our theory in Section 3 guarantees that TokenGT can reduce to an equivariant layer by learning
+fixed equivariant basis at each attention head, in practice, it can freely utilize multihead self-attention
+to learn less restricted and more useful computation structure from data. To analyze such a structure,
+we compute the attention distance across heads and network depth by averaging pairwise token
+distances on a graph weighted by their attention scores (Figure 3). This distance is analogous to the
+number of hops in message-passing. In both TokenGT (ORF) and TokenGT (Lap), in the lowest
+layers, some heads attend globally over the graph while others consistently have small receptive fields
+(acting like a local message-passing operator). In deeper layers, the attention distances increase, and
+most heads attend globally. Interestingly, this behavior is highly consistent with Vision Transformers
+on image patches [18], suggesting that hybrid architectures based on convolution to aid ViT [16, 80]
+might also work well for graphs. While TokenGT (ORF) shows relatively consistent attention distance
+over heads, TokenGT (Lap) shows higher variance, implying that it learns more diverse attention
+patterns. Judging from the higher performance of TokenGT (Lap), this suggests that the graph
+structure information of the Laplacian eigenvector facilitates learning useful and diverse attention
+structures, which calls for future exploration of better node identifiers based on graph PEs [38, 42].
+
+6
+
+Conclusion
+
+We showed that Transformers directly applied to graphs can work well in both theory and practice. In
+the theoretical aspect, we proved that with appropriate token-wise embeddings, a Transformer on node
+and edge tokens is at least as expressive as k-IGN and k-WL test, making it more expressive than all
+message-passing GNNs. For such token-wise embeddings, we showed that a combination of simple
+orthonormal node identifiers and trainable type identifiers suffices, which we also verified with a
+synthetic experiment. In an experiment with PCQM4Mv2 large-scale dataset, we show that Tokenized
+Graph Transformer (TokenGT) performs significantly better than all GNNs and is competitive with
+Transformer variants with strong graph-specific architectural components [78, 29, 54].
+While the results suggest a promising research direction, there are challenges to be addressed in
+future work. First, treating each node and edge as tokens requires O((n + m)2 ) asymptotic cost due
+to the quadratic nature of self-attention. While we address this to some degree with kernelization and
+achieve O(n + m) cost, other types of efficient Transformers (e.g., sparse) that can deliver better
+performance are left to be tested. Another issue is slightly lower performance compared to the stateof-the-art. Adopting Transformer engineering techniques from vision and language domains, such as
+data scaling [7, 18], deepening [70, 74], hybrid architectures [16, 80], and self-supervision [17, 7, 24],
+are promising. In the societal aspect, to prevent the potential risky behavior in, e.g., decision making
+from graph-structured inputs, interpretability research regarding self-attention on graphs is desired.
+We finish with interesting research directions that stem from our work. As our approach advocates
+viewing a graph as (n + m) tokens [37], it opens up new paradigms of graph learning, including autoregressive decoding, in-context learning, prompting, and multimodal learning. Another interesting
+direction is to extend our theory and use self-attention to approximate equivariant basis for general
+discrete group actions, which might be a viable approach for learning equivariance from data.
+Acknowledgement This work was supported in part by Institute of Information & communications
+Technology Planning & Evaluation (IITP) (No. 2022-0-00926, 2022-0-00959, 2021-0-02068, and
+2019-0-00075) and the National Research Foundation of Korea (NRF) (No. 2021R1C1C1012540)
+grants funded by the Korea government (MSIT).
+10
+
+References
+[1] J.-M. Andreoli. Convolution, attention and structure embedding. arXiv, 2019. (Cited on 7)
+[2] A.-L. Barabasi and R. Albert. Emergence of scaling in random networks. arXiv, 1999. (Cited on 23)
+[3] S. Bhattamishra, A. Patel, and N. Goyal. On the computational power of transformers and its implications
+in sequence modeling. In CoNLL, 2020. (Cited on 7)
+[4] S. Bhojanapalli, C. Yun, A. S. Rawat, S. J. Reddi, and S. Kumar. Low-rank bottleneck in multi-head
+attention models. In ICML, 2020. (Cited on 7)
+[5] S. Brody, U. Alon, and E. Yahav. How attentive are graph attention networks? In ICLR, 2022. (Cited on
+24)
+[6] M. M. Bronstein, J. Bruna, Y. LeCun, A. Szlam, and P. Vandergheynst. Geometric deep learning: Going
+beyond euclidean data. IEEE Signal Process. Mag., 2017. (Cited on 7)
+[7] T. B. Brown, B. Mann, N. Ryder, M. Subbiah, J. Kaplan, P. Dhariwal, A. Neelakantan, P. Shyam, G. Sastry,
+A. Askell, S. Agarwal, A. Herbert-Voss, G. Krueger, T. Henighan, R. Child, A. Ramesh, D. M. Ziegler,
+J. Wu, C. Winter, C. Hesse, M. Chen, E. Sigler, M. Litwin, S. Gray, B. Chess, J. Clark, C. Berner,
+S. McCandlish, A. Radford, I. Sutskever, and D. Amodei. Language models are few-shot learners. In
+NeurIPS, 2020. (Cited on 1, 7, 10)
+[8] C. Cai and Y. Wang. A note on over-smoothing for graph neural networks. arXiv, 2020. (Cited on 1, 7)
+[9] L. Chen, K. Lu, A. Rajeswaran, K. Lee, A. Grover, M. Laskin, P. Abbeel, A. Srinivas, and I. Mordatch.
+Decision transformer: Reinforcement learning via sequence modeling. In NeurIPS, 2021. (Cited on 1, 7)
+[10] Z. Chen, L. Chen, S. Villar, and J. Bruna. Can graph neural networks count substructures? In NeurIPS,
+2020. (Cited on 4)
+[11] K. M. Choromanski, V. Likhosherstov, D. Dohan, X. Song, A. Gane, T. Sarlós, P. Hawkins, J. Q. Davis,
+A. Mohiuddin, L. Kaiser, D. B. Belanger, L. J. Colwell, and A. Weller. Rethinking attention with performers.
+In ICLR, 2021. (Cited on 2, 9, 10, 22, 24)
+[12] K. M. Choromanski, M. Rowland, and A. Weller. The unreasonable effectiveness of structured random
+orthogonal embeddings. In NeurIPS, 2017. (Cited on 3, 23)
+[13] T. Cohen and M. Welling. Group equivariant convolutional networks. In ICML, 2016. (Cited on 7)
+[14] T. S. Cohen and M. Welling. Steerable cnns. In ICLR, 2017. (Cited on 7)
+[15] J. Cordonnier, A. Loukas, and M. Jaggi. On the relationship between self-attention and convolutional
+layers. In ICLR, 2020. (Cited on 7)
+[16] Z. Dai, H. Liu, Q. V. Le, and M. Tan. Coatnet: Marrying convolution and attention for all data sizes. In
+NeurIPS, 2021. (Cited on 10)
+[17] J. Devlin, M. Chang, K. Lee, and K. Toutanova. BERT: pre-training of deep bidirectional transformers for
+language understanding. In NAACL-HLT, 2019. (Cited on 1, 2, 3, 4, 7, 10)
+[18] A. Dosovitskiy, L. Beyer, A. Kolesnikov, D. Weissenborn, X. Zhai, T. Unterthiner, M. Dehghani, M. Minderer, G. Heigold, S. Gelly, J. Uszkoreit, and N. Houlsby. An image is worth 16x16 words: Transformers
+for image recognition at scale. In ICLR, 2021. (Cited on 1, 2, 3, 4, 7, 9, 10)
+[19] V. P. Dwivedi and X. Bresson. A generalization of transformer networks to graphs. arXiv, 2020. (Cited on
+1, 7)
+[20] V. P. Dwivedi, C. K. Joshi, T. Laurent, Y. Bengio, and X. Bresson. Benchmarking graph neural networks.
+arXiv, 2020. (Cited on 3, 7, 10, 23, 27)
+[21] J. Gilmer, S. S. Schoenholz, P. F. Riley, O. Vinyals, and G. E. Dahl. Neural message passing for quantum
+chemistry. In ICML, 2017. (Cited on 2, 4, 6)
+[22] A. N. Gorban, I. Y. Tyukin, D. V. Prokhorov, and K. I. Sofeikov. Approximation with random bases: Pro et
+contra. Inf. Sci., 2016. (Cited on 27)
+[23] B. Hanin and M. Sellke. Approximating continuous functions by relu nets of minimal width. arXiv, 2017.
+(Cited on 14, 20)
+[24] K. He, X. Chen, S. Xie, Y. Li, P. Dollár, and R. B. Girshick. Masked autoencoders are scalable vision
+learners. arXiv, 2021. (Cited on 10)
+[25] D. Hendrycks and K. Gimpel. Gaussian error linear units (gelus). arXiv, 2018. (Cited on 24)
+[26] K. Hornik, M. B. Stinchcombe, and H. White. Multilayer feedforward networks are universal approximators.
+Neural Networks, 1989. (Cited on 20)
+[27] W. Hu, M. Fey, H. Ren, M. Nakata, Y. Dong, and J. Leskovec. OGB-LSC: A large-scale challenge for
+machine learning on graphs. arXiv, 2021. (Cited on 2, 7, 9, 24)
+
+11
+
+[28] G. Huang, Y. Sun, Z. Liu, D. Sedra, and K. Q. Weinberger. Deep networks with stochastic depth. In ECCV,
+2016. (Cited on 24)
+[29] M. S. Hussain, M. J. Zaki, and D. Subramanian. Edge-augmented graph transformers: Global self-attention
+is enough for graphs. arXiv, 2021. (Cited on 1, 2, 7, 9, 10, 22)
+[30] A. Jaegle, S. Borgeaud, J. Alayrac, C. Doersch, C. Ionescu, D. Ding, S. Koppula, D. Zoran, A. Brock,
+E. Shelhamer, O. J. Hénaff, M. M. Botvinick, A. Zisserman, O. Vinyals, and J. Carreira. Perceiver IO: A
+general architecture for structured inputs & outputs. arXiv, 2021. (Cited on 1, 7, 22)
+[31] A. Jaegle, F. Gimeno, A. Brock, O. Vinyals, A. Zisserman, and J. Carreira. Perceiver: General perception
+with iterative attention. In ICML, 2021. (Cited on 1, 7, 22)
+[32] A. Katharopoulos, A. Vyas, N. Pappas, and F. Fleuret. Transformers are rnns: Fast autoregressive
+transformers with linear attention. In ICML, 2020. (Cited on 22)
+[33] N. Keriven and G. Peyré. Universal invariant and equivariant graph neural networks. In NeurIPS, 2019.
+(Cited on 28)
+[34] J. Kim, S. Oh, and S. Hong. Transformers generalize deepsets and can be extended to graphs and
+hypergraphs. In NeurIPS, 2021. (Cited on 1, 2, 4, 6, 7, 14, 15, 28)
+[35] D. P. Kingma and J. Ba. Adam: A method for stochastic optimization. In ICLR, 2015. (Cited on 27)
+[36] T. N. Kipf and M. Welling. Semi-supervised classification with graph convolutional networks. In ICLR,
+2017. (Cited on 27)
+[37] Z. Kolter, S. Bai, D. Wilmott, M. Kornbluth, and J. Mailoa. First place solution of 2019 champs predicting molecular properties challenge. https://www.kaggle.com/c/champs-scalar-coupling/
+discussion/106575, 2019. (Cited on 10)
+[38] D. Kreuzer, D. Beaini, W. L. Hamilton, V. Létourneau, and P. Tossou. Rethinking graph transformers with
+spectral attention. NeurIPS, 2021. (Cited on 7, 10, 22, 23, 27)
+[39] J. Lee, Y. Lee, J. Kim, A. R. Kosiorek, S. Choi, and Y. W. Teh. Set transformer: A framework for
+attention-based permutation-invariant neural networks. In ICML, 2019. (Cited on 7, 22)
+[40] Q. Li, Z. Han, and X. Wu. Deeper insights into graph convolutional networks for semi-supervised learning.
+In AAAI, 2018. (Cited on 1, 7)
+[41] V. Likhosherstov, K. Choromanski, and A. Weller. On the expressive power of self-attention matrices.
+arXiv, 2021. (Cited on 7)
+[42] D. Lim, J. Robinson, L. Zhao, T. E. Smidt, S. Sra, H. Maron, and S. Jegelka. Sign and basis invariant
+networks for spectral graph representation learning. arXiv, 2022. (Cited on 7, 10, 23, 27)
+[43] K. Lin, L. Wang, and Z. Liu. Mesh graphormer. In ICCV, 2021. (Cited on 1, 7)
+[44] I. Loshchilov and F. Hutter. Decoupled weight decay regularization. In ICLR, 2019. (Cited on 24)
+[45] X. Ma, X. Kong, S. Wang, C. Zhou, J. May, H. Ma, and L. Zettlemoyer. Luna: Linear unified nested
+attention. NeurIPS, 2021. (Cited on 22)
+[46] H. Maron, H. Ben-Hamu, H. Serviansky, and Y. Lipman. Provably powerful graph networks. In NeurIPS,
+2019. (Cited on 2, 4, 6, 14, 28)
+[47] H. Maron, H. Ben-Hamu, N. Shamir, and Y. Lipman. Invariant and equivariant graph networks. In ICLR,
+2019. (Cited on 2, 4, 5, 6, 7, 14, 15, 28)
+[48] H. Maron, E. Fetaya, N. Segol, and Y. Lipman. On the universality of invariant networks. In ICML, 2019.
+(Cited on 4, 28)
+[49] H. Maron, O. Litany, G. Chechik, and E. Fetaya. On learning sets of symmetric elements. In ICML, 2020.
+(Cited on 7)
+[50] E. Min, R. Chen, Y. Bian, T. Xu, K. Zhao, W. Huang, P. Zhao, J. Huang, S. Ananiadou, and Y. Rong.
+Transformer for graphs: An overview from architecture perspective. arXiv, 2022. (Cited on 1, 7)
+[51] D. Q. Nguyen, T. D. Nguyen, and D. Phung. Universal graph transformer self-attention networks. In
+WWW, 2022. (Cited on 1, 7)
+[52] K. Oono and T. Suzuki. Graph neural networks exponentially lose expressive power for node classification.
+In ICLR, 2020. (Cited on 1, 7)
+[53] H. Pan and R. Kondor. Permutation equivariant layers for higher order interactions. In AISTATS, 2022.
+(Cited on 7)
+[54] W. Park, W. Chang, D. Lee, J. Kim, and S. won Hwang. Grpe: Relative positional encoding for graph
+transformer. arXiv, 2022. (Cited on 1, 2, 7, 9, 10, 22)
+[55] H. Peng, N. Pappas, D. Yogatama, R. Schwartz, N. A. Smith, and L. Kong. Random feature attention. In
+ICLR, 2021. (Cited on 22)
+
+12
+
+[56] S. Ravanbakhsh, J. G. Schneider, and B. Póczos. Equivariance through parameter-sharing. In ICML, 2017.
+(Cited on 7)
+[57] S. Reed, K. Żolna, E. Parisotto, S. G. Colmenarejo, A. Novikov, G. Barth-Maron, M. Giménez, Y. Sulsky,
+J. Kay, J. T. Springenberg, T. Eccles, J. Bruce, A. Razavi, A. Edwards, N. Heess, Y. Chen, R. Hadsell,
+O. Vinyals, M. Bordbar, and N. de Freitas. A generalist agent. arXiv, 2022. (Cited on 1)
+[58] Y. Rong, Y. Bian, T. Xu, W. Xie, Y. Wei, W. Huang, and J. Huang. Self-supervised graph transformer on
+large-scale molecular data. In NeurIPS, 2020. (Cited on 1, 7)
+[59] B. Rozemberczki, C. Allen, and R. Sarkar. Multi-scale attributed node embedding. J. Complex Networks,
+2021. (Cited on 26)
+[60] H. Serviansky, N. Segol, J. Shlomi, K. Cranmer, E. Gross, H. Maron, and Y. Lipman. Set2graph: Learning
+graphs from sets. In NeurIPS, 2020. (Cited on 7, 28)
+[61] O. Shchur, M. Mumme, A. Bojchevski, and S. Günnemann. Pitfalls of graph neural network evaluation.
+arXiv, 2018. (Cited on 26)
+[62] Z. Shen, M. Zhang, H. Zhao, S. Yi, and H. Li. Efficient attention: Attention with linear complexities. In
+WACV, 2021. (Cited on 22)
+[63] Y. Shi, S. Zheng, G. Ke, Y. Shen, J. You, J. He, S. Luo, C. Liu, D. He, and T. Liu. Benchmarking
+graphormer on large-scale molecular modeling datasets. arXiv, 2022. (Cited on 9)
+[64] A. Steiner, A. Kolesnikov, X. Zhai, R. Wightman, J. Uszkoreit, and L. Beyer. How to train your vit? data,
+augmentation, and regularization in vision transformers. arXiv, 2021. (Cited on 24)
+[65] Y. Tay, M. Dehghani, D. Bahri, and D. Metzler. Efficient transformers: A survey. arXiv, 2020. (Cited on 1)
+[66] N. Thomas, T. E. Smidt, S. Kearnes, L. Yang, L. Li, K. Kohlhoff, and P. Riley. Tensor field networks:
+Rotation- and translation-equivariant neural networks for 3d point clouds. arXiv, 2018. (Cited on 7)
+[67] J. Tompson, R. Goroshin, A. Jain, Y. LeCun, and C. Bregler. Efficient object localization using convolutional
+networks. In CVPR, 2015. (Cited on 23)
+[68] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, L. Kaiser, and I. Polosukhin.
+Attention is all you need. In NeurIPS, 2017. (Cited on 1, 3, 9, 14)
+[69] P. Velickovic, G. Cucurull, A. Casanova, A. Romero, P. Liò, and Y. Bengio. Graph attention networks. In
+ICLR, 2018. (Cited on 1, 7, 24, 27)
+[70] H. Wang, S. Ma, L. Dong, S. Huang, D. Zhang, and F. Wei. Deepnet: Scaling transformers to 1, 000 layers.
+arXiv, 2022. (Cited on 10)
+[71] S. Wang, B. Z. Li, M. Khabsa, H. Fang, and H. Ma. Linformer: Self-attention with linear complexity.
+arXiv, 2020. (Cited on 22)
+[72] X. Wang, Z. Tu, L. Wang, and S. Shi. Self-attention with structural position representations. In EMNLPIJCNLP, 2019. (Cited on 1)
+[73] M. Weiler, M. Geiger, M. Welling, W. Boomsma, and T. Cohen. 3d steerable cnns: Learning rotationally
+equivariant features in volumetric data. In NeurIPS, 2018. (Cited on 7)
+[74] N. Wies, Y. Levine, D. Jannai, and A. Shashua. Which transformer architecture fits my data? A vocabulary
+bottleneck in self-attention. In ICML, 2021. (Cited on 10)
+[75] R. Xiong, Y. Yang, D. He, K. Zheng, S. Zheng, C. Xing, H. Zhang, Y. Lan, L. Wang, and T. Liu. On layer
+normalization in the transformer architecture. In ICML, 2020. (Cited on 24)
+[76] Y. Xiong, Z. Zeng, R. Chakraborty, M. Tan, G. Fung, Y. Li, and V. Singh. Nyströmformer: A nyström-based
+algorithm for approximating self-attention. In AAAI, 2021. (Cited on 22)
+[77] K. Xu, W. Hu, J. Leskovec, and S. Jegelka. How powerful are graph neural networks? In ICLR, 2019.
+(Cited on 7, 27)
+[78] C. Ying, T. Cai, S. Luo, S. Zheng, G. Ke, D. He, Y. Shen, and T. Liu. Do transformers really perform bad
+for graph representation? In NeurIPS, 2021. (Cited on 1, 2, 7, 9, 10, 22, 24, 27)
+[79] F. X. Yu, A. T. Suresh, K. M. Choromanski, D. N. Holtmann-Rice, and S. Kumar. Orthogonal random
+features. In NeurIPS, 2016. (Cited on 3, 23)
+[80] K. Yuan, S. Guo, Z. Liu, A. Zhou, F. Yu, and W. Wu. Incorporating convolution designs into visual
+transformers. In ICCV, 2021. (Cited on 10)
+[81] C. Yun, S. Bhojanapalli, A. S. Rawat, S. J. Reddi, and S. Kumar. Are transformers universal approximators
+of sequence-to-sequence functions? In ICLR, 2020. (Cited on 7, 14)
+[82] M. Zaheer, S. Kottur, S. Ravanbakhsh, B. Póczos, R. Salakhutdinov, and A. J. Smola. Deep sets. In
+NeurIPS, 2017. (Cited on 7)
+[83] M. Zopf. 1-wl expressiveness is (almost) all you need. arXiv, 2022. (Cited on 2)
+
+13
+
+A
+
+Appendix
+
+A.1
+
+Proofs
+
+A.1.1
+
+Extended Preliminary (Cont. from Section 3.1)
+
+Before proceeding to the proofs, we first provide additional preliminary material that supplements
+Section 3.1. We begin by formally defining multihead self-attention and Transformer. Our definition
+is equivalent to Vaswani et al. (2017) [68], except we omit layer normalization for simplicity as in
+[81, 23, 34]. Specifically, a multihead self-attention layer MSA : Rn×d → Rn×d is defined as:
+
+p 
+αh = softmax XwhQ (XwhK )> / dH ,
+(7)
+MSA(X)i =
+
+H X
+n
+X
+
+αhij Xj whV whO ,
+
+(8)
+
+h=1 j=1
+
+where H is number of heads, dH is head size, and whQ , whK ∈ Rd×dH , whV ∈ Rd×dv whO ∈ Rdv ×d .
+In our proofs, we use biases for query and key projections as in [81] but omit them here for brevity.
+With multihead self-attention, a Transformer layer T : Rn×d → Rn×d is defined as:
+H = X + MSA(X),
+(9)
+T (X) = H + MLP(H),
+(10)
+where MSA : Rn×d → Rn×d is a multihead self-attention layer with H heads of size dH and
+MLP : Rn×d → Rn×d is a tokenwise MLP with hidden dimension dF .
+We now provide the complete definition of invariant graph networks (IGNs) [47, 46] and maximally
+expressive equivariant linear layers [47] summarized in Section 3.1. We first recall Definition 1 and 2:
+k
+
+Definition 1. An order-k Invariant Graph Network (k-IGN) is a function Fk : Rn ×d0 → R written
+as the following:
+(T )
+
+(1)
+
+Fk = MLP ◦ Lk→0 ◦ Lk→k ◦ σ ◦ ... ◦ σ ◦ Lk→k ,
+
+(1)
+
+k
+k
+(t)
+where each Lk→k is equivariant linear layer [47] from Rn ×dt−1 to Rn ×dt , σ is activation function,
+k
+and Lk→0 is a invariant linear layer from Rn ×dT to R.
+k
+
+l
+
+0
+
+Definition 2. An equivariant linear layer is a function Lk→l : Rn ×d → Rn ×d written as follows
+k
+for order-k input X ∈ Rn ×d :
+XX µ
+X
+Lk→l (X)i =
+Bi,j Xj wµ +
+Cλi bλ ,
+(2)
+µ
+
+λ
+
+j
+0
+
+0
+
+where i ∈ [n]l , j ∈ [n]k are multi-indices, wµ ∈ Rd×d , bλ ∈ Rd are weight and bias parameters,
+l+k
+l
+and Bµ ∈ Rn and Cλ ∈ Rn are binary basis tensors corresponding to order-(l + k) and order-l
+equivalence classes µ and λ, respectively. Invariant linear layer is a special case of Lk→l with l = 0.
+We now define equivalence classes and basis tensors mentioned briefly in Definition 2. The equivalence classes are defined upon a specific equivalence relation ∼ on the index space of higher-order
+tensors as follows:
+Definition 3. An order-l equivalence class γ ∈ [n]l /∼ is an equivalence class of [n]l under the
+equivalence relation ∼, where the equivalence relation ∼ on multi-index space [n]l relates i ∼ j if
+and only if (i1 , ..., il ) = (π(j1 ), ..., π(jl )) for some node permutation π ∈ Sn .
+We note that a multi-index i has the same permutation-invariant equality pattern to any j that satisfies
+i ∼ j, i.e., ia = ib ⇔ ja = jb for all a, b ∈ [k]. Consequently, each equivalence class γ in Definition 3
+is a distinct set of all order-l multi-indices having a specific equality pattern.
+Now, for each equivalence class, we define the corresponding basis tensor as follows:
+l
+
+Definition 4. An order-l basis tensor Bγ ∈ Rn corresponding to an order-l equivalence class γ is
+a binary tensor defined as follows:
+
+1
+i∈γ
+Bγi =
+(11)
+0 otherwise
+14
+
+For a given l, it is known that there exist bell(l) order-l equivalence classes {γ1 , ..., γbell(l) } = [n]l /∼
+regardless of n [47]. This gives bell(l) order-l basis tensors Bγ1 , ..., Bγbell(l) accordingly. Thus, an
+equivariant linear layer Lk→l in Definition 2 has bell(l + k) weights and bell(l) biases.
+Let us consider the first-order equivariant layer L1→1 as an example. We have bell(2) = 2 secondorder equivalence classes γ1 and γ2 for the weight, with γ1 the set of all (i1 , i2 ) with i1 = i2 and γ2
+the set of all (i1 , i2 ) with i1 6= i2 . From Definition 4, their corresponding basis tensors are Bγ1 = I
+and Bγ2 = 11> − I. Given a set of features X ∈ Rn×d ,
+L1→1 (X) = IXw1 + (11> − I)Xw2 + 1b> ,
+0
+
+(12)
+
+0
+
+with two weights w1 , w2 ∈ Rd×d , and a single bias b ∈ Rd . For graphs (k = l = 2), we have
+bell(4) = 15 weights and bell(2) = 2 biases.
+A.1.2
+
+Proof of Lemma 1 (Section 3.3)
+
+To prove Lemma 1, we need to show that each basis tensor Bµ (Eq. (11)) in weights of equivariant
+linear layers (Eq. (2)) can be approximated by the self-attention coefficient αh (Eq. (7)) to arbitrary
+precision up to normalization if its input is augmented by node and type identifiers (Section 3.3).
+From Definition 4, each entry of basis tensor Bµi,j encodes whether (i, j) ∈ µ or not. Here, our key
+idea is to break down the inclusion test (i, j) ∈ µ into equivalent but simpler Boolean tests that can be
+implemented in self-attention (Eq. (8)) as dot product of i-th query and j-th key followed by softmax.
+To achieve this, we show some supplementary Lemmas. We start with Lemma 2, which comes from
+Lemma 1 of Kim et al. (2021) [34] (we repeat their proof here for completeness).
+Lemma 2. For any order-(l + k) equivalence class µ, the set of all i ∈ [n]l such that (i, j) ∈ µ for
+some j ∈ [n]k forms an order-l equivalence class. Likewise, the set of all j such that (i, j) ∈ µ for
+some i forms an order-k equivalence class.
+Proof. We only prove for i as proof for j is analogous. For some (i1 , j1 ) ∈ µ, let us denote the
+equivalence class of i1 as γ l (i.e., i1 ∈ γ l ). It is sufficient that we prove i ∈ γ l ⇔ ∃j : (i, j) ∈ µ.
+(⇒) For all i ∈ γ l , as i1 ∼ i, there exists some π ∈ Sn such that i = π(i1 ) by definition. As π acts on
+multi-indices entry-wise, we have π(i1 , j1 ) = (i, π(j1 )). As π(i1 , j1 ) ∼ (i1 , j1 ) holds by definition,
+we have (i, π(j1 )) ∼ (i1 , j1 ), and thus (i, π(j1 )) ∈ µ. Therefore, for all i ∈ γ l , by setting j = π(j1 )
+we can always obtain (i, j) ∈ µ.
+(⇐) For all (i, j) ∈ µ, as (i, j) ∼ (i1 , j1 ), there exists some π ∈ Sn such that (i, j) = π(i1 , j1 ). This
+gives i = π(i1 ) and j = π(j1 ), leading to i ∼ i1 and therefore i ∈ γ l .
+Lemma 2 states that the equivalence classes γ l of i and γ k of j are identical for all (i, j) ∈ µ. Based
+on this, we appropriately break down the test (i, j) ∈ µ into a combination of several simpler tests, in
+particular including i ∈ γ l and j ∈ γ k :
+Lemma 3. For a given order-(l + k) equivalence class µ, let γ l and γ k be equivalence classes of
+some i1 ∈ [n]l , j1 ∈ [n]k respectively that satisfies (i1 , j1 ) ∈ µ. Then, for any i ∈ [n]l and j ∈ [n]k ,
+(i, j) ∈ µ holds if and only if the following conditions both hold:
+1. i ∈ γ l and j ∈ γ k
+2. ia = jb ⇔ i2a = j2b for all a ∈ [l], b ∈ [k], and (i2 , j2 ) ∈ µ
+Proof. (⇒) If (i, j) ∈ µ, from Lemma 2 it follows that i ∈ γ l and j ∈ γ k . Also, as all (i2 , j2 ) ∈ µ
+including (i, j) have the same equality pattern, it follows that for all a ∈ [l], b ∈ [k], and (i2 , j2 ) ∈ µ,
+if i2a = j2b then ia = jb and if i2a 6= j2b then ia 6= jb .
+(⇐) We show that the conditions specify that the equivalence class of (i, j) is µ.
+For this, it is convenient to represent an order-l equivalence class γ as an equivalent undirected graph
+G = (V, E) defined on vertex set V = {v1 , ..., vl } where the vertices va and vb are connected, i.e.,
+(va , vb ) ∈ E if and only if the equivalence class γ specifies ia = ib ∀i ∈ γ. Then, for some multi-index
+i0 ∈ [n]l , the inclusion i0 ∈ γ holds if and only if the equivalence class of i0 is represented as G.
+15
+
+(k = 2, l = 3)
+Gμ
+
+G of (i, j)
+
+u1
+
+v1
+
+Gl
+
+u1
+
+v1
+
+u1
+
+u1
+
+v1
+?
+
+u2
+
+u2
+
+v2
+
+v2
+
+Gk
+
+E
+
+?
+
+?
+
+u2
+
+v2
+
+Ek
+
+u3
+
+Goal: test (i, j) ∈ μ
+i.e., test G = G μ
+
+v1
+
+v1
+
+l
+
+v2
+
+u3
+
+u1
+
+EC
+
+u3
+
+u2
+?
+
+E
+
+l
+
+v2
+
+u3
+
+Condition 1.
+
+EC
+
+u2
+Ek
+u3
+
+Condition 2.
+
+Conditions 1 and 2 hold
+⟺ G = Gμ
+a ∈ [k ], b ∈ [l ], (i2, j2) ∈ μ
+⟺ (i, j) ∈ μ
+
+i ∈ γ l and j ∈ γ k
+
+ia = jb ⟺ i2a = j2b for all
+
+Figure 4: An exemplary illustration of testing (i, j) ∈ µ as a combination of simpler tests, based on
+equivalence classes µ, γ l , and γ k represented as graphs G µ , G l , and G k , respectively.
+Given this, let us represent the equivalence classes γ l , γ k , and µ as graphs G l , G k , and G µ respectively:
+G l = (V l , E l ) where V l = {v1 , ..., vl },
+
+(13)
+
+k
+
+k
+
+k
+
+k
+
+(14)
+
+µ
+
+µ
+
+µ
+
+µ
+
+G = (V , E ) where V = {u1 , ..., uk },
+l
+
+k
+
+G = (V , E ) where V = V ∪ V = {v1 , ..., vl , u1 , ..., uk }.
+
+(15)
+
+From the precondition that γ l and γ k are equivalence classes of i1 ∈ [n]l , j1 ∈ [n]k that satisfies
+(i1 , j1 ) ∈ µ, we can see that (va , vb ) ∈ E l ⇔ (va , vb ) ∈ E µ and (ua , ub ) ∈ E k ⇔ (ua , ub ) ∈ E µ .
+That is, if we consider V l and V k as a graph cut of G µ and write the cut-set (edges between V l and
+V k ) as E C = {(va , ub )|(va , ub ) ∈ E µ }, we obtain a partition {E l , E k , E C } of the edge set E µ .
+We now move to the conditions.
+Let us assume the first condition that i ∈ γ l and j ∈ γ k , with the equivalence classes represented as
+G l and G k , respectively. Now, let us consider the equivalence class of (i, j) represented by (unknown)
+graph G = (V, E). Considering V k and V l as a graph cut of G, we can see that E is partitioned as
+{E l , E k , E D } where E D is the cut-set (edges between V l and V k ).
+Let us also assume the second condition ia = jb ⇔ i2a = j2b for all a ∈ [l], b ∈ [k], and (i2 , j2 ) ∈ µ.
+This directly implies that e ∈ E C ⇔ e ∈ E D , meaning that E C = E D . As a result, we see that G and
+G µ are identical graphs, and therefore the equivalence class of (i, j) is µ and (i, j) ∈ µ holds.
+In Figure 4, we provide an exemplary illustration of testing (i, j) ∈ µ following the above discussion.
+With Lemma 3, we have a decomposition of (i, j) ∈ µ into independent conditions on i and j
+combined with pairwise conditions between i and j. In the following Definition 5 and Property 1, we
+encode these tests into a single scoring function that can be later implemented by self-attention.
+Definition 5. A scoring function δ(i, j; µ, ) is a map that, given an order-(l + k) equivalence class
+µ and  > 0, takes multi-indices i ∈ [n]l , j ∈ [n]k and gives the following:
+X X
+δ(i, j; µ, ) = 1i∈γ l + (1 − )1i∈γ
+sgn(a, b)1ia =jb , (16)
+/ l + 1j∈γ k + (1 − )1j∈γ
+/ k +
+a∈[l] b∈[k]
+
+where 1 is indicator, γ and γ are equivalence classes of i ∈ [n] , j1 ∈ [n]k such that (i1 , j1 ) ∈ µ,
+and the sign function sgn(·, ·) is defined as follows:
+(
++1 i2a = j2b ∀(i2 , j2 ) ∈ µ
+sgn(a, b) =
+.
+(17)
+−1 i2a 6= j2b ∀(i2 , j2 ) ∈ µ
+l
+
+k
+
+1
+
+l
+
+An important property of the scoring function δ(i, j; µ) is that it gives the maximum possible value if
+and only if the input satisfies (i, j) ∈ µ, as shown in the below Property 1.
+16
+
+w hQ
+
+w hK
+
+k 2d p
+kd p
+
+kd p
+
+...
+
+2d e
+
+kd p
+
+...
+
+2d e
+
+d
+
+d
+sgn(1, 1)
+
+√aI
+
+kd p
+
+k 2d p
+kd p
+
+dp
+
+sgn(1, k)
+
+√aI
+
+√aI d p
+
+d p ... √aI
+
+kd p
+
+...
+sgn(k, 1)
+
+√aI
+
+de
+bell(2k)d
+
+...
+
+dp
+
+...
+
+sgn(k, k)
+
+√aI d e d e
+
+d e √aI
+
+...
+
+√aI
+de
+bell(2k)d
+
+...
+
+√aI de de
+de
+
+√aI
+
+Figure 5: Query and key projection matrices whQ , whK (Eq. (18), Eq. (19)). Uncolored cells are zeros.
+Property 1. For given order-(l + k) equivalence class µ and positive real number  > 0, for any
+i ∈ [n]l and j ∈ [n]k , (i, j) ∈ µ holds if and only if the scoring function δ(i, j; µ, ) (Eq. (16)) outputs
+the maximum possible value.
+Proof. As shown in Lemma 3, (i, j) ∈ µ holds if and only if the following two conditions are met.
+1. i ∈ γ l and j ∈ γ k
+2. ia = jb ⇔ i2a = j2b for all a ∈ [l], b ∈ [k], and (i2 , j2 ) ∈ µ
+When both conditions are satisfied, in Eq. (16), we always have 1i∈γ l + (1 − )1i∈γ
+/ l = 1 and
+1j∈γ k + (1 − )1j∈γ
+/ k = 1. We also have 1ia =jb = 1 for sgn(a, b) = 1 and 1ia =jb = 0 for
+sgn(a, b) = −1 for all a ∈ [l], b ∈ [k]. As a result, Eq. (16) gives a constant output for all (i, j) ∈ µ.
+On the other hand, if given (i, j) violates any of the conditions (thus (i, j) ∈
+/ µ), we either have
+1i∈γ l + (1 − )1i∈γ
+/ l = (1 − ), or 1j∈γ k + (1 − )1j∈γ
+/ k = (1 − ), or 1ia =jb = 0 for sgn(a, b) = 1
+or 1ia =jb = 1 for sgn(a, b) = −1 for some a ∈ [l], b ∈ [k]. Any of these violations decrements the
+output of Eq. (16) by a positive (1 or ), resulting in a non-maximum output.
+Thus, the scoring function δ(i, j; µ, ) gives the maximum possible output if and only if (i, j) ∈ µ.
+Now, we prove Lemma 1.
+k
+
+Lemma 1. For all X ∈ Rn ×d and their augmentation Xin , self-attention coefficients αh (Eq. (3))
+2k
+computed with Xin win can approximate any basis tensor Bµ ∈ Rn of order-k equivariant linear
+layer Lk→k (Definition 2) to arbitrary precision up to normalization.
+k
+
+Proof. Let us first recall the node and type identifiers (Section 3.3) for order-k tensors X ∈ Rn ×d .
+Node identifier P ∈ Rn×dp is an orthonormal matrix with n rows, and type identifier is a trainable matrix E ∈ Rbell(k)×de with bell(k) rows Eγ1 , ..., Eγbell(k) , each designated for an order-k
+equivalence class γ. For each multi-index i = (i1 , ..., ik ) ∈ [n]k , we augment the corresponding
+i
+input tensor entry as [Xi , Pi1 , ..., Pik , Eγ ] where i ∈ γ i , obtaining the augmented order-k tensor
+k
+Xin ∈ Rn ×(d+kdp +de ) . We use a trainable projection win ∈ R(d+kdp +de )×dT to map them to a
+hidden dimension dT .
+We now use self-attention on Xin win to perform an accurate approximation of the equivariant basis.
+Specifically, we use each self-attention matrix αh (Eq. (7)) to approximate each basis tensor Bµh of
+Lk→k (Eq. (2)) to arbitrary precision up to normalization.
+Let us take dT = (d + kdp + de ) + bell(2k)d, putting bell(2k)d extra channels on top of channels
+of the augmented input Xin . We now let win = [I, 0], where I ∈ R(d+kdp +de )×(d+kdp +de ) is
+an identity matrix and 0 ∈ R(d+kdp +de )×(dT −(d+kdp +de )) is a matrix filled with zeros. With this,
+X0 = Xin win simply contains Xin in the first (d + kdp + de ) channels and zeros in the rest.
+Now we pass X0 to the self-attention layer in √
+Eq. (7), where each self-attention matrix is given as
+Q
+h
+0 Q
+0 K
+K >
+α = softmax((X wh + bh )(X wh + bh ) / dH ). The key idea is to set query and key projection
+17
+
+K
+dH
+parameters whQ , whK ∈ RdT ×dH and bQ
+appropriately so that the self-attention matrix αh
+h , bh ∈ R
+µ
+approximates a given basis tensor B corresponding to an order-2k equivalence class µ. Let γ Q and
+γ K be equivalence classes of some i1 , j1 ∈ [n]k respectively that satisfy (i1 , j1 ) ∈ µ (see Lemma 3).
+K
+We set head dimension dH = k 2 dp + 2de and set whQ , whK , bQ
+h , bh as follows:
+
+(
+I < i ≤ I + dp
+for I = d + (s − 1)dp ,
+
+√
+
+
+J < j ≤ J + dp for J = (s − 1)kdp + (r − 1)dp ,
+ sgn(s, r) aIi−I,j−J
+
+
+ for all s, r ∈ [k]
+(whQ )ij =
+,
+√
+I < i ≤ I + de
+for I = d + kdp ,
+
+
+aI
+2
+i−I,j−J
+
+
+J < j ≤ J + de for J = k dp ,
+
+
+0
+otherwise
+(18)
+
+(
+I < i ≤ I + dp
+for I = d + (r − 1)dp ,
+
+
+ √aIi−I,j−J
+J < j ≤ J + dp for J = (s − 1)kdp + (r − 1)dp ,
+
+
+
+ for all s, r ∈ [k]
+,
+(whK )ij =
+√
+I < i ≤ I + de
+for I = d + kdp ,
+
+
+aI
+2
+i−I,j−J
+
+
+J < j ≤ J + de for J = k dp + de ,
+
+
+0
+otherwise
+(19)
+ √ γK
+2
+J < j ≤ J + de for J = k dp
+aEj−J
+(bQ
+,
+(20)
+h )j =
+0
+otherwise
+ √ γQ
+J < j ≤ J + de for J = k2 dp + de
+aEj−J
+K
+(bh )j =
+,
+(21)
+0
+otherwise
+
+where a > 0 is a positive real, I is an identity matrix, and sgn(·, ·) is the sign function defined in
+Eq. (17) (Definition 5). In Figure 5 we provide an illustration of the query and key weights whQ , whK .
+With the parameters, i-th query and j-th key entries are computed as follows:
+√
+i
+K
+a[[sgn(1, 1)Pi1 , ..., sgn(1, k)Pi1 ], ..., [sgn(k, 1)Pik , ..., sgn(k, k)Pik ], Eγ , Eγ ],
+X0i whQ + bQ
+h =
+(22)
+k repeats
+
+X0j whK + bK
+h =
+
+}|
+{
+√ z
+Q
+j
+a[[Pj1 , ..., Pjk ], ..., [Pj1 , ..., Pjk ], Eγ , Eγ ].
+
+(23)
+
+Then, scaled pairwise dot product of query and key is given as follows:
+
+
+>
+0 K
+K
+X
+X
+(X0i whQ + bQ
+)
+(X
+w
++
+b
+)
+i
+Q
+j
+K
+a
+j h
+h
+h
+(Eγ )> Eγ + (Eγ )> Eγ +
+.
+√
+=√
+sgn(a, b)P>
+ia Pjb
+dH
+dH
+a∈[k] b∈[k]
+(24)
+We refer to the scaled dot product in Eq. (24) as the unnormalized attention coefficient α̃hi,j .
+We now let the type identifiers Eγ1 , ..., Eγbell(k) be radially equispaced unit vectors on any twodimensional subspace (Figure 6). This guarantees that any pair of type identifiers Eγ1 , Eγ2 with
+γ1 6= γ2 have dot product (Eγ1 )> Eγ2 ≤ cos (2π/bell(k)). By setting  = 1 − cos (2π/bell(k)) > 0,
+Q
+i
+this can be equivalently written as (Eγ1 )> Eγ2 ≤ 1 − . We additionally note that (Eγ )> Eγ = 1
+if and only if i ∈ γ Q because γ i = γ Q ⇔ i ∈ γ Q .
+Combining the above, Eq. (24), and Eq. (16), we have the following:
+a
+α̃hi,j = √ δ(i, j; µ, ) if (i, j) ∈ µ,
+dH
+a
+h
+α̃i,j ≤ √ δ(i, j; µ, ) otherwise,
+dH
+
+(25)
+(26)
+
+where  = 1 − cos (2π/bell(k)) and δ(i, j; µ, ) is the scoring function in Eq. (16) (Definition 5).
+18
+
+de = 3
+k = 3 → bell(k) = 5
+
+Eγ
+Eγ
+
+Eγ
+
+5
+
+4
+
+2π/5
+
+Eγ
+
+1
+
+Eγ
+
+2
+
+3
+
+Figure 6: k = 3 case example of bell(k) = 5 type identifiers embedded in de = 3 dimensional space.
+For a given query index i, let us assume there exists at least one key index j such that (i, j) ∈ µ 3 .
+From Property 1 and Eq. (25), all keys j that give (i, j) ∈ µ hold the same maximum value α̃hi,j =
+√a δ(i, j; µ, ), and any (i, j) ∈
+/ µ gives a value smaller at least by min (1, ) > 0. Then, in softmax
+dH
+normalization, we send a → ∞ by scaling up the query and key projection parameters. This pushes
+softmax arbitrarily close to the hardmax operator, leaving only the maximal entries leading to the
+following:
+Bµi,j
+exp(α̃hi,j )
+1(i,j∈µ)
+P
+P
+→
+αhi,j = P
+=
+µ as a → ∞.
+h
+j 1(i,j∈µ)
+j Bi,j
+j exp(α̃i,j )
+
+(27)
+
+Thus, as shown in Eq. (27), the attention coefficient αh can arbitrarily accurately approximate the
+normalized basis tensor Bµ for given equivalence class µ.
+A.1.3
+
+Proof of Theorem 1 (Section 3.3)
+k
+
+Theorem 1. For all X ∈ Rn ×d and their augmentation Xin , a Transformer layer with bell(2k)
+self-attention heads that operates on Xin win can approximate an order-k equivariant linear layer
+Lk→k (X) (Definition 2) to arbitrary precision.
+Proof. We continue from the proof of Lemma 1 and assume that each attention matrix α1 , ..., αbell(2k)
+in Eq. (7) head-wise
+approximates each normalized basis tensor Bµ1 , ..., Bµbell(2k) respectively, i.e.,
+µh P
+µh 4
+h
+αi,j = Bi,j / j Bi,j .
+Then, in Eq. (8) we use dv = d and set whV ∈ RdT ×d to whV = [I; 0], where I ∈ Rd×d is an identity
+matrix and 0 ∈ R(dT −d)×d is a matrix filled with zeros. With this, the value projection of each i-th
+entry simply gives the original input features, X0i whV = Xi .
+Then, we set output projections whO ∈ Rd×dT as follows:
+
+(wµh )i,j−J J < j ≤ J + d for J = (d + kdp + de ) + (h − 1)d
+O
+(wh )ij =
+,
+0
+otherwise
+
+(28)
+
+where wµ1 , ..., wµbell(2k) ∈ Rd×d are weight matrices of the given equivariant linear layer Lk→k in
+Eq. (2) (Definition 2), each corresponding to equivalence classes µ1 , ..., µbell(2k) .
+Then, output projection applied after value projection of each i-th input entry gives the following:
+X0i whV whO = Xi whO = [0, 0L , Xi wµh , 0R ],
+
+(29)
+
+where 0 ∈ R(d+kdp +de ) , 0L ∈ R(h−1)d , 0R ∈ RdT −(d+kdp +de )−hd are zero vectors.
+If such key index j does not exist, corresponding basis tensor entries are Bµ
+i,j = 0∀j, and approximation
+P
+target cannot be defined as normalizing denominator j Bµ
+is
+0.
+Thus
+we
+do
+not
+approximate for such i, let
+i,j
+attention row αi,· have any
+finite
+values,
+and
+later
+silence
+their
+attention
+output
+by
+multiplying
+zero at MLP.
+P µ
+4
+we handle the case j Bi,jh = 0 later separately as mentioned in footnote 3.
+3
+
+19
+
+Based on the results, we compute the MSA with skip connection H = X0 + MSA(X0 ) (Eq. (9)):
+Hi = X0i + MSA(X0 )i
+(30)
+h
+i
+γi
+= Xi , Pi1 , ..., Pik , E , 01
+
+
+X Bµi,jbell(2k)
+X Bµi,j1
+P µ1 Xj wµ1 , ...,
+(31)
++ 02 ,
+P µbell(2k) Xj wµbell(2k) 
+Bi,j
+j
+j Bi,j
+j
+j
+
+
+µbell(2k)
+µ1
+X
+B
+B
+i X
+i,j
+P i,jµ1 Xj wµ1 , ...,
+= Xi , Pi1 , ..., Pik , Eγ ,
+(32)
+P µbell(2k) Xj wµbell(2k)  ,
+Bi,j
+B
+j
+j i,j
+j
+j
+where 01 ∈ RdT −(d+kdp +de ) , 02 ∈ R(d+kdp +de ) are zero vectors.
+We use feedforward MLP (Eq. (10)) to denormalize and combine the result. Specifically, we make the
+elementwise MLP approximate following f : RdT → RdT based on universal approximation [23, 26]:
+
+P
+ −Hi,j + h∈[bell(2k)] g(Hi )h Hi,j+J + b(Hi )j j ≤ d
+f (Hi )j =
+0
+d < j ≤ (d + kdp + de ) , (33)
+ −H
+j > (d + kdp + de )
+i,j
+X µ
+Bi,jh ,
+(34)
+g(Hi )h =
+j
+
+X γ
+b(Hi )j = (bγ i )j = (
+Ci bγ )j ,
+
+(35)
+
+γ
+
+where J = (d + kdp + de ) + (h − 1)d, and bγ1 , ..., bγbell(k) are biases of the given equivariant linear
+layer Lk→k with corresponding basis tensors Cγ1 , ..., Cγbell(k) (Eq. (2)).
+Within the function f , the auxiliary function g : RdT → Rbell(2k) computes head-wise attention
+denormalization factor5 and b : RdT → Rd computes bias. As n and k are fixed constants, the outputs
+g(Hi ) and b(Hi ) only depend on the equivalence class γ i of i. We note that the functions g and b can
+i
+deduce the equivalence class from the input Hi , by extracting the type identifier Eγ = H>
+i [03 , I, 04 ]
+with I ∈ Rde ×de an identity matrix and 03 ∈ Rd+kdp , 04 ∈ Rbell(2k)d zero matrices.
+Based on the results, we compute the feedforward MLP with skip connection T (X0 ) = H + MLP(H)
+(Eq. (10)), which is the output of Transformer layer T :
+T (X0 )i = Hi + MLP(H)i
+(36)
+= Hi + f (Hi )
+(37)
+h
+i
+bell(2k)
+γi
+1
+= Xi , Pi1 , ..., Pik , E , Si , ..., Si
+
+
+X X µ
+X γ
+bell(2k) 
++ −Xi +
+Bi,jh Xj wµh +
+Ci bγ , 05 , −S1i , ..., −Si
+,
+(38)
+h∈[bell(2k)]
+
+γ
+
+j
+
+
+
+
+X
+
+X
+
+h∈[bell(2k)]
+
+j
+
+=
+
+Bµi,jh Xj wµh +
+
+X
+
+i
+
+Cγi bγ , Pi1 , ..., Pik , Eγ , 06  ,
+
+(39)
+
+γ
+
+µ
+
+where we write Shi =
+
+P
+
+j
+
+B h
+P i,jµh Xj wµh and 05 ∈ Rkdp +de , 06 ∈ R(dT −(d+kdp +de )) are zeros.
+j Bi,j
+
+In Eq.P
+(39),
+layer T (X0 )i only updates the first d channels of X0i from
+Pnoteµ that the Transformer
+P
+γ
+Xi to µ j Bi,j Xj wµ + γ Ci bγ . Therefore, with a simple projection wout = [I; 0] ∈ RdT ×d
+where I ∈ Rd×d is an identity matrix and 0 ∈ R(dT −d)×d is a matrix filled with zeros, we can select
+the first d channels of the output and finally obtain T (X0 )wout = Lk→k (X).
+In conclusion, a Transformer layer with bell(2k) self-attention heads that operates on augmented X0
+can approximate any given Lk→k (X) to arbitrary precision.
+5
+
+Note that the g(Hi )h gives 0 for all i that
+discussed at footnote 3 and footnote 4.
+
+µh
+j Bi,j = 0, which automatically handles the corner case as
+
+P
+
+20
+
+A.1.4
+
+Proof of Theorem 2 (Section 3.3)
+k
+
+Theorem 2. For all X ∈ Rn ×d and their augmentation Xin , a Transformer composed of T layers
+that operates on Xin win followed by sum-pooling and MLP can approximate an k-IGN Fk (X)
+(Definition 1) to arbitrary precision.
+Proof. We continue from the proof of Theorem 1, and assume that each Transformer layer T can
+approximate a given Lk→k by only updating the first d channels.
+Then, based on Theorem 1 we assume the following for each t < T :
+h
+i
+i
+(t)
+T (t) (X0 )i = σ(Lk→k (X))i , Pi1 , ..., Pik , Eγ , 06
+i
+
+(40)
+
+(t)
+
+where X0i = [Xi , Pi1 , ..., Pik , Eγ , 06 ]. While Theorem 1 gives Lk→k (X) in the first d channels,
+we add elementwise activation σ(·) by absorbing it into the elementwise MLP in Eq. (33). Then,
+leveraging the property that each Transformer layer T (t) only updates the first d channels, we stack
+T − 1 Transformer layers T (1) , ..., T (T −1) and obtain the following:
+h
+i
+i
+(T −1)
+(1)
+T (T −1) ◦ ... ◦ T (1) (X0 )i = σ ◦ Lk→k ◦ σ ◦ ... ◦ σ ◦ Lk→k (X)i , Pi1 , ..., Pik , Eγ , 06 . (41)
+(T )
+
+For the last layer T (T ) , we follow the procedure in the proof of Theorem 1 to approximate Lk→k ,
+(T )
+but slightly tweak Eq. (33) so that elementwise MLP copies each output entry Lk→k (X)i in
+appropriate reserved channels. Specifically, we let the elementwise MLP approximate following f 0 :
+(
+−Hi,j
+j≤D
+0
+−Hi,j + Cγi a Fi,j−(D+(a−1)d) D + (a − 1)d < j ≤ D + ad for all a ∈ [bell(k)] ,
+f (Hi )j =
+−Hi,j
+D + bell(k)d < j
+(42)
+P
+where D = (d + kdp + de ) and we abbreviate Fi,j = h∈[bell(2k)] g(Hi )h Hi,j+J + b(Hi )j with
+J, g, b defined as same as in Eq. (33). Recall that Cγi a = 1 if and only if i ∈ γa . Therefore, with
+(T )
+Eq. (42), we are simply duplicating each output entry Fi = Lk→k (X)i to spare channel indices
+reserved for the equivalence class of i (γa that i ∈ γa ).
+With the choice of T (T ) , the layer output T (T ) (X0 ) = H + MLP(H) (Eq. (10)) is computed as:
+T (T ) (X0 )i = Hi + MLP(H)i
+
+(43)
+
+0
+
+= Hi + f (Hi )
+h
+i
+(T )
+γ (k) (T )
+= 07 , Cγi 1 Lk→k (X)i , ..., Ci bell Lk→k (X)i , 08 ,
+
+(44)
+(45)
+
+where 07 ∈ R(d+kdp +de ) , 08 ∈ RdT −(d+kdp +de )−bell(k)d are zero vectors.
+Then, by applying T (T ) (Eq. (45)) on top of T (T −1) ◦ ... ◦ T (1) (Eq. (41)), we obtain the following:
+h
+i
+γ (k)
+T (T ) ◦ ... ◦ T (1) (X0 )i = 07 , Cγi 1 Yi , ..., Ci bell Yi , 08 .
+(46)
+(T )
+
+(1)
+
+where we abbreviate Y = Lk→k ◦ σ ◦ ... ◦ σ ◦ Lk→k (X).
+The remaining step is to utilize MLP ◦ sumpool to approximate MLPk ◦ Lk→0 that tops Fk . By
+sum-pooling over all indices i, we obtain the following:
+"
+#
+X γ
+X γ (k)
+bell
+(T )
+(1)
+0
+1
+sumpool ◦ T
+◦ ... ◦ T (X ) = 07 ,
+Ci Yi , ...,
+Ci
+Yi , 08 .
+(47)
+i
+
+i
+
+Now, we let the final MLP approximate the following function f 00 : RdT → Rd :
+
+
+X
+f 00 (X) = MLPk 
+Xa wµa + bf  where Xaj = XD+(a−1)d+j for j ∈ [d],
+a∈[bell(k)]
+
+21
+
+(48)
+
+where wµ1 , ..., wµbell(k) ∈ Rd×d and bf ∈ Rd are the weights and bias of the given invariant linear
+layer Lk→0 , and each Xa ∈ Rd is a chunk that coincides with reserved channels in Eq. (42). By
+plugging in the sum-pooled representation in Eq. (47), we finally obtain the following:
+MLP ◦ sumpool ◦ T (T ) ◦ ... ◦ T (1) (X0 ) = f 00 ◦ sumpool ◦ T (T ) ◦ ... ◦ T (1) (X0 )
+
+
+X X γ
+= MLPk 
+Ci a Yi wµa + bf 
+a∈[bell(k)]
+
+(49)
+(50)
+
+i
+
+= MLPk ◦ Lk→0 (Y)
+
+(51)
+
+(T )
+(1)
+= MLPk ◦ Lk→0 ◦ Lk→k ◦ σ ◦ ... ◦ σ ◦ Lk→k (X)
+
+(52)
+(53)
+
+= Fk (X),
+where the last equality comes from Definition 1.
+
+Taken together, we arrive at the conclusion that MLP◦sumpool◦T (T ) ◦...◦T (1) (X0 ) can approximate
+Fk (X) to arbitrary precision.
+A.2
+
+Additional Discussion on Linear Attention for Graph Transformers (Section 4)
+
+We provide an additional discussion on related work, specifically on why Graphormer [78], based on
+fully-connected self-attention on nodes, is not compatible with many linear attention methods that
+reduce the memory complexity from O(n2 ) to O(n). A range of prior graph Transformers including
+EGT [29], GRPE [54], and SAN [38] can be analyzed analogously. Let us first remind self-attention
+with query, key, value Q, K, V ∈ Rn×d and self-attention matrix α ∈ Rn×n :
+√
+X
+exp(Q>
+i Kj / d)
+√ .
+Att(Q, K, V)i =
+αij Vj where αij = P
+(54)
+>
+k exp(Qi Kk / d)
+j
+For graphs, as self-attention on nodes alone cannot recognize the edge connectivity, Graphormer
+incorporates the structural information of an input graph G into the self-attention matrix αG ∈ Rn×n
+via attention bias matrix bG ∈ Rn×n (referred to as the edge and spatial encoding) as the following:
+√
+G
+exp(Q>
+i Kj / d + bij )
+G
+√
+αij = P
+.
+(55)
+G
+>
+k exp(Qi Kk / d + bij )
+Unfortunately, this modification immediately precludes the adaptation of many efficient attention
+techniques developed for pure self-attention. As representative examples, we take Performer [11],
+Linear Transformer [32], Efficient Transformer [62], and Random Feature Attention [55]. The
+methods are based on kernelization of the Att(·) operator as the following:
+P
+
+>
+φ(Qi )>
+X φ(Qi )> φ(Kj )
+j φ(Kj )Vj
+P
+P
+Attφ (Q, K, V)i =
+Vj =
+.
+(56)
+>
+φ(Qi )> ( k φ(Kk ))
+k φ(Qi ) φ(Kk )
+j
+As the above factorization of exp(·) into a pairwise dot product eliminates the need to explicitly
+compute the attention matrix, it reduces both time and memory cost of self-attention to O(n). Yet,
+in Eq. (55), since the bias bGij is added to the dot product before exp(·), it is required that the full
+attention matrix αG ∈ Rn×n is always explicitly computed. Thus, Graphormer and related variations
+are unable to utilize the method and are bound to O(n2 ).
+While above discussion regards kernelization, a wide range of other efficient Transformers, including
+Set Transformer [39], LUNA [45], Linformer [71], Nyströmformer [76], Perceiver [31], and PerceiverIO [30] are not applicable to Graphormer due to similar reasons.
+A.3
+
+Experimental Details (Section 5)
+
+We provide detailed information on the datasets and models used in our experiments in Section 5.
+Dataset statistics can be found in Table 3.
+22
+
+Table 3: Statistics of the datasets.
+(a) Statistics of Barabási-Albert random graph dataset.
+
+Dataset
+Size
+Average # node
+Average # edge
+
+A.3.1
+
+Barabási-Albert
+1280
+14.9
+47.8
+
+(b) Statistics of PCQM4Mv2 dataset.
+
+Dataset
+Size
+Average # node
+Average # edge
+
+PCQM4Mv2
+3.7M
+14.1
+14.6
+
+Implementation Details of Node and Type Identifiers
+
+In most of our experiments on graph data (k = 2), we fix the Transformer encoder configuration and
+experiment with choices of node identifiers P ∈ Rn×dp and type identifiers E ∈ R2×de (Section 2).
+For type identifiers E, we set de equal to the hidden dimension d of the main encoder de = d and
+initialize and train them jointly with the model.
+For orthonormal node identifiers P, we use normalized orthogonal random features (ORFs) or
+Laplacian eigenvectors obtained as follows:
+• For orthogonal random features (ORFs), we use rows of random orthogonal matrix Q ∈
+Rn×n obtained with QR decomposition of random Gaussian matrix G ∈ Rn×n [79, 12].
+• For Laplacian eigenvectors, we perform eigendecomposition of graph Laplacian matrix, i.e.,
+rows of U from ∆ = I−D−1/2 AD−1/2 = U> ΛU, where A ∈ Rn×n is adjacency matrix,
+D is degree matrix, and Λ, U correspond to eigenvalues and eigenvectors respectively [20].
+The model expects dp -dimensional node identifiers P ∈ Rn×dp , while ORF and Laplacian eigenvectors are n-dimensional. To resolve this, if n < dp , we zero-pad the channels. If n > dp , for ORF
+we randomly sample dp channels and discard the rest, and for Laplacian eigenvectors we use dp
+eigenvectors with the smallest eigenvalues following common practice [20, 42, 38].
+As the Laplacian eigenvectors are defined up to the factor ±1 after normalized to unit length [20], we
+randomly flip their signs during training. For PCQM4Mv2 (Section 5.2), we apply random dropout
+on eigenvectors during training, similar to 2D channel dropout in ConvNets [67]. In our experiments
+with PCQM4Mv2, we find that both sign flip and eigenvector dropout work as effective regularizers
+and improves performance on validation data.
+A.3.2
+
+Second-Order Equivariant Basis Approximation (Section 5.1)
+
+Dataset For the equivariant basis approximation experiment, we use a synthetic dataset containing
+Barabási-Albert (BA) random graphs [2]. With U denoting discrete uniform distribution, each graph
+is generated by first sampling the number of nodes n ∼ U(10, 20) and the number for preferential
+attachment k ∼ U(2, 3), then iteratively adding n nodes by linking each new node to k random
+previous nodes. We do not utilize node or edge attributes and only use edge connectivity. We generate
+1152 graphs for training and 128 for testing. Further dataset statistics is provided in Table 3a.
+Architecture Each model tested in Table 1 is a single multihead self-attention layer (Eq. (9)) with
+hidden dimension d = 1024, heads H = bell(2 + 2) = 15, and head dimension dH = 128. As for
+the node identifier dimension, we use dp = 24 for ORF and dp = 20 for Laplacian eigenvectors.
+Experimental Setup We experiment with sparse or dense input graph representations. For sparse
+input, we embed each graph with n nodes and m edges into Xin ∈ R(n+m)×(2dp +de ) . For dense
+2
+input, we use all n2 pairwise edges and obtain Xin ∈ Rn ×(2dp +de ) , so that sparse edge connectivity
+is only used for obtaining Laplacian node identifiers.
+For both sparse and dense inputs, we follow the standard procedure in Section 2 to use node and type
+identifiers to obtain Xin ∈ RN ×(2dp +de ) where N = (n + m) or n2 , and project it to dimension
+d with trainable projection win . We also utilize a special token [null] with trainable embedding
+X[null] ∈ Rd (we shortly explain its use) to obtain the final input [X[null] ; Xin win ] ∈ R(1+N )×d .
+23
+
+For an input [X[null] ; Xin win ], the goal is to supervise each of the H = 15 self-attention heads with
+attention matrices α1 , ..., α15 to explicitly approximate row-normalized version of each equivariant
+basis Bµ1 , ..., Bµ15 ∈ RN ×N (Eq. (2)) on the N = (n + m) or n2 input tokens (except [null]).
+An issue in supervision is that for rows of Bµ that only contains zeros, normalization is not defined.
+To sidestep this, for such rows we simply supervise to attend to the special [null] token only. For
+all other rows of Bµ that contains nonzero entry, we supervise the model to ignore [null] token.
+Training and Evaluation We train and evaluate all models with L2 loss between attention matrix
+αh and normalized basis tensor Bµh (involving [null] token) averaged over heads h = 1, ..., 15.
+We train all models with AdamW optimizer [44] on 4 RTX 3090 GPUs each with 24GB. For sparse
+inputs we use batch size 512, and for dense inputs we use batch size 256 due to increased memory
+cost. We train all models for 3k steps (which takes about ∼1.5 hours) and apply linear learning rate
+warmup for 1k steps up to 1e-4 followed by linear decay to 0. For all models, we use dropout rate of
+0.1 on the input [X[null] ; Xin win ] to prevent overfitting.
+A.3.3
+
+Large-Scale Graph Learning (Section 5.2)
+
+Dataset For large-scale learning, we use the PCQM4Mv2 quantum chemistry regression dataset
+from the OGB-LSC benchmark [27] that contains 3.7M molecular graphs. Along with graph structure,
+we utilize both node and edge features e.g., atom and bond types following our standard procedure in
+Section 2. Dataset statistics is provided in Table 3b.
+Architecture All our models in Table 2 (under Pure Transformers) have the same encoder configuration following Graphormer [78], with 12 layers, hidden dimension d = 768, heads H = 32,
+and head dimension dH = 24. We adopt PreLN [75] that places layer normalization before MSA
+layer (Eq. (9)), MLP layer (Eq. (10)), and the final output projection after the last encoder layer. We
+implement MLP (Eq. (10)) as a stack of two linear layers with GeLU nonlinearity [25] in between.
+As for node identifier dimension, we use dp = 64 for ORF and dp = 16 for Laplacian eigenvectors.
+As an additional GNN baseline, we run Graph Attention Network (GATv2) [69, 5] under several
+configurations. For GAT and GAT-VN in Table 2, we use 5-layer GATv2 with hidden dimension 600
+and a single attention head, having 6.7M parameters in total. For GAT-VN (large), we use a 10-layer
+GATv2 with hidden dimension 1200 and a single attention head, having 55.2M parameters in total.
+For GAT-VN and GAT-VN (large), we use virtual node that helps modeling global interaction [27].
+Training and Evaluation We mainly report and compare the Mean Absolute Error (MAE) on the
+validation data, and report MAE on the hidden test data if possible. We train all models with L1 loss
+using AdamW optimizer [44] with gradient clipping at global norm 5.0. We use batch size 1024
+and train the models on 8 RTX 3090 GPUs with 24GB for ∼3 days. We train our models for 1M
+iterations, and apply linear lr warmup for 60k iterations up to 2e-4 followed by linear decay to 0. For
+our models in Table 2 except TokenGT (Lap) + Performer, we use the following regularizers:
+• Attention and MLP dropout rate 0.1
+• Weight decay 0.1
+• Stochastic depth [28, 64] with linearly increasing layer drop rate, reaching 0.1 at last layer
+• Eigenvector dropout rate 0.2 for TokenGT (Lap) (see Appendix A.3.1)
+For TokenGT (Lap) + Performer in Table 2, we load a trained model checkpoint of TokenGT (Lap),
+change its self-attention to FAVOR+ kernelized attention of Performer [11] that can provably accurately approximate softmax attention, and fine-tune it with AdamW optimizer for 0.1M training steps
+with 1k warmup iterations and cosine learning rate decay. With batch size 1024 on 8 RTX 3090
+GPUs, fine-tuning takes ∼ 12 hours. We do not use stochastic depth and eigenvector dropout for
+fine-tuning. For GAT baselines in Table 2, we use batch size 256 and train the models for 100 epochs
+with initial learning rate 0.001 decayed with a factor of 0.25 every 30 epochs.
+A.4
+
+Additional Experimental Results (Section 5)
+
+We report additional experimental results and discussions that could not be included in the main text
+due to space restriction.
+24
+
+Dense
+
+No embedding
+
+Type id. only
+
+Rand
+
+ORF
+
+Node id. (first-order) + type id.
+Rand
+
+ORF
+
+Node id. only
+Lap
+
+Rand
+
+ORF
+
+Node id. + type id.
+
+Lap
+
+Equivariant basis
+
+Basis tensor Bµ
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+25
+
+µ1
+
+1
+
+µ2
+
+µ
+
+µ
+2
+
+Self-attention matrix αh
+
+Figure 7: Self-attention maps learned under various node and type identifier configurations for two target equivariant basis tensors (out of 15), for both dense
+and sparse inputs. For better visualization, we clamp the entries by 0.01. Self-attention learns acute pattern coherent to equivariant basis when orthonormal node
+identifiers and type identifiers are provided both as input.
+
+Sparse
+
+Mean attention distance (hops)
+
+Mean attention distance (hops)
+
+TokenGT (ORF), Train
+
+4
+3
+2
+
+Head 1
+...
+
+1
+
+Head 32
+0
+
+0
+
+10
+5
+Network depth (layer)
+
+TokenGT (Lap), Train
+
+4
+3
+2
+
+Head 1
+...
+
+1
+
+Head 32
+0
+
+0
+
+10
+5
+Network depth (layer)
+
+Figure 8: Attention distance by head and network depth, measured for entire PCQM4Mv2 training
+set. Each dot shows mean attention distance in hops across graphs of a head at a layer.
+Table 4: Statistics of the transductive node classification datasets.
+Dataset
+# nodes
+# edges
+# classes
+
+CS
+18,333
+81,894
+15
+
+Physics
+34,493
+247,962
+5
+
+Photo
+7,650
+119,081
+8
+
+Computers
+13,752
+245,861
+10
+
+Chameleon
+2,277
+36,101
+6
+
+Crocodile
+11,631
+180,020
+6
+
+Table 5: Transductive node classification. OOM denotes out-of-memory error on a 24GB RTX 3080
+GPU. We report aggregated test accuracy at best validation accuracy over 7 randomized runs.
+GCN
+GAT
+GIN
+Graphormer
+TokenGT (Near-ORF) + Performer
+TokenGT (Lap) + Performer
+TokenGT (Lap) + Performer + SEB
+
+A.4.1
+
+CS
+0.895 ± 0.004
+0.893 ± 0.005
+0.895 ± 0.005
+0.791 ± 0.015
+0.882 ± 0.007
+0.902 ± 0.004
+0.903 ± 0.004
+
+Physics
+0.932 ± 0.004
+0.937 ± 0.01
+0.886 ± 0.046
+OOM
+0.931 ± 0.009
+0.941 ± 0.007
+0.950 ± 0.003
+
+Photo
+0.926 ± 0.008
+0.947 ± 0.006
+0.886 ± 0.017
+0.894 ± 0.004
+0.872 ± 0.011
+0.919 ± 0.009
+0.949 ± 0.007
+
+Computers
+0.873 ± 0.004
+0.914 ± 0.002
+0.362 ± 0.051
+0.814 ± 0.013
+0.82 ± 0.019
+0.86 ± 0.012
+0.912 ± 0.006
+
+Chameleon
+0.593 ± 0.01
+0.632 ± 0.011
+0.479 ± 0.027
+0.457 ± 0.011
+0.568 ± 0.019
+0.637 ± 0.032
+0.653 ± 0.029
+
+Crocodile
+0.660 ± 0.01
+0.692 ± 0.017
+0.515 ± 0.041
+0.489 ± 0.014
+0.583 ± 0.024
+0.638 ± 0.025
+0.718 ± 0.012
+
+Second-Order Equivariant Basis Approximation (Section 5.1)
+
+In addition to the Figure 2 in the main text that shows learned self-attention maps for dense input, in
+Figure 7, we provide an extended visualization of self-attention maps for both dense and sparse inputs.
+Consistent to Lemma 1 and Table 1, self-attention achieves accurate approximation of equivariant
+basis only when both the orthonormal node identifiers (ORF or Lap) and type identifiers are given.
+A.4.2
+
+Large-Scale Graph Learning (Section 5.2)
+
+In addition to the Figure 3 in the main text that shows attention distance measured for the PCQM4Mv2
+validation data, in Figure 8, we provide an extended figure of attention distance measured for the
+entire training set that contains ∼3M graphs. Overall we find similar trends as analyzed in Section 5.2.
+A.4.3
+
+Transductive Node Classification on Large Graphs (Section 5)
+
+While our main experiment in Section 5.2 focuses on graph-level predictions, TokenGT can in
+principle be applied to a more broad class of node-level or edge-level graph understanding tasks by
+putting prediction head on appropriate output tokens. To demonstrate this, we conduct additional
+experiments on a variety of transductive node classification datasets. In contrast to PCQM4Mv2, they
+involve large graphs with up to tens of thousands of nodes, posing a challenge to O(n2 ) complexity
+methods such as graph Transformers that rely on dense attention bias.
+Dataset We use transductive node classification datasets, where each data is represented as a node in
+a large-scale graph, including co-authorship (CS, Physics) [61], co-purchase (Photo, Computers) [61],
+and Wikipedia page networks (Chameleon, Crocodile) [59]. We randomly split the dataset into train,
+validation, and test sets by randomly reserving 30 random nodes per class for validation and test
+respectively, and use the rest of the nodes for training. Dataset statistics is provided in Table 4.
+26
+
+Approach We utilize simple variants of TokenGT with Performer kernel attention of O(n + m)
+complexity. Due to the large number of nodes n, an immediate challenge for TokenGT is dealing
+with the orthonormality assumption on the node identifiers (Lemma 1) as the maximal number of
+orthonormal node identifiers is bounded by dimension dp . In this case, it is reasonable to introduce
+near-orthonormal vectors as node identifiers, as it is theoretically guaranteed that we can draw
+an exponential number O(eΩ(dp ) ) of dp -dimensional near-orthonormal vectors [22]. For TokenGT
+(Near-ORF), we use dp = 64-dimensional random node identifiers where each entry is sampled
+from {−1/dp , +1/dp } with coin toss [22]. For TokenGT (Lap), we use a subset of the Laplacian
+eigenvectors as node identifiers, specifically dp /2 eigenvectors with lowest eigenvalues and dp /2
+eigenvectors with highest eigenvalues, and choose dp among 64-100 based on validation performance.
+While Near-ORF and Lap can theoretically serve as an efficient low-rank approximation for orthonormal node identifiers, their approximation can affect the quality of modeled equivariant basis
+(Section 3). In particular, equivariant basis (µ) represented as sparse basis tensor (Bµ ; Definition 4)
+are expected to be affected more, as they require most entries to be zero. To remedy this,P
+we take a
+simple approach of residually adding one of such sparse equivariant operators Xii 7→ Xii + j6=i Xij
+explicitly after each Transformer layer. We denote this variant as TokenGT (Lap) + Performer + SEB,
+where SEB abbreviates sparse equivariant basis. This fix is minimal, easy to implement, and highly
+efficient as it only requires a single torch.coalesce() call, and also empirically effective.
+Architecture All our models in Table 5 utilize a linear prediction head on the node tokens obtained
+at the final Transformer layer to perform node-level classification. We perform an exploratory
+hyperparameter search over the number of layers from 2-4, heads H from 1-4, hidden dimension d
+from 128-1024, and dropout rate from {0.1, 0.5}, based on validation performance.
+We employ strong message-passing GNN and graph Transformer baselines, including GCN [36],
+GAT [69], GIN [77] which has 2-WL expressiveness similar to ours, and Graphormer [78] based
+on fully-connected node self-attention. For message-passing GNNs, we use a 4-layer architecture
+and search hidden dimension d from {64, 1024} based on validation performance. For Graphormer,
+we perform an exploratory search on the number of layers from 1-4, heads H from 1-4, and hidden
+dimension d from 128-1024 based on validation performance. We apply 0.5 dropout for all baselines.
+Training and Evaluation We report and compare classification accuracy on the test nodes at
+best validation accuracy aggregated over 7 randomized runs. We train all models with node-level
+categorical cross-entropy loss using Adam optimizer [35] on a single RTX 3090 GPU with 24GB.
+We train all models with a learning rate of 1e-3 for 300 epochs.
+Results The results are in Table 5. Graphormer [78] suffers out-of-memory in the Physics dataset
+mainly due to the spatial encoding that requires O(n2 ) memory. By constraining the model capacity
+appropriately, we were able to run Graphormer on other datasets. However, we observe a low
+performance, presumably due to the memory cost that prevents depth and head scaling. As the
+spatial encoding is incorporated into the model via attention bias, the model strictly requires O(n2 )
+memory and cannot be easily made more efficient. On the other hand, TokenGT variants are able to
+utilize Performer attention with O(m + n) cost, which allows using larger models to achieve the best
+performance in all but one dataset (Computers, where the performance is on par with the best model).
+A.5
+
+Additional Discussion on Performance on PCQM4Mv2 (Section 5.2)
+
+As in the Table 2 in the main text, TokenGT currently shows a slightly lower performance compared
+to the Graphormer and its successors in the PCQM4Mv2 benchmark. We conjecture this is partly
+because we intentionally keep its components simple to faithfully adhere to the equivariance theory.
+We discuss some engineering approaches that may enhance the performance of TokenGT at the
+cost of differentiating from the theory. We consider engineering TokenGT to match or outperform
+sophisticated graph Transformers as a promising and important next research direction.
+Node Identifiers Our best performing TokenGT (Lap) currently uses Laplacian eigenvectors [20]
+as the node identifiers, which has been criticized for issues such as loss of structural information [38]
+and sign ambiguity [42]. Thus, one could try to relax the theoretical requirement for orthonormality of
+node identifiers and incorporate more powerful node positional encodings [38, 42] as node identifiers,
+which could potentially yield better performance in practice.
+27
+
+(Hyper)Edge Tokens TokenGT currently treats an undirected input edge (u, v) as if both directions
+(u, v) and (v, u) are present, leading to a pair of edge tokens [X(u,v) , Pu , Pv ] and [X(v,u) , Pv , Pu ].
+Similarly, an undirected order-k input hyperedge (v1 , ..., vk ) of an higher-order hypergraph is parsed
+to all possible orderings of node identifiers. While this is a common characteristic of tensor-based permutation equivariant neural networks [47, 48, 33, 60, 46, 34], they can lead to memory overhead and
+redundancy since multiple tokens represent an identical undirected edge. To avoid this, one can use a
+Pk
+single token for each undirected (hyper)edge and pool the node identifiers as i=1 ρ(Pvi ). Combined
+with powerful node identifiers, this approach could potentially enhance the model performance.
+
+28
+
+

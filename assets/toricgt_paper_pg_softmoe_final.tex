@@ -1,0 +1,1774 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{fontspec}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs,array,longtable,multirow}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage[nameinlink,noabbrev]{cleveref}
+
+\graphicspath{{./}{./toricgt_pg_softmoe_figures/}{./toricgt_extended_figures/}}
+\newfontfamily\hebrewfont{Noto Serif Hebrew}
+\newcommand{\heb}[1]{{\hebrewfont #1}}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  citecolor=blue!55!black,
+  urlcolor=blue!55!black
+}
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{assumption}[definition]{Assumption}
+\newtheorem{example}[definition]{Example}
+\theoremstyle{plain}
+\newtheorem{theorem}[definition]{Theorem}
+\newtheorem{lemma}[definition]{Lemma}
+\newtheorem{proposition}[definition]{Proposition}
+\newtheorem{corollary}[definition]{Corollary}
+\theoremstyle{remark}
+\newtheorem{remark}[definition]{Remark}
+
+\numberwithin{equation}{section}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\T}{\mathbb{T}}
+\newcommand{\one}{\mathbf{1}}
+\newcommand{\A}{\mathcal{A}}
+\newcommand{\G}{\mathcal{G}}
+\newcommand{\V}{\mathcal{V}}
+\newcommand{\E}{\mathcal{E}}
+\newcommand{\X}{\mathcal{X}}
+\newcommand{\Y}{\mathcal{Y}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\Tok}{\mathsf{Tok}}
+\newcommand{\Graph}{\mathsf{Graph}}
+\newcommand{\Phase}{\mathsf{Phase}}
+\newcommand{\Root}{\mathsf{Root}}
+\newcommand{\Pat}{\mathsf{Pat}}
+\newcommand{\Binyan}{\mathsf{Binyan}}
+\newcommand{\Feat}{\mathsf{Feat}}
+\newcommand{\softmax}{\operatorname{softmax}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\argmax}{\operatorname*{arg\,max}}
+\newcommand{\argmin}{\operatorname*{arg\,min}}
+\newcommand{\supp}{\operatorname{supp}}
+\newcommand{\Tr}{\operatorname{Tr}}
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Eop}{\mathbb{E}}
+\newcommand{\dist}{\operatorname{dist}}
+\newcommand{\poly}{\operatorname{poly}}
+\newcommand{\norm}[1]{\left\lVert #1\right\rVert}
+\newcommand{\abs}[1]{\left\lvert #1\right\rvert}
+\newcommand{\ip}[2]{\left\langle #1,#2\right\rangle}
+\newcommand{\transpose}{^{\mathsf T}}
+\newcommand{\defeq}{\vcentcolon=}
+
+\title{\vspace{-2em}ToricGT: Graph-Token Reasoning with Tropical Ring Attention, Noncommutative Tori, Soft-MoE Routing, and Parameter-Golf Compression}
+\author{Amelie Schreiber}
+\date{May 25, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This manuscript extends the ToricGT framework into a more formal, didactic, and proof-heavy specification.  ToricGT is a graph-to-graph architecture that combines TokenGT-style node and edge tokenization, exact ring evaluation of attention, tropical max-plus heads for dynamic-programming structure, finite noncommutative-torus channels for projective phase memory, and embedding-space Generative Flow Network fine-tuning.  We formalize bounded typed graph domains, prove equivariance of tokenization, masking, attention, decoding, and projective toric transports, and reduce bounded graph-to-graph universality to sequence-to-sequence Transformer universality.  We then give exact blockwise tropical ring-attention proofs, stability lemmas for active faces, and constructive simulations of Bellman-Ford-style semiring recurrences.  The operator-algebra layer is sharpened by normal-form, cocycle, trace, finite Weyl-pair, and irrational-spiral projection theorems.  A new Hebrew morphology section defines root-template graphs for biblical and classical Hebrew, including radical alignment, binyan/template structure, source-span graphs, paradigm graphs, and semiring alignment losses.  We add a visualization contract for auditing reasoning capacity: equivariance orbits, tropical active faces, toric phase maps, Hebrew paradigm lattices, GFlowNet reward landscapes, and proof-dependency graphs.  We integrate Soft-MoE routing as a typed, fully differentiable expert-slot layer for ToricGT graph tokens, prove its permutation equivariance, give low-rank and shared-expert variants for compact artifacts, and specify a Parameter-Golf-constrained micro-ToricGT language-model track with byte-accurate artifact accounting, BPB scoring, quantization-aware training, record-folder checklists, and compliance risk controls.  Finally, we integrate PolarQuant-style random preconditioning and recursive polar-angle quantization as an optional long-context KV-cache layer for ToricGT ring attention, with perturbation bounds showing when quantized keys and values preserve tropical outputs and active argmax faces.  This revision also adds two implementation-facing layers requested for the training program: Soft-MoE feed-forward replacement blocks adapted to graph tokens, and a Parameter-Golf compression track that turns ToricGT ideas into a self-contained micro language model satisfying the OpenAI Model Craft Challenge constraints.  The result is a mathematically controlled specification for a small, reproducible model family aimed at graph-structured mathematical, algebraic, tropical, Hebrew-morphological, and parameter-constrained language-model reasoning.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Purpose and high-level architecture}
+
+The original ToricGT proposal joined four pieces: graph-tokenized Transformers, ring attention, tropical max-plus reasoning, and finite noncommutative-torus features.  This version makes the claims precise.  The paper deliberately separates three levels of assertion.
+
+First, there are exact statements about finite graph-token computations: permutation equivariance, ring-schedule exactness, projective phase consistency, and stability of max-plus argmax faces.  These can be proved without empirical assumptions.  Second, there are compact-domain approximation statements.  These are universal-approximation results over bounded graph families, not claims about all finite graphs of arbitrary size.  Third, there are experimental design claims: if one trains on finite shadows of rotation algebras, braid groups, Coxeter groups, Hebrew morphological paradigms, and tropical graph algorithms, the correct evaluations are held-out families and graph-similarity-controlled splits, not random example-level splits.
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\textwidth]{toricgt_architecture_and_training_diagram.pdf}
+  \caption{Dark-mode architecture and training-paradigm diagram.  The central encoder mixes lower softmax/hybrid layers with middle and upper tropical ring-attention layers, while graph tokens carry endpoint, type, and toric phase features.  Training combines supervised graph-to-graph losses with embedding-space GFlowNet exploration.}
+  \label{fig:architecture}
+\end{figure}
+
+\paragraph{Model family.}
+A ToricGT instance consists of
+\begin{equation}
+  \mathsf{ToricGT}=D\circ \Phi_L\circ\cdots\circ\Phi_1\circ T,
+\end{equation}
+where $T$ is a graph-tokenizer, each $\Phi_\ell$ is a token-permutation-equivariant Transformer block with softmax, tropical, or hybrid attention, and $D$ is a shared node/edge/graph decoder.  Optional side modules supply toric phase transports, a GFlowNet policy head, and a PolarQuant cache for long-context inference.
+
+\paragraph{Core design invariants.}
+The model is engineered around five invariants.
+\begin{enumerate}[leftmargin=2em]
+  \item \emph{Graph-to-graph equivariance}: relabeling a graph relabels node and edge outputs in the same way.
+  \item \emph{Exact schedule/function separation}: ring attention changes the evaluation schedule, not the attention function being evaluated.
+  \item \emph{Semiring visibility}: tropical heads expose active maximizers and margins, so dynamic-programming decisions can be visualized and tested.
+  \item \emph{Projective algebraic memory}: toric phase channels encode twisted commutation and cocycles without pretending that a finite neural network faithfully represents an infinite $C^*$-algebra.
+  \item \emph{Auditable reasoning}: every run emits diagnostics that make equivariance, active faces, phase consistency, root-template alignments, and GFlowNet diversity inspectable.
+\end{enumerate}
+
+\section{Typed attributed graph domains}
+
+\subsection{Graph objects}
+
+\begin{definition}[Typed attributed directed multigraph]
+A typed attributed graph is a tuple
+\begin{equation}
+  G=(V,E,s,t,\tau_V,\tau_E,x,e,m_V,m_E),
+\end{equation}
+where $V=\{1,\ldots,n\}$ is a finite vertex set, $E=\{1,\ldots,m\}$ is a finite edge-token set, $s,t:E\to V$ are source and target maps, $\tau_V:V\to\mathcal T_V$ and $\tau_E:E\to\mathcal T_E$ are finite type maps, $x_i\in\R^{d_v}$ and $e_a\in\R^{d_e}$ are bounded real attributes, and $m_V,m_E$ are masks when the graph is embedded into a padded domain.
+\end{definition}
+
+The edge set is treated as a set of edge tokens rather than as raw file-order rows.  This matters: file order is rarely a graph invariant.  For a node relabeling $\pi\in S_n$, an edge $a$ with endpoints $(s(a),t(a))$ is transformed to an edge with endpoints $(\pi s(a),\pi t(a))$.  If edge tokens are stored by a canonical endpoint order, this induces an edge permutation $\rho_\pi$; if edge tokens are stored unordered, $\rho_\pi$ is any consistent action on the edge-token set.
+
+\begin{definition}[Padded bounded graph cell]
+Fix $N_{\max}$ and $M_{\max}$.  A padded graph cell $\G_{n,m,I,\tau}$ consists of graphs with exactly $n\le N_{\max}$ valid nodes, $m\le M_{\max}$ valid edges, fixed endpoint pattern $I\in\{1,\ldots,n\}^{m\times 2}$, fixed node and edge type pattern $\tau$, and attributes in compact sets $K_V\subset\R^{d_v}$ and $K_E\subset\R^{d_e}$.  The full bounded domain is the finite union
+\begin{equation}
+  \G_{\le N,\le M}=\bigcup_{n\le N,\,m\le M,\,I,\tau}\G_{n,m,I,\tau}.
+\end{equation}
+\end{definition}
+
+\begin{lemma}[Compactness of cells]
+Every graph cell $\G_{n,m,I,\tau}$ is compact.  The bounded padded graph space $\G_{\le N,\le M}$ is a finite union of compact cells and is therefore compact when equipped with the disjoint-union topology or with a mask topology that separates cells.
+\end{lemma}
+
+\begin{proof}
+Fix $n,m,I,\tau$.  The only continuous degrees of freedom are node attributes $X\in K_V^n$ and edge attributes $E\in K_E^m$.  Finite products of compact sets are compact by Tychonoff's theorem in the finite case, equivalently by Heine-Borel when the sets are closed and bounded subsets of Euclidean space.  Endpoint and type data are fixed discrete parameters in the cell.  Hence $\G_{n,m,I,\tau}\simeq K_V^n\times K_E^m$ is compact.  There are finitely many masks, endpoint patterns, and type patterns under fixed $N$ and $M$, so the union is finite.  A finite union of compact sets is compact.
+\end{proof}
+
+\begin{lemma}[Induced edge permutations form an action]
+Suppose edge canonicalization is label-compatible: for all $\pi,\sigma\in S_n$, canonicalizing after $\sigma$ and then after $\pi$ is the same as canonicalizing after $\pi\sigma$.  Then $\rho_{\pi\sigma}=\rho_\pi\rho_\sigma$ and $\rho_{\mathrm{id}}=\mathrm{id}$.
+\end{lemma}
+
+\begin{proof}
+Let $a$ be an edge token with endpoints $(u,v)$.  Applying $\sigma$ sends the endpoints to $(\sigma u,\sigma v)$ and moves the token to position $\rho_\sigma(a)$.  Applying $\pi$ next sends endpoints to $(\pi\sigma u,\pi\sigma v)$ and token position to $\rho_\pi(\rho_\sigma(a))$.  Direct application of $\pi\sigma$ gives the same endpoint pair.  By label-compatible canonicalization the same edge-token position is assigned, so $\rho_{\pi\sigma}(a)=\rho_\pi\rho_\sigma(a)$ for every $a$.  The identity relabeling leaves endpoints and canonical order unchanged.
+\end{proof}
+
+\begin{definition}[Graph-to-graph equivariance]
+Let $P_\pi=\pi\oplus\rho_\pi$ be the induced token permutation on node and edge outputs.  A graph-to-graph map $F:\G\to\Y_V^n\times\Y_E^m\times\Y_G$ is equivariant if
+\begin{equation}
+  F(\pi\cdot G)=\bigl(P_\pi F_{V,E}(G),F_G(G)\bigr)
+\end{equation}
+for every admissible relabeling $\pi$.  Its graph-level component is invariant when $F_G(\pi\cdot G)=F_G(G)$.
+\end{definition}
+
+\section{Tokenization as an equivariant construction}
+
+\subsection{Token maps}
+
+A graph tokenizer maps typed attributed graphs to token matrices.  Node and edge tokens have distinct type channels, endpoint channels, structural identifiers, and optional toric phase channels.  For a node $i$ and an edge token $a=(u,v)$,
+\begin{align}
+  t_i^V &= \phi_V(x_i,\tau_V(i)) + \eta_i + \kappa_i + \theta_i,\\
+  t_a^E &= \phi_E(e_a,\tau_E(a)) + \psi(\eta_u,\eta_v) + \zeta_a + \kappa_a + \theta_a.
+\end{align}
+Here $\eta_i$ is an equivariant node identifier, $\zeta_a$ is an edge identifier, $\kappa$ denotes optional structural features such as degree or Laplacian information, and $\theta$ denotes optional toric phase features.  The maps $\phi_V,\phi_E,\psi$ are shared across all nodes and edges.
+
+\begin{assumption}[Equivariant identifiers]
+The identifier fields obey
+\begin{equation}
+  \eta_i(\pi G)=\eta_{\pi^{-1}i}(G),\qquad
+  \zeta_a(\pi G)=\zeta_{\rho_\pi^{-1}a}(G),
+\end{equation}
+and structural/phase channels obey the analogous transformation law.
+\end{assumption}
+
+\begin{lemma}[Tokenization equivariance]
+Under equivariant identifiers and shared endpoint maps,
+\begin{equation}
+  T(\pi\cdot G)=P_\pi T(G).
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+For a node token,
+\begin{align}
+  t_i^V(\pi G)
+  &=\phi_V(x_{\pi^{-1}i},\tau_V(\pi^{-1}i))+\eta_{\pi^{-1}i}+\kappa_{\pi^{-1}i}+\theta_{\pi^{-1}i}\\
+  &=(P_\pi T(G))_i.
+\end{align}
+For an edge token $a$ in the relabeled graph, its preimage under $\rho_\pi$ is $\rho_\pi^{-1}a$.  Its source and target identifiers are the permuted identifiers of the original endpoints.  Since $\phi_E$ and $\psi$ are shared, the edge token after relabeling equals the edge token at $\rho_\pi^{-1}a$ before relabeling.  Concatenating node and edge rows gives $P_\pi T(G)$.
+\end{proof}
+
+\begin{lemma}[Mask equivariance]
+Let $M(G)\in\{0,-\infty\}^{L\times L}$ be an additive attention mask whose entries depend only on token validity, token types, and graph incidence relations.  Then
+\begin{equation}
+  M(\pi G)=P_\pi M(G)P_\pi\transpose.
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+Validity masks permute with valid token rows.  Type masks are preserved because node tokens map to node tokens and edge tokens map to edge tokens.  Incidence masks are preserved because $a$ is incident to $i$ exactly when $\rho_\pi a$ is incident to $\pi i$.  Thus every masked or unmasked pair is carried to its relabeled pair, which is exactly conjugation by $P_\pi$.
+\end{proof}
+
+\subsection{Attention and block equivariance}
+
+For token matrix $Z\in\R^{L\times d}$, define
+\begin{equation}
+  Q=ZW_Q,\\quad K=ZW_K,
+  \quad V=ZW_V,
+  \quad S=QK\transpose/\sqrt{d_h}.
+\end{equation}
+A softmax head computes $\softmax(S+M)V$.  A max-plus tropical head computes
+\begin{equation}
+  Y_{ic}=\max_j\{S_{ij}+M_{ij}+V_{jc}\}.
+\end{equation}
+
+\begin{lemma}[Softmax and tropical attention are token equivariant]
+For any token permutation matrix $P$ and mask satisfying $M(PZ)=PM(Z)P\transpose$,
+\begin{equation}
+  \operatorname{Attn}(PZ)=P\operatorname{Attn}(Z)
+\end{equation}
+for softmax attention and for tropical attention.
+\end{lemma}
+
+\begin{proof}
+Linear projections commute with row permutations: $Q(PZ)=PQ(Z)$ and similarly for $K,V$.  Hence the score matrix becomes
+\begin{equation}
+  S(PZ)=PQK\transpose P\transpose/\sqrt{d_h}=PS(Z)P\transpose.
+\end{equation}
+For softmax, row-wise exponentiation and normalization are invariant under simultaneous row and column reindexing:
+\begin{equation}
+  \softmax(PSP\transpose+PMP\transpose)=P\softmax(S+M)P\transpose.
+\end{equation}
+Multiplication by $PV$ then yields $P\softmax(S+M)V$.  For tropical attention, fix output row $i$ and coordinate $c$.  If $p$ is the permutation represented by $P$, then
+\begin{align}
+  Y'_{ic}
+  &=\max_j\{(PSP\transpose+PMP\transpose)_{ij}+(PV)_{jc}\}\\
+  &=\max_j\{S_{p^{-1}i,p^{-1}j}+M_{p^{-1}i,p^{-1}j}+V_{p^{-1}j,c}\}\\
+  &=\max_{j'}\{S_{p^{-1}i,j'}+M_{p^{-1}i,j'}+V_{j'c}\}=Y_{p^{-1}i,c}.
+\end{align}
+Thus $Y'=PY$.
+\end{proof}
+
+\begin{lemma}[Row-wise sublayers are equivariant]
+Shared feed-forward networks, residual connections, dropout with shared distribution over rows, and layer normalization applied row-wise commute with token permutations.
+\end{lemma}
+
+\begin{proof}
+A shared feed-forward network $f$ acts as $(f(Z_1),\ldots,f(Z_L))$.  Permuting rows before or after applying the same $f$ gives the same sequence of rows.  Residual addition is row-wise vector addition.  Layer normalization uses statistics within a row, not across row labels.  Dropout is exactly equivariant when the dropout mask is permuted with rows, and distributionally equivariant when masks are independently sampled from the same row-wise distribution.
+\end{proof}
+
+\begin{theorem}[TokenGT stack equivariance]
+A ToricGT encoder built from equivariant tokenization, equivariant masks, shared attention projections, shared row-wise feed-forward layers, residuals, layer normalization, and shared node/edge decoders is graph-to-graph equivariant.
+\end{theorem}
+
+\begin{proof}
+Tokenization maps $G$ to $Z$ and $\pi G$ to $P_\pi Z$.  Each encoder block maps $P_\pi Z$ to $P_\pi \Phi(Z)$ by the previous two lemmas.  A composition of equivariant maps is equivariant by induction on layers.  Shared node decoders apply the same map to every node-token row, and shared edge decoders apply the same map to every edge-token row.  Therefore decoding also commutes with $P_\pi$.  Graph-level pooling by sum, mean, log-sum-exp, max, or attention with a permutation-invariant query is invariant because it is a symmetric function of token rows.
+\end{proof}
+
+\section{Universal graph-to-graph approximation}
+
+\begin{assumption}[Token separability]
+For each fixed graph cell $\G_{n,m,I,\tau}$, the tokenizer $T$ is continuous and injective.  Since the domain is compact and the codomain is Hausdorff, $T$ is a homeomorphism from $\G_{n,m,I,\tau}$ onto $T(\G_{n,m,I,\tau})$.
+\end{assumption}
+
+\begin{theorem}[Fixed-cell graph-to-graph universality]
+Let $F:\G_{n,m,I,\tau}\to\R^{(n+m)\times d_o}$ be continuous and equivariant under all relabelings preserving the cell.  Under token separability, for every $\varepsilon>0$ there exists a TokenGT-style Transformer $\Phi$ without absolute position embeddings such that
+\begin{equation}
+  \sup_{G\in\G_{n,m,I,\tau}}\norm{\Phi(T(G))-F(G)}<\varepsilon,
+\end{equation}
+and $\Phi$ is token-permutation equivariant.
+\end{theorem}
+
+\begin{proof}
+Let $K_T=T(\G_{n,m,I,\tau})$.  The set $K_T$ is compact because $T$ is continuous and the graph cell is compact.  Since $T$ is a homeomorphism onto $K_T$, the conjugate map
+\begin{equation}
+  \widetilde F=F\circ T^{-1}:K_T\to\R^{(n+m)\times d_o}
+\end{equation}
+is continuous.  Equivariance of $F$ and $T$ gives, for every admissible $P_\pi$,
+\begin{equation}
+  \widetilde F(P_\pi Z)=F(T^{-1}(P_\pi Z))=F(\pi T^{-1}(Z))=P_\pi F(T^{-1}(Z))=P_\pi\widetilde F(Z).
+\end{equation}
+Yun et al.'s sequence-to-sequence Transformer universality theorem gives an equivariant Transformer approximating any continuous equivariant map on a compact token domain.  Apply that theorem to $\widetilde F$ on $K_T$.  The approximation inequality follows after composing with $T$.
+\end{proof}
+
+\begin{corollary}[Bounded variable-size universality]
+Let $\G_{\le N,\le M}$ be a finite union of graph cells.  If $F$ is continuous on each cell, equivariant, and compatible with padding masks, then a masked TokenGT model uniformly approximates $F$ on the bounded padded domain.
+\end{corollary}
+
+\begin{proof}
+Apply the fixed-cell theorem to every cell.  There are finitely many cells.  The model can read mask and type indicators; shared feed-forward layers can approximate a continuous partition-of-unity-like selector over this finite discrete partition.  Since the maximum of finitely many approximation errors can be made below $\varepsilon$, a single masked model approximates all cells.  Mask equivariance preserves the group action.
+\end{proof}
+
+\begin{remark}[Scope]
+The theorem is not a claim that one finite model uniformly solves all graph sizes, all denominators $q$, all braid lengths, all Hebrew lexemes, or the entire irrational rotation algebra.  It is a compact-domain theorem.  Infinite objects enter the experimental program through finite presentations, finite approximants, finite graphs, and curriculum generalization tests.
+\end{remark}
+
+\section{Tropical ring attention and semiring reasoning}
+
+\subsection{Max-plus heads with provenance}
+
+Let $\T_{\max}=\R\cup\{-\infty\}$ with $a\oplus b=\max(a,b)$ and $a\otimes b=a+b$.  A tropical attention head computes
+\begin{equation}
+  Y_{ic}=\bigoplus_{j=1}^L S_{ij}\otimes V_{jc}=\max_j(S_{ij}+V_{jc}).
+\end{equation}
+Its provenance set is
+\begin{equation}
+  A_{ic}=\argmax_j(S_{ij}+V_{jc}).
+\end{equation}
+When $A_{ic}$ is a singleton, the output is locally affine.  The top-two tropical margin is
+\begin{equation}
+  \Delta_{ic}=z_{ic}^{(1)}-z_{ic}^{(2)},\qquad z_{icj}=S_{ij}+V_{jc},
+\end{equation}
+where $z^{(1)}$ and $z^{(2)}$ are the largest and second-largest candidate values.
+
+\begin{theorem}[Exact blockwise tropical ring attention]
+Partition the key-value indices into blocks $B_1,\ldots,B_R$.  Let
+\begin{equation}
+  \widehat Y_{ic}^{(r)}=\max_{j\in B_r}(S_{ij}+V_{jc}),\qquad
+  \widehat Y_{ic}=\max_r\widehat Y_{ic}^{(r)}.
+\end{equation}
+Then $\widehat Y_{ic}=Y_{ic}$ for every query $i$ and coordinate $c$, independent of block order.
+\end{theorem}
+
+\begin{proof}
+The blocks form a partition of $\{1,\ldots,L\}$.  Thus
+\begin{align}
+Y_{ic}
+&=\max_{j\in\cup_r B_r}(S_{ij}+V_{jc})\\
+&=\max\left(\max_{j\in B_1}(S_{ij}+V_{jc}),\ldots,\max_{j\in B_R}(S_{ij}+V_{jc})\right)\\
+&=\max_r\widehat Y_{ic}^{(r)}.
+\end{align}
+The binary maximum is associative and commutative, so the order in which blocks arrive around the ring cannot change the exact real-arithmetic result.  Floating-point implementations differ only by standard numerical roundoff and tie-breaking behavior.
+\end{proof}
+
+\begin{corollary}[Exact provenance under ring evaluation]
+If each block returns both its block maximum and the local argmax set, then a second maximum over block maxima returns the same global provenance set $A_{ic}$ as full tropical attention.
+\end{corollary}
+
+\begin{proof}
+Let $m_r=\max_{j\in B_r}z_j$ and $m=\max_r m_r$.  A candidate $j$ is globally active exactly when $z_j=m$.  This holds exactly when $j$ is locally active in a block $B_r$ whose block value $m_r=m$.  Taking the union of local argmax sets over globally maximal blocks gives precisely the global argmax set.
+\end{proof}
+
+\begin{lemma}[Lipschitz stability of tropical attention]
+Let $S,V$ and $\widehat S,\widehat V$ satisfy
+\begin{equation}
+  \norm{S-\widehat S}_{\infty}\le\epsilon_S,
+  \qquad \norm{V-\widehat V}_{\infty}\le\epsilon_V.
+\end{equation}
+Then the tropical outputs satisfy
+\begin{equation}
+  \norm{Y-\widehat Y}_{\infty}\le \epsilon_S+\epsilon_V.
+\end{equation}
+If the original margin $\Delta_{ic}>2(\epsilon_S+\epsilon_V)$, then the active argmax index for $(i,c)$ is unchanged under perturbation.
+\end{lemma}
+
+\begin{proof}
+For every candidate $j$,
+\begin{equation}
+  \abs{(S_{ij}+V_{jc})-(\widehat S_{ij}+\widehat V_{jc})}\le\epsilon_S+
+\epsilon_V.
+\end{equation}
+The maximum function is 1-Lipschitz in $\ell_\infty$:
+\begin{equation}
+  \abs{\max_j a_j-\max_j b_j}\le\max_j\abs{a_j-b_j}.
+\end{equation}
+This proves the output bound.  For argmax stability, let $j^\star$ be the unique original maximizer and let $j\ne j^\star$.  After perturbation,
+\begin{align}
+  \widehat z_{j^\star}-\widehat z_j
+  &\ge (z_{j^\star}-(\epsilon_S+\epsilon_V))-(z_j+(\epsilon_S+\epsilon_V))\\
+  &\ge \Delta_{ic}-2(\epsilon_S+\epsilon_V)>0.
+\end{align}
+Thus $j^\star$ remains the unique maximizer.
+\end{proof}
+
+\subsection{Dynamic-programming gates}
+
+\begin{definition}[Equivariant max-plus graph circuit]
+An equivariant max-plus graph circuit is a finite directed acyclic circuit whose inputs are graph-token features, whose gates are shared over token orbits, and whose primitive gates compute
+\begin{equation}
+  g(x)=\max_{r\in[R]}(a_r\transpose x+b_r)
+\end{equation}
+or ordinary affine maps, with outputs transforming equivariantly under graph relabeling.
+\end{definition}
+
+\begin{lemma}[Tropical heads implement max-plus affine gates]
+For a bounded token domain, a tropical attention head followed by shared affine maps can implement, or uniformly approximate, a finite max-plus affine gate $g(x)=\max_r(a_r\transpose x+b_r)$.
+\end{lemma}
+
+\begin{proof}
+Create one candidate key-value channel for each affine form.  A shared linear map computes the candidate score $a_r\transpose x+b_r$ and stores it as $S_{ir}+V_{rc}$ for an appropriate query row $i$ and output coordinate $c$.  Tropical attention takes the maximum over $r$.  If exact candidate construction is not available because candidate identities are embedded continuously, a feed-forward network approximates the candidate scores uniformly on the compact domain, and the Lipschitz property of maximum transfers this approximation to the gate output.
+\end{proof}
+
+\begin{proposition}[One Bellman-Ford relaxation as tropical attention]
+For a directed weighted graph with current distances $D_u$ and edge weights $w_{u\to v}$, the relaxation
+\begin{equation}
+  D'_v=\min\left(D_v,\min_{u:u\to v}(D_u+w_{u\to v})\right)
+\end{equation}
+can be implemented by a min-plus variant of tropical attention with an incidence mask.
+\end{proposition}
+
+\begin{proof}
+Use the identity $\min_j z_j=-\max_j(-z_j)$.  For each query node $v$, mask keys to include $v$ itself and predecessors $u$ satisfying $u\to v$.  Give the self-candidate value $D_v$ and predecessor candidate value $D_u+w_{u\to v}$.  Applying negative max-plus attention computes the minimum over these candidates.  The incidence mask is equivariant by mask equivariance.  Therefore the relaxation is equivariant.
+\end{proof}
+
+\begin{theorem}[Tropical TokenGT approximation of bounded semiring algorithms]
+Let $A$ be a graph algorithm over bounded graphs that can be unrolled into $T$ finite max-plus, min-plus, or Boolean semiring circuit layers with shared local rules and equivariant masks.  Then a ToricGT stack with tropical heads and shared feed-forward layers uniformly approximates the unrolled algorithm on the bounded graph domain and is graph equivariant.
+\end{theorem}
+
+\begin{proof}
+Each primitive semiring gate is either a max/min over finitely many affine candidates, an addition of finite channels, or a Boolean threshold.  Max/min gates are implemented by tropical heads by the previous lemma; additions are affine maps; thresholds can be uniformly approximated away from zero-margin decision boundaries by ReLU feed-forward layers, or represented exactly if Boolean values are embedded as $0$ and $-\infty$ with exact masks.  Composing the approximating layers gives an approximation to the unrolled circuit.  Equivariance follows because every gate is shared over node and edge orbits and every mask transforms by conjugation.
+\end{proof}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_tropical_active_faces.pdf}
+  \caption{Tropical reasoning diagnostics.  Left: a shortest-path-style active predecessor path.  Right: a piecewise-linear tropical envelope whose active face and margin provide a direct explanation of a discrete decision.}
+  \label{fig:tropical-active}
+\end{figure}
+
+\section{Rotation algebras, noncommutative tori, and spiral projections}
+
+\subsection{Finite Weyl pairs and normal forms}
+
+For $\theta\in\R$, the rotation algebra $\A_\theta$ is generated by unitaries $U,V$ satisfying
+\begin{equation}
+  VU=e^{2\pi i\theta}UV.
+\end{equation}
+For rational $\theta=p/q$, finite clock and shift matrices give an exact Weyl pair.  Let $\omega=e^{2\pi i p/q}$,
+\begin{equation}
+  C_q=\diag(1,\omega,\omega^2,\ldots,\omega^{q-1}),\qquad S_q e_j=e_{j-1\bmod q}.
+\end{equation}
+
+\begin{lemma}[Finite clock-shift relation]
+The matrices $S_q$ and $C_q$ satisfy
+\begin{equation}
+  S_qC_q=\omega C_qS_q.
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+Apply both sides to a basis vector $e_j$, with indices interpreted modulo $q$.  Since $C_qe_j=\omega^j e_j$ and $S_qe_j=e_{j-1}$,
+\begin{equation}
+  S_qC_qe_j=\omega^j e_{j-1}.
+\end{equation}
+On the other hand,
+\begin{equation}
+  \omega C_qS_qe_j=\omega C_qe_{j-1}=\omega\cdot\omega^{j-1}e_{j-1}=\omega^j e_{j-1}.
+\end{equation}
+The two operators agree on every basis vector, so $S_qC_q=\omega C_qS_q$.
+\end{proof}
+
+\begin{remark}[Convention discipline]
+The sign of the clock-shift phase is a common source of synthetic-data bugs.  Every generated record must store the shift convention, the normal-form order, and whether the relation is $VU=\omega UV$ or $UV=\omega VU$.
+\end{remark}
+
+\begin{lemma}[Rotation-word normal form]
+Let $VU=\omega UV$, where $\omega=e^{2\pi i\theta}$.  Every word in $U^{\pm1},V^{\pm1}$ reduces to a unique expression
+\begin{equation}
+  \omega^c U^aV^b,
+\end{equation}
+where $a,b,c\in\Z$, after fixing the normal-form order $U$ before $V$.  If the word is $W=X_1\cdots X_T$ and $\deg(X_t)=(u_t,v_t)\in\Z^2$, then
+\begin{equation}
+  a=\sum_{t=1}^T u_t,
+  \qquad b=\sum_{t=1}^T v_t,
+  \qquad c=\sum_{1\le r<s\le T} v_r u_s,
+\end{equation}
+with signs interpreted by the same commutation convention.
+\end{lemma}
+
+\begin{proof}
+The relation $VU=\omega UV$ allows any adjacent out-of-order pair $VU$ to be swapped into $UV$ at the cost of multiplying by $\omega$.  Similarly, inverse pairs cancel using $UU^{-1}=U^{-1}U=VV^{-1}=V^{-1}V=1$, and inverse commutations follow by multiplying the basic relation by inverses.  Repeated adjacent swaps bubble all $U$ powers to the left and all $V$ powers to the right.  The net exponents $a$ and $b$ are additive because $U$ and $V$ powers combine within their own generators.  The phase exponent counts signed crossings in which a $V$ contribution originally appears before a later $U$ contribution; this is exactly $\sum_{r<s}v_ru_s$.  Confluence follows because this crossing count depends only on the ordered degree sequence, and all swap sequences that sort the word have the same inversion count in the abelianized degree lattice with the same bilinear cocycle.
+\end{proof}
+
+\subsection{Higher noncommutative tori}
+
+A higher noncommutative torus $\A_\Theta$ is generated by $U_1,\ldots,U_n$ with
+\begin{equation}
+  U_jU_k=e^{2\pi i\Theta_{jk}}U_kU_j,
+\end{equation}
+where $\Theta\in\R^{n\times n}$ is skew-symmetric.  For $a,b\in\Z^n$, define the cocycle
+\begin{equation}
+  \sigma_\Theta(a,b)=\exp(2\pi i a\transpose\Theta b).
+\end{equation}
+
+\begin{lemma}[Bicharacter identities]
+For $a,b,c\in\Z^n$,
+\begin{align}
+  \sigma_\Theta(a+b,c)&=\sigma_\Theta(a,c)\sigma_\Theta(b,c),\\
+  \sigma_\Theta(a,b+c)&=\sigma_\Theta(a,b)\sigma_\Theta(a,c),\\
+  \sigma_\Theta(a,b)\sigma_\Theta(b,a)&=1.
+\end{align}
+\end{lemma}
+
+\begin{proof}
+The first two identities follow from bilinearity:
+\begin{equation}
+  (a+b)\transpose\Theta c=a\transpose\Theta c+b\transpose\Theta c,
+\end{equation}
+and similarly in the second argument.  Exponentiating turns sums into products.  For the third identity, skew-symmetry gives $b\transpose\Theta a=-a\transpose\Theta b$.  Hence the exponents sum to zero.
+\end{proof}
+
+\begin{proposition}[Projective equivariance of toric transports]
+Let $T_a$ be a lattice transport on toric channels satisfying
+\begin{equation}
+  T_aT_b=\sigma_\Theta(a,b)T_{a+b}.
+\end{equation}
+If token relabelings act on rows and $T_a$ acts only on toric feature channels attached equivariantly to each row, then ToricGT layers built from shared maps, attention, and $T_a$ are graph-equivariant and projectively lattice-equivariant.
+\end{proposition}
+
+\begin{proof}
+A graph relabeling $P_\pi$ acts by row permutation.  A toric transport $T_a$ acts within the channel vector of every row by the same linear operator or by an endpoint-derived equivariant channel rule.  Therefore $P_\pi T_a=T_aP_\pi$.  The only noncommutativity among transports is the scalar cocycle $\sigma_\Theta(a,b)$, which yields projective equivariance.  Since all other sublayers are row-shared and equivariant, the composition retains graph equivariance and the stated projective lattice law.
+\end{proof}
+
+\subsection{Infinite spiral projection}
+
+The infinite spiral view is a visualization, not a finite representation theorem.  It makes the irrational rotation visible: repeated additions of $\alpha$ never close when $\alpha$ is irrational, and the orbit winds densely.
+
+\begin{lemma}[Density of an irrational circle orbit]
+If $\alpha\notin\Q$, then the set $\{k\alpha\bmod 1:k\in\N\}$ is dense in $[0,1)$.
+\end{lemma}
+
+\begin{proof}
+Fix $N\in\N$.  Consider the $N+1$ points $0,\alpha,2\alpha,\ldots,N\alpha$ modulo $1$.  Partition $[0,1)$ into $N$ intervals of length $1/N$.  By the pigeonhole principle, two points $r\alpha$ and $s\alpha$ lie in the same interval, so $\delta=(s-r)\alpha\bmod 1$ has distance at most $1/N$ from $0$.  Since $\alpha$ is irrational, $\delta\ne0$.  The arithmetic progression $0,\delta,2\delta,\ldots$ modulo $1$ visits every interval of length roughly $1/N$ before wrapping.  Because $N$ was arbitrary, every open interval contains some $k\alpha\bmod1$.
+\end{proof}
+
+\begin{definition}[Spiral projection feature]
+For irrational $\alpha$ and truncation length $K$, define the spiral-projection feature path
+\begin{equation}
+  \Gamma_K(k)=\left(\cos(2\pi k\alpha),\sin(2\pi k\alpha),k/K\right),\qquad 0\le k<K,
+\end{equation}
+and the projected torus path
+\begin{equation}
+  \Pi_K(k)=\left((R+r\cos(2\pi k\beta))\cos(2\pi k\alpha),
+  (R+r\cos(2\pi k\beta))\sin(2\pi k\alpha),
+  r\sin(2\pi k\beta)\right),
+\end{equation}
+where $1,\alpha,\beta$ are rationally independent.
+\end{definition}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\textwidth]{fig_spiral_projection.pdf}
+  \caption{Infinite spiral-projection diagnostic for the rotation algebra and noncommutative torus.  The cylinder shows irrational rotation by $\alpha$; the torus projection visualizes dense phase winding and finite phase-channel truncations.}
+  \label{fig:spiral}
+\end{figure}
+
+\begin{proposition}[Finite feature convergence of phases]
+Let $p_k/q_k$ be continued-fraction approximants to $\alpha$.  Then
+\begin{equation}
+  \abs{e^{2\pi i p_k/q_k}-e^{2\pi i\alpha}}\le 2\pi\abs{p_k/q_k-\alpha}\to0.
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+For real $x,y$, $\abs{e^{ix}-e^{iy}}=2\abs{\sin((x-y)/2)}\le\abs{x-y}$.  Set $x=2\pi p_k/q_k$ and $y=2\pi\alpha$.  Continued-fraction convergence gives $p_k/q_k\to\alpha$.
+\end{proof}
+
+\subsection{Trace supervision}
+
+The canonical trace on the rotation algebra satisfies
+\begin{equation}
+  \tau(U^aV^b)=\begin{cases}1,&a=b=0,\\0,&\text{otherwise.}\end{cases}
+\end{equation}
+For a finite Weyl-pair approximation, the normalized trace $q^{-1}\Tr(C_q^aS_q^b)$ obeys the same selection rule modulo $q$.
+
+\begin{lemma}[Finite trace selection]
+For the $q$-dimensional Weyl pair, if $a,b\in\Z$, then
+\begin{equation}
+  \frac1q\Tr(C_q^aS_q^b)=0
+\end{equation}
+unless $a\equiv b\equiv0\pmod q$, in which case the normalized trace is $1$.
+\end{lemma}
+
+\begin{proof}
+If $b\not\equiv0\pmod q$, then $S_q^b$ has no fixed basis vector, so $C_q^aS_q^b$ has zero diagonal and zero trace.  If $b\equiv0\pmod q$, then $S_q^b=I$ and
+\begin{equation}
+  \Tr(C_q^a)=\sum_{j=0}^{q-1}\omega^{aj}.
+\end{equation}
+This geometric sum is $q$ when $\omega^a=1$, equivalently $a\equiv0\pmod q$, and is $0$ otherwise.
+\end{proof}
+
+\section{Hebrew roots as graph-structured morphology}
+
+\subsection{Why Hebrew morphology belongs in ToricGT}
+
+Biblical and classical Hebrew morphology is naturally graph-structured.  A surface form is not merely a string: it is related to a lexical root, ordered radicals, a vocalic/consonantal template, a binyan or stem, prefixes and suffixes, morphosyntactic features, a lemma, a gloss, and a source span.  These objects form a typed graph with many-to-many dependencies.  A root such as \heb{כתב} (transliterated K-T-B) participates in forms such as \emph{katav} (\heb{כָּתַב}, ``he wrote''), \emph{kotev} (writing/writer), and \emph{miktav} (letter or writing).  A model trained only on linear strings must rediscover this structured factorization; a graph-token model can represent it explicitly.
+
+Classical grammars describe Hebrew and other Semitic languages through roots, stems, and patterns; computational morphology often implements such analyses with finite-state or two-level systems \cite{gesenius1910,waltke1990,joüon2006,koskenniemi1983,beesley2003,yona2008}.  ToricGT does not replace a morphological analyzer.  It consumes analyzer outputs, text spans, and uncertain analyses as typed graph evidence, and learns graph-to-graph tasks over those analyses.
+
+\begin{definition}[Hebrew root-template record]
+A Hebrew morphology record is a typed graph
+\begin{equation}
+  G_H=(V_H,E_H,\tau,\rho,x,\ell,y)
+\end{equation}
+with node types
+\begin{equation}
+\begin{split}
+  \mathcal T_V^H=\{&\Root,\mathsf{Radical},\Pat,\Binyan,\Feat,\mathsf{Prefix},\mathsf{Suffix},\\
+  &\mathsf{SurfaceForm},\mathsf{Lemma},\mathsf{Gloss},\mathsf{VerseSpan},\mathsf{Paradigm},\mathsf{AnalyzerHypothesis}\},
+\end{split}
+\end{equation}
+and edge types
+\begin{equation}
+\begin{split}
+  \mathcal T_E^H=\{&\mathsf{has\_radical},\mathsf{fills\_slot},\mathsf{has\_template},\mathsf{has\_binyan},\mathsf{has\_feature},\\
+  &\mathsf{attested\_at},\mathsf{glosses},\mathsf{same\_root},\mathsf{paradigm\_member},\mathsf{analyzer\_score}\}.
+\end{split}
+\end{equation}
+The target $y$ may include root identity, radical-slot alignment, binyan, feature bundle, lemma, gloss, paradigm membership, and confidence.
+\end{definition}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_hebrew_root_graph.pdf}
+  \caption{A root-template graph for K-T-B.  The actual graph record can also store Hebrew glyphs and source spans; the figure uses transliteration for directional readability.}
+  \label{fig:hebrew-root}
+\end{figure}
+
+\begin{definition}[Root-template rendering relation]
+Let $r=(r_1,r_2,r_3)$ be an ordered radical tuple, $p$ a template with consonant slots $C_1,C_2,C_3$ and vocalic/affix material, $b$ a binyan, and $f$ a feature bundle.  The rendering relation is a partial relation
+\begin{equation}
+  \mathcal R_H\subseteq \Root\times\Pat\times\Binyan\times\Feat\times\mathsf{SurfaceForm}
+\end{equation}
+where $(r,p,b,f,w)\in\mathcal R_H$ if $w$ is licensed by inserting radicals into template slots and applying the orthographic/phonological rules attached to $b$ and $f$.
+\end{definition}
+
+\begin{remark}[Root ambiguity]
+A Hebrew surface string can have multiple analyses.  Matres lectionis, missing niqqud, weak roots, gutturals, homographs, and clitic morphology can all create ambiguity.  The graph schema therefore allows multiple analyzer-hypothesis nodes with scores, instead of forcing a single gold analysis when the evidence is uncertain.
+\end{remark}
+
+\subsection{Graph construction algorithm}
+
+Given a tokenized Hebrew or biblical-Hebrew text with optional morphology, construct $G_H$ as follows.
+\begin{enumerate}[leftmargin=2em]
+  \item Create one \texttt{SurfaceForm} node per token or morpheme span.
+  \item For each analyzer hypothesis, create a hypothesis node with score $s_h$.
+  \item Attach root, radical, template, binyan, feature, lemma, gloss, and span nodes.  Share root and paradigm nodes across forms when the analyzer or lexicon identifies the same root.
+  \item Add \texttt{fills\_slot} edges from radicals to template slots and from slots to surface spans.
+  \item Add \texttt{same\_root} and \texttt{paradigm\_member} edges between lexemes/forms with the same root family.
+  \item Preserve uncertainty by edge weights or hypothesis scores rather than deleting non-maximal analyses.
+\end{enumerate}
+
+\begin{lemma}[Typed acyclicity of local morphology subgraphs]
+If paradigm-sharing edges are removed, each local root-template analysis graph is acyclic when edges are oriented from abstract causes to surface evidence.
+\end{lemma}
+
+\begin{proof}
+Order node types by the partial order
+\begin{equation}
+  \Root,\mathsf{Radical},\Pat,\Binyan,\Feat
+  \prec \mathsf{AnalyzerHypothesis}\prec \mathsf{SurfaceForm}\prec \mathsf{Lemma},\mathsf{Gloss},\mathsf{VerseSpan}.
+\end{equation}
+Edges in a local analysis go from an earlier type to a later type, or from a hypothesis to a surface node.  Since every directed edge increases this type rank, no directed cycle can occur.  Paradigm-sharing edges intentionally introduce global family structure and are excluded from the local acyclicity claim.
+\end{proof}
+
+\begin{lemma}[Functoriality under graph relabeling]
+Let $C$ be a deterministic converter from morphology records to typed graphs, and let $\pi$ be a relabeling of source token identifiers that preserves source spans and analyzer hypotheses.  Then
+\begin{equation}
+  C(\pi\cdot R)=\pi\cdot C(R).
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+The converter creates graph nodes by deterministic functions of record fields: token id, span id, root id, hypothesis id, feature id, and lexicon id.  Relabeling source token ids simply relabels the nodes whose keys contain those token ids.  Shared lexical nodes such as root and binyan nodes are unaffected except for incident edge endpoints.  Therefore every node and edge in $C(R)$ is carried to the corresponding node and edge in $C(\pi R)$.
+\end{proof}
+
+\subsection{Hebrew morphology losses}
+
+Let $p_R$, $p_B$, $p_F$, and $p_L$ denote predicted distributions over roots, binyanim, feature bundles, and lemmas.  Let $A\in[0,1]^{3\times S}$ be a predicted radical-to-slot alignment for a three-radical root and $A^\star$ the target alignment.  Define
+\begin{align}
+  \mathcal L_{\mathrm{root}} &= -\log p_R(R^\star),\\
+  \mathcal L_{\mathrm{binyan}} &= -\log p_B(B^\star),\\
+  \mathcal L_{\mathrm{feat}} &= -\sum_{f\in\mathcal F}\left[y_f\log p_F(f)+(1-y_f)\log(1-p_F(f))\right],\\
+  \mathcal L_{\mathrm{align}} &= -\sum_{i=1}^3\sum_{s=1}^S A^\star_{is}\log A_{is}.
+\end{align}
+Paradigm consistency can be enforced by a cycle loss.  If $z_w$ is the embedding of a surface form and $z_R$ is the embedding of its root family,
+\begin{equation}
+  \mathcal L_{\mathrm{par}}=\sum_{(w,w'):\Root(w)=\Root(w')}\norm{(z_w-z_R)-(z_{w'}-z_R)}_2^2
+  -\sum_{(w,u):\Root(w)\ne\Root(u)}\max(0,\gamma-\norm{z_w-z_u})^2.
+\end{equation}
+
+\begin{proposition}[Paradigm loss is relabeling invariant]
+If root-family membership is represented by equivariant graph edges and embeddings transform by token permutation, then $\mathcal L_{\mathrm{par}}$ is invariant under graph relabeling.
+\end{proposition}
+
+\begin{proof}
+Relabeling permutes the set of surface-form nodes and root-family edges but does not change which unordered pairs are same-root or different-root.  The summands depend only on Euclidean distances between the corresponding permuted embeddings.  Euclidean distance is unchanged by row reindexing.  Therefore the entire sum is invariant.
+\end{proof}
+
+\subsection{Tropical alignment for root extraction}
+
+Root-template alignment can be cast as a shortest-path problem over a small weighted finite-state graph.  Let $w_1,\ldots,w_T$ be surface characters or consonantal skeleton symbols, and let template states record how many radical slots have been filled.  A transition either consumes a surface symbol as affix/vowel material or aligns it to the next radical slot.  With costs $c_t(q,q')$, the best analysis is
+\begin{equation}
+  D_{t+1}(q')=\min_q\left(D_t(q)+c_t(q,q')\right).
+\end{equation}
+
+\begin{theorem}[Root-template alignment is min-plus dynamic programming]
+For a fixed finite template inventory and bounded token length $T$, the best radical-slot alignment is computed by a finite min-plus circuit and can therefore be represented by tropical ToricGT layers.
+\end{theorem}
+
+\begin{proof}
+The dynamic program has finitely many states because the template inventory and maximum word length are bounded.  Each update is a minimum over finitely many predecessor states of an affine expression $D_t(q)+c_t(q,q')$.  This is a min-plus gate.  Unrolling for $T$ time steps yields a finite min-plus circuit.  By the tropical semiring approximation theorem above, ToricGT can implement or approximate this circuit on the bounded domain.
+\end{proof}
+
+\subsection{Hebrew graph tasks}
+
+ToricGT should include at least the following Hebrew-specific tasks.
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Root recovery}: predict the root node and ordered radicals from a surface form and context.
+  \item \textbf{Binyan classification}: predict stem/binyan and verbal pattern.
+  \item \textbf{Feature tagging}: predict person, number, gender, tense/aspect, state, and part of speech when represented in the source annotation.
+  \item \textbf{Paradigm completion}: given several forms in a root family, predict missing forms or missing feature nodes.
+  \item \textbf{Graph disambiguation}: choose among analyzer hypotheses using local context and source-span dependencies.
+  \item \textbf{Interlinear graph construction}: convert text plus morphology into lemma, gloss, and dependency graphs.
+\end{enumerate}
+
+\section{Reasoning capacity and visualization contract}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_reasoning_capacity.pdf}
+  \caption{Reasoning capacity as a composition of graph-token routing, algebraic transport, tropical inference, and graph-level output.  The model should expose checks at each stage rather than returning only an answer string.}
+  \label{fig:reasoning-capacity}
+\end{figure}
+
+\begin{definition}[Visualization contract]
+A ToricGT run satisfies the visualization contract if it emits, for every evaluation batch, the following diagnostic objects: relabeling orbits, attention/ring block provenance, tropical active-face maps, toric phase trajectories, Hebrew root-template subgraphs when applicable, proof-dependency graphs, GFlowNet terminal samples, and reward/margin/error summaries.
+\end{definition}
+
+\begin{longtable}{p{0.23\linewidth}p{0.32\linewidth}p{0.34\linewidth}}
+\toprule
+Diagnostic & Computation & Failure mode exposed \\
+\midrule
+\endhead
+Equivariance orbit & $\norm{F(\pi G)-P_\pi F(G)}$ over random $\pi$ & absolute-position leakage, edge-order bugs \\
+Tropical active face & $A_{ic}=\argmax_j(S_{ij}+V_{jc})$ and margin $\Delta_{ic}$ & tropical collapse, unstable DP decisions \\
+Torus commutator & $\norm{U_jU_kH-e^{2\pi i\Theta_{jk}}U_kU_jH}$ & phase memorization without cocycle structure \\
+Hebrew paradigm lattice & root-family edges and feature-bundle consistency & string memorization without root-template abstraction \\
+GFlowNet diversity & terminal graph count, edit distance, reward histogram & mode collapse, reward hacking \\
+Polar cache residual & $\norm{K-\widehat K}$, $\norm{V-\widehat V}$, argmax preservation rate & quantization damaging long-context retrieval \\
+\bottomrule
+\end{longtable}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_visualization_dashboard.pdf}
+  \caption{Visualization dashboard targets.  The dashboard should make reasoning behavior falsifiable: a good scalar metric is not sufficient if equivariance, phase, active-face, morphology, or diversity diagnostics fail.}
+  \label{fig:viz-dashboard}
+\end{figure}
+
+\begin{proposition}[Visualization invariance]
+Suppose diagnostic functions are defined from graph-invariant quantities or equivariant token quantities followed by canonical graph rendering.  Then relabeling the input graph changes only node/edge labels in the visualization, not the diagnostic values.
+\end{proposition}
+
+\begin{proof}
+Equivariance errors are norms of aligned outputs and are invariant under row permutation.  Active-face sets transform by the same token permutation, and canonical rendering quotients out token labels.  Commutator losses act on channel operators shared across rows, so row permutations do not change Frobenius norms.  Root-family and paradigm diagnostics are computed over graph edges whose incidence is preserved by relabeling.  GFlowNet terminal graph diversity is computed up to graph edit distance or canonical graph hashes.  Therefore the diagnostic values are invariant, while rendered node names may change.
+\end{proof}
+
+\section{Embedding-space GFlowNet fine-tuning}
+
+A GFlowNet samples terminal graph objects with probability proportional to reward.  In ToricGT, the default Markov decision process acts in embedding space.
+
+\begin{definition}[Embedding-space state]
+A state is
+\begin{equation}
+  s_t=(h_G^{(t)},H_V^{(t)},H_E^{(t)},m^{(t)}),
+\end{equation}
+where $h_G$ is a graph embedding, $H_V$ and $H_E$ are node and edge latent tables, and $m$ is metadata such as current root-analysis hypotheses, proof obligations, braid word state, or torus normal-form state.
+\end{definition}
+
+Actions include adding a reasoning node, adding or relabeling an edge, applying a braid generator $\sigma_i^{\pm1}$, applying an affine Coxeter reflection $s_i$, applying a toric shift or clock operation, choosing a tropical active face, requesting a local proof check, selecting a Hebrew analyzer hypothesis, and terminating.
+
+\begin{definition}[Trajectory balance loss]
+For a trajectory $\tau=(s_0,a_0,s_1,\ldots,s_T=x)$, forward policy $P_F$, backward policy $P_B$, reward $R(x)>0$, and learned partition scalar $Z>0$, trajectory balance is
+\begin{equation}
+  \mathcal L_{\mathrm{TB}}(\tau)=\left(\log Z+\sum_{t=0}^{T-1}\log P_F(s_{t+1}\mid s_t)-\log R(x)-\sum_{t=0}^{T-1}\log P_B(s_t\mid s_{t+1})\right)^2.
+\end{equation}
+\end{definition}
+
+\begin{theorem}[Trajectory balance terminal law]
+If the trajectory-balance equation holds exactly for every complete trajectory and the backward policy is normalized over parents of every state, then the marginal probability of sampling terminal object $x$ under the forward policy is proportional to $R(x)$.
+\end{theorem}
+
+\begin{proof}
+Exact trajectory balance states
+\begin{equation}
+  Z\prod_{t=0}^{T-1}P_F(s_{t+1}\mid s_t)=R(x)\prod_{t=0}^{T-1}P_B(s_t\mid s_{t+1}).
+\end{equation}
+Sum both sides over all trajectories ending at fixed terminal object $x$.  The left side becomes $ZP_F(x)$, the forward marginal probability of reaching $x$.  The right side becomes $R(x)$ times the sum of backward probabilities over all reverse paths from $x$ to the initial state.  Because $P_B$ is normalized over parents and every reverse path terminates at the unique initial state, this sum is $1$.  Hence $P_F(x)=R(x)/Z$.
+\end{proof}
+
+A useful ToricGT reward is
+\begin{equation}
+  R(x)=\exp\left(\frac{\lambda_c C(x)+\lambda_n N(x)-\lambda_eE_{\mathrm{eq}}(x)+\lambda_t\Delta_{\mathrm{trop}}(x)-\lambda_H H(x)-\lambda_\Theta E_\Theta(x)}{\tau}\right),
+\end{equation}
+where $C$ is correctness, $N$ is novelty, $E_{\mathrm{eq}}$ is equivariance error, $\Delta_{\mathrm{trop}}$ is tropical margin, $H$ is complexity, and $E_\Theta$ is toric commutator error.
+
+\section{Interleaving PolarQuant with ToricGT ring attention}
+
+\subsection{Applicability}
+
+PolarQuant is directly relevant when ToricGT performs long-context autoregressive graph-token decoding, verifier decoding over long proof graphs, or ring-attention inference over very long tokenized graph traces.  It is less relevant to small full-context training batches where no KV cache is materialized or where training memory is dominated by activations rather than cached keys and values.  Its best role in ToricGT is therefore optional: a long-context inference and evaluation module, plus a stress-test for ring attention under compressed cache memory.
+
+Han, Kacham, Karbasi, Mirrokni, and Zandieh introduce PolarQuant as a KV-cache quantization method using random preconditioning, recursive polar transformation, and angle quantization \cite{han2025polarquant}.  The method is motivated by the fact that KV cache memory scales with context length, layers, and heads; their paper reports over $\times 4.2$ compression while maintaining strong long-context performance.
+
+\subsection{Recursive polar transform}
+
+Assume the head dimension $d_h$ is a power of two.  For $x\in\R^{d_h}$, define level-one angles and radii by pairing coordinates:
+\begin{equation}
+  r_j^{(1)}=\sqrt{x_{2j-1}^2+x_{2j}^2},\qquad
+  \psi_j^{(1)}=\operatorname{atan2}(x_{2j},x_{2j-1}),
+  \qquad j=1,\ldots,d_h/2.
+\end{equation}
+For $\ell\ge2$, recursively pair radii:
+\begin{equation}
+  r_j^{(\ell)}=\sqrt{(r_{2j-1}^{(\ell-1)})^2+(r_{2j}^{(\ell-1)})^2},\qquad
+  \psi_j^{(\ell)}=\tan^{-1}\left(\frac{r_{2j}^{(\ell-1)}}{r_{2j-1}^{(\ell-1)}}\right).
+\end{equation}
+The transform stores one final radius $r^{(\log_2 d_h)}$ and $d_h-1$ angles.
+
+\begin{lemma}[Polar transform is invertible off coordinate-pair degeneracies]
+For $x\ne0$, the recursive polar representation with exact radius and exact angles reconstructs $x$ uniquely, up to the standard angle-convention choices on zero coordinates.
+\end{lemma}
+
+\begin{proof}
+At level $\ell$, each pair $(a,b)$ is represented by $r=\sqrt{a^2+b^2}$ and angle $\psi$ satisfying $a=r\cos\psi$, $b=r\sin\psi$ with the level-appropriate quadrant convention.  Starting from the top radius, recursively apply this inverse map to recover lower-level radii and finally the original coordinate pairs.  If a pair has zero radius, its angle is irrelevant; fixing a deterministic convention yields uniqueness of the reconstructed vector.
+\end{proof}
+
+\begin{lemma}[Gaussian preconditioning gives predictable radii]
+Let $S\in\R^{m\times d}$ have i.i.d. $\mathcal N(0,1)$ entries.  For fixed $x\in\R^d$, $Sx\sim\mathcal N(0,\norm{x}_2^2I_m)$.
+\end{lemma}
+
+\begin{proof}
+The $i$th coordinate of $Sx$ is $\sum_j S_{ij}x_j$, a linear combination of independent centered Gaussians.  Hence it is Gaussian with mean zero and variance $\sum_jx_j^2=\norm{x}_2^2$.  Distinct rows of $S$ are independent, so the coordinates are independent.  Therefore the covariance matrix is $\norm{x}_2^2I_m$.
+\end{proof}
+
+\begin{proposition}[Angle concentration heuristic]
+After random preconditioning, recursive polar angles at higher levels concentrate around $\pi/4$ because they compare norms of two independent high-dimensional Gaussian subvectors of equal dimension.
+\end{proposition}
+
+\begin{proof}
+At a higher recursive level, an angle has form
+\begin{equation}
+  \psi=\tan^{-1}\left(\frac{R_2}{R_1}\right),
+\end{equation}
+where $R_1$ and $R_2$ are norms of independent Gaussian subvectors of the same dimension $m$.  Each $R_i^2$ is chi-square distributed up to scale, with mean proportional to $m$ and variance proportional to $m$.  Thus $R_i/\sqrt m$ concentrates around the same constant as $m$ grows.  Consequently $R_2/R_1$ concentrates around $1$, and $\psi$ concentrates around $\tan^{-1}(1)=\pi/4$.  PolarQuant formalizes this distribution and uses it for codebook design \cite{han2025polarquant}.
+\end{proof}
+
+\subsection{Polar ring cache}
+
+\begin{definition}[Polar ring cache]
+For each ring block $B_r$, head $h$, and layer $\ell$, store quantized polar representations
+\begin{equation}
+  \mathsf{PQ}(K_{\ell h,B_r}),\qquad \mathsf{PQ}(V_{\ell h,B_r})
+\end{equation}
+instead of full-precision $K,V$.  During ring traversal, a block is dequantized locally or fused into a kernel that computes $Q\widehat K\transpose$ and attention-value products without materializing full $\widehat K,\widehat V$ globally.
+\end{definition}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_polar_ring_cache.pdf}
+  \caption{PolarQuant interleaving with ring attention.  Each key-value block is randomly preconditioned, recursively transformed to polar coordinates, angle-quantized, packed, and dequantized only when the block reaches a query device.}
+  \label{fig:polar-ring}
+\end{figure}
+
+\begin{lemma}[Score perturbation from quantized keys]
+Assume $\norm{q_i}_2\le R_Q$ for every query and $\norm{k_j-\widehat k_j}_2\le\epsilon_K$ for every key.  Then
+\begin{equation}
+  \norm{S-\widehat S}_\infty\le \frac{R_Q\epsilon_K}{\sqrt{d_h}}.
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+For every pair $(i,j)$,
+\begin{equation}
+  \abs{S_{ij}-\widehat S_{ij}}=\frac{1}{\sqrt{d_h}}\abs{q_i\transpose(k_j-\widehat k_j)}
+  \le\frac{1}{\sqrt{d_h}}\norm{q_i}_2\norm{k_j-\widehat k_j}_2
+  \le\frac{R_Q\epsilon_K}{\sqrt{d_h}},
+\end{equation}
+by Cauchy-Schwarz.
+\end{proof}
+
+\begin{theorem}[Tropical output stability under PolarQuant cache]
+Assume key and value dequantization errors obey
+\begin{equation}
+  \norm{k_j-\widehat k_j}_2\le\epsilon_K,
+  \qquad \norm{v_j-\widehat v_j}_\infty\le\epsilon_V,
+\end{equation}
+and $\norm{q_i}_2\le R_Q$.  Then tropical attention with dequantized PolarQuant cache satisfies
+\begin{equation}
+  \norm{Y-\widehat Y}_\infty\le \frac{R_Q\epsilon_K}{\sqrt{d_h}}+\epsilon_V.
+\end{equation}
+If the full-precision tropical margin is larger than twice this bound, the active key is unchanged.
+\end{theorem}
+
+\begin{proof}
+The previous lemma bounds score perturbation by $\epsilon_S=R_Q\epsilon_K/\sqrt{d_h}$.  Value perturbation is bounded by $\epsilon_V$.  Apply the Lipschitz and argmax-stability lemma for tropical attention.
+\end{proof}
+
+\begin{proposition}[Equivariance of a shared PolarQuant cache]
+If the random preconditioner, codebooks, and quantization rules are shared over token rows and ring blocks, and block schedules are label-independent or transformed consistently, then PolarQuant-dequantized ring attention remains graph equivariant up to numerical quantization error.
+\end{proposition}
+
+\begin{proof}
+The preconditioner and quantizer act identically on every key/value row.  Therefore quantizing after a row permutation gives the same packed rows in permuted order, modulo deterministic tie-breaking.  Ring traversal is a schedule; if it is label-independent or permuted with the tokens, it does not introduce semantic label dependence.  Dequantized attention is equivariant by the attention equivariance proof, with values replaced by their quantized approximations.  The only deviation from full-precision equivariance comes from finite-precision quantization and tie-breaking.
+\end{proof}
+
+\subsection{Memory accounting}
+
+Let $B_{\mathrm{fp}}$ be bits per full-precision coordinate, typically $16$ for bf16/fp16 KV caches.  If a polar cache stores one radius using $B_r$ bits and angle level $\ell$ uses $b_\ell$ bits per angle, then amortized bits per coordinate are approximately
+\begin{equation}
+  B_{\mathrm{polar}}\approx \frac{B_r+\sum_{\ell=1}^{\log_2 d_h}(d_h/2^\ell)b_\ell}{d_h}+B_{\mathrm{overhead}},
+\end{equation}
+where $B_{\mathrm{overhead}}$ accounts for packed-index alignment and amortized codebook storage.  The compression ratio is
+\begin{equation}
+  \rho_{\mathrm{cache}}\approx \frac{B_{\mathrm{fp}}}{B_{\mathrm{polar}}}.
+\end{equation}
+Because codebooks are shared and preconditioning avoids per-block scale/zero-point storage, the overhead can be lower than blockwise affine quantization.
+
+
+\section{Soft-MoE ToricGT blocks}
+
+\subsection{Motivation and placement}
+
+Soft-MoE is useful for ToricGT for a different reason than ordinary large-scale MoE.  The goal is not merely to increase parameter count.  The goal is to allocate typed computation to different graph-token roles without hard token dropping or brittle top-$k$ routing.  In a ToricGT block, experts may specialize as generic feed-forward maps, tropical dynamic-programming gates, toric phase maps, Hebrew root-template analyzers, local proof verifiers, or graph-decoder refiners.  Because Soft-MoE computes differentiable weighted mixtures rather than discrete assignments, the routing map remains smooth and can be made permutation equivariant.
+
+Puigcerver, Riquelme, Mustafa, and Houlsby define Soft-MoE as a fully differentiable MoE mechanism where each expert slot receives a weighted average of all input tokens and the output tokens are reconstructed as weighted averages of the expert outputs \cite{puigcerver2024softmoe}.  The public PyTorch implementation referenced for this project exposes a \texttt{SoftMoE} layer with arguments such as \texttt{in\_features}, \texttt{out\_features}, \texttt{num\_experts}, and \texttt{slots\_per\_expert} \cite{schreiber2026softmoe}.  ToricGT uses that mechanism as a graph-token feed-forward replacement, not as a black-box vision-only module.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_soft_moe_toricgt_clean.pdf}
+  \caption{Soft-MoE ToricGT block.  Graph tokens are softly dispatched into slot mixtures, typed experts process the slots, and combine weights project expert outputs back to the original token stream.  The same equations handle node, edge, proof, Hebrew, tropical, and toric tokens when masks and type channels are equivariant.}
+  \label{fig:soft-moe-toricgt}
+\end{figure}
+
+\subsection{Equations}
+
+Let $X\in\R^{B\times L\times d}$ be a batch of graph-token hidden states and let $M\in\{0,1\}^{B\times L}$ be the validity mask.  A Soft-MoE layer has $E$ experts and $S$ slots per expert.  Let $\Phi\in\R^{d\times E\times S}$ be learned slot vectors and let $g>0$ be a learned temperature.  Use normalized vectors
+\begin{equation}
+  \bar x_{b i}=\frac{x_{b i}}{\norm{x_{b i}}_2+\epsilon},\qquad
+  \bar\phi_{e s}=\frac{\phi_{e s}}{\norm{\phi_{e s}}_2+\epsilon},
+\end{equation}
+and define token-slot logits
+\begin{equation}
+  A_{b i e s}=g\,\ip{\bar x_{b i}}{\bar\phi_{e s}}.
+\end{equation}
+Invalid tokens are removed by setting $A_{b i e s}=-\infty$ whenever $M_{b i}=0$.  Dispatch weights normalize over tokens for each slot:
+\begin{equation}
+  D_{b i e s}=\frac{\exp(A_{b i e s})M_{b i}}{\sum_{j=1}^L\exp(A_{b j e s})M_{b j}+\epsilon}.
+\end{equation}
+Combine weights normalize over slots for each token:
+\begin{equation}
+  C_{b i e s}=\frac{\exp(A_{b i e s})}{\sum_{e'=1}^E\sum_{s'=1}^S\exp(A_{b i e's'})+\epsilon}.
+\end{equation}
+The input slot for expert $e$ and slot $s$ is
+\begin{equation}
+  Z_{b e s}=\sum_{i=1}^L D_{b i e s}X_{b i}.
+\end{equation}
+Each expert $f_e:\R^d\to\R^d$ processes its slots:
+\begin{equation}
+  \widetilde Z_{b e s}=f_e(Z_{b e s}).
+\end{equation}
+The output token is reconstructed by
+\begin{equation}
+  Y_{b i}=\sum_{e=1}^E\sum_{s=1}^S C_{b i e s}\widetilde Z_{b e s}.
+\end{equation}
+A residual gate $\alpha_\ell\in[0,1]$ is used in practice:
+\begin{equation}
+  X_{\ell+1}=X_\ell+\alpha_\ell\operatorname{Dropout}(Y_\ell),\qquad \alpha_\ell\text{ initialized near }0.05\text{ or }0.1.
+\end{equation}
+This conservative initialization prevents the expert bank from dominating early training before the graph-token features have useful semantics.
+
+\begin{lemma}[Soft-MoE graph-token equivariance]
+Let $P$ be a token permutation matrix that preserves the validity mask by $M(PX)=PM(X)$.  Suppose $\Phi$, the experts $f_e$, and the temperature $g$ are shared across token rows and do not depend on absolute token indices.  Then
+\begin{equation}
+  \operatorname{SoftMoE}(PX,PM)=P\operatorname{SoftMoE}(X,M).
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+The logits satisfy
+\begin{equation}
+  A(PX)_{i e s}=A(X)_{\pi^{-1}i,e,s}.
+\end{equation}
+The dispatch denominator for a fixed $(e,s)$ sums over all valid tokens, so it is invariant under reindexing.  Therefore
+\begin{equation}
+  D(PX)_{i e s}=D(X)_{\pi^{-1}i,e,s}.
+\end{equation}
+The slot mixture is unchanged:
+\begin{align}
+  Z(PX)_{e s}
+    &=\sum_i D(PX)_{i e s}(PX)_i
+      =\sum_i D(X)_{\pi^{-1}i,e,s}X_{\pi^{-1}i}\nonumber\\
+    &=\sum_j D(X)_{j e s}X_j
+      =Z(X)_{e s}.
+\end{align}
+Thus expert outputs $\widetilde Z_{e s}$ are unchanged.  The combine weights satisfy $C(PX)_{i e s}=C(X)_{\pi^{-1}i,e,s}$ because their denominator normalizes only over slots for the same token.  Hence
+\begin{equation}
+  Y(PX)_i=\sum_{e,s}C(X)_{\pi^{-1}i,e,s}\widetilde Z_{e s}=Y(X)_{\pi^{-1}i},
+\end{equation}
+which is exactly $PY(X)$.
+\end{proof}
+
+\begin{proposition}[Soft-MoE preserves TokenGT equivariance]
+Replacing any shared token-wise feed-forward block of an equivariant ToricGT layer by the Soft-MoE block above preserves graph-to-graph equivariance.
+\end{proposition}
+
+\begin{proof}
+The surrounding attention, normalization, residual, and decoder maps are equivariant by earlier results.  The Soft-MoE block is equivariant by the preceding lemma.  Compositions and residual sums of equivariant maps are equivariant.
+\end{proof}
+
+\subsection{Typed expert bank for ToricGT}
+
+For the full 8M-35M graph-reasoning model, use a small typed bank rather than hundreds of experts.
+\begin{longtable}{p{0.22\linewidth}p{0.31\linewidth}p{0.36\linewidth}}
+\toprule
+Expert & Function & Practical notes \\
+\midrule
+\endhead
+Generic MLP & ordinary dense nonlinear map & always present; fallback for arbitrary continuous approximation \\
+Tropical DP & max/min-plus candidate scoring and margin features & use for shortest path, Viterbi, active-face, and transitive-closure tasks \\
+Toric phase & clock/shift/cocycle channels and phase normalization & regularize lightly; avoid forcing phase structure on arbitrary data \\
+Hebrew root & radical alignment, template/binyan features, paradigm consistency & useful only for Hebrew or Semitic morphology batches; can be gated by type embeddings \\
+Proof verifier & local step validity and dependency consistency & attach to equation/proof-obligation nodes \\
+Graph decoder & node/edge graph-to-graph refinement & useful near output layers \\
+\bottomrule
+\end{longtable}
+
+Recommended defaults are $E=4$--$8$ experts, $S=1$--$4$ slots per expert, $g$ initialized near $1$, and Soft-MoE enabled by default in the upper half of the network.  For $L\le2048$, $E S\le32$ is normally safe on a 4090.  For longer graph traces, use chunked dispatch: compute $A$ blockwise over tokens, accumulate dispatch denominators by log-sum-exp, then form slots in a second streaming pass.  This keeps the slot computation compatible with ring attention.
+
+\subsection{Implementation details}
+
+A minimal PyTorch implementation for graph tokens has the following shape discipline.
+\begin{verbatim}
+# X: [B, L, d], mask: [B, L]
+Xn = l2_normalize(X, dim=-1)
+Pn = l2_normalize(Phi, dim=0)                 # [d, E, S]
+logits = scale * torch.einsum('bld,des->bles', Xn, Pn)
+logits = logits.masked_fill(~mask[:, :, None, None], -torch.inf)
+D = torch.softmax(logits, dim=1)              # dispatch over tokens
+C = torch.softmax(logits.flatten(2), dim=-1).view(B, L, E, S)
+slots = torch.einsum('bld,bles->besd', X, D)
+out_slots = stack([experts[e](slots[:, e]) for e in range(E)], dim=1)
+Y = torch.einsum('besd,bles->bld', out_slots, C)
+X = X + residual_gate * dropout(Y)
+\end{verbatim}
+The implementation should explicitly test: output shape, mask handling, gradient finiteness, deterministic behavior under token permutation, absence of NaNs when all tokens of a batch element are padded, and agreement between chunked and unchunked dispatch within numerical tolerance.
+
+
+\subsection{Prefix-causal Soft-MoE for language-model scoring}
+
+The graph-to-graph ToricGT encoder is allowed to use bidirectional graph context.  The Parameter-Golf micro language model is not.  A direct Soft-MoE implementation that dispatches each expert slot using all tokens in a sequence is noncausal: the slot representation for position $t$ would include future tokens $x_{>t}$ and would therefore leak validation information.  The contest-facing model must use a prefix-causal version of Soft-MoE whenever the output at token $t$ is scored autoregressively.
+
+Flatten the expert and slot indices into $s\in\{1,\dots,E S\}$ and let $a_{t s}$ be the token-slot logit.  For an autoregressive sequence $x_1,\dots,x_T$, define strict-prefix dispatch accumulators
+\begin{align}
+  N_s^{(t)} &= \sum_{m<t}\exp(a_{m s})x_m,\\
+  R_s^{(t)} &= \sum_{m<t}\exp(a_{m s}),\\
+  Z_s^{(t)} &= \frac{N_s^{(t)}}{R_s^{(t)}+\epsilon}.
+\end{align}
+The expert output available at position $t$ is
+\begin{equation}
+  \widetilde Z_s^{(t)}=f_{e(s)}\!\left(Z_s^{(t)}\right),
+\end{equation}
+and the causal combine weights are normalized only over slots for the current token,
+\begin{equation}
+  C_{t s}=\frac{\exp(a_{t s})}{\sum_{u=1}^{E S}\exp(a_{t u})+\epsilon}.
+\end{equation}
+The Soft-MoE residual used to predict token $x_{t+1}$ is then
+\begin{equation}
+  y_t=\sum_{s=1}^{E S}C_{t s}\widetilde Z_s^{(t)}.
+\end{equation}
+After the loss for position $t$ has been computed, the accumulators may be updated by
+\begin{align}
+  N_s^{(t+1)} &= N_s^{(t)}+\exp(a_{t s})x_t,\\
+  R_s^{(t+1)} &= R_s^{(t)}+\exp(a_{t s}).
+\end{align}
+This is a score-before-update rule.  It is the Soft-MoE analogue of ordinary causal attention: the current prediction can use only the strict prefix.
+
+\begin{lemma}[Prefix-causal Soft-MoE is valid for autoregressive BPB]
+For every position $t$, the output $y_t$ of the prefix-causal Soft-MoE block is a measurable function of $x_{<t}$, the current unscored embedding used to choose a distribution over $x_t$ only when that embedding itself is derived from $x_{<t}$, and the fixed model parameters.  In particular, if the surrounding attention and embedding pipeline is causal, replacing a dense feed-forward block by prefix-causal Soft-MoE preserves strict left-to-right scoring.
+\end{lemma}
+
+\begin{proof}
+By construction, $N_s^{(t)}$ and $R_s^{(t)}$ are sums over indices $m<t$.  Therefore $Z_s^{(t)}$ and $\widetilde Z_s^{(t)}$ are functions only of the strict prefix and the parameters of $f_e$.  The combine weights $C_{t s}$ may depend on the hidden state at $t$, but in a causal language model that hidden state is produced from the same strict prefix.  Hence $y_t$ is a function of the strict prefix.  The update with $x_t$ occurs only after scoring position $t$, so no scored probability can depend on its own target or on future targets.
+\end{proof}
+
+A vectorized training implementation can compute these quantities by prefix scans.  In PyTorch, the noncausal dispatch
+\begin{verbatim}
+D = softmax(logits, dim=1)          # invalid for LM scoring if dim=1 sees future
+slots = einsum('bld,bles->besd', X, D)
+\end{verbatim}
+should be replaced in the contest model by cumulative sums over time:
+\begin{verbatim}
+w = torch.exp(logits.flatten(2)).clamp_max(1e4)       # [B, T, ES]
+prefix_num = torch.cumsum(w[..., None] * X[:, :, None, :], dim=1)
+prefix_den = torch.cumsum(w, dim=1)
+# strict prefix: shift right before forming slots
+N = torch.cat([zeros_like(prefix_num[:, :1]), prefix_num[:, :-1]], dim=1)
+R = torch.cat([zeros_like(prefix_den[:, :1]), prefix_den[:, :-1]], dim=1)
+slots_t = N / (R[..., None] + eps)                    # [B, T, ES, d]
+out_slots_t = experts(slots_t)
+C = torch.softmax(logits.flatten(2), dim=-1)
+Y = torch.einsum('bts,btsd->btd', C, out_slots_t)
+\end{verbatim}
+For the graph-reasoning encoder this causal restriction is unnecessary; for the Parameter-Golf track it is mandatory.
+
+\subsection{Soft-MoE regularizers and diagnostics}
+
+Soft-MoE should be monitored rather than trusted.  Define expert combine mass
+\begin{equation}
+  m_e=\frac{1}{B L}\sum_{b,i,s}C_{b i e s},
+\end{equation}
+slot dispatch entropy
+\begin{equation}
+  H_{e s}^{D}=-\sum_i D_{b i e s}\log(D_{b i e s}+\epsilon),
+\end{equation}
+and token combine entropy
+\begin{equation}
+  H_i^C=-\sum_{e,s}C_{b i e s}\log(C_{b i e s}+\epsilon).
+\end{equation}
+A light usage regularizer is
+\begin{equation}
+  \mathcal L_{\mathrm{moe}}=\lambda_{\mathrm{bal}}\sum_e\left(m_e-\frac1E\right)^2
+  -\lambda_D\Eop[H^D]+\lambda_C\Eop\left[\max(0,H^C-H_{\max})\right].
+\end{equation}
+The sign convention encourages noncollapsed dispatch while allowing combine weights to become sharp only when the task supports specialization.  Do not over-regularize $m_e$ on mixed-domain batches: if a batch contains only Hebrew morphology, the Hebrew-root expert should be allowed to receive more mass.
+
+\section{Parameter-Golf constrained ToricGT}
+
+\subsection{Contest constraints as engineering axioms}
+
+The OpenAI Model Craft Challenge: Parameter Golf asks participants to train the best language model that fits in a self-contained $16{,}000{,}000$ byte artifact, trains in roughly ten minutes on the prescribed 8xH100 evaluation setting, and is scored by tokenizer-agnostic bits per byte on FineWeb validation data \cite{openai2026paramgolf}.  The ToricGT implementation should track both the official repository and the working fork used for this project \cite{schreiber2026paramgolf}.  The important engineering point is that the counted artifact is not a vague parameter count: it is the serialized code, compressed model state, tokenizer or byte model, and metadata that the evaluator receives.  The contest setting also requires evaluation to be self-contained, with no network calls, no external downloads, no hidden validation side information, and no dependence on a training dataset at evaluation time \cite{openai2026paramgolf}.  Record-style submissions should include a runnable \texttt{train\_gpt.py}, README, \texttt{submission.json}, training logs from independent runs, and exact byte accounting.  SOTA claims require a statistically meaningful improvement over the current record, so a ToricGT-derived submission must be treated as an auditable compression experiment rather than an informal model sketch.  The working fork used for ToricGT experimentation is treated as the project-local contest scaffold, while the official OpenAI repository remains the normative source for rules and compliance checks \cite{schreiber2026paramgolf}.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_parameter_golf_protocol_clean.pdf}
+  \caption{Parameter-Golf protocol for ToricGT.  The full graph-to-graph model remains the research model.  The contest-facing model is a micro language model distilled from graph-reasoning traces, equipped with byte-safe Soft-MoE adapters, trained under the wallclock budget, and exported as a single self-contained artifact with exact byte accounting and prequential BPB validation.}
+  \label{fig:param-golf-pipeline}
+\end{figure}
+
+\begin{definition}[Parameter-Golf artifact budget]
+Let
+\begin{equation}
+  B_{\mathrm{art}}=B_{\mathrm{code}}+B_{\mathrm{weights}}+B_{\mathrm{tokenizer}}+B_{\mathrm{metadata}}.
+\end{equation}
+A Parameter-Golf-compliant artifact must satisfy
+\begin{equation}
+  B_{\mathrm{art}}\le16{,}000{,}000.
+\end{equation}
+For a model with tensors $W_r$ quantized to $b_r$ bits per scalar and entropy-compressed by factor $\rho_r\ge1$,
+\begin{equation}
+  B_{\mathrm{weights}}\approx\sum_r \frac{b_r\,|W_r|}{8\rho_r}+B_{\mathrm{packing}}.
+\end{equation}
+\end{definition}
+
+The contest objective can be written as
+\begin{equation}
+  \min_{\theta,\mathcal C}\operatorname{BPB}_{\mathrm{FineWeb}}(q_{\theta,\mathcal C})
+  \quad\text{subject to}\quad
+  B_{\mathrm{art}}\le16{,}000{,}000,
+\end{equation}
+where $\mathcal C$ denotes the compression/export scheme and
+\begin{equation}
+  \operatorname{BPB}(q)= -\frac{1}{N_{\mathrm{bytes}}}\sum_{t}\log_2 q(b_t\mid b_{<t}).
+\end{equation}
+This formula is tokenizer-agnostic because the denominator is bytes, not tokens.
+
+\subsection{Prequential BPB validity}
+
+Parameter Golf scoring is best viewed as a prequential compression game.  The model emits a full normalized predictive distribution, pays log loss on the next symbol, and only then may update any legal online state.  Let the validation byte stream be $b_1,\dots,b_T$ and let $\ell(t)$ be the exact number of bytes represented by the tokenizer symbol scored at step $t$.  A scoring procedure is valid if it satisfies four conditions:
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{strict prefix dependence}: $q_t$ depends only on $b_{<t}$, fixed parameters, and legal online state derived from already scored bytes;
+  \item \textbf{full normalization}: $q_t$ is a normalized distribution over the next scored symbol;
+  \item \textbf{score before update}: the state update using $b_t$ occurs after $-\log q_t(b_t)$ is recorded;
+  \item \textbf{single validation pass}: the validation stream is not permuted, repeated for tuning, or searched over by seeds.
+\end{enumerate}
+Under these conditions the reported objective is
+\begin{equation}
+  \operatorname{BPB}_{\mathrm{valid}}
+  =\frac{\sum_{t=1}^{T}-\log_2 q_t(b_t\mid b_{<t})}{\sum_{t=1}^{T}\ell(t)}.
+\end{equation}
+
+\begin{proposition}[Score-before-update prevents validation leakage]
+Assume $q_t$ satisfies strict prefix dependence and the online state update has the form $s_{t+1}=U(s_t,b_t)$ after the loss term at $t$ is recorded.  Then the cumulative validation loss is a proper left-to-right log score and no term in the sum can depend on future validation bytes.
+\end{proposition}
+
+\begin{proof}
+We prove by induction that $s_t$ is a function only of $b_{<t}$ and fixed parameters.  The base state $s_1$ is fixed.  If $s_t$ is a function only of $b_{<t}$, then $q_t$ is also a function only of $b_{<t}$ by strict prefix dependence.  The loss term $-\log q_t(b_t)$ is therefore scored before any access to $b_{>t}$.  The update $s_{t+1}=U(s_t,b_t)$ is then a function only of $b_{\le t}$, closing the induction.  Thus no loss term uses future information.
+\end{proof}
+
+\subsection{Micro-ToricGT language-model design}
+
+The contest model should be a language model inspired by ToricGT, not the full graph-to-graph encoder.  The recommended design is:
+\begin{enumerate}[leftmargin=2em]
+  \item a byte-level or small-BPE tokenizer, with tied input/output embeddings;
+  \item a small number of unique Transformer blocks reused recurrently to increase effective depth without storing more block parameters;
+  \item lower dense blocks for stable language modeling and upper \emph{prefix-causal} Soft-MoE blocks with very small $E$ and $S$;
+  \item tiny toric/tropical adapters that add phase-like and max-gated residuals without large parameter cost;
+  \item quantization-aware training and final int6/int8 packing plus zlib/zstd round-trip checks;
+  \item optional legal score-first test-time adaptation only on validation tokens already scored, never on future validation tokens.
+\end{enumerate}
+
+A safe starting microarchitecture is
+\begin{equation}
+  V=1024\text{ or }2048,\\quad d=384\text{ or }512,
+  \quad L_{\mathrm{unique}}=4\text{--}6,
+  \quad L_{\mathrm{effective}}=8\text{--}12,
+\end{equation}
+with grouped-query attention, tied embeddings, recurrent block tying, and Soft-MoE only in the last two unique blocks.  If $P_{\mathrm{fp}}$ is the uncompressed scalar count, then int8 export roughly permits $P_{\mathrm{fp}}<16$M minus code overhead; int6 export roughly permits $P_{\mathrm{fp}}<21$M before entropy compression; int4 export permits more parameters but is less stable unless quantization-aware training is strong.  These are engineering estimates; the actual gate is the serialized artifact size.
+
+\begin{proposition}[Depth recurrence improves effective computation without increasing stored block parameters]
+Let a block $\Psi_\theta$ be applied $r$ times with shared parameters.  The stored parameter count is $|\theta|$, while the effective computational depth is $r$.  If $\Psi_\theta$ is token equivariant, then $\Psi_\theta^r$ is token equivariant.
+\end{proposition}
+
+\begin{proof}
+Only one copy of $\theta$ is serialized, so stored parameters do not scale with $r$.  The composition of $r$ copies of the same equivariant map is equivariant because for any permutation $P$,
+\begin{equation}
+  \Psi_\theta^r(PX)=\Psi_\theta^{r-1}(P\Psi_\theta(X))=P\Psi_\theta^r(X)
+\end{equation}
+by induction.
+\end{proof}
+
+\subsection{Soft-MoE under a 16 MB artifact cap}
+
+A naive Soft-MoE can violate the artifact budget because it stores multiple expert MLPs.  The contest adaptation must use one or more of the following parameter-sharing schemes.
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Shared base plus expert adapters}: $f_e(x)=f_0(x)+B_e\sigma(A_e x)$ with small rank $r\ll d$.
+  \item \textbf{Tied expert matrices}: all experts share $W_1,W_2$ but have expert-specific gates, biases, or low-rank deltas.
+  \item \textbf{Grouped experts}: experts are reused across recurrent layers and only routing vectors $\Phi$ change by layer.
+  \item \textbf{Quantized experts}: expert weights are trained with straight-through quantization and exported in int6/int8.
+  \item \textbf{Pruned slots}: keep $E S\le8$ or $16$ for the contest model; large slot counts are inappropriate under the wallclock cap.
+\end{enumerate}
+
+For a low-rank expert adapter with rank $r$, the incremental parameter cost per expert is approximately
+\begin{equation}
+  P_{\mathrm{adapter}}\approx 2dr+2d_{\mathrm{ff}}r+O(d+d_{\mathrm{ff}}),
+\end{equation}
+which is far smaller than a full expert cost $2dd_{\mathrm{ff}}$.  Therefore a Parameter-Golf Soft-MoE block should store one shared dense MLP plus small expert adapters.  The graph-reasoning version may use full typed experts; the contest version should not unless artifact measurements prove it fits.
+
+\subsection{Distillation from ToricGT to the contest LM}
+
+The full ToricGT model can help the contest track before submission by producing training-time supervisory signals.  The contest artifact should not need the teacher at evaluation.  Let $p_T$ be a trained ToricGT-derived teacher distribution over serialized graph-reasoning traces and $p_S$ be the micro language model.  A compliant training objective on allowed training data is
+\begin{equation}
+  \mathcal L_{\mathrm{PG}}=\mathcal L_{\mathrm{LM}}
+  +\lambda_{\mathrm{KD}}T^2\operatorname{KL}\left(p_T^{(T)}(\cdot\mid c)\;\Vert\;p_S^{(T)}(\cdot\mid c)\right)
+  +\lambda_h\norm{R h_T-h_S}_2^2
+  +\lambda_q\mathcal L_{\mathrm{QAT}},
+\end{equation}
+where $c$ ranges over training contexts, $T$ is distillation temperature, $R$ is a small learned projection used only during training, and $\mathcal L_{\mathrm{QAT}}$ is the quantization-aware training loss.  Teacher logits, if stored, must be generated from allowed training data and must not be used as hidden validation information.  In the final artifact, omit the teacher, omit distillation heads, and serialize only the student.
+
+
+\subsection{Artifact packing and runtime implementation}
+
+A robust contest script should separate training-time tensors from serialized tensors.  During training, keep fp16 or bf16 master weights and fake-quantized forward weights.  At export, pack only the deployable state:
+\begin{equation}
+  \mathcal A=\operatorname{Pack}\left(\operatorname{Quantize}(\theta_S),\operatorname{Tokenizer},\operatorname{Config},\operatorname{DecodeCode}\right).
+\end{equation}
+The export test is not complete until the model is loaded from $\mathcal A$ and evaluated without the floating-point training checkpoint.  The following checks should be hard failures in \texttt{train\_gpt.py}:
+\begin{verbatim}
+assert artifact_bytes <= 16_000_000
+assert not uses_network()
+assert not reads_validation_except_eval_stream()
+assert roundtrip_bpb_close(float_eval_bpb, packed_eval_bpb, tolerance=0.01)
+assert causal_audit_passed(model)
+\end{verbatim}
+The size audit should report at least
+\begin{equation}
+  (B_{\mathrm{code}},B_{\mathrm{weights}},B_{\mathrm{tokenizer}},B_{\mathrm{metadata}},B_{\mathrm{art}}),
+\end{equation}
+and the log should include the exact command, seed, git commit, wallclock, GPU type, tokenizer, vocabulary size, number of unique blocks, recurrence depth, number of Soft-MoE experts, slots per expert, quantization bits, validation BPB, and validation bytes.  For a ToricGT-derived model, also report whether causal Soft-MoE, toric adapters, tropical gates, or teacher distillation were active.
+
+\subsection{Contest record folder checklist}
+
+A ToricGT Parameter-Golf submission should create a record folder with:
+\begin{verbatim}
+records/<name>/
+  README.md              # architecture, training recipe, size accounting
+  submission.json        # author, GitHub id, val_bpb, metadata
+  train.log              # automatic training/eval log, preferably 3 seeds
+  train_gpt.py           # self-contained runnable script
+  requirements.txt       # only if extra packages are needed
+\end{verbatim}
+Before opening a pull request, run:
+\begin{verbatim}
+python train_gpt.py --dry_run_size_check
+python train_gpt.py --smoke_train --max_steps 20
+python train_gpt.py --roundtrip_quantize
+python train_gpt.py --eval_only --assert_no_network
+\end{verbatim}
+The script should print train loss, validation loss, validation BPB, compressed model bytes, code bytes, artifact bytes, seed, wallclock, and hardware.  The size check must compute decimal bytes and fail at $16{,}000{,}000$, not $16$ MiB.
+
+\subsection{Pragmatic risk controls}
+
+The Parameter-Golf track has different failure modes from the research model.  The most important controls are:
+\begin{enumerate}[leftmargin=2em]
+  \item keep a boring dense baseline in the record folder before adding Soft-MoE;
+  \item measure artifact bytes after every architecture change;
+  \item verify quantized round-trip evaluation, not only floating-point evaluation;
+  \item maintain three-seed evidence before claiming a record-quality result;
+  \item keep validation handling strictly score-first and never train on future validation tokens;
+  \item prefer self-contained torch code over fragile external imports, even if imports are nominally allowed;
+  \item document every compression, tokenizer, and test-time adaptation trick in the README.
+\end{enumerate}
+The contest leaderboard shows that successful submissions often combine small-model architecture changes, quantization, recurrent or parallel residual computation, tokenizer/data transforms, and legal test-time adaptation.  ToricGT should borrow these tactics only when they are compatible with the self-contained artifact and validation rules.
+
+
+\section{Datasets, synthetic families, and leakage control}
+
+\subsection{Training mixture}
+
+The data plan is graph-first.  Every raw record is normalized into a graph record with question, answer, reasoning, metadata, stable hashes, graph JSON, token-count estimates, and deterministic split fields.  The local curation plan targets chain-of-thought, tree-of-thought, graph-of-thought, mathematical, programming, OpenAI-origin GSM8K, Hebrew morphology, rabbinic Hebrew/Aramaic-English, and Jewish Hebrew text sources.  It writes Parquet outputs and split reports suitable for training and, after license review, possible Hugging Face upload.
+
+{\small
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.24\linewidth}>{\raggedright\arraybackslash}p{0.24\linewidth}>{\raggedright\arraybackslash}p{0.14\linewidth}>{\raggedright\arraybackslash}p{0.27\linewidth}}
+\toprule
+Dataset & Selected loader/config & License observed & ToricGT role \\
+\midrule
+\endhead
+NuminaMath-CoT & default via \texttt{datasets} & Apache-2.0 & large math CoT to proof graphs \\
+OpenR1-Math-220k & \texttt{all} via \texttt{datasets} & Apache-2.0 & multi-trace math reasoning \\
+Codeforces-CoTs & decontaminated Python/editorial config & CC-BY-4.0 & algorithmic/programming CoT \\
+GSM8K & \texttt{main} & MIT & OpenAI math word problems \\
+Hendrycks MATH & seven subject configs & MIT & competition math and verifier checks \\
+MATH-500 & default/test & dataset card & verifier-style benchmark \\
+Tree-of-Thoughts 24k & raw JSON & Apache-2.0 & explicit ToT branches \\
+Got Math 500K & raw JSONL stream & Apache-2.0 & explicit GoT math \\
+UniMorph Hebrew & raw UniMorph TSV fallback & CC-BY-SA-3.0 & Hebrew lemma/inflection graphs \\
+Sefaria parallel pairs & default & CC-BY-4.0 & rabbinic Hebrew/Aramaic-English parallel text \\
+Sefaria Hebrew library & default & GPL-3.0 & large Jewish Hebrew text library \\
+Superior-Reasoning gpt-oss & \texttt{stage1}/\texttt{stage2} & CC-BY-4.0 & frontier open-weight reasoning distillation \\
+GPT-OSS math distill & default & Apache-2.0 & gpt-oss math rationales \\
+Algorithmic SFT v1 & default & MIT & procedural algorithmic traces \\
+Graph reasoning messages & default & Apache-2.0 & graph-structured reasoning dialogue \\
+DAG reasoning & default & Apache-2.0 & dependency-aware reasoning traces \\
+Opus reasoning 24k & default & Apache-2.0 & high-quality reasoning style transfer \\
+\bottomrule
+\end{longtable}
+}
+
+The important loader details are pragmatic.  The UniMorph Hub repository may contain an old dataset script, so the Hebrew file should be downloaded directly from the UniMorph GitHub source when the current \texttt{datasets} package rejects the script.  The GoT and ToT sources are raw JSON/JSONL rather than conventional multi-shard builders, so the curation script downloads and streams them directly.  The Hebrew/Jewish-text slice intentionally uses Sefaria and UniMorph Hebrew sources rather than Christian-branded biblical-language datasets when the experimental goal is Jewish Hebrew/rabbinic coverage.
+
+\subsection{Normalized record schema}
+
+Every curated row should contain:
+\begin{verbatim}
+record_id, dataset, config, source_split, source_index,
+task_family, language, license, role,
+question, answer, solution, reasoning,
+metadata_json, text, graph_json,
+content_hash, group_hash, split,
+estimated_tokens, quality_flags_json
+\end{verbatim}
+The schema separates the human-readable training view from the graph view.  The \texttt{text} field supports ordinary language-model distillation and debugging; the \texttt{graph\_json} field supports TokenGT conversion, graph-to-graph prediction, GFlowNet state construction, and visualization.
+
+\subsection{Graph conversion policy}
+
+The conservative base graph has a \texttt{problem} node, zero or more \texttt{reasoning\_step} nodes, an \texttt{answer} node, \texttt{depends\_on} edges between consecutive or referenced steps, and a \texttt{supports\_answer} edge from the final step or problem node to the answer node.  Dataset-specific additions are:
+\begin{enumerate}[leftmargin=2em]
+  \item Codeforces rows add \texttt{problem\_statement}, \texttt{editorial}, \texttt{public\_test}, and \texttt{code\_solution} nodes when available.
+  \item OpenR1 rows add one generation node per sampled reasoning trace when multiple traces are present.
+  \item UniMorph rows add \texttt{lemma}, \texttt{form}, and \texttt{features} nodes.
+  \item Sefaria parallel rows add \texttt{ref}, \texttt{hebrew\_or\_aramaic}, \texttt{english}, and \texttt{category} nodes.
+  \item Sefaria Hebrew-library rows add \texttt{ref}, \texttt{category}, \texttt{version}, and \texttt{text} nodes when metadata is available.
+  \item ToT/GoT rows preserve branch markers and tag records as \texttt{tot} or \texttt{got\_math} for richer later conversion.
+\end{enumerate}
+This representation is deliberately conservative: it is sufficient for TokenGT pretraining and can be refined later without redownloading raw sources.
+
+\subsection{Leakage-resistant splitting}
+
+Random record-level splits are invalid for this setting.  Near-duplicate chain-of-thought traces, identical proof graphs, inverse braid words, conjugate torus words, repeated Hebrew lexeme paradigms, and copied Sefaria references can leak structure.
+
+\begin{definition}[Leakage cluster]
+A leakage cluster is an equivalence class generated by any of the following high-similarity relations: exact normalized-content hash, source-family key collision, text shingle SimHash prefix match, graph Weisfeiler-Lehman sketch match, algebraic normal-form equivalence, inverse/conjugate word equivalence, same Hebrew root paradigm, Sefaria reference identity, or graph-isomorphism equivalence for synthetic dynamic-programming instances.
+\end{definition}
+
+The practical splitter computes canonical text, exact \texttt{content\_hash}, task-family keys such as Codeforces problem id or Sefaria reference, and a stable SimHash prefix over word shingles.  The \texttt{group\_hash} combines task-family key, content hash, and SimHash prefix.  Split assignment is deterministic:
+\begin{equation}
+  \operatorname{split}(g)=
+  \begin{cases}
+  \text{train}, & h(g)\in[0,80),\\
+  \text{validation}, & h(g)\in[80,90),\\
+  \text{test}, & h(g)\in[90,100),
+  \end{cases}
+\end{equation}
+where $h(g)$ is a stable hash percentile.  All rows with the same group key go to the same split.  For synthetic algebra, stronger family holdouts override percentile splitting: hold out denominator intervals $q$, word lengths, Coxeter ranks, graph sizes, root families, and root-template pairs.
+
+\begin{proposition}[Cluster splitting prevents direct duplicate leakage]
+If every leakage cluster is assigned wholly to one split, then no train/test pair is connected by the chosen leakage relations.
+\end{proposition}
+
+\begin{proof}
+Assume for contradiction that a train record $r$ and a test record $s$ are connected by a leakage relation.  By definition, $r$ and $s$ lie in the same equivalence class generated by such relations.  Cluster splitting assigns the entire class to a single split, contradicting that $r$ is train and $s$ is test.
+\end{proof}
+
+\subsection{Output layout and commands}
+
+The curation output should have the following structure.
+\begin{verbatim}
+data/
+  curated/
+    manifest.json
+    split_report.json
+    split_report.md
+    all.parquet
+    train.parquet
+    validation.parquet
+    test.parquet
+    by_dataset/<safe_dataset_name>.parquet
+  raw/hf/
+    downloaded raw JSON/JSONL fallback files
+\end{verbatim}
+Run a full curation with:
+\begin{verbatim}
+conda run -n tokengt env PYTHONPATH=src python scripts/curate_datasets.py \
+  --output-dir data/curated \
+  --raw-dir data/raw/hf \
+  --chunk-size 20000 \
+  --num-workers 16 \
+  --normalize-batch-size 256
+\end{verbatim}
+Run a bounded smoke curation with:
+\begin{verbatim}
+conda run -n tokengt env PYTHONPATH=src python scripts/curate_datasets.py \
+  --output-dir data/curated_smoke \
+  --raw-dir data/raw/hf \
+  --max-records-per-source 1000 \
+  --num-workers 4 \
+  --normalize-batch-size 128
+\end{verbatim}
+Validate outputs with:
+\begin{verbatim}
+conda run -n tokengt env PYTHONPATH=src python scripts/inspect_curated_data.py \
+  --curated-dir data/curated
+\end{verbatim}
+Use 8--16 CPU workers on a 32-thread workstation, lowering the count when other CPU-heavy jobs are running.  Large direct downloads can use \texttt{aria2c} when available, but the bottleneck is often Python-side graph normalization, SimHash grouping, and Parquet writing.
+
+\subsection{Expected scale and license handling}
+
+The first full pass is expected to produce about $5.2$M records: roughly $859$k NuminaMath, $225$k OpenR1, $500$k GoT Math, $9.8$k Codeforces, $8.8$k GSM8K, $12.5$k MATH, $24.7$k ToT, $3.55$M Sefaria Hebrew-library records, $3.7$k Sefaria parallel pairs, and a small UniMorph Hebrew table.  This is enough for the lower Chinchilla-style token budget for 8M-35M parameters once reasoning text, Hebrew text, and graph tokens are counted.
+
+Before publishing any normalized data, re-check every license, preserve source attribution columns, and consider publishing only metadata and graph-conversion outputs where redistribution is allowed.  Do not publish records from sources whose terms prohibit redistribution or require gating.  GPL-licensed data, in particular, should be handled separately from permissively licensed training mixtures when downstream model or dataset release terms matter.
+
+\subsection{Synthetic generator specifications}
+
+\paragraph{Rotation words.}
+Sample words in $\{U,U^{-1},V,V^{-1}\}$, reduce to $\omega^cU^aV^b$, and emit each rewrite as a graph edge labeled \texttt{commutes\_with\_phase} or \texttt{cancels}.  Hold out denominator intervals $q$, word lengths, and phase exponents.
+
+\paragraph{Higher tori.}
+Sample skew matrices $\Theta$ and words in $U_1^{\pm1},\ldots,U_n^{\pm1}$.  Targets include ordered exponent vector $a\in\Z^n$ and symbolic phase
+\begin{equation}
+  \exp\left(2\pi i\sum_{j<k}c_{jk}\Theta_{jk}\right).
+\end{equation}
+
+\paragraph{Hebrew roots.}
+Sample root families and templates from curated lexica or analyzer outputs.  Create graph records with shared root nodes, radical nodes, template nodes, binyan nodes, and uncertain hypotheses.  Hold out entire roots or entire root-template combinations to test abstraction.
+
+\paragraph{Tropical algorithms.}
+Generate weighted graphs and full Bellman-Ford/Floyd-Warshall traces.  Record selected and dominated candidates, active faces, margins, and final distances.
+
+\section{Model, losses, and training schedule}
+
+\subsection{Architecture}
+
+A practical 8M-35M parameter ToricGT family uses $L=6$--$12$ layers, width $d=256$--$512$, eight heads, MLP expansion four, softmax/hybrid lower layers, tropical ring middle and upper layers, node/edge/graph heads, optional Hebrew morphology heads, optional GFlowNet policy heads, default Soft-MoE feed-forward replacements in the upper half of the network, and optional PolarQuant cache at inference.  The full research model is graph-to-graph.  The Parameter-Golf variant is a distilled micro language model with tied embeddings, recurrent blocks, quantization-aware training, and a small Soft-MoE adapter bank.
+
+The rough parameter count is
+\begin{equation}
+  P\approx L\left(4d^2+8d^2\right)+O(dV_{\mathrm{feat}}),
+\end{equation}
+where $4d^2$ is attention projection scale and $8d^2$ is a two-layer feed-forward block with expansion four.  Because graph-token feature vocabularies are small compared with language vocabularies, most parameters sit in the encoder.  If a dense feed-forward block is replaced by full Soft-MoE experts, the stored parameter count grows roughly like $E$ times the expert MLP size plus $dES$ router parameters.  For the research model this can be acceptable when $E$ is small.  For Parameter Golf, use shared experts or low-rank expert adapters so that increased specialization does not destroy the artifact budget.
+
+\subsection{Composite objective}
+
+The supervised objective is
+\begin{equation}
+\begin{split}
+  \mathcal L_{\mathrm{sup}}={}&\lambda_V\mathcal L_V+\lambda_E\mathcal L_E+\lambda_G\mathcal L_G+
+  \lambda_{\mathrm{eq}}\mathcal L_{\mathrm{eq}}+
+  \lambda_\Theta\mathcal L_\Theta+\lambda_{\mathrm{trop}}\mathcal L_{\mathrm{margin}}\\
+  &+\lambda_H(\mathcal L_{\mathrm{root}}+\mathcal L_{\mathrm{align}}+\mathcal L_{\mathrm{binyan}}+\mathcal L_{\mathrm{feat}}+\mathcal L_{\mathrm{par}})
+  +\lambda_{\mathrm{moe}}\mathcal L_{\mathrm{moe}}
+  +\lambda_{\mathrm{cache}}\mathcal L_{\mathrm{PQ}}
+  +\lambda_{\mathrm{KD}}\mathcal L_{\mathrm{distill}}.
+\end{split}
+\end{equation}
+The equivariance loss is
+\begin{equation}
+  \mathcal L_{\mathrm{eq}}=\Eop_{\pi}\norm{F(\pi G)-P_\pi F(G)}_2^2.
+\end{equation}
+The torus loss is
+\begin{equation}
+  \mathcal L_\Theta=\sum_{j<k}\norm{U_jU_kH-e^{2\pi i\Theta_{jk}}U_kU_jH}_F^2.
+\end{equation}
+A stable tropical objective combines margin and entropy:
+\begin{equation}
+  \mathcal L_{\mathrm{margin}}=-\Eop[\Delta_{\mathrm{correct}}]+\beta\Eop[\max(0,\Delta_{\mathrm{collapse}}-H(A))].
+\end{equation}
+
+\subsection{Schedule}
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Phase A: smoke tests}.  CPU-only shape tests, equivariance tests, mask tests, and exact tropical ring-vs-full comparisons.
+  \item \textbf{Phase B: synthetic algebra}.  Rotation words, finite tori, braid/Coxeter tasks, and tropical dynamic programming.
+  \item \textbf{Phase C: curated reasoning graphs}.  Math, algorithmic, and Hebrew morphology graph records with clustered splits.
+  \item \textbf{Phase D: GFlowNet fine-tuning}.  Activate trajectory or subtrajectory balance over embedding-space graph refinements.
+  \item \textbf{Phase E: long-context cache evaluation}.  Enable PolarQuant cache for long graph-token traces and compare exact KV, unquantized ring, and polar ring cache.
+  \item \textbf{Phase F: Parameter-Golf distillation and compression}.  Distill graph-reasoning behavior into a micro language model, add compact Soft-MoE adapters only after a dense baseline is stable, run quantization-aware training, and export a self-contained artifact with exact byte accounting.
+\end{enumerate}
+
+\section{Evaluation and ablations}
+
+Core metrics include node accuracy/regression, edge accuracy/regression, graph answer exact match, proof validity, equivariance error, tropical margin and active-face entropy, torus commutator error, Hebrew root/binyan/feature F1, paradigm consistency, Soft-MoE expert utilization and slot entropy, Parameter-Golf artifact bytes and validation BPB for the micro-LM track, GFlowNet reward calibration, terminal diversity, and OOD generalization over graph size, word length, denominator $q$, Coxeter rank, and Hebrew root families.
+
+\begin{longtable}{p{0.32\linewidth}p{0.56\linewidth}}
+\toprule
+Ablation & Question answered \\
+\midrule
+\endhead
+Softmax TokenGT, no toric features & Is graph tokenization alone sufficient? \\
+Softmax TokenGT + toric features & Do phase channels help without tropical heads? \\
+Tropical heads, no ring schedule & Does max-plus reasoning help independent of systems schedule? \\
+Tropical ring heads & Does exact blockwise evaluation preserve quality at longer context? \\
+No equivariance loss & Does architecture alone enforce enough symmetry in practice? \\
+No torus regularizer & Are phase channels learned structurally or memorized? \\
+No Hebrew graph factorization & Does root-template structure outperform string-only morphology? \\
+GFlowNet token-space vs embedding-space & Which action space gives more diverse high-reward graphs? \\
+Dense FFN vs Soft-MoE ToricGT & Does typed differentiable routing improve graph reasoning without destabilizing training? \\
+Full expert Soft-MoE vs shared-adapter Soft-MoE & Which expert parameterization gives the best quality/byte tradeoff? \\
+Full ToricGT vs micro-ToricGT LM & Which graph-reasoning inductive biases survive the Parameter-Golf compression regime? \\
+Full KV vs PolarQuant cache & Does polar cache compression preserve long-context graph reasoning? \\
+\bottomrule
+\end{longtable}
+
+\section{Implementation blueprint}
+
+The codebase should be organized as follows.
+\begin{enumerate}[leftmargin=2em]
+  \item \texttt{typed\_graph.py}: graph schema, relabeling, canonicalization, masks.
+  \item \texttt{graph\_tokenizer.py}: node, edge, endpoint, toric, Hebrew, and structural feature channels.
+  \item \texttt{tropical\_attention.py}: full tropical attention, ring tropical attention, provenance, margins.
+  \item \texttt{toric\_algebra.py}: continued fractions, Weyl pairs, cocycles, normal forms, trace tasks.
+  \item \texttt{hebrew\_graphs.py}: root-template graph conversion, analyzer-hypothesis graphs, paradigm graphs.
+  \item \texttt{model.py}: encoder, task heads, graph decoder, GFlowNet policy head.
+  \item \texttt{gflownet.py}: trajectory balance, subtrajectory balance, replay buffer, novelty metrics.
+  \item \texttt{soft\_moe\_toric.py}: graph-token Soft-MoE dispatch/combine, typed expert banks, slot diagnostics, chunked dispatch.
+  \item \texttt{causal\_soft\_moe.py}: prefix-scan Soft-MoE for autoregressive Parameter-Golf scoring, causal audits, score-before-update tests.
+  \item \texttt{polar\_cache.py}: preconditioning, recursive polar transform, codebooks, packing, dequantized kernels.
+  \item \texttt{parameter\_golf\_export.py}: byte accounting, tied-weight packing, QAT export, zlib/zstd round-trip checks, record-folder scaffolding.
+  \item \texttt{bpb\_audit.py}: byte-length accounting, validation-order checks, normalized-distribution tests, seed-bruteforce guards.
+  \item \texttt{visualization.py}: spiral projection, tropical cells, root graphs, braid/Coxeter trajectories, reward landscapes.
+  \item \texttt{leakage.py}: text shingles, graph hashes, algebraic normal forms, root-family cluster splits.
+\end{enumerate}
+
+\section{Discussion and limits}
+
+ToricGT is intentionally finite.  It learns finite presentations, finite approximants, finite graph algorithms, finite root-template analyses, and finite proof graphs.  The operator-algebraic layer supplies structure and tests, not a claim that a 35M parameter model contains $\A_\theta$ as an infinite $C^*$-algebra.  The Hebrew layer supplies an explicit graph factorization of morphology, not a claim that every ambiguous biblical form has a unique analysis.  The PolarQuant layer supplies a plausible and mathematically analyzable cache-compression path for long-context inference, not a claim that every graph reasoning task is insensitive to quantization.
+
+The practical advantage of this framing is falsifiability.  Soft-MoE routing can be inspected through slot entropy and expert mass rather than treated as magic capacity.  Parameter-Golf claims can be inspected through exact byte accounting, run logs, and validation rules rather than informal model-size estimates.  If the model violates relabeling equivariance, the error is measured.  If tropical heads collapse to a single global key, active-face entropy shows it.  If toric channels memorize denominators, held-out $q$ intervals reveal it.  If Hebrew root abstraction fails, held-out root families and paradigm completion expose it.  If PolarQuant breaks long-context retrieval, margin-preservation and exact-vs-quantized graph outputs show where.
+
+\section{Conclusion}
+
+The extended ToricGT framework gives a rigorous path from graph-tokenized Transformers to algebraic, tropical, and morphological graph reasoning.  The central mathematical claims are exact finite statements: tokenization and layers are equivariant; tropical ring attention exactly equals full tropical attention; max-plus heads simulate bounded semiring algorithms; finite Weyl pairs and cocycles provide controlled toric features; root-template Hebrew morphology becomes a typed graph problem; Soft-MoE blocks preserve graph equivariance while routing typed computations; Parameter-Golf compression defines a separate micro-LM deployment path with byte-level constraints; and PolarQuant-style cache compression admits explicit attention perturbation bounds.  The resulting research program is small enough for single-GPU experimentation yet structured enough to support serious mathematical diagnostics.
+
+\appendix
+
+\section{Additional proof details}
+
+\subsection{Hybrid universal approximation}
+
+\begin{theorem}[Hybrid ToricGT universality]
+Let $F$ be a continuous equivariant graph-to-graph map on a bounded compact graph domain.  A ToricGT model with at least one ordinary ReLU feed-forward path or softmax attention path and any number of tropical, toric, Hebrew, or PolarQuant-compatible residual paths can approximate $F$ uniformly while preserving equivariance.
+\end{theorem}
+
+\begin{proof}
+By graph-to-graph universality, an equivariant TokenGT approximant exists using ordinary Transformer blocks.  Add the additional paths as residual maps.  Initialize their output projections to zero or arbitrarily small norm, so the augmented model initially equals or approximates the original approximant.  Every added path is equivariant by the preceding lemmas when its masks, transports, and quantizers are shared or equivariant.  A sum of equivariant maps is equivariant, and the approximation error can be kept below $\varepsilon$ by choosing the original approximant error below $\varepsilon/2$ and the residual perturbation below $\varepsilon/2$.
+\end{proof}
+
+\subsection{Softmax perturbation with quantized keys}
+
+\begin{lemma}[Softmax attention perturbation]
+Let rows of $V$ and $\widehat V$ be bounded by $R_V$ in $\ell_\infty$, and suppose $\norm{S-\widehat S}_\infty\le\epsilon_S$ and $\norm{V-\widehat V}_\infty\le\epsilon_V$.  Then a single softmax head satisfies
+\begin{equation}
+  \norm{\softmax(S)V-\softmax(\widehat S)\widehat V}_\infty
+  \le C_L R_V\epsilon_S+
+\epsilon_V,
+\end{equation}
+where $C_L$ is a Lipschitz constant for row-wise softmax on $L$ entries.
+\end{lemma}
+
+\begin{proof}
+Add and subtract $\softmax(\widehat S)V$:
+\begin{align}
+\norm{\softmax(S)V-\softmax(\widehat S)\widehat V}_\infty
+&\le \norm{(\softmax(S)-\softmax(\widehat S))V}_\infty+
+\norm{\softmax(\widehat S)(V-\widehat V)}_\infty.
+\end{align}
+The second term is at most $\epsilon_V$ because each softmax row is a probability vector.  The first term is bounded by the Lipschitz constant of softmax times $\epsilon_S$ times the value bound.  This yields the claim.
+\end{proof}
+
+\section{Graph record schema}
+
+A recommended JSONL record has fields
+\begin{verbatim}
+id, source, task_family, nodes, edges, targets, metadata, split_cluster
+\end{verbatim}
+Each node contains a stable local id, type, symbolic payload, numerical features, source span, and optional uncertainty.  Each edge contains source id, target id, type, directionality, numerical features, and optional proof or analyzer metadata.  Targets include graph-level labels, node labels, edge labels, next-state graphs, answer strings, verifier scores, GFlowNet rewards, and visualization payloads.
+
+For Hebrew records, node types include \texttt{root}, \texttt{radical}, \texttt{template}, \texttt{binyan}, \texttt{feature}, \texttt{surface}, \texttt{lemma}, \texttt{gloss}, \texttt{span}, and \texttt{hypothesis}.  Edge types include \texttt{has\_radical}, \texttt{fills\_slot}, \texttt{has\_feature}, \texttt{attested\_at}, \texttt{same\_root}, and \texttt{paradigm\_member}.
+
+\section{Recommended hyperparameters}
+
+\begin{longtable}{p{0.28\linewidth}p{0.25\linewidth}p{0.35\linewidth}}
+\toprule
+Setting & Value & Notes \\
+\midrule
+\endhead
+Smoke model & 2 layers, $d=64$ & CPU-only shape and equivariance tests \\
+8M model & 6 layers, $d=256$ & first real training run \\
+15M model & 8 layers, $d=384$ & preferred single-4090 target \\
+35M model & 12 layers, $d=512$ & checkpointing and careful memory profiling \\
+Attention block size & 128--512 & tune by sequence length and memory \\
+Tropical heads & 25--50\% of heads after warmup & avoid early collapse \\
+Torus regularizer & small, delayed & introduce after normal forms are learned \\
+Hebrew loss weight & curriculum-dependent & start with analyzer-supervised tasks \\
+Soft-MoE full model & $E=4$--$8$, $S=1$--$4$ & enabled by default in upper layers; monitor expert mass and slot entropy \\
+Soft-MoE Parameter-Golf & $E=2$--$4$, $S=1$--$2$ & use shared low-rank adapters and QAT; measure bytes after every change \\
+Parameter-Golf micro-LM & tied embeddings, recurrent 4--6 unique blocks & target under 16,000,000 artifact bytes with train/eval logs \\
+PolarQuant cache & inference/eval first & compare full KV vs compressed cache \\
+Optimizer & AdamW & clipping at 1.0, cosine decay \\
+Precision & bf16 & fallback to fp16/fp32 if unsupported \\
+Splits & clustered 80/10/10 & no random record-level split \\
+\bottomrule
+\end{longtable}
+
+\begin{thebibliography}{99}
+
+\bibitem{vaswani2017attention}
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin.
+\newblock Attention is all you need.
+\newblock In \emph{NeurIPS}, 2017.
+
+\bibitem{yun2020transformers}
+Chulhee Yun, Srinadh Bhojanapalli, Ankit Singh Rawat, Sanjiv Kumar, and Sashank J. Reddi.
+\newblock Are Transformers universal approximators of sequence-to-sequence functions?
+\newblock \emph{ICLR}, 2020. arXiv:1912.10077.
+
+\bibitem{kim2022tokengt}
+Jinwoo Kim, Tien Dat Nguyen, Seonwoo Min, Sungjun Cho, Moontae Lee, Honglak Lee, and Seunghoon Hong.
+\newblock Pure Transformers are powerful graph learners.
+\newblock \emph{NeurIPS}, 2022. arXiv:2207.02505.
+
+\bibitem{liu2023ring}
+Hao Liu, Matei Zaharia, and Pieter Abbeel.
+\newblock Ring Attention with blockwise Transformers for near-infinite context.
+\newblock arXiv:2310.01889, 2023.
+
+\bibitem{hashemi2025tropical}
+Baran Hashemi, Kurt Pasque, Chris Teska, and Ruriko Yoshida.
+\newblock Tropical Attention: Neural algorithmic reasoning for combinatorial algorithms.
+\newblock \emph{NeurIPS}, 2025. arXiv:2505.17190.
+
+\bibitem{rieffel1981rotation}
+Marc A. Rieffel.
+\newblock $C^*$-algebras associated with irrational rotations.
+\newblock \emph{Pacific Journal of Mathematics}, 93(2):415--429, 1981.
+
+\bibitem{rieffel1988projective}
+Marc A. Rieffel.
+\newblock Projective modules over higher-dimensional non-commutative tori.
+\newblock \emph{Canadian Journal of Mathematics}, 40(2):257--338, 1988.
+
+\bibitem{pimsner1980embedding}
+Mihai Pimsner and Dan Voiculescu.
+\newblock Imbedding the irrational rotation $C^*$-algebra into an AF-algebra.
+\newblock \emph{Journal of Operator Theory}, 4:201--210, 1980.
+
+\bibitem{connes1980cstar}
+Alain Connes.
+\newblock $C^*$-algebres et geometrie differentielle.
+\newblock \emph{Comptes Rendus de l'Academie des Sciences}, 290:599--604, 1980.
+
+\bibitem{bengio2023gflownet}
+Yoshua Bengio, Salem Lahlou, Tristan Deleu, Edward J. Hu, Mo Tiwari, and Emmanuel Bengio.
+\newblock GFlowNet foundations.
+\newblock \emph{Journal of Machine Learning Research}, 24(210):1--55, 2023.
+
+\bibitem{malkin2022trajectory}
+Nikolay Malkin, Moksh Jain, Emmanuel Bengio, Chen Sun, and Yoshua Bengio.
+\newblock Trajectory balance: Improved credit assignment in GFlowNets.
+\newblock arXiv:2201.13259, 2022.
+
+\bibitem{madan2023subtb}
+Kanika Madan, Jarrid Rector-Brooks, Maksym Korablyov, Emmanuel Bengio, Moksh Jain, Andrei Cristian Nica, Tom Bosc, Yoshua Bengio, and Nikolay Malkin.
+\newblock Learning GFlowNets from partial episodes for improved convergence and stability.
+\newblock In \emph{ICML}, 2023.
+
+\bibitem{hoffmann2022chinchilla}
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza Rutherford, Diego de Las Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, Tom Hennigan, Eric Noland, Katie Millican, and others.
+\newblock Training compute-optimal large language models.
+\newblock In \emph{NeurIPS}, 2022. arXiv:2203.15556.
+
+
+\bibitem{puigcerver2024softmoe}
+Joan Puigcerver, Carlos Riquelme, Basil Mustafa, and Neil Houlsby.
+\newblock From Sparse to Soft Mixtures of Experts.
+\newblock \emph{ICLR}, 2024. arXiv:2308.00951.
+
+\bibitem{openai2026paramgolf}
+OpenAI.
+\newblock Model Craft Challenge: Parameter Golf.
+\newblock GitHub repository \url{https://github.com/openai/parameter-golf}, accessed May 26, 2026.
+
+\bibitem{schreiber2026paramgolf}
+Amelie Schreiber.
+\newblock Parameter Golf fork for ToricGT experimentation.
+\newblock GitHub repository \url{https://github.com/amelie-iska/parameter-golf}, accessed May 26, 2026.
+
+\bibitem{schreiber2026softmoe}
+Amelie Schreiber.
+\newblock Soft mixture-of-experts fork for ToricGT experimentation.
+\newblock GitHub repository \url{https://github.com/amelie-iska/soft-mixture-of-experts}, accessed May 26, 2026.
+
+\bibitem{han2025polarquant}
+Insu Han, Praneeth Kacham, Amin Karbasi, Vahab Mirrokni, and Amir Zandieh.
+\newblock PolarQuant: Quantizing KV Caches with Polar Transformation.
+\newblock arXiv:2502.02617, 2025.
+
+\bibitem{gesenius1910}
+Wilhelm Gesenius, edited and enlarged by E. Kautzsch, translated by A. E. Cowley.
+\newblock \emph{Gesenius' Hebrew Grammar}.
+\newblock Oxford University Press, 1910.
+
+\bibitem{waltke1990}
+Bruce K. Waltke and M. O'Connor.
+\newblock \emph{An Introduction to Biblical Hebrew Syntax}.
+\newblock Eisenbrauns, 1990.
+
+\bibitem{joüon2006}
+Paul Joüon and Takamitsu Muraoka.
+\newblock \emph{A Grammar of Biblical Hebrew}.
+\newblock Gregorian and Biblical Press, revised edition, 2006.
+
+\bibitem{koskenniemi1983}
+Kimmo Koskenniemi.
+\newblock Two-level morphology: A general computational model for word-form recognition and production.
+\newblock University of Helsinki, Department of General Linguistics, 1983.
+
+\bibitem{beesley2003}
+Kenneth R. Beesley and Lauri Karttunen.
+\newblock \emph{Finite State Morphology}.
+\newblock CSLI Publications, 2003.
+
+\bibitem{yona2008}
+Shlomo Yona and Shuly Wintner.
+\newblock A finite-state morphological grammar of Hebrew.
+\newblock \emph{Natural Language Engineering}, 14(2):173--190, 2008.
+
+\end{thebibliography}
+
+\end{document}

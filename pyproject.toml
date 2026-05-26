@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toricgt"
+version = "0.1.0"
+description = "TokenGT-style graph transformer components with tropical ring attention, noncommutative torus operators, and embedding-space GFlowNet utilities."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Amelie Schreiber"}]
+dependencies = [
+  "datasets>=2.19",
+  "huggingface_hub>=0.23",
+  "matplotlib>=3.8",
+  "networkx>=3.2",
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "pyarrow>=15",
+  "scikit-learn>=1.4",
+  "torch>=2.2",
+  "tqdm>=4.66",
+  "wandb>=0.16",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
