@@ -145,6 +145,26 @@ This preserves existing niqqud and marks Hebrew rows with `has_niqqud`, `has_heb
 
 The current full curation contains `5,790,736` records and about `14.52B` estimated whitespace tokens. The split is `4,633,582 / 578,319 / 578,835` rows for train/validation/test. The repaired GoT Math shard contributes `518,439` graph-of-thought records, and Hebrew rows carry niqqud coverage flags.
 
+The public curated split repository is `AmelieSchreiber/toricgt-curated-splits`.
+Download it with the current Hugging Face CLI:
+
+```bash
+HF_HUB_ENABLE_HF_TRANSFER=1 \
+conda run --no-capture-output -n tokengt hf download \
+  AmelieSchreiber/toricgt-curated-splits \
+  --repo-type dataset \
+  --local-dir data/curated \
+  --max-workers 8 \
+  --include "README.md" \
+  --include "train.parquet" \
+  --include "validation.parquet" \
+  --include "test.parquet" \
+  --include "manifest.json" \
+  --include "split_report.json" \
+  --include "split_report.md" \
+  --include "niqqud_report.json"
+```
+
 Publish split Parquet files to a public Hugging Face dataset repo using the local credential store. For large uploads, prefer the resumable CLI path:
 
 ```bash
