@@ -14,6 +14,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
+from toricgt.cli_config import apply_yaml_defaults, parse_config_path
 from toricgt.config import ModelConfig
 from toricgt.datasets import TEST_TIME_SCALING_DATASETS
 from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items
@@ -162,7 +163,8 @@ def default_new_eval_path(args: argparse.Namespace) -> str | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--config", default=None, help="YAML file whose keys become CLI defaults.")
+    parser.add_argument("--checkpoint", default=None)
     parser.add_argument(
         "--data-path",
         default=None,
@@ -185,7 +187,10 @@ def main() -> None:
     parser.add_argument("--curation-normalize-batch-size", type=int, default=256)
     parser.add_argument("--curation-chunk-size", type=int, default=5000)
     parser.add_argument("--output-json", default=None)
+    apply_yaml_defaults(parser, parse_config_path())
     args = parser.parse_args()
+    if args.checkpoint is None:
+        parser.error("--checkpoint is required unless supplied by --config")
     args.data_path = default_new_eval_path(args)
 
     payload = torch.load(args.checkpoint, map_location=args.device, weights_only=False)

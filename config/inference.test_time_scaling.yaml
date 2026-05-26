@@ -1,0 +1,56 @@
+# Held-out OpenAI/NVIDIA inference-time scaling defaults.
+# By default this auto-curates the new held-out test data into
+# `data/test_time_scaling/new_external/test.parquet` if it is absent.
+
+metadata:
+  purpose: "Held-out inference-time scaling with GFlowNet rollouts and MC dropout."
+  training_steps: 0
+  training_epochs: 0
+  default_datasets:
+    - openai/frontierscience
+    - openai/healthbench
+    - openai/healthbench-professional
+    - openai/graphwalks
+    - nvidia/Nemotron-RL-ReasoningGym-v1
+    - nvidia/Nemotron-Content-Safety-Reasoning-Dataset
+    - nvidia/PhysicalAI-Traffic-Anomaly-Reasoning
+
+phase_plan:
+  phase: inference_time_scaling
+  supervised_training_steps: 0
+  gflownet_training_steps: 0
+  unsupervised_training_steps: 0
+  candidate_budgets:
+    - 1
+    - 4
+    - 16
+    - 64
+  gflownet_rollout_horizon: 4
+  mc_dropout_candidates: true
+
+inference:
+  checkpoint: checkpoints/toricgt_full_30m/toricgt_step_00008000.pt
+  data_path: null
+  device: cuda
+  batch_size: 2
+  batches: 20
+  budgets:
+    - 1
+    - 4
+    - 16
+    - 64
+  gflownet_horizon: 4
+  temperature: 1.0
+  mc_dropout: true
+  synthetic: false
+  parquet_batch_size: 512
+  output_json: runs/test_time_scaling/openai_nvidia_eval.json
+
+curation:
+  new_eval_dir: data/test_time_scaling/new_external
+  raw_dir: data/raw/hf
+  no_auto_curate_new_data: false
+  new_data_max_records_per_source: 0
+  curation_workers: 4
+  curation_normalize_batch_size: 256
+  curation_chunk_size: 5000

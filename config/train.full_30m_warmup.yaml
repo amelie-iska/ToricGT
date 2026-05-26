@@ -1,0 +1,69 @@
+# ToricGT 30M-class supervised/self-supervised warmup.
+# This is the pre-curriculum phase used before `train.full_30m_cyclic.yaml`.
+
+metadata:
+  purpose: "Base full-Soft-MoE warmup before braided expert specialization."
+  train_records: 4633582
+  train_estimated_text_tokens: 11607210191
+  records_per_optimizer_step: 32
+
+phase_plan:
+  phase: warmup
+  supervised_steps: 2000
+  gflownet_auxiliary_steps: 2000
+  unsupervised_only_steps: 0
+  optimizer_steps: 2000
+  records_seen: 64000
+  approximate_train_epochs: 0.013812
+  estimated_text_tokens_seen: 160321205
+  objective: "masked graph node-feature reconstruction with auxiliary embedding-space GFlowNet trajectory balance"
+
+data:
+  data_path:
+    - data/curated/train.parquet
+  val_data_path:
+    - data/curated/validation.parquet
+  parquet_batch_size: 512
+
+model:
+  attention: hybrid
+  d_model: 384
+  num_heads: 8
+  num_layers: 8
+  max_nodes: 256
+  max_edges: 1024
+  no_soft_moe: false
+  soft_moe_all_layers: false
+  soft_moe_experts: 4
+  soft_moe_slots: 2
+
+training:
+  steps: 2000
+  resume: null
+  checkpoint_dir: checkpoints/toricgt_full_30m
+  checkpoint_every: 1000
+  device: cuda
+  batch_size: 2
+  grad_accum_steps: 16
+  precision: bf16
+  seed: 17
+  lr: 0.0003
+  weight_decay: 0.05
+  lr_schedule: cosine
+  warmup_steps: 2000
+  min_lr_ratio: 0.1
+  log_interval: 20
+  eval_every: 1000
+  eval_batches: 20
+  wandb: true
+
+curriculum:
+  gflownet_loss_weight: 0.01
+  gflownet_space: embedding
+  expert_cyclic_curriculum: false
+  expert_curriculum_subsets: 0
+  expert_curriculum_phase_steps: 500
+  expert_curriculum_start_step: 0
+  expert_curriculum_order: braid
+  expert_curriculum_salt: 17
+  expert_curriculum_distill_weight: 0.0

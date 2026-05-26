@@ -15,6 +15,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
+from toricgt.cli_config import apply_yaml_defaults, parse_config_path
 from toricgt.config import ModelConfig, TrainConfig
 from toricgt.expert_curriculum import CyclicExpertCurriculum, ExpertCurriculumAssignment
 from toricgt.gflownet import TrajectoryBatch, trajectory_balance_loss
@@ -186,11 +187,12 @@ def evaluate_loader(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=None, help="YAML file whose keys become CLI defaults.")
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--attention", choices=["softmax", "tropical", "tropical_ring", "hybrid"], default="tropical_ring")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
-    parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--wandb", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--no-soft-moe", action="store_true", help="Disable the default Soft-MoE feed-forward blocks.")
     parser.add_argument("--soft-moe-all-layers", action="store_true", help="Use Soft-MoE in every encoder layer.")
     parser.add_argument("--soft-moe-experts", type=int, default=4)
@@ -219,13 +221,14 @@ def main() -> None:
     parser.add_argument("--lr-schedule", choices=["cosine", "constant"], default="cosine")
     parser.add_argument("--warmup-steps", type=int, default=2_000)
     parser.add_argument("--min-lr-ratio", type=float, default=0.1)
-    parser.add_argument("--expert-cyclic-curriculum", action="store_true")
+    parser.add_argument("--expert-cyclic-curriculum", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--expert-curriculum-subsets", type=int, default=0)
     parser.add_argument("--expert-curriculum-phase-steps", type=int, default=500)
     parser.add_argument("--expert-curriculum-order", choices=["cyclic", "braid"], default="braid")
     parser.add_argument("--expert-curriculum-start-step", type=int, default=0)
     parser.add_argument("--expert-curriculum-salt", type=int, default=17)
     parser.add_argument("--expert-curriculum-distill-weight", type=float, default=0.0)
+    apply_yaml_defaults(parser, parse_config_path())
     args = parser.parse_args()
     set_seed(args.seed)
 

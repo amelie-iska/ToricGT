@@ -329,6 +329,19 @@ Resume from a checkpoint by adding:
 
 When `--wandb` is enabled, the trainer reports online metrics for train loss, supervised loss, GFlowNet trajectory-balance loss, GFlowNet loss weight, graph tokens per microbatch, LR, grad norm, validation masked MSE, VRAM, and Soft-MoE routing diagnostics.
 
+YAML configs are available in [config/](/home/iska/Documents/amelie/bio/ToricGT/config). CLI flags override YAML values:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src WANDB_PROJECT=toricgt \
+  python scripts/train.py --config config/train.full_30m_warmup.yaml
+
+conda run --no-capture-output -n tokengt env PYTHONPATH=src WANDB_PROJECT=toricgt \
+  python scripts/train.py --config config/train.full_30m_cyclic.yaml \
+  --resume checkpoints/toricgt_full_30m/toricgt_step_00008000.pt
+```
+
+The configured full plan is 2,000 warmup optimizer steps plus 98,000 braided-expert optimizer steps. With batch size 2 and gradient accumulation 16, this is 3.2M graph records, about 0.6906 pass-equivalent epochs over the 4,633,582-record train split. GFlowNet trajectory-balance supervision runs as an auxiliary objective on all 100,000 steps; there is no separate unsupervised-only phase in the current training scripts.
+
 Braided expert-curriculum training is available with `--expert-cyclic-curriculum`. It partitions curated Parquet rows into stable hash-disjoint subsets, trains one active Soft-MoE expert at a time, rotates experts through subsets in a cyclic or braided order, then enables inter-expert distillation and GFlowNet reward shaping after full coverage. The full plan is in `planning/CYCLIC-EXPERT-GFLOWNET-PLAN.md`.
 
 Resume the current 30M-class run from step 2000 with the braided curriculum:
@@ -463,13 +476,7 @@ Held-out test-time scaling over curated test rows:
 
 ```bash
 conda run --no-capture-output -n tokengt env PYTHONPATH=src python scripts/test_time_scaling.py \
-  --checkpoint checkpoints/toricgt_full_30m/toricgt_step_00002000.pt \
-  --device cuda \
-  --batch-size 2 \
-  --batches 20 \
-  --budgets 1 4 16 64 \
-  --gflownet-horizon 4 \
-  --output-json runs/test_time_scaling/heldout_scaling.json
+  --config config/inference.test_time_scaling.yaml
 ```
 
 By default, this uses the new held-out OpenAI/NVIDIA test-time scaling dataset

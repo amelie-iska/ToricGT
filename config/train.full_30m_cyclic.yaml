@@ -1,0 +1,77 @@
+# ToricGT 30M-class braided Soft-MoE/GFlowNet training defaults.
+# CLI flags override these values. Use a current checkpoint in `resume` when
+# continuing an already-running run.
+
+metadata:
+  purpose: "Post-warmup braided Soft-MoE expert specialization with GFlowNet auxiliary reinforcement."
+  train_records: 4633582
+  train_estimated_text_tokens: 11607210191
+  records_per_optimizer_step: 32
+  expected_warmup_checkpoint: checkpoints/toricgt_full_30m/toricgt_step_00002000.pt
+
+phase_plan:
+  phase: braided_expert_curriculum
+  prerequisite_warmup_steps: 2000
+  supervised_steps: 98000
+  gflownet_auxiliary_steps: 98000
+  unsupervised_only_steps: 0
+  optimizer_steps: 98000
+  records_seen: 3136000
+  approximate_train_epochs: 0.676798
+  estimated_text_tokens_seen: 7855739071
+  phase_steps: 500
+  records_per_curriculum_phase: 16000
+  approximate_subset_epoch_per_phase: 0.013812
+  full_expert_subset_coverage_steps: 8000
+  full_expert_subset_coverage_cycles: 12.25
+  objective: "masked graph node-feature reconstruction plus embedding-space GFlowNet trajectory balance, with inter-expert distillation after full coverage"
+
+data:
+  data_path:
+    - data/curated/train.parquet
+  val_data_path:
+    - data/curated/validation.parquet
+  parquet_batch_size: 512
+
+model:
+  attention: hybrid
+  d_model: 384
+  num_heads: 8
+  num_layers: 8
+  max_nodes: 256
+  max_edges: 1024
+  no_soft_moe: false
+  soft_moe_all_layers: false
+  soft_moe_experts: 4
+  soft_moe_slots: 2
+
+training:
+  steps: 98000
+  resume: checkpoints/toricgt_full_30m/toricgt_step_00002000.pt
+  checkpoint_dir: checkpoints/toricgt_full_30m
+  checkpoint_every: 2000
+  device: cuda
+  batch_size: 2
+  grad_accum_steps: 16
+  precision: bf16
+  seed: 17
+  lr: 0.0003
+  weight_decay: 0.05
+  lr_schedule: cosine
+  warmup_steps: 2000
+  min_lr_ratio: 0.1
+  log_interval: 20
+  eval_every: 1000
+  eval_batches: 20
+  wandb: true
+
+curriculum:
+  gflownet_loss_weight: 0.05
+  gflownet_space: embedding
+  expert_cyclic_curriculum: true
+  expert_curriculum_subsets: 4
+  expert_curriculum_phase_steps: 500
+  expert_curriculum_start_step: 2000
+  expert_curriculum_order: braid
+  expert_curriculum_salt: 17
+  expert_curriculum_distill_weight: 0.05
