@@ -563,6 +563,7 @@ class DenseRandomOrderToricLM(nn.Module):
             bos_token_id=self.bos_token_id,
             permutation=permutation,
         )
+        order_aux: dict[str, torch.Tensor] | None = None
         if self.config.use_gflownet_policy and gflownet_samples > 1:
             sample_losses = []
             sample_logps = []
@@ -587,6 +588,7 @@ class DenseRandomOrderToricLM(nn.Module):
                 if "gflownet_action_diversity" in losses:
                     diversities.append(losses["gflownet_action_diversity"])
                 last_aux = aux
+            order_aux = last_aux
             mixture_logp = torch.logsumexp(torch.stack(sample_logps, dim=0), dim=0) - math.log(gflownet_samples)
             loss = -mixture_logp.mean()
             logits = last_aux["logits"] if last_aux is not None else torch.empty(0, device=tokens.device)
@@ -608,6 +610,7 @@ class DenseRandomOrderToricLM(nn.Module):
             if not isinstance(aux, dict):
                 raise RuntimeError("expected auxiliary output")
             logits = aux["logits"]
+            order_aux = aux
             aux_losses = self._supervised_and_gflownet_losses(aux, batch.target_tokens)
             loss = aux_losses["loss"]
         out: dict[str, torch.Tensor] = {
@@ -625,6 +628,8 @@ class DenseRandomOrderToricLM(nn.Module):
                     "permutation": batch.permutation,
                 }
             )
+            if order_aux is not None and "action_ids" in order_aux:
+                out["gflownet_action_ids"] = order_aux["action_ids"]
         return out
 
     @torch.no_grad()

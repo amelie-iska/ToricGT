@@ -74,6 +74,29 @@ training:
   causal_audit_interval: 1000
   ckpt_interval: 1000
 
+complexity:
+  enabled: true
+  eval_every: 50
+  eval_samples: 2
+  compressors:
+    - zlib
+    - lzma
+
+checkpoint_publishing:
+  enabled: true
+  repo_id: AmelieSchreiber/toricgt-checkpoints
+  repo_type: model
+  checkpoint_filename: parameter_golf_oai_best.pt
+  manifest_filename: parameter_golf_oai_best.json
+  state_path: checkpoints/parameter_golf_oai_dense/hf_best_publish_state.json
+  # Lower is better.  This composite keeps BPB primary while requiring the
+  # prediction-target complexity/NCD diagnostic to be part of promotion.
+  complexity_metric: complexity/val/prediction_target_ncd_lzma_mean
+  complexity_weight: 0.05
+  min_score_delta: 0.0
+  max_complexity_regression: 0.10
+  private: false
+
 export:
   bits: 6
   quantization_mode: row

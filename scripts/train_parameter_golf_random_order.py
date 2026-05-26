@@ -21,6 +21,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 from tqdm.auto import tqdm
 
+from toricgt.complexity import random_order_complexity_metrics
 from toricgt.parameter_golf_export import PARAMETER_GOLF_BYTE_LIMIT, write_artifact
 from toricgt.random_order_lm import (
     DenseRandomOrderToricLM,
@@ -58,6 +59,49 @@ def read_yaml(path: str | None) -> dict[str, Any]:
 
 def config_get(config: dict[str, Any], section: str, key: str, default: Any) -> Any:
     return config.get(section, {}).get(key, default)
+
+
+def load_optional_training_tokens(path: str | Path = "keys.txt") -> None:
+    """Load local auth tokens without printing or checkpointing them.
+
+    The repository ignores ``keys.txt``.  This helper only populates standard
+    environment variables when they are absent, which lets tmux-launched runs
+    publish best checkpoints and log to W&B without placing secrets in config
+    files, logs, or checkpoints.
+    """
+
+    key_path = Path(path)
+    if not key_path.exists():
+        return
+    aliases = {
+        "hf_token": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HUB_TOKEN"),
+        "huggingface_token": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HUB_TOKEN"),
+        "hugging_face": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HUB_TOKEN"),
+        "hugging_face_token": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HUB_TOKEN"),
+        "wandb": ("WANDB_API_KEY",),
+        "wandb_token": ("WANDB_API_KEY",),
+        "wandb_api_key": ("WANDB_API_KEY",),
+    }
+    try:
+        lines = key_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            raw_key, raw_value = line.split("=", 1)
+        elif ":" in line:
+            raw_key, raw_value = line.split(":", 1)
+        else:
+            continue
+        key = raw_key.strip().lower().replace("-", "_").replace(" ", "_")
+        value = raw_value.strip().strip('"').strip("'")
+        if not value:
+            continue
+        for env_name in aliases.get(key, ()):
+            os.environ.setdefault(env_name, value)
 
 
 class ParquetByteChunkDataset(IterableDataset):
@@ -342,6 +386,204 @@ def save_checkpoint(
     )
 
 
+def read_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def publish_quality_score(
+    val_bpb: float,
+    metrics: dict[str, float],
+    complexity_metric: str,
+    complexity_weight: float,
+) -> tuple[float, float | None]:
+    """Return lower-is-better checkpoint score including a complexity proxy."""
+
+    complexity_value = metrics.get(complexity_metric)
+    if complexity_value is None and complexity_metric != "complexity/val/prediction_target_ncd_lzma_mean":
+        complexity_value = metrics.get("complexity/val/prediction_target_ncd_lzma_mean")
+    if complexity_value is None:
+        complexity_value = metrics.get("complexity/val/target_cond_k_lzma_mean")
+    score = float(val_bpb)
+    if complexity_value is not None and math.isfinite(float(complexity_value)):
+        score += float(complexity_weight) * float(complexity_value)
+    return score, None if complexity_value is None else float(complexity_value)
+
+
+def checkpoint_publish_decision(
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+    min_score_delta: float = 0.0,
+    max_complexity_regression: float = 0.10,
+) -> bool:
+    """Decide whether the current checkpoint is better than the published one."""
+
+    if previous is None:
+        return True
+    current_score = current.get("quality_score")
+    previous_score = previous.get("quality_score")
+    if current_score is None:
+        return False
+    if previous_score is None:
+        return True
+    if float(current_score) >= float(previous_score) - float(min_score_delta):
+        return False
+    current_k = current.get("complexity_value")
+    previous_k = previous.get("complexity_value")
+    if current_k is not None and previous_k is not None:
+        allowed = float(previous_k) * (1.0 + max(0.0, float(max_complexity_regression)))
+        if float(current_k) > allowed:
+            previous_bpb = previous.get("val_bpb", float("inf"))
+            current_bpb = current.get("val_bpb", float("inf"))
+            if float(current_bpb) >= float(previous_bpb):
+                return False
+    return True
+
+
+def better_publish_state(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any] | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    left_score = left.get("quality_score")
+    right_score = right.get("quality_score")
+    if left_score is None:
+        return right
+    if right_score is None:
+        return left
+    return left if float(left_score) <= float(right_score) else right
+
+
+def download_remote_publish_manifest(
+    repo_id: str,
+    repo_type: str,
+    manifest_filename: str,
+    cache_dir: Path,
+) -> dict[str, Any] | None:
+    try:
+        from huggingface_hub import hf_hub_download
+
+        path = hf_hub_download(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            filename=manifest_filename,
+            local_dir=cache_dir,
+            force_download=True,
+        )
+    except Exception:
+        return None
+    return read_json_file(Path(path))
+
+
+def publish_best_checkpoint_to_hf(
+    checkpoint_path: Path,
+    step: int,
+    metrics: dict[str, float],
+    repo_id: str,
+    repo_type: str,
+    checkpoint_filename: str,
+    manifest_filename: str,
+    state_path: Path,
+    complexity_metric: str,
+    complexity_weight: float,
+    min_score_delta: float,
+    max_complexity_regression: float,
+    private: bool,
+    wandb_url: str | None,
+) -> dict[str, float]:
+    """Upload the best checkpoint to HF only when the quality score improves."""
+
+    val_bpb = float(metrics["val/bpb"])
+    score, complexity_value = publish_quality_score(
+        val_bpb=val_bpb,
+        metrics=metrics,
+        complexity_metric=complexity_metric,
+        complexity_weight=complexity_weight,
+    )
+    state_path = state_path.expanduser()
+    local_previous = read_json_file(state_path)
+    remote_previous = download_remote_publish_manifest(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        manifest_filename=manifest_filename,
+        cache_dir=state_path.parent / ".hf_manifest_cache",
+    )
+    previous = better_publish_state(local_previous, remote_previous)
+    manifest = {
+        "model_type": "random_order_dense_lm",
+        "step": int(step),
+        "val_bpb": val_bpb,
+        "val_loss": float(metrics["val/loss"]),
+        "quality_score": float(score),
+        "complexity_metric": complexity_metric,
+        "complexity_value": complexity_value,
+        "complexity_weight": float(complexity_weight),
+        "checkpoint_filename": checkpoint_filename,
+        "wandb_url": wandb_url,
+        "published_at_unix": int(time.time()),
+    }
+    publish_metrics = {
+        "hf_publish/score": float(score),
+        "hf_publish/val_bpb": val_bpb,
+        "hf_publish/published": 0.0,
+    }
+    if complexity_value is not None:
+        publish_metrics["hf_publish/complexity_value"] = float(complexity_value)
+    if previous and previous.get("quality_score") is not None:
+        publish_metrics["hf_publish/previous_score"] = float(previous["quality_score"])
+    if not checkpoint_publish_decision(
+        manifest,
+        previous,
+        min_score_delta=min_score_delta,
+        max_complexity_regression=max_complexity_regression,
+    ):
+        write_json_atomic(state_path, previous or manifest)
+        publish_metrics["hf_publish/skipped_not_better"] = 1.0
+        return publish_metrics
+
+    try:
+        from huggingface_hub import HfApi
+
+        api = HfApi()
+        api.create_repo(repo_id=repo_id, repo_type=repo_type, private=private, exist_ok=True)
+        api.upload_file(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            path_or_fileobj=str(checkpoint_path),
+            path_in_repo=checkpoint_filename,
+            commit_message=f"Update ToricGT best Parameter-Golf checkpoint at step {step}",
+        )
+        manifest_path = state_path.parent / manifest_filename
+        write_json_atomic(manifest_path, manifest)
+        api.upload_file(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            path_or_fileobj=str(manifest_path),
+            path_in_repo=manifest_filename,
+            commit_message=f"Update ToricGT best checkpoint manifest at step {step}",
+        )
+        write_json_atomic(state_path, manifest)
+        publish_metrics["hf_publish/published"] = 1.0
+    except Exception as exc:
+        publish_metrics["hf_publish/error"] = 1.0
+        error_path = state_path.with_suffix(".error.txt")
+        try:
+            error_path.write_text(f"{type(exc).__name__}: {exc}\n", encoding="utf-8")
+        except OSError:
+            pass
+    return publish_metrics
+
+
 @torch.no_grad()
 def evaluate(
     model: DenseRandomOrderToricLM,
@@ -413,6 +655,54 @@ def causal_audit(
     return error
 
 
+@torch.no_grad()
+def compute_batch_complexity_metrics(
+    model: DenseRandomOrderToricLM,
+    batch: dict[str, torch.Tensor],
+    device: torch.device,
+    precision: str,
+    pass_id: int,
+    max_samples: int,
+    compressors: tuple[str, ...],
+    prefix: str,
+) -> dict[str, float]:
+    """Compute small-sample Kolmogorov-style diagnostics for one byte batch."""
+
+    if max_samples <= 0:
+        return {}
+    was_training = model.training
+    model.eval()
+    tokens = batch["tokens"][:max_samples].to(device, non_blocking=True)
+    sample_ids = batch["sample_ids"][:max_samples].to(device, non_blocking=True)
+    amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
+    use_amp = device.type == "cuda" and precision in {"bf16", "fp16"}
+    with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp):
+        out = model(
+            tokens,
+            sample_ids=sample_ids,
+            pass_id=pass_id,
+            sample_gflownet=model.config.use_gflownet_policy,
+            return_order=True,
+        )
+    metrics = random_order_complexity_metrics(
+        tokens=tokens,
+        previous_tokens=out["previous_tokens"],
+        target_tokens=out["target_tokens"],
+        permutation=out["permutation"],
+        logits=out["logits"],
+        action_ids=out.get("gflownet_action_ids"),
+        byte_offset=model.config.byte_offset,
+        prefix=prefix,
+        compressors=compressors,
+        max_samples=max_samples,
+    )
+    metrics[f"{prefix}/loss"] = float(out["loss"].detach().cpu())
+    metrics[f"{prefix}/bpb"] = float(out["bpb"].detach().cpu())
+    if was_training:
+        model.train()
+    return metrics
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config")
@@ -482,6 +772,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-score-first-bias-decay", type=float)
     parser.add_argument("--eval-score-first-bias-clip", type=float)
     parser.add_argument("--causal-audit-interval", type=int)
+    parser.add_argument("--complexity", action="store_true")
+    parser.add_argument("--no-complexity", action="store_true")
+    parser.add_argument("--complexity-eval-every", type=int)
+    parser.add_argument("--complexity-eval-samples", type=int)
+    parser.add_argument("--complexity-compressors", nargs="+")
+    parser.add_argument("--hf-publish-best", action="store_true")
+    parser.add_argument("--no-hf-publish-best", action="store_true")
+    parser.add_argument("--hf-repo-id")
+    parser.add_argument("--hf-repo-type", default=None)
+    parser.add_argument("--hf-checkpoint-filename")
+    parser.add_argument("--hf-manifest-filename")
+    parser.add_argument("--hf-publish-state")
+    parser.add_argument("--hf-publish-complexity-metric")
+    parser.add_argument("--hf-publish-complexity-weight", type=float)
+    parser.add_argument("--hf-publish-min-score-delta", type=float)
+    parser.add_argument("--hf-publish-max-complexity-regression", type=float)
+    parser.add_argument("--hf-publish-private", action="store_true")
     parser.add_argument("--export-bits", type=int, choices=[4, 6, 8])
     parser.add_argument("--quantization-mode", choices=["tensor", "row"])
     parser.add_argument("--artifact-compression", choices=["deflated", "bzip2", "lzma"])
@@ -495,6 +802,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     file_config = read_yaml(args.config)
+    load_optional_training_tokens()
 
     seed = args.seed if args.seed is not None else config_get(file_config, "training", "seed", 17)
     torch.manual_seed(seed)
@@ -665,6 +973,74 @@ def main() -> None:
         if args.causal_audit_interval is not None
         else config_get(file_config, "training", "causal_audit_interval", 1000)
     )
+    complexity_enabled = (
+        False
+        if args.no_complexity
+        else bool(args.complexity or config_get(file_config, "complexity", "enabled", True))
+    )
+    complexity_eval_every = (
+        args.complexity_eval_every
+        if args.complexity_eval_every is not None
+        else config_get(file_config, "complexity", "eval_every", 50)
+    )
+    complexity_eval_samples = (
+        args.complexity_eval_samples
+        if args.complexity_eval_samples is not None
+        else config_get(file_config, "complexity", "eval_samples", 2)
+    )
+    complexity_compressors = tuple(
+        args.complexity_compressors
+        if args.complexity_compressors is not None
+        else config_get(file_config, "complexity", "compressors", ["zlib", "lzma"])
+    )
+    publish_best_to_hf = (
+        False
+        if args.no_hf_publish_best
+        else bool(args.hf_publish_best or config_get(file_config, "checkpoint_publishing", "enabled", False))
+    )
+    hf_repo_id = args.hf_repo_id or config_get(
+        file_config, "checkpoint_publishing", "repo_id", "AmelieSchreiber/toricgt-checkpoints"
+    )
+    hf_repo_type = args.hf_repo_type or config_get(file_config, "checkpoint_publishing", "repo_type", "model")
+    hf_checkpoint_filename = args.hf_checkpoint_filename or config_get(
+        file_config, "checkpoint_publishing", "checkpoint_filename", "parameter_golf_oai_best.pt"
+    )
+    hf_manifest_filename = args.hf_manifest_filename or config_get(
+        file_config, "checkpoint_publishing", "manifest_filename", "parameter_golf_oai_best.json"
+    )
+    hf_publish_state = Path(
+        args.hf_publish_state
+        or config_get(
+            file_config,
+            "checkpoint_publishing",
+            "state_path",
+            "checkpoints/parameter_golf_oai_dense/hf_best_publish_state.json",
+        )
+    )
+    hf_complexity_metric = args.hf_publish_complexity_metric or config_get(
+        file_config,
+        "checkpoint_publishing",
+        "complexity_metric",
+        "complexity/val/prediction_target_ncd_lzma_mean",
+    )
+    hf_complexity_weight = (
+        args.hf_publish_complexity_weight
+        if args.hf_publish_complexity_weight is not None
+        else config_get(file_config, "checkpoint_publishing", "complexity_weight", 0.05)
+    )
+    hf_min_score_delta = (
+        args.hf_publish_min_score_delta
+        if args.hf_publish_min_score_delta is not None
+        else config_get(file_config, "checkpoint_publishing", "min_score_delta", 0.0)
+    )
+    hf_max_complexity_regression = (
+        args.hf_publish_max_complexity_regression
+        if args.hf_publish_max_complexity_regression is not None
+        else config_get(file_config, "checkpoint_publishing", "max_complexity_regression", 0.10)
+    )
+    hf_private = bool(
+        args.hf_publish_private or config_get(file_config, "checkpoint_publishing", "private", False)
+    )
     ckpt_interval = (
         args.ckpt_interval if args.ckpt_interval is not None else config_get(file_config, "training", "ckpt_interval", 1_000)
     )
@@ -708,7 +1084,8 @@ def main() -> None:
         model.load_state_dict(payload["model"])
         optimizer.load_state_dict(payload["optimizer"])
         start_step = int(payload.get("step", 0))
-        best_val = float(payload.get("metrics", {}).get("val_bpb", best_val))
+        resume_metrics = payload.get("metrics", {})
+        best_val = float(resume_metrics.get("val_bpb", resume_metrics.get("best_val_bpb", best_val)))
 
     params = parameter_count(model)
     export_bits = args.export_bits or config_get(file_config, "export", "bits", 8)
@@ -791,6 +1168,24 @@ def main() -> None:
                     "eval_score_first_bias_clip": eval_score_first_bias_clip,
                     "causal_audit_interval": causal_audit_interval,
                 },
+                "complexity": {
+                    "enabled": complexity_enabled,
+                    "eval_every": complexity_eval_every,
+                    "eval_samples": complexity_eval_samples,
+                    "compressors": list(complexity_compressors),
+                    "training_regularizer_weight": 0.0,
+                },
+                "checkpoint_publishing": {
+                    "enabled": publish_best_to_hf,
+                    "repo_id": hf_repo_id,
+                    "repo_type": hf_repo_type,
+                    "checkpoint_filename": hf_checkpoint_filename,
+                    "manifest_filename": hf_manifest_filename,
+                    "complexity_metric": hf_complexity_metric,
+                    "complexity_weight": hf_complexity_weight,
+                    "min_score_delta": hf_min_score_delta,
+                    "max_complexity_regression": hf_max_complexity_regression,
+                },
                 "data": {
                     "include_graph_projection": include_graph_projection,
                     "graph_projection_max_chars": graph_projection_max_chars,
@@ -831,6 +1226,15 @@ def main() -> None:
             "artifact_compression": artifact_compression,
             "deployment_parameters": report.deployment_parameters,
             "excluded_tensors": report.excluded_tensors,
+            "complexity_enabled": complexity_enabled,
+            "complexity_eval_every": complexity_eval_every,
+            "complexity_eval_samples": complexity_eval_samples,
+            "complexity_compressors": list(complexity_compressors),
+            "hf_publish_best": publish_best_to_hf,
+            "hf_repo_id": hf_repo_id,
+            "hf_checkpoint_filename": hf_checkpoint_filename,
+            "hf_manifest_filename": hf_manifest_filename,
+            "hf_publish_complexity_metric": hf_complexity_metric,
         },
         indent=2,
     ))
@@ -861,6 +1265,7 @@ def main() -> None:
         step_trajectory_viscous = 0.0
         step_smear_temperature = 0.0
         step_toric_memory_entropy = 0.0
+        last_train_batch: dict[str, torch.Tensor] | None = None
         lr_step = cosine_lr(step, lr, warmup_steps, steps)
         for group in optimizer.param_groups:
             group["lr"] = lr_step
@@ -868,6 +1273,7 @@ def main() -> None:
             batch = next(iterator)
             tokens = batch["tokens"].to(device, non_blocking=True)
             sample_ids = batch["sample_ids"].to(device, non_blocking=True)
+            last_train_batch = {"tokens": tokens.detach(), "sample_ids": sample_ids.detach()}
             with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp):
                 out = model(
                     tokens,
@@ -932,6 +1338,23 @@ def main() -> None:
         audit_error = None
         if causal_audit_interval > 0 and step % causal_audit_interval == 0:
             audit_error = causal_audit(model, tokens)
+        complexity_due = complexity_enabled and last_train_batch is not None and (
+            step == start_step + 1 or (complexity_eval_every > 0 and step % complexity_eval_every == 0)
+        )
+        complexity_metrics: dict[str, float] = {}
+        if complexity_due:
+            complexity_metrics.update(
+                compute_batch_complexity_metrics(
+                    model=model,
+                    batch=last_train_batch,
+                    device=device,
+                    precision=precision,
+                    pass_id=step * 1_000_003,
+                    max_samples=int(complexity_eval_samples),
+                    compressors=complexity_compressors,
+                    prefix="complexity/train",
+                )
+            )
 
         if step % log_interval == 0:
             metrics = {
@@ -969,11 +1392,14 @@ def main() -> None:
             }
             if audit_error is not None:
                 metrics["audit/future_permutation_logit_error"] = audit_error
+            metrics.update(complexity_metrics)
             if device.type == "cuda":
                 metrics["system/vram_allocated_gb"] = torch.cuda.memory_allocated(device) / 1e9
                 metrics["system/vram_reserved_gb"] = torch.cuda.memory_reserved(device) / 1e9
             if wandb_run is not None:
                 wandb_run.log(metrics, step=step)
+        elif complexity_metrics and wandb_run is not None:
+            wandb_run.log(complexity_metrics, step=step)
 
         if step % eval_interval == 0 or step == steps:
             val = evaluate(
@@ -998,20 +1424,65 @@ def main() -> None:
             }
             if "bias_norm" in val:
                 metrics["val/score_first_bias_norm"] = val["bias_norm"]
+            if complexity_enabled and complexity_eval_samples > 0:
+                try:
+                    val_batch = next(iter(val_loader))
+                    metrics.update(
+                        compute_batch_complexity_metrics(
+                            model=model,
+                            batch=val_batch,
+                            device=device,
+                            precision=precision,
+                            pass_id=step * 1_000_003 + 17,
+                            max_samples=int(complexity_eval_samples),
+                            compressors=complexity_compressors,
+                            prefix="complexity/val",
+                        )
+                    )
+                except StopIteration:
+                    pass
             print(json.dumps({"step": step, **metrics}, indent=2))
             if wandb_run is not None:
                 wandb_run.log(metrics, step=step)
             if val["bpb"] < best_val:
                 best_val = val["bpb"]
+                best_checkpoint_path = checkpoint_dir / "best.pt"
+                checkpoint_metrics = {"val_bpb": best_val, "val_loss": val["loss"], **metrics}
                 save_checkpoint(
-                    checkpoint_dir / "best.pt",
+                    best_checkpoint_path,
                     model=model,
                     optimizer=optimizer,
                     step=step,
                     config=model_config,
                     args=args,
-                    metrics={"val_bpb": best_val, "val_loss": val["loss"]},
+                    metrics=checkpoint_metrics,
                 )
+                if publish_best_to_hf:
+                    wandb_url = None
+                    if wandb_run is not None:
+                        try:
+                            wandb_url = wandb_run.get_url()
+                        except Exception:
+                            wandb_url = None
+                    publish_metrics = publish_best_checkpoint_to_hf(
+                        checkpoint_path=best_checkpoint_path,
+                        step=step,
+                        metrics=metrics,
+                        repo_id=hf_repo_id,
+                        repo_type=hf_repo_type,
+                        checkpoint_filename=hf_checkpoint_filename,
+                        manifest_filename=hf_manifest_filename,
+                        state_path=hf_publish_state,
+                        complexity_metric=hf_complexity_metric,
+                        complexity_weight=float(hf_complexity_weight),
+                        min_score_delta=float(hf_min_score_delta),
+                        max_complexity_regression=float(hf_max_complexity_regression),
+                        private=hf_private,
+                        wandb_url=wandb_url,
+                    )
+                    print(json.dumps({"step": step, **publish_metrics}, indent=2))
+                    if wandb_run is not None:
+                        wandb_run.log(publish_metrics, step=step)
             model.train()
 
         if step % ckpt_interval == 0 or step == steps:

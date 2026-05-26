@@ -25,6 +25,9 @@ changes.
   contrastive hidden-state regularization, compact noncommutative-toric memory,
   compact domain tags for math/code/graph/Hebrew/biomed/biochem/biophysics
   records, QAT grid regularization, and causal future-byte audits.
+- Complexity diagnostics: compressor-tagged Kolmogorov-style proxies for
+  conditional byte programs, graph projections, random-order permutations, and
+  GFlowNet action traces.
 - Soft-MoE: off for the contest track; still default for the graph research
   encoder.
 - Export: bit-packed 6-bit row quantization with LZMA by default; auxiliary
@@ -104,6 +107,53 @@ random-order exploratory run is slower by design: observed throughput is about
 validation/checkpoint overhead.  A local challenge-equivalent probe is therefore
 about `2.3k-4.7k` steps on this machine.
 
+## Curated Split Usage
+
+The local mirror of `AmelieSchreiber/toricgt-curated-splits` is used through
+Parquet shard globs. The default supervised training path consumes only
+`data/curated_hf_shards/train/*.parquet`. Validation consumes
+`data/curated_hf_shards/validation/*.parquet`. Test shards are reserved for
+held-out score-first evaluation and GFlowNet test-time scaling. This is the
+competition-safe split: do not train on validation/test bytes, and do not let
+GFlowNet adaptation or score-first bias updates see a byte before its loss has
+been recorded.
+
+## Kolmogorov-Style Diagnostics
+
+True Kolmogorov complexity is uncomputable, so the implementation reports
+estimator-tagged proxies instead of one canonical score. The `oai` trainer logs
+small-sample metrics such as:
+
+```text
+complexity/train/target_cond_k_lzma_mean
+complexity/train/order_program_k_zlib_mean
+complexity/train/prediction_target_ncd_lzma_mean
+complexity/train/gflownet_action_trace_k_lzma_mean
+complexity/val/target_cond_k_lzma_mean
+```
+
+These metrics are diagnostic by default. They help detect whether BPB
+improvements come with more compact, robust reasoning programs or only local
+byte-pattern modeling. The BPB objective and causal scoring contract remain
+unchanged.
+
+## Best Checkpoint Publishing
+
+The `oai` trainer promotes checkpoints to
+`AmelieSchreiber/toricgt-checkpoints` only when the validation candidate beats
+the previous published manifest. The default lower-is-better promotion score is
+
+```text
+val_bpb + 0.05 * complexity/val/prediction_target_ncd_lzma_mean
+```
+
+so BPB stays primary while the prediction-target compression distance is part
+of the gate. The uploaded checkpoint path is `parameter_golf_oai_best.pt` and
+the manifest path is `parameter_golf_oai_best.json`. Local state is kept at
+`checkpoints/parameter_golf_oai_dense/hf_best_publish_state.json`; this file is
+not a training dependency and can be regenerated from the HF manifest. Failed
+uploads log `hf_publish/error` to W&B and do not interrupt training.
+
 ## Commands
 
 Train:
@@ -126,6 +176,16 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --output-dir outputs/projections/oai-step2000-to-50000
 ```
 
+Evaluate complexity over a held-out sample without training:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/evaluate_complexity.py \
+  --data-glob 'data/curated_hf_shards/validation/*.parquet' \
+  --samples 512 \
+  --output-dir outputs/complexity/oai-validation
+```
+
 The default training config has graph projection and GFlowNet sampling enabled:
 
 ```yaml
@@ -138,6 +198,17 @@ training:
   eval_gflownet_samples: 2
   mtp_loss_weight: 0.05
   eval_score_first_bias_lr: 0.025
+complexity:
+  enabled: true
+  eval_every: 50
+  eval_samples: 2
+checkpoint_publishing:
+  enabled: true
+  repo_id: AmelieSchreiber/toricgt-checkpoints
+  checkpoint_filename: parameter_golf_oai_best.pt
+  manifest_filename: parameter_golf_oai_best.json
+  complexity_metric: complexity/val/prediction_target_ncd_lzma_mean
+  complexity_weight: 0.05
 model:
   use_gflownet_policy: true
   gflownet_num_actions: 16

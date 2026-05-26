@@ -25,6 +25,8 @@ configuration. It keeps the research model's ToricGT bias while adapting to the
 | GFlowNet | 16-action prefix-visible embedding policy with TB surrogate |
 | Cheap byte features | BigramHash, CaseOps byte classes, SmearGate confidence |
 | Toric memory | 32 compact irrational clock/shift/cocycle slots |
+| Complexity diagnostics | compressor-tagged conditional-K, NCD, order-program, and GFlowNet action-trace metrics |
+| HF best checkpoint | promotes `parameter_golf_oai_best.pt` to `AmelieSchreiber/toricgt-checkpoints` only when BPB plus complexity score improves |
 | Auxiliary heads | 2 offset multi-token heads plus contrastive hidden regularization, stripped from export |
 | Evaluation scaling | random orders, GFlowNet samples, and score-first bias adaptation |
 | Export | bit-packed 6-bit row quantization with LZMA |
@@ -49,6 +51,14 @@ training runs as an auxiliary objective on all 50,000 steps with
 default, plus score-first output-bias adaptation at `0.025`; inference config
 can raise random-order and GFlowNet samples to 4+ when runtime permits. The
 full graph model's richer embedding-space GFlowNet remains in `train.full_30m_*`.
+
+Complexity diagnostics run every 50 optimizer steps by default on a tiny sample.
+They are logged under `complexity/train/*` and `complexity/val/*` and do not
+change the BPB objective.
+
+The same config also enables best-checkpoint publishing. Promotion uses
+`val_bpb + 0.05 * complexity/val/prediction_target_ncd_lzma_mean`, replacing
+the previous HF checkpoint only when the composite score improves.
 
 ### Graph Research Track
 

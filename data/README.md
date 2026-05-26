@@ -75,8 +75,14 @@ conda run --no-capture-output -n tokengt hf download \
   --max-workers 8
 ```
 
+The `oai` Parameter Golf run publishes only the best current checkpoint to the
+same model repo as `parameter_golf_oai_best.pt`, with manifest
+`parameter_golf_oai_best.json`. Promotion is gated by validation BPB plus the
+Kolmogorov-style prediction-target NCD metric, so worse interval checkpoints
+are not uploaded over the current best.
+
 ## Notes
 
 The dataset repo and checkpoint repo are public collection items. The current
-checkpoint file is `toricgt_step_00001000.pt`; later training checkpoints should
-be uploaded to the same model repo as they become available.
+graph-research checkpoint file is `toricgt_step_00001000.pt`; the competition
+branch's live candidate is `parameter_golf_oai_best.pt`.

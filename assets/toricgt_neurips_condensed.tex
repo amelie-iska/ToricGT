@@ -33,6 +33,7 @@
 \newcommand{\argmax}{\operatorname*{arg\,max}}
 \newcommand{\Conv}{\operatorname{Conv}}
 \newcommand{\Newt}{\operatorname{Newt}}
+\newcommand{\Kc}{\widehat K}
 \newcommand{\norm}[1]{\left\lVert #1\right\rVert}
 \newcommand{\ip}[2]{\left\langle #1,#2\right\rangle}
 \newcommand{\transpose}{^{\mathsf T}}
@@ -208,9 +209,23 @@ For a byte chunk $b=(b_1,\ldots,b_T)$, sample a content-independent order $\pi\i
 \end{equation}
 BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  A byte-safe GFlowNet policy samples latent graph-of-thought action embeddings from the prefix-visible hidden state, and validation can average multiple action samples.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.  Curated \texttt{graph\_json} records are projected into compact node/edge byte traces so graph structure is visible to this adapter.
 
-The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.
+The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.  The local mirror of \texttt{AmelieSchreiber/toricgt-curated-splits} is used in the competition-safe split: train shards feed supervised BPB optimization, validation shards feed score-first validation, and test shards are reserved for held-out GFlowNet test-time scaling.
 
 Operationally, the first serious BPB target is $1.20$--$1.22$, a strong run is $1.16$--$1.19$, an excellent run is $1.13$--$1.15$, and $\le1.12$ is exceptional under OpenAI's public recap.  Claims below $1.10$ BPB should trigger strict leakage, tokenizer, and score-before-update audits.
+
+\paragraph{Kolmogorov-style reasoning diagnostics.}
+The competition score is BPB, but BPB alone does not distinguish shallow byte compression from robust reusable reasoning.  ToricGT therefore logs estimator-tagged proxies for conditional Kolmogorov complexity.  For compressor $c$,
+\begin{equation}
+  \Kc_c(s)=|c(s)|,\qquad
+  \Kc_c(y\mid x)=\max\{0,\Kc_c(x\,\Vert\,y)-\Kc_c(x)\},
+\end{equation}
+and for two trajectories
+\begin{equation}
+  \operatorname{NCD}_c(a,b)=
+  \frac{\Kc_c(a\,\Vert\,b)-\min(\Kc_c(a),\Kc_c(b))}
+       {\max(\Kc_c(a),\Kc_c(b))}.
+\end{equation}
+These are not claims to compute true Kolmogorov complexity.  They are auditable lower-tech probes for whether successful graph-of-thought paths are compact conditional programs, whether random orders induce stable programs, and whether GFlowNet terminal diversity is genuine rather than cosmetic.  The implementation logs conditional target complexity, order-program complexity, prediction-target NCD, graph-MDL summaries, and GFlowNet action-trace complexity to W\&B.  All such metrics are diagnostic by default; the BPB objective remains unchanged unless a future ablation explicitly gives a complexity reward nonzero weight.
 
 \section{Next Iteration}
 

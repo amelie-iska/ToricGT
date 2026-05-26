@@ -239,6 +239,23 @@ conda run -n tokengt env PYTHONPATH=src python scripts/publish_hf_model.py \
   --repo-id AmelieSchreiber/toricgt-checkpoints
 ```
 
+The `oai` Parameter Golf trainer also has automatic best-checkpoint publishing
+enabled in `config/train.parameter_golf_random_order_dense.yaml`. At each
+validation improvement, it saves `checkpoints/parameter_golf_oai_dense/best.pt`
+and uploads that file to `AmelieSchreiber/toricgt-checkpoints` as
+`parameter_golf_oai_best.pt` only when the composite promotion score improves:
+
+```text
+publish_score = val_bpb + 0.05 * complexity/val/prediction_target_ncd_lzma_mean
+```
+
+The matching manifest is `parameter_golf_oai_best.json`. Worse checkpoints are
+skipped, so the HF repo remains the current best candidate rather than a dump
+of every interval. Auth comes from the normal Hugging Face credential store or
+the local ignored `keys.txt`; tokens are never printed, logged, or stored in
+checkpoints. Publish failures are reported as `hf_publish/error` in W&B and do
+not stop training.
+
 For large checkpoint files, git-lfs is more reliable than the HTTP helper:
 
 ```bash
@@ -532,6 +549,23 @@ Hebrew, biomedicine, biochemistry, biophysics, and toric tasks, and bit-packed
 6-bit row quantized LZMA exports. JEPA is deliberately excluded from this branch per the current
 experiment scope.
 
+Kolmogorov-style reasoning diagnostics are enabled by default on the `oai`
+branch without changing the BPB objective. The trainer periodically logs
+compressor-tagged proxies such as `complexity/train/target_cond_k_lzma_mean`,
+`complexity/train/order_program_k_zlib_mean`,
+`complexity/train/gflownet_action_trace_k_lzma_mean`, and validation analogues.
+These estimate conditional reasoning/program complexity, random-order program
+length, prediction-target NCD, and GFlowNet action-trace complexity. They are
+diagnostic unless an explicit future config gives them nonzero training weight.
+
+The local `AmelieSchreiber/toricgt-curated-splits` mirror is used as far as is
+competition-safe: supervised training streams `data/curated_hf_shards/train/*.parquet`,
+validation streams `data/curated_hf_shards/validation/*.parquet`, and the test
+shards are reserved for held-out score-first evaluation and GFlowNet
+test-time-scaling studies. Do not train on validation/test bytes or use future
+validation/test bytes for adaptation; score-first state updates are allowed only
+after the current byte has been scored.
+
 Reference BPB target bands for the OpenAI Parameter Golf setting:
 
 | Validation BPB | Meaning |
@@ -583,6 +617,25 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --target-step 10000 \
   --metrics train/loss train/bpb \
   --output-dir outputs/projections/oai-step2000-to-10000
+```
+
+Evaluate standalone complexity diagnostics over a held-out shard sample:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/evaluate_complexity.py \
+  --data-glob 'data/curated_hf_shards/validation/*.parquet' \
+  --samples 512 \
+  --output-dir outputs/complexity/oai-validation
+```
+
+Plot the resulting summary:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/plot_complexity.py \
+  --summary-json outputs/complexity/oai-validation/complexity_summary.json \
+  --output-dir outputs/complexity/oai-validation/plots
 ```
 
 Export a compressed artifact from either a graph checkpoint or a dense
