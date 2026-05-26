@@ -1,0 +1,1505 @@
+                                             TORIC GEOMETRY OF RELU NEURAL NETWORKS
+
+                                                                              YAOYING FU
+
+
+                                                 Abstract. Given a continuous finitely piecewise linear function f :
+                                                 Rn0 → R and a fixed architecture (n0 , . . . , nk ; 1) of feedforward ReLU
+                                                 neural networks, the exact function realization problem is to determine
+arXiv:2509.05894v1 [math.AG] 7 Sep 2025
+
+
+
+
+                                                 when some network with the given architecture realizes f . To develop a
+                                                 systematic way to answer these questions, we establish a connection be-
+                                                 tween toric geometry and ReLU neural networks. This approach enables
+                                                 us to utilize numerous structures and tools from algebraic geometry to
+                                                 study ReLU neural networks. Starting with an unbiased ReLU neu-
+                                                 ral network with rational weights, we define the ReLU fan, the ReLU
+                                                 toric variety, and the ReLU Cartier divisor associated with the network.
+                                                 This work also reveals the connection between the tropical geometry
+                                                 and the toric geometry of ReLU neural networks. As an application
+                                                 of the toric geometry framework, we prove a necessary and sufficient
+                                                 criterion of functions realizable by unbiased shallow ReLU neural net-
+                                                 works by computing intersection numbers of the ReLU Cartier divisor
+                                                 and torus-invariant curves.
+
+
+
+
+                                                                          1. Introduction
+                                             Although the Universal Approximation Theorem ([11]) guarantees that
+                                          neural networks with a single hidden layer and suitable nonlinearity—such
+                                          as the ReLU activation—can approximate any continuous function on a com-
+                                          pact domain to arbitrary accuracy, it does so by allowing arbitrarily large
+                                          width, and it addresses approximation rather than exact realization. In this
+                                          paper, we take aim at a more structural question: Which functions are ex-
+                                          actly realized by a given neural network architecture, and conversely, given
+                                          a function, which architectures realize it—and how can this be determined?
+                                          Our approach to these questions—and the main contribution of this pa-
+                                          per—is to develop a dictionary between feedforward ReLU neural networks
+                                          and toric geometry. This provides a geometric framework in which ques-
+                                          tions of exact function realization, architectural expressivity, and structural
+                                          constraints for ReLU neural networks can be formulated and studied using
+                                          the language of divisors, fans, and other notions from algebraic geometry.
+                                             The central insight underlying this work is that the function computed
+                                          by a feedforward ReLU neural network with no biases can be interpreted
+                                          as the support function of a Q-Cartier divisor on a rational polyhedral fan.
+                                          Previous works have connected ReLU networks to tropical geometry [13].
+                                          Our perspective places these observations within the broader framework of
+                                          toric geometry (in which tropical geometry arises as the combinatorial data
+                                          associated with divisors and their support functions).
+                                             In this paper, the connection to toric geometry is established for unbiased
+                                          feedforward ReLU neural networks. Nevertheless, the more general case of
+                                          affine maps also fits into the structure of toric geometry. Rather than a
+                                                                                     1
+2                                  YAOYING FU
+
+single fan, a general feedforward ReLU neural network will yield a family
+of fans. We believe that the connection built in this paper will be a good
+motivation for future work.
+   We start with feedforward ReLU neural networks with no biases and
+rational parameters, which we denote by F0Q (Definition 3.3). Given an ar-
+chitecture (n0 , n1 , . . . , nk ; 1) (Definition 3.2), we connect feedforward ReLU
+neural networks with toric geometry by defining the toric encoding map:
+                             T : P → {ReLU fans}
+                                 θ 7→ Σfθ .
+   Here P is the parameter space (Definition 3.6) of a fixed unbiased ReLU
+neural network architecture with rational weights. A parameter θ ∈ P is
+mapped to the ReLU fan Σfθ (Definition 5.1). The ReLU fan Σfθ is the
+polyhedral complex such that the output function f and all the piecewise
+linear functions in the hidden layers, which can be interpreted as the neurons
+in the hidden layers, are linear in each cell. Following [5], this polyhedral
+complex is called the canonical polyhedral complex Cfθ associated with the
+ReLU neural network fθ (Definition 3.11).
+   More concretely, we use the following example as an illustration of the
+toric encoding map.
+Example 1.1. Fixing the architecture (2, 3, 1; 1) of unbiased        ReLU
+                                                                        neu-
+                                                                  0 1
+ral networks, let θ = (L1 , 0, L2 , 0, L3 , 0), where L1 = 0 −1, L2 =
+                                                                  1 −1
+                                            2 ς◦L1    3  ς◦L2     L3
+  1 −1 1 and L3 = 1, and thus fθ : R −−−→ R −−−→ R −→                  R. Then
+the output function of the ReLU neural network fθ is f = max{0, x, y}. The
+three piecewise linear function in the first hidden layer are f11 = max{0, y}, f21 =
+max{0, −y} and f31 = max{0, x − y}, and the piecewise linear function in
+the second hidden layer is f12 = max{0, x, y}. The image of θ under the toric
+encoding map T is the ReLU fan Σfθ :
+
+
+
+
+                                               .
+Σfθ is the canonical polyhedral complex such that the piecewise linear func-
+tions f, f11 , f21 , f31 and f12 are linear in each cell of Σfθ .
+   After defining the toric encoding map, we define the ReLU toric variety
+(Definition 5.5), which is the toric variety corresponding to the ReLU fan
+Σfθ , and the ReLU Cartier divisor Df (Definition 5.6), which can be under-
+stood as the output piecewise linear function of a given feedforward ReLU
+neural network, up to a shift by a linear term.
+   We denote by ReLUR (n0 , k) to be the set of functions that can be repre-
+sented by feedforward ReLU neural networks with k hidden layers and real
+weights (Definition 2.1). As a consequence of Theorem 1, for fixed depth
+k, the realizable piecewise linear functions are exactly the realizable ReLU
+Cartier divisors, since realizability is invariant under affine shifts.
+               TORIC GEOMETRY OF RELU NEURAL NETWORKS                           3
+
+Theorem 1. If f ∈ ReLUR (n0 , k) and f ′ − f = g, where g : Rn0 → R is
+affine linear, then f ′ ∈ ReLUR (n0 , k).
+   Then we build linkage between the tropical geometry of ReLU neural
+networks and the toric geometry of ReLU neural networks. It was shown
+in [13] that the output piecewise linear function f of a feedforward ReLU
+neural networks with integral weights is a tropical rational function. We
+denote by ReLUZ0 (n0 , k) to be the set of functions that can be represented
+by feedforward ReLU neural networks with k hidden layers, no biases and
+integral weights (Definition 2.1). We prove the following theorem:
+Theorem 2. For any k ∈ N, let f ∈ ReLUZ0 (n0 , k) be given and suppose
+fθ ∈ F0Q realizes f . If f is a tropical polynomial, or a convex function in
+the sense of Definition 3.8, then we have
+                              P−D = −Newt(f ),
+and furthermore
+                      Vol(Newt(f )) = Vol(OXΣf (−D)).
+                                                   θ
+
+  Here D is the ReLU Cartier divisor, P−D is the polytope associated with
+the Cartier divisor −D (Definition 4.50), Newt(f ) is the Newton polytope as-
+sociated with the tropical polynomial f (Definition 6.8), Vol(Newt(f )) is the
+mixed volume of the Newton polytope (Definition 6.11) and Vol(OXΣf (−D))
+                                                                        θ
+is the volume of the line bundle OXΣf (−D) (Definition 4.64).
+                                          θ
+    When f is a tropical rational function rather than a tropical polynomial,
+there is in general no analogue of the Newton polytope associated with f
+from the tropical geometry perspective. However, from the toric geometry
+point of view, the polytope PD or P−D is always well-defined. When f is a
+tropical polynomial, by the Theorem above, we see that the two polytopes
+from tropical and toric geometry coincide with each other. Therefore, we
+believe that the polytope PD associated with the ReLU Cartier divisor D
+is a good generalization of the Newton polytope in this context of ReLU
+neural networks.
+    As a first application of the toric geometry framework, we use intersection
+numbers of divisors and curves (Definition 4.60) to obtain a complete clas-
+sification of the functions that can be realized by unbiased shallow ReLU
+neural networks with rational weights, which we denote by ReLUQ        0 (n0 , 1)
+(Definition 2.1).
+Theorem 3. Let f ∈ ReLUQ                            Q
+                       0 (n0 , 1) and suppose fθ ∈ F0 realizes f . The
+                                                          ς◦L       L
+reduced ReLU representation of f is fθred : Rn0 −−−→ 1
+                                                        Rn1 −→2
+                                                                 R. Let
+   (1)         (1)                             n
+H1 , . . . , Hn1 denote the n1 hyperplanes in R . Then for any two walls,
+                                                0
+
+             (1)
+τ1 , τ2 ⊆ Hi for i ∈ {1, . . . , n1 }, we have
+                           Df · V (τ1 ) = Df · V (τ2 ),
+where Df is the ReLU Cartier divisor supported on the ReLU fan Σf red .
+                                                                            θ
+
+  Here, the reduced ReLU representation of a function realizable by an
+unbiased shallow ReLU neural network refers to the architecture where all
+weights are integral, and the weight matrix for the hidden layer
+4                                YAOYING FU
+
+      • has no zero row,
+      • has row-wise greatest common divisor 1, and
+      • no row is parallel to another of the same direction.
+The notation Df · V (τ1 ) and Df · V (τ2 ) computes the intersection numbers
+of the ReLU Cartier divisor Df with the curve V (τ1 ) and V (τ2 ) respectively.
+   Intuitively, the intersection numbers can be understood as how much the
+output piecewise linear function f bends when changing from one linear
+piece to another along the walls.
+   Theorem 3 is a necessary condition of a function realizable by an unbiased
+shallow ReLU neural networks with rational weights. Conversely, we prove
+a sufficient condition as follows.
+Theorem 4. Let f : Rn0 → R be a finitely-piecewise linear function. If
+extending the codimension one loci of the non-linear locus of f to be full hy-
+perplanes yields a fan Σ in Rn0 , and the ReLU Cartier divisor Df , supported
+on the fan Σ, satisfies the following:
+                           Df · V (τ1 ) = Df · V (τ2 )
+for any two walls τ1 , τ2 coming from the same full hyperplane in Σ, then
+f ∈ ReLUQ 0 (n0 , 1).
+
+   For the convenience of readers, preliminaries on toric geometry are pro-
+vided. Algebraic geometers may safely skip §4. For readers from other areas,
+some definitions may be safely skimmed on a first reading and referenced
+only as needed to understand the proofs of the main results. Rather than
+digesting all the abstract definitions in §4 and §5, it would be a nice idea to
+understand the Examples 4.23, 4.31, 4.32, 4.43, 4.46, 4.39 and 5.10.
+   The structure of the paper is as follows. We begin in §2 by discussing
+related works like expressive power results in [1], [2], [6], [7], and tropical
+geometry of deep neural networks in [13]. Then we introduce necessary
+background on ReLU neural networks and toric geometry in §3 and §4.
+Toric geometry of ReLU neural networks is rigorously established in §5.
+In §6, we have built the linkage between the tropical geometry of ReLU
+neural networks and the toric geometry of ReLU neural networks. As a first
+application of the toric geometry framework, in §7 we obtain a complete
+characterization of the set of functions which can be realized by unbiased
+one-hidden-layered, or shallow ReLU neural networks.
+Acknowledgements. The author was partially supported by NSF grants
+DMS 2133822 and 2001089. The author would like to express her sincere
+gratitude towards her advisors Qile Chen and Kathryn Lindsey for their
+cherishable advice and tremendous support. The author would also like
+to thank Karina Cho for studying Tropical Geometry together; Tingting
+Fang and Zijian Han for discussion of proof of Theorem 3; Yufan Ren for
+great inspiration from computer science point of view; Shelby Cox, Bella
+Finkel, Elisenda Grigsby, Jiayi Li, Jose Israel Rodriguez, Rishi Sonthalia
+and Maximilian Wiesmann for invaluable discussions and encouragement.
+
+                             2. Related Work
+    Here we define some function class notations in this paper.
+                  TORIC GEOMETRY OF RELU NEURAL NETWORKS                          5
+
+Definition 2.1.
+      ReLUR (n, k) := {f : Rn → R | f can be represented by a
+                      k + 1-layer ReLU neural network with weights in R}
+      ReLUR                 n
+          0 (n, k) := {f : R → R | f can be represented by a bias-free
+                      k + 1-layer ReLU neural network with weights in R}
+           CPWLR          n
+               n := {f : R → R | f is continuous and finitely
+                      piecewise linear with coefficients in R}
+         MAXR              n
+            n (p) := {f : R → R | f is a linear combination of
+                      p-term max functions with coefficients in R}.
+Here R can be any ring. In this paper, R is usually Q or Z. Follow-
+ing [7], a function f is called a p-term max function if it can be expressed
+as maximum of p affine terms, that is, f (x) = max{l1 (x), . . . , lp (x)} where
+li : Rn → R is affine linear for i ∈ {1, . . . , p}. We sometimes  suppress the
+number of hidden layers k, and write ReLUR (n) := ∞                 R
+                                                         S
+                                                           k=0 ReLU    (n, k) and
+       R       S ∞        R
+ReLU0 (n) := k=0 ReLU0 (n, k).
+   Expressivity and exact function realization problems of ReLU neural net-
+works have been studied in works like [1], [2], [6], [7]. In [1], a depth lower
+bound k ∗ = ⌈log2 (n + 1)⌉ of ReLU neural networks was proved so that
+                         ∗
+CPWLR   n ⊆ ReLU (n, k ), and this bound was conjectured to be the op-
+                   R
+
+timal bound. This result took advantage of the result that CPWLR              n ⊆
+      R
+MAXn (n + 1), which was proved in [12]. In [7], it was shown that prov-
+ing k ∗ to be the optimal depth bound was equivalent to proving that the
+particular function f = max{0, x1 , . . . , x2k } ̸∈ ReLUR   k
+                                                         0 (2 , k + 1). In [6], the
+                      ∗
+depth lower bound k = ⌈log2 (n + 1)⌉ was proved to be the optimal bound
+for ReLU neural networks with integral weights. However, in [2], the depth
+lower bound k ∗ was disproved to be optimal by providing a better lower
+bound k ∗∗ = ⌈log3 (n − 1)⌉ + 1 for ReLU neural networks with real weights.
+   The connection between tropical geometry and ReLU neural networks was
+established in [13]. With the tropical geometry framework, works like [6]
+have benefited from polyhedral and polytopal geometry.
+   Algebraic geometry has been attached great importance by works study-
+ing polynomial neural networks like [4], [8], and [10].
+
+               3. Background on ReLU Neural Networks
+Definition 3.1. For any n ∈ N, the rectified linear unit (ReLU) is the map
+ReLU : R → R defined by ReLU(x) = max{0, x}. Let ς : Rn → Rn denote
+the function that applies ReLU to each coordinate:
+                ς(x) = (max{0, x1 }, max{0, x2 }, . . . , max{0, xn })
+where x = (x1 , x2 , . . . , xn ).
+Definition 3.2. For any number of hidden layers k ∈ N, a (k + 1)-layer
+feedforward ReLU neural network is defined as follows:
+                       ς◦A           ς◦A    ς◦A       ς◦A        Ak+1
+            fθ : Rn0 −−−→
+                        1
+                          Rn1 −−−→
+                                 2
+                                   Rn2 −−−→
+                                          3          k
+                                            · · · −−−→ Rnk −−−→ R
+6                                        YAOYING FU
+
+where n0 , n1 , . . . , nk ∈ N, and Ai : Rni−1 → Rni are all affine-linear maps.
+Such a neural network fθ is said to be of architecture (n0 , n1 , . . . , nk ; 1),
+depth k+1, size kj=1 nj , ni is the width of the ith layer, and each Rni , ∀1 ≤
+                      P
+i ≤ k, is called a hidden layer. Moreover, each affine map Ai is of the form
+                                               
+                                    Ai = Mi |bi
+where Mi ∈ Matni ,ni−1 (R) and entries are called weights, while bi ∈ Rni is
+called the bias of the ith layer. A feedforward ReLU neural network is called
+shallow if k = 1 and deep otherwise. Here the ReLU map ς is called the
+activation function.
+Definition 3.3. We denote by F0Q = {fθ }θ to be the set of all feedfor-
+ward ReLU neural network representations of functions with no biases and
+rational parameters – that is, the set of all formal compositions
+                      ς◦A         ς◦A          ς◦A      ς◦A            Ak+1
+(1)        fθ : Rn0 −−−→
+                       1
+                         Rn1 −−−→
+                                2
+                                  Rn2 −−−→
+                                         3          k
+                                           · · · −−−→ Rnk −−−→ R
+where n0 , . . . , nk are natural numbers, each Ai is a matrix with entries in
+Q that represents a linear map, and ς is ReLU map. We use the subscript
+θ in the the notation fθ to encode the information of how the function f is
+represented as a neural network; concretely, f represents a pure function,
+while fθ is a representation of the function f in the form (1).
+Definition 3.4 ( [5]). Let
+            F :=ς◦A            F :=ς◦A        F :=ς◦A         F :=ς◦A          Ak+1
+    fθ : Rn0 −−1−−−−→
+                    1
+                      Rn1 −−2−−−−→
+                                 2
+                                   Rn2 −−3−−−−→
+                                              3
+                                                · · · −−k−−−−→
+                                                             k
+                                                               Rnk −−−→ R
+be a ReLU neural network.
+                            For each layer map Fi , ∀i ∈ {1, . . . , k}, denoted
+as Ai,j = Mi,j |bi,j the jth row of Ai , we consider the following set:
+              (i)
+             Sj := {x ∈ Rni−1 | (Mi,j |bi,j ) · (x|1) = 0} ⊆ Rni−1 .
+                      (i)                                        (i)
+When Mi.j = 0, Sj           is said to be degenerate. When Sj          is nondegenerate,
+            (i)
+denoted as Hj is a hyperplane associated with the ith layer map Fi .            A
+hyperplane arrangement associated
+                          n            with  ith
+                                             o   layer is the set of nondegenerate
+                            (i)          (i)
+hyperplanes, i.e., A(i) := H1 , . . . , Hmi , for some mi ∈ N with mi ≤ ni .
+                                                                         (i)
+Remark 3.5. For each layer map Fi , ∀i ∈ {1, . . . , k}, if all Sj ’s are nonde-
+generate, then mi = ni . Otherwise, mi < ni .
+Definition 3.6. For an architecture (n0 , n1 , . . . , nk ; 1), we define the pa-
+rameter space
+                                    P := RD
+where a parameter θ := (M1 , b1 , . . . , Mk , bk , Ak+1 ) consists of all weights in
+the weight matrices Mi , biases bi , ∀i ∈ {1, . . . , k} and entries of the affine
+map of the last layer Ak+1 . Accordingly, D = nk + 1 + ki=1 ni (ni−1 + 1).
+                                                                P
+
+Definition 3.7. A function f : Rn → R is said to be finitely piecewise
+linear if the function is affine linear on finitely many pieces of the domain.
+In particular, each piece of the domain is a polyhedral set. The polyhedral
+set is a set that can be expressed as the intersection of a finite set of closed
+half-spaces.
+                TORIC GEOMETRY OF RELU NEURAL NETWORKS                              7
+
+Definition 3.8. A function f : Rn → R is convex if for all x, y ∈ R, and
+all λ ∈ [0, 1], we have
+                      f (λx + (1 − λ)y) ≤ λf (x) + (1 − λ)f (y)
+  We say that f is concave if −f is convex.
+Definition 3.9. Let
+            F :=ς◦A          F :=ς◦A        F :=ς◦A         F :=ς◦A       Ak+1
+  fθ : Rn0 −−1−−−−→
+                  1
+                    Rn1 −−2−−−−→
+                               2
+                                 Rn2 −−3−−−−→
+                                            3
+                                              · · · −−k−−−−→
+                                                           k
+                                                             Rnk −−−→ R
+                                                      (i)       (i)
+be a ReLU neural network and let A(i) = {H1 , . . . , Hmi } denote the hy-
+perplane arrangement in Rni−1 , for any i ∈ {2, . . . , k}. A bent hyperplane
+associated with the ith layer of f , for any i ∈ {2, . . . , k}, is the preimage in
+                          (i)
+Rn0 of any hyperplane Hj ⊆ Rni−1 associated with the ith layer map:
+                                                    (i)
+                              (Fi−1 ◦ · · · F1 )−1 (Hj ).
+                                 (1)
+Note that the hyperplanes Hj ⊆ Rn0 , for any j ∈ {1, . . . , n1 } associated
+with the first layer, do not bend, we however for the sake of consistency call
+  (1)
+Hj ∈ A(1) the bent hyperplanes associated with the first layer of fθ .
+                       (i)                             (i)
+   We will denote by Bfθ := m                       −1
+                            S i
+                              j=1 (Fi−1 ◦ · · · F1 ) (Hj ) for i ∈ {2, . . . , k}
+     (1)   S 1 (1)
+or Bfθ := m   j=1 Hj the bent hyperplane arrangement associated with the
+ith layer of fθ .
+                                     (i)
+   We will denote by Bfθ := ki=1 Bfθ the bent hyperplane arrangement
+                              S
+
+associated with fθ .
+Remark 3.10. Since there is no activation function on the last layer map
+to induce any additional loci of nonlinearity, the last layer will make no
+contribution to the bent hyperplane arrangement.
+Definition 3.11 ( [5]). Let
+            F :=ς◦A          F :=ς◦A        F :=ς◦A         F :=ς◦A       Ak+1
+  fθ : Rn0 −−1−−−−→
+                  1
+                    Rn1 −−2−−−−→
+                               2
+                                 Rn2 −−3−−−−→
+                                            3
+                                              · · · −−k−−−−→
+                                                           k
+                                                             Rnk −−−→ R
+be a ReLU neural network. For i ∈ {1, 2, . . . , k}, denote by R(i) the polyhe-
+dral complex in Rni−1 induced by the hyperplane arrangement associated to
+the i−th layer map Fi . Inductively define polyhedral complexes, C(Fi ◦· · ·◦F1 )
+in Rn0 as follows: Set
+      • C(F1 ) := R(1) , and
+      • C(Fi ◦ · · · ◦ F1 ) := C(Fi−1 ◦ · · · ◦ F1 )∈R(i) for i = 2, . . . , k.
+The canonical polyhedral complex associated to fθ is Cfθ := C(Fk ◦ · · · ◦ F1 ).
+Remark 3.12. In Definition 3.11, the polyhedral complex C(Fi−1 ◦ · · · ◦
+F1 )∈R(i) is the level set complex, which is defined as
+                          n                                                                   o
+C(Fi−1 ◦· · ·◦F1 )∈R(i) := S ∩ (Fi−1 ◦ · · · ◦ F1 )−1 (Y ) S ∈ C(Fi−1 ◦ · · · ◦ F1 ), Y ∈ R(i) .
+More details can be found in [5].
+Remark 3.13. In sections later in this paper, if not specified, we will assume
+that we are working with unbiased ReLU neural networks with rational
+weights. The motivation behind this assumption is that there is relatively
+8                                      YAOYING FU
+
+nicer and easier-to-understand geometric structure of unbiased RNNs com-
+pared with biased ones.
+
+                   4. Background on toric geometry
+  In this section, we review the toric geometry background needed for this
+paper. Many technical details will be omitted, which can be found in [3].
+
+4.1. Characters and co-characters.
+Definition 4.1. Let S = C[x1 , x2 , · · · , xn ]. Then S is the coordinate ring
+of an affine n-space over C, denoted as An . An affine variety V is defined to
+be the vanishing locus of finitely many polynomials in S. More specifically,
+let B be a set of finitely many polynomials in S, then
+               V = V(B) := {p ∈ An f (p) = 0 for any f ∈ B}.
+Definition 4.2. The affine variety (C∗ )n is a group under the component-
+wise multiplication. A torus T is an affine variety which is isomorphic to
+(C∗ )n , where T inherits a group structure from the isomorphism, i.e., T acts
+on itself by multiplication. Associated to a torus T are its characters and
+co-characters defined as follows.
+Definition 4.3. A character of a torus T is a morphism χm : T ∼
+                                                              = (C∗ )n →
+ ∗
+C that is a group homomorphism.
+Remark 4.4. For instance, m = (a1 , a2 , . . . , an ) ∈ Zn gives a character χm :
+(C∗ )n → C∗ defined by
+                       χm (t1 , t2 , . . . , tn ) = ta11 ta22 · · · tann ,
+where (t1 , t2 , . . . , tn ) ∈ T ∼
+                                  = (C∗ )n . Indeed, all characters of (C∗ )n arise
+this way. Thus the characters of (C∗ )n form a group isomorphic to Zn .
+Furthermore, the group of characters of a torus T is denoted as M and
+M∼ = Zn .
+Definition 4.5. A co-character of a torus T is a morphism λu : C∗ → T ∼
+                                                                      =
+(C∗ )n that is a group homomorphism.
+Remark 4.6. For instance, u = (b1 , b2 , . . . , bn ) ∈ Zn gives a co-character
+λu : C∗ → (C∗ )n defined by
+                             λu (t) = (tb1 , tb2 , . . . , tbn ),
+where t ∈ C∗ . Indeed, all co-characters of a torus T ∼ = (C∗ )n arise this
+                                    ∗
+way. Thus the co-characters of (C ) form a group isomorphic to Zn and
+                                      n
+
+the group of co-characters of a torus T is denoted as N where N ∼= Zn .
+Definition 4.7. There is a natural bilinear pairing ⟨, ⟩ : M ×N → Z defined
+as follows. Given a character χm and a co-character λu , the composition
+                                 χm ◦ λu : C∗ → C∗
+                                              t 7→ tl
+is a character of the torus T ∼
+                              = C∗ , for some l ∈ Z. Then ⟨m, u⟩ = l.
+                TORIC GEOMETRY OF RELU NEURAL NETWORKS                                9
+
+   In the setting of this paper, we may understand the character, co-character
+of a torus, and their bilinear pairing in a more concrete way as follows. Fix
+an integer n ≥ 1. The cocharacter lattice is
+                                               n
+                                               M
+                                       N :=           Zei ,
+                                                i=1
+
+the free Z-module of rank n with standard basis e1 , . . . , en . The character
+lattice is the dual free Z-module
+                                                n
+                                                M
+                                   M :=               Ze∨
+                                                        i
+                                                i=1
+
+where the dual basis e∨            ∨
+                      1 , . . . , en satisfies
+
+                                       ⟨ei , e∨
+                                              j ⟩ = δij .
+
+The pairing ⟨ , ⟩ : N × M → Z is given by
+                      * n          n
+                                           + n
+                        X          X         X
+                                         ∨
+                          ai e i ,   bj ej =   ai bi .
+                           i=1           j=1                  i=1
+
+Extending scalars to R gives the real vector spaces
+                                 n                                      n
+          NR := N ⊗Z R ∼                         MR := M ⊗Z R ∼
+                                 M                                      M
+                       =               Rei ,                  =               Re∨
+                                                                                i ,
+                                 i=1                                    i=1
+
+with the same coordinatewise pairing
+                    * n           n
+                                          + n
+                      X           X         X
+                                        ∨
+                         xi e i ,   yj ej =   xi yi .
+                           i=1           j=1                  i=1
+
+The maximal torus TN can be understood as TN = HomGrp (M, C∗ ) ∼
+                                                               = (C∗ )n .
+An element ϕ ∈ TN assigns to each m ∈ M a nonzero complex number
+ϕ(m) ∈ C∗ such that
+
+                ϕ(m + m′ ) = ϕ(m) · ϕ(m′ )               for all m, m′ ∈ M.
+
+Such a morphism is determined entirely by the n complex numbers
+
+                         αi := ϕ(e∨
+                                  i )∈C
+                                       ∗
+                                                       (1 ≤ i ≤ n),
+                Pn         ∨
+since for m =      i=1 mi ei we have
+                                               n
+                                               Y
+                                 ϕ(m) =              αimi ∈ C.
+                                               i=1
+
+Thus, for each m ∈ M , the character χm is the function
+
+                       χm : TN −→ C∗ ,               χm (ϕ) = ϕ(m).
+10                               YAOYING FU
+
+4.2. Cones.
+Definition 4.8. A convex polyhedral cone in NR is a set σ of the form
+                              (                )
+                                X
+               σ = Cone(S) :=       λu u λu ≥ 0 ⊆ NR ,
+                                    u∈S
+where S ⊆ NR is finite. We say that σ is generated by S. Also, Cone(∅) =
+{0}. The dimension dim σ of a polyhedral cone is the dimension of the
+smallest subspace W = Span(σ) of NR containing σ. We call Span(σ) the
+span of σ, which stands for R−linear span.
+Definition 4.9. Given a polyhedral cone σ ⊆ NR (Definition 4.8), its dual
+cone is defined by
+                   σ ∨ := m ∈ MR ⟨m, u⟩ ≥ 0, ∀u ∈ σ .
+                         
+
+Furthermore, σ ∨ is a polyhedral cone in MR and (σ ∨ )∨ = σ.
+Definition 4.10. Let σ ⊆ NR be a polyhedral cone. We define
+                σ ⊥ := {m ∈ MR | ⟨m, u⟩ = 0 for all u ∈ σ}.
+Definition 4.11. Given m ̸= 0 in MR , we define the hyperplane
+                     Hm := {u ∈ NR ⟨m, u⟩ = 0} ⊆ NR .
+A face of a cone σ is τ = Hm ∩ σ for some m ∈ σ ∨ , written τ ⪯ σ. Faces
+τ ̸= σ are called proper faces, written τ ≺ σ. Note that using m = 0 shows
+that σ is a face of itself, i.e., σ ⪯ σ.
+Definition 4.12. A polyhedral cone σ is strongly convex if the origin {0}
+is a face of σ.
+Remark 4.13. If a polyhedral cone σ ⊆ NR is strongly convex of maximal
+dimension, then so is σ ∨ .
+Definition 4.14. A polyhedral cone σ ⊆ NR is rational if σ = Cone(S) for
+some finite set S ⊆ N .
+Remark 4.15. A strongly convex rational polyhedral cone is generated by
+the ray generators, which are the first lattice points of the rays, and the ray
+generators are called minimal generators. A ray of a cone is denoted by ρ
+and the minimal generator of ρ is denoted by uρ .
+4.3. Monoids, morphisms, affine semigroups and semigroup alge-
+bras. Starting with a cone, which is a combinatorial object, we are able to
+associate it with an algebra structure, called semigroup algebra, which will
+be illustrated in the following definitions.
+Definition 4.16. A monoid S is a set equipped with a commutative and
+associative binary operation, denoted as +, and an identity element, denoted
+as 0. A submonoid S ′ of a monoid A is a subset S ′ ⊆ S that is closed under
+the monoid operation + and contains the identity element 0 of S.
+Definition 4.17. A monoid morphism between two monoids (S, +S ) and
+(S ′ , +S ′ ) is a function f : S → S ′ such that
+        • f (x +S y) = f (x) +S ′ f (y), ∀x, y ∈ S,
+               TORIC GEOMETRY OF RELU NEURAL NETWORKS                          11
+
+    • f (0S ) = 0S ′
+We denote the set of all monoid morphism from S to S ′ as HomMon (S, S ′ ).
+Remark 4.18. When S, S ′ are groups, which are monoids with elements
+having inverses, we have HomMon (S, S ′ ) = HomGrp (S, S ′ ). Hence, for the
+maximal torus TN , we have
+             TN := HomGrp (M, C∗ ) = HomMon (M, C) ∼ = (C∗ )n
+Definition 4.19. Let S be a monoid. A subset A ⊆ S is said to generate
+S if                   (                      )
+                         X
+                NA :=        am m am ∈ N} ⊆ S = S.
+                             m∈A
+Moreover, if A ⊆ S is a finite set such that NA = S, then we say the monoid
+S is finitely generated.
+Definition 4.20. An affine semigroup S is a monoid such that
+     • the monoid is finitely generated, and
+     • the monoid can be embedded in a lattice M as a submonoid.
+Definition 4.21. Given an affine semigroup S, the semigroup algebra C[S]
+is the vector space over C with S as a basis and
+                                             L multiplication induced by the
+semigroup structure of S. That is, C[S] = m∈S C · z m and multiplication
+                     ′       ′
+is given by z m · z m = z m+m .
+Remark 4.22. Let S ⊆ M be an affine semigroup, then
+          (                                                      )
+            X
+                   m
+  C[S] :=      cm χ cm ∈ C and cm = 0 for all but finitely many m ,
+             m∈S
+with multiplication induced by
+                                        ′            ′
+                              χm · χm = χm+m .
+If S = NA for A = {m1 , . . . , ms }, then C[S] = C[χm1 , . . . , χms ].
+Example 4.23. Notice that the character lattice M ∼           = Zn , then M =
+      ∨           ∨                                              ∨
+N{±e1 , . . . , ±en } as an affine semigroup. Setting xi = χei yields the Lau-
+rent polynomial ring
+                              C[M ] = C[x±             ±
+                                          1 , . . . , xn ],
+which is the coordinate ring of the maximal torus TN ∼      = (C∗ )n . The affine
+semigroup Nn ⊆ Zn gives the polynomial ring
+                            C[Nn ] = C[x1 , . . . , xn ].
+Example 4.24. Consider the cone σ = Cone(e1 , e2 , e1 + e3 , e2 + e3 ) ⊆
+NR ∼ = R3 . Then σ ∨ = Cone(e∨     ∨ ∨ ∨            ∨    ∨         ∼ 3
+                              1 , e2 , e3 , e1 + e2 − e3 ) ⊆ MR = R . Here the
+affine semigroup S = NA, where A = {e1 , e2 , e3 , e1 + e2 − e∨
+                                                ∨    ∨  ∨  ∨     ∨
+                                                                     3 }. Setting
+        e∨       e∨       e ∨           e∨ +e∨ −e∨
+x1 = χ , x2 = χ , x3 = χ , x4 = χ
+         1        2         3            1    2   3 , we have that
+                   C[S] = C[x1 , x2 , x3 , x4 ]/(x1 x2 − x3 x4 ).
+Remark 4.25. In Remark 4.22, there are no relations indicated in the no-
+tation C[S] = C[χm1 , · · · , χms ]. Although there is no relation as shown in
+Example 4.23, there can be relations between the variables χm1 , · · · , χms ,
+as illustrated by Example 4.24.
+12                                    YAOYING FU
+
+Definition 4.26. Given a rational polyhedral cone σ ⊆ NR , we define the
+affine semigroup associated with σ to be
+                               Sσ := σ ∨ ∩ M ⊆ M.
+Remark 4.27. By Gordan’s Lemma, Sσ defined above is a finitely generated
+monoid that can be embedded in M as a submonoid. Hence, Sσ is an affine
+semigroup where the group action is lattice addition.
+4.4. Affine toric variety associated to a cone. After associating semi-
+group algebra to a cone in §4.3, we now define the affine toric variety as-
+sociated with a cone. The coordinate ring of this affine toric variety is the
+semigroup algebra.
+Definition 4.28. Let σ ⊆ N ⊗Z R = NR ∼   = Rn be a rational polyhedral cone
+                                       ∨
+with associated affine semigroup Sσ = σ ∩ M . Then
+                              Uσ := HomMon (Sσ , C)
+is an affine toric variety.
+   Here in Definition 4.28, we first understand Uσ as a set of monoid mor-
+phisms. For it to make sense as a topological space, we need to specify what
+topology we are putting on it. Specifically, for any points p, q ∈ Uσ , a metric
+||p − q|| can be put as follows:
+||p − q|| := |χm1 (p) − χm1 (q)| + |χm2 (p) − χm2 (q)| + · · · + |χms (p) − χms (q)|,
+where {m1 , m2 , . . . , ms } is the set of generators of Sσ . We previously showed
+that characters χmi ’s are functions in §4.1, for all i ∈ {1, . . . , s}. Then χmi (p)
+and χmi (q) are in C, and |χmi (p) − χmi (q)| is the usual Euclidean metric
+on C. Indeed, the space HomMon (Sσ , C) with the topology above induced
+can be understood the same as a complex analytic space with the complex
+analytic topology.
+  To give a rough idea about why Uσ is indeed an affine toric variety, we
+should specify the torus it contains. Indeed, the torus is implicitly encoded
+by the condition that the rational polyhedral cone σ is contained in NR =
+N ⊗Z R ∼ = Rn .
+Proposition 4.29. Let Uσ be an affine toric variety, then we have:
+      dim Uσ = n ⇐⇒ the torus of Uσ is TN ⇐⇒ σ is strongly convex.
+Remark 4.30. In a traditional literature of toric variety, in Definition 4.28,
+Uσ is defined to be an affine toric variety
+                     Uσ := Spec(C[Sσ ]) = Spec(C[σ ∨ ∩ M ])
+with coordinate ring C[Sσ ] (Definition 4.21).
+Example 4.31. Let σ = {0} ⊆ NR ∼       = Rn . Then Sσ = σ ∨ ∩ M = M . As
+seen in Example 4.23, we have the affine toric variety Uσ = TN ∼ = (C∗ )n
+                                  ±          ±
+with coordinate ring C[M ] = C[x1 , . . . , xn ].
+Example 4.32.
+                                  0      e1
+Let σ = Cone(e1 ) ⊆ NR ∼
+                       = R. Then σ ∨ = Cone(e∨            ∼
+                                                 1 ) ⊆ MR = R. Setting
+ e∨                    1
+χ 1 = x, we have Uσ = Ax with coordinate ring C[x].
+               TORIC GEOMETRY OF RELU NEURAL NETWORKS                         13
+
+4.5. Fans and their associated toric varieties. A fan is a combinatorial
+object which is a collection of cones. We previously associated a cone with
+an affine toric variety in §4.4; our next goal is to glue these affine pieces to
+get a toric variety corresponding to a fan.
+Definition 4.33. A fan Σ in NR is a finite collection of cones σ such that:
+   (1) Every σ ∈ Σ is a strongly convex rational polyhedral cone.
+   (2) For all σ ∈ Σ, each face of σ is also in Σ.
+   (3) For all σ1 , σ2 ∈ Σ, the intersection σ1 ∩ σ2 is a face of both(hence
+       also in Σ).
+Furthermore, if Σ is a fan, then:
+     • The support of Σ is |Σ| = ∪σ∈Σ σ ⊆ NR .
+     • Σ(r) is the set of r−dimensional cones of Σ.
+Definition 4.34. Let Σ be a fan. A cone σ is a wall if σ ∈ Σ(n − 1).
+Definition 4.35. Let Σ be a fan. Σ is complete if
+                             |Σ| = ∪σ∈Σ σ = NR .
+Definition 4.36. A generalized fan Σ in NR is a finite collection of cones
+σ ⊆ NR such that:
+   (1) Every σ ∈ Σ is a rational polyhedral cone.
+   (2) For all σ ∈ Σ, each face of σ is also in Σ.
+   (3) For all σ1 , σ2 ∈ Σ, the intersection σ1 ∩ σ2 is a face of each (hence
+       also in Σ).
+Definition 4.37. Let Σ be a fan in NR . Then XΣ is the toric variety
+associated with the fan Σ.
+  To see how we may associate the variety XΣ with a fan Σ, we need
+the following Proposition, which is essential for gluing the affine varieties
+{Uσ }σ∈Σ(n) to get XΣ . Here {Uσ }σ∈Σ(n) is called an affine open cover of
+XΣ .
+Proposition 4.38. (Separation Lemma) Let Σ be a fan. If σ1 , σ2 ∈ Σ and
+τ = σ1 ∩ σ2 , then
+         Sτ = Sσ1 + Sσ2 := {m1 + m2 | m1 ∈ Sσ1 , m2 ∈ Sσ2 } ⊆ M.
+   To have a better idea of how the gluing is exactly happening, we let
+σ1 , σ2 ∈ Σ(n) and let τ = σ1 ∩ σ2 . Note that Uσ1 = HomMon (Sσ1 , C),
+Uσ2 = HomMon (Sσ2 , C), and Uτ = HomMon (Sτ , C). By Proposition 4.38, we
+have Sτ = Sσ1 + Sσ2 , and hence Uτ = Uσ1 ∩ Uσ2 . That is, we may glue
+Uσ1 and Uσ2 together along their intersection Uτ . Therefore, we obtain an
+abstract variety XΣ associated to the fan Σ.
+Example 4.39. (Illustration of gluing affine pieces to get XΣ = P1 )
+
+                               −e1     0     e1
+
+Let Σ = {{0}, σ1 := Cone(e1 ), σ2 := Cone(−e1 )} in NR ∼
+                                                       = R. As shown in
+                                   ∨                   ∨
+Example 4.31 and 4.32, setting χe1 = x and hence χ−e1 = x−1 , we have
+14                               YAOYING FU
+
+U{0} = TN =∼ C∗ , Uσ = A1 and Uσ = A1 −1 . Note that {0} = σ1 ∩ σ2 , we
+                    1   x        2     x
+have S{0} = M = Z = N{e∨           ∨
+                        1 } + N{−e1 } = Sσ1 + Sσ2 , and
+
+                    U{0} = C∗x± = A1x ∩ A1x−1 = Uσ1 ∩ Uσ2 .
+Hence, we glue Uσ1 and Uσ2 along U{0} to get XΣ , which can be equivalently
+understood from topological perspective as gluing the two charts A1x and
+A1x−1 along C∗ to get P1 .
+4.6. Cartier divisors on toric varieties. We illustrated how to associate
+the toric variety with a fan in §4.5. To study these varieties, we study the
+functions on these varieties. The output function of a ReLU neural network
+is a finitely-piecewise linear function. We will therefore introduce Cartier
+divisors on toric varieties, which can be understood as the output piecewise
+linear function of a given feedforward ReLU neural network, up to a shift
+by a linear term.
+
+   Let XΣ be the toric variety of a fan Σ in NR ∼   = Rn . Let TN ⊆ XΣ
+be the maximal torus. Then XΣ \ TN is of codimension one inside XΣ .
+This locus XΣ \ TN consists of codimension one irreducible components
+in one-to-one correspondence with rays in Σ, denoted as Dρ ’s. That is,
+XΣ \ TN = ∪ρ∈Σ(1) Dρ . More explicitly, Dρ is defined as follows.
+Definition 4.40. Consider ρ ∈ Σ(1), and suppose ρ ⊆ σ for some σ ∈ Σ.
+We obtain a TN −invariant prime divisor Dρ , defined as the closure of
+              n                                                 o
+       O(ρ) := γ ∈ HomMon (Sσ , C) γ(m) ̸= 0 ⇔ m ∈ ρ⊥ ∩ M ,
+
+i.e., Dρ := O(ρ).
+Definition 4.41. A TN −invariant Weil divisor D is a finite sum
+                                 X
+                          D=          aρ Dρ
+                                    ρ∈Σ(1)
+
+where aρ ∈ Z and Dρ ’s are TN -invariant prime divisors.
+Remark 4.42. Throughout this paper, we restrict our attention to TN −invariant
+divisors on XΣ . For simplicity, we shall refer to them as divisors.
+Example 4.43. The fan Σ in Example 4.39 has two rays ρ1 = Cone(e1 )
+and ρ2 = Cone(−e1 ). In this case, XΣ \ TN = P1 \ C∗ consists of two points,
+                   ∨                            ∨
+which are Dρ1 = {χe1 = x = 0} and Dρ2 = {χ−e1 = x−1 = 0}.
+Remark 4.44. Although a Weil divisor D is of codimension one, it is not
+necessarily locally cut out by one equation due to the possibility of existence
+of singularities. When a Weil divisor D is locally cut out by one equation,
+it is called Cartier which is defined as follows.
+Definition 4.45. A Weil divisor D is Cartier if for an affine open cover
+{Uσ }σ∈Σ(n) of XΣ , D is of the form {(Uσ , χ−mσ )} for some mσ ∈ M such
+that ⟨mσ , uρ ⟩ = −aρ for all ρ ∈ σ(1), where uρ is the minimal generator of
+the ray ρ. And {mσ } is called the Cartier data.
+               TORIC GEOMETRY OF RELU NEURAL NETWORKS                       15
+
+Example 4.46. Continuing with Example 4.43, the two Weil divisors Dρ1
+and Dρ2 are both Cartier. The Cartier data for Dρ1 is {mσ1 = −e∨
+                                                               1 , mσ2 = 0}
+                                                   ∨
+and the Cartier data for Dρ2 is {mσ1 = 0, mσ2 = e1 }.
+Definition 4.47. A support function is a function φ : |Σ| → R that is
+linear on each cone of Σ. A support function φ is integral with respect to
+the lattice N if φ(|Σ| ∩ N ) ⊆ Z.
+                           P
+Remark 4.48. Given D = ρ aρ Dρ with Cartier data {mσ }σ∈Σ , the funcion
+                   φD :|Σ| → R
+                       u 7→ φD (u) = ⟨mσ , u⟩ when u ∈ σ
+is a well-defined support function that is integral with repsect to N .
+Definition 4.49. Let D be a Cartier divisor represented by {Uσ , mσ } on
+the toric variety XΣ . We associate a line bundle OXΣ (D) to D which is
+defined to be a functor mapping open affines Uσ to OXΣ (D)(Uσ ) where
+                        OXΣ (D)(Uσ ) := C[Sσ ] · χmσ .
+Definition 4.50. (Polyhedron of a divisor) Let D be a Cartier divisor of
+XΣ . Define PD ⊆ MR as follows
+             PD := {m ∈ MR |⟨m, uρ ⟩ ≥ −aρ for all ρ ∈ Σ(1)} .
+Proposition 4.51. The polyhedron PD (Definition 4.50) gives the global
+sections of the line bundle OXΣ (D). That is,
+                                         M
+                      Γ(XΣ , OXΣ (D)) =       C · χm .
+                                        m∈PD ∩M
+
+A rational function f ∈ Γ(XΣ , OXΣ (D)) is called a global section of OXΣ (D).
+Remark 4.52. If Σ is complete, then PD is a polytope. Since in our study,
+the fan Σ is always complete, we may always assume that PD is a polytope
+throughout this paper.
+Remark 4.53. As mentioned in the beginning of §4.6, the output piecewise
+linear function of a ReLU neural network can be roughly understood as a
+Cartier divisor. Since we allow rational coefficients for ReLU neural net-
+works, we also
+             P allow the coefficients aρ ’s of a divisor to be rational. A
+divisor D = ρ∈Σ(1) aρ Dρ is called a Q−Cartier divisor if aρ ∈ Q and mD
+is a Cartier divisor for some positive integer m.
+4.7. Properties of Cartier divisors on toric varieties. We previously
+reinterpreted a piecewise linear function as the support function of a Cartier
+divisor in §4.6. We now investigate properties of such functions and intro-
+duce techniques we will use to study those functions.
+Definition 4.54. If φD is convex, i.e., φD is convex if
+                     
+     φD tu + (1 − t)v ≥ tφD (u) + (1 − t)φD (v), ∀u, v ∈ NR , t ∈ [0, 1]
+then the Cartier divisor D is basepoint free. Furthermore,
+                        PD = Conv(mσ |σ ∈ Σ(n)).
+16                                YAOYING FU
+
+Definition 4.55. If φD is strictly convex, i.e., it is convex and mσ ̸= mσ′
+when σ ̸= σ ′ in Σ(n), then D is ample. Here for strict convexity, we may
+think of it as “the function φD bend as much as possible”. Furthermore,
+                          PD = Conv(mσ |σ ∈ Σ(n))
+is a polytope of full dimension, i.e., dim PD = n.
+Remark 4.56. Note that the convexity defined in Definition 4.54 is precisely
+the opposite of the convexity defined in Definition 3.8. That is, if φD is
+convex in the sense of Definition 4.54, then φD is concave in the sense of
+Definition 3.8.
+Example 4.57. Continuing with Example 4.46, the two Cartier divisors
+Dρ1 and Dρ2 of P1 are both ample, i.e., the two support functions φD1 and
+φD2 are both strictly convex (Definition 4.55).
+Definition 4.58. Let Σ be a fan in NR = ∼ Rn . A curve C is torus-invariant
+and complete if C = V (τ ) ∼
+                           = P1 where τ = σ ∩ σ ′ ∈ Σ(n − 1), and σ, σ ′ ∈
+Σ(n).
+Remark 4.59. When τ = σ ∩ σ ′ ∈ Σ(n − 1) and σ, σ ′ ∈ Σ(n), τ is a wall
+(Definition 4.34). To see why the toric variety V (τ ) ∼   = P1 , the co-character
+lattice of V (τ ) is N (τ ) := N/Nτ , where Nτ = Span(τ ) ∩ N . Since τ is a wall,
+we have the torus N (τ ) ∼    = Z. Furthermore, σ̄, σ̄ ′ are rays that correspond
+to the rays in the usual fan for V (τ ) ∼= P1 , where σ̄ := σ/τ, σ̄ ′ := σ ′ /τ .
+Definition 4.60. (Intersection number) Let C = V (τ ) be the complete
+torus-invariant curve in XΣ coming from the wall τ = σ ∩ σ ′ . Let D be
+a Cartier divisor with Cartier data mσ , mσ′ ∈ M corresponding to σ, σ ′ ∈
+Σ(n). Also pick u ∈ σ ′ ∩ N that maps to the minimal generator of σ̄ ′ :=
+σ ′ /τ ⊆ N (τ )R . Then
+                         D · C := ⟨mσ − mσ′ , u⟩ ∈ Z.
+Remark 4.61. More intuitively, we may interpret the intersection number as
+the extent to which the support function φD bends along the wall τ = σ ∩σ ′ .
+Remark 4.62. If D is a Q−Cartier divisor, i.e., lD is Cartier for some integer
+l > 0. Given a complete torus-invariant curve C, then
+                                  1
+                         D · C := (lD) · C ∈ Q.
+                                   l
+Proposition 4.63. (Linearity of intersection number) Let C be an irre-
+ducible complete curve and D, E Cartier divisors on the toric variety XΣ
+corresponding to a fan Σ. Then
+                         (D + E) · C = D · C + E · C.
+Definition 4.64. Let XΣ be the toric variety of a fan Σ and a Cartier
+divisor D. Then the volume of the line bundle OXΣ (D) is defined to be the
+nonnegative real number
+                                        h0 (XΣ , OXΣ (mD))
+                 Vol(OXΣ (D)) := lim sup
+                                    m→∞       mn /n!
+where h0 (XΣ , OXΣ (mD)) is the dimension of the global sections of the line
+bundle OXΣ (mD).
+                 TORIC GEOMETRY OF RELU NEURAL NETWORKS                               17
+
+            5. Toric geometry of ReLU Neural Networks
+  Having established the necessary background, we now develop a dictio-
+nary between feedforward ReLU networks and toric geometry.
+Definition 5.1. Let f ∈ ReLUQ                            Q
+                            0 (n0 , k) and suppose fθ ∈ F0 realizes f :
+                     ς◦L         ς◦L         ς◦L        ς◦L         Lk+1
+           fθ : Rn0 −−−→
+                       1
+                         Rn1 −−−→
+                                2
+                                  Rn2 −−−→
+                                         3          k
+                                           · · · −−−→ Rnk −−−→ R,
+denote by Σfθ the ReLU fan associated with this ReLU neural network is
+defined to be the canonical polyhedral complex Cfθ associated to fθ (Definition
+3.11). In another word, Σfθ := Cfθ .
+Remark 5.2. Note that Σfθ defined above is in general a generalized fan
+(Definition 4.36). However, in a real world application, we may assume that
+n1 > n0 . Thus, in the rest of this paper, we will assume that Σfθ is a fan
+(Definition 4.33) unless otherwise specified.
+Proposition 5.3. With Definition 5.1 and Remark 5.2, fixing an architec-
+ture (n0 , . . . , nk ; 1) of unbiased ReLU neural networks with rational weights,
+we get the toric encoding map
+                               T : P → {ReLU fans}
+with
+                                       θ 7→ Σfθ .
+Remark 5.4. The real vector space NR spanned by the co-character lattice N
+is identified as Rn0 , i.e., NR = Rn0 . Inherited from the standard coordinates
+of Rn0 , denote by {e1 , . . . , en0 } we get the standard basis of N . Identify the
+character lattice M as N and denote by {e∨                       ∨
+                                                    1 , . . . , en0 } we get the standard
+                  ∨               ∨                              ∨
+basis of M = N via ⟨ei , ej ⟩ = 0, ∀i ̸= j and ⟨ei , ei ⟩ = 1, ∀i ∈ {1, . . . , n0 }.
+Here, the pairing ⟨, ⟩ : N × M → Z is the usual dot product.
+  Let fθ ∈ F0Q and the corresponding ReLU fan Σfθ be given.
+Definition 5.5. Denote by XΣfθ the ReLU toric variety is defined to be the
+toric variety corresponding to the ReLU fan Σfθ . Since the ReLU fan Σfθ
+is complete (Definition 4.35), the ReLU toric variety XΣfθ is proper.
+Definition 5.6. The output finitely-piecewise linear function f serves as
+the support function (Definition 4.47) of a Q−Cartier divisor Df supported
+on Σfθ . Then we define Df to be the ReLU Cartier divisor.
+Lemma 5.7. When the ReLU Cartier divisor associated with the output
+function f is Cartier with Cartier data {mσ }σ∈Σf (n) (Definition 4.45), then
+                                                         θ
+we may interpret the Cartier data as the slope vector of the linear term.
+More specifically, say f : Rn0 → R, then in each maximal dimensional cone
+σ ∈ Σfθ , the function f is linear of the form a1 x1 + . . . + an0 xn0 . We have
+the slope vector
+                              (a1 , . . . , an0 ) = mσ .
+Proof. f served as the support function φDf : |Σfθ | → R with
+                       u 7→ φDf (u) = ⟨mσ , u⟩ when u ∈ σ.
+18                                  YAOYING FU
+
+On the other hand, when u ∈ σ, φDf (u) = a1 x1 + . . . + an0 xn0 with u =
+x1 e1 + . . . + xn0 en0 . It follows that mσ = a1 e∨                  ∨
+                                                     1 + . . . + an0 en0 . This yields
+the slope vector (a1 , . . . , an0 ) = mσ as desired.                               □
+Remark 5.8. When the ReLU Cartier divisor associated with the output
+function f is Q−Cartier, we have the same result as in Lemma 5.7.
+   To study the set of piecewise linear functions that can be realized by
+certain architectures, it suffices to study the set of ReLU Cartier divisors
+that can be realized by those architectures. However, two piecewise linear
+functions f, f ′ will correspond to the same Q−Cartier divisor D if they differ
+by a linear term, i.e. f − f ′ = g, where g is linear. If we take the set of
+piecewise linear functions and quotient out by linear terms, then we get a
+one-to-one correspondence as follows:
+(2) {piecewise linear functions}/{linear terms} ∼
+                                                = {Q − Cartier divisors}
+   To focus on studying the set of Q−Cartier divisors realizable by a ReLU
+neural network of a given depth, we need to make sure that the kernel of
+(2) does not change the depth of the ReLU neural network, which yields the
+following theorem.
+Theorem 1. If f ∈ ReLUR (n0 , k) and f ′ − f = g, where g : Rn0 → R is
+affine linear, then f ′ ∈ ReLUR (n0 , k).
+                                                                             T
+Proof. Since g is affine linear, let g = ni=1
+                                        P 0                  
+                                              ai xi +bg where x1 x2 · · · xn0 ∈
+                                                                   ς◦A          ς◦A
+Rn0 and ai , bg ∈ R for i ∈ {1, . . . , n0 }. Say fθ : Rn0 −−−→
+                                                              1
+                                                                Rn1 −−−→
+                                                                       2
+
+     ς◦A           ς◦A      Ak+1
+Rn2 −−−→3           k
+           · · · −−−→  Rnk −−−→ R realizes f . Then let A′1 be an (n1 + 2) ×
+(n0 + 1) matrix, whose first n1 rows are
+                                        the same as A1 and the last two
+            a1      a2 · · · an0    bg
+rows are                                 , i.e.,
+           −a1 −a2 · · · −an0 −bg
+                                                       
+                                        A1
+                     A′1 :=  a1  a2 · · · an0      bg  .
+                             −a1 −a2 · · · −an0 −bg
+
+                      note that Aj is an nj × (nj−1 + 1) matrix which can
+For all j from 2 to k,
+be written as Aj = Mj |bj (Definition 3.2). Then let A′j be an (nj + 2) ×
+(nj−1 + 3) matrix as follows:
+                                  0 bj
+                                         
+                           Mj
+                  A′j := 
+                           0 10 01 00 , ∀j ∈ {2, . . . , k}.
+                                          
+
+
+As for A′k+1 , we note that Ak+1 = Mk+1 bk+1 . Then let A′k+1 be a
+                                                   
+
+1 × (nk + 3) matrix as follows:
+                       A′k+1 := Mk+1 1 −1 bk+1 .
+                                                    
+
+Then f ′ is realizable by the following k + 1-layer ReLU neural network
+            ς◦A′           ς◦A′            ς◦A′        ς◦A′           A′k+1
+fθ′ : Rn0 −−−→
+             1
+               Rn1 +2 −−−→ 2
+                             Rn2 +2 −−−→
+                                       3          k
+                                         · · · −−−→ Rnk +2 −−−→ R, i.e.,
+  ′
+f ∈ ReLU(n0 , k) as desired.                                         □
+               TORIC GEOMETRY OF RELU NEURAL NETWORKS                           19
+
+Remark 5.9. For Theorem 1, if we restrict ourselves to ReLUR   0 (n0 , k), i.e.,
+where all affine maps Ai are linear maps Li , then we have the same conclu-
+sion. That is, if f ∈ ReLUR                 ′                     n0 → R is
+                            0 (n0 , k) and f − f = g, where g : R
+               ′
+linear, then f ∈ ReLU0 (n0 , k).
+                       R
+
+
+   With Theorem 1 and Remark 5.9, we know that investigating functions
+that can be realized by architectures of certain depth k is equivalent to
+studying the ReLU Cartier divisors that can be realized by those architec-
+tures.
+   Before moving to the next section, we illustrate the concepts defined in
+§5 with a specific example as follows.
+Example 5.10. Continuing with Example 1.1, the ReLU fan Σfθ is as
+follows:
+                                    ρ2
+                                        (1)
+                                     H3
+                           σ2      σ1
+                    ρ3                  ρ1
+                                     (1)     (1)
+                        σ3        H1 = H2
+                           σ4     σ5
+                     ρ4
+                            ρ5 F −1 (H (2) )
+                                1      1         .
+                                                                          (1)
+Following the Definition 3.9, the hyperplane {y = 0} is denoted as H1 =
+   (1)                                          (1)
+H2 , the hyperplane {x = y} is denoted as H3 and the bent hyperplane
+         (2)
+F1−1 (H1 ) is colored in red.
+    The output piecewise linear function is f = max{0, x, y} or f = 0 ⊕ x ⊕ y
+in tropical algebra. The ReLU Cartier divisor associated with f is Df =
+−Dρ1 − Dρ2 with Cartier data, or slope vector {mσ1 = mσ5 = e∨       1 , mσ2 =
+e∨
+ 2 , m σ3 =  mσ4 = 0}.
+
+
+   6. A motivating link between tropical geometry of ReLU
+      Neural Networks and toric geometry of ReLU Neural
+                            Networks
+  Here we define some related concepts from tropical geometry, but more
+details on tropical geometry can be found in the book [9].
+Definition 6.1. In the tropical semiring (R ∪ {−∞}, ⊕, ⊙), the tropical
+sum ⊕ and the tropical product ⊙ are defined as follows:
+                  x ⊕ y := max{x, y} and x ⊙ y := x + y.
+Remark 6.2. Both addition and multiplication are commutative and asso-
+ciative. Negavie infinity is the identity element for addition and zero is the
+identity element for multiplication:
+                         x ⊕ −∞ = x and x ⊙ 0 = x.
+Definition 6.3. Let x1 , x2 , . . . , xn be variables which represent elements
+in the tropical semiring (R ∪ {−∞}, ⊕, ⊙). A monomial is any product of
+these variables with repetition allowed. By commutativity, we can sort the
+20                                          YAOYING FU
+
+product and write monomials in the usual notation, with the variables raised
+to exponents:
+                         x1 ⊙ x2 ⊙ x1 ⊙ x3 = x21 x2 x3 .
+A monomial represents a function from Rn to R. When evaluating this
+function in classical arithmetic, we get a linear function:
+                          x1 + x2 + x1 + x3 = 2x1 + x2 + x3 .
+Remark 6.4. Generally, as a tropical monomial, we allow negative integer
+exponents:
+                     x21 x−1 −2
+                          2 x3 := 2x1 − x2 − 2x3 .
+
+Definition 6.5. A tropical polynomial is a finite linear combination of
+tropical monomials:
+          p(x1 , . . . , xn ) = a ⊙ xi11 xi22 · · · xinn ⊕ b ⊙ xj11 xj22 · · · xjnn ⊕ . . . ,
+where the coefficients a, b, . . . are real numbers and the exponents i1 , j1 , i2 , j2 , . . .
+are integers.
+Remark 6.6. Every tropical polynomial represents a function from Rn to R.
+When evaluating this function in classical arithmetic, we get the maximum
+of a finite collection of affine linear functions:
+p(x1 , x2 , . . . , xn ) = max{a+i1 x1 +i2 x2 +. . .+in xn , b+j1 x1 +j2 x2 +. . .+jn xn , . . .}.
+This function is a convex (Definition 3.8) continuous finitely-piecewise linear
+function (Definition 3.7).
+Definition 6.7. A tropical rational function is a difference in classical
+arithmetic, or, equivalently, a tropical quotient of two tropical polynomials
+f (x) and g(x):
+                         f (x) ⊘ g(x) := f (x) − g(x)
+which will be denoted as f ⊘ g.
+Definition 6.8. Given a tropical polynomial f (x) = c1 xu1 ⊕ c2 xu2 ⊕ . . . ⊕
+cr xur , where x = (x1 , x2 , . . . , xn ), ui ∈ Zn , ci ∈ R, ∀1 ≤ i ≤ r. The newton
+polytope associated to this f is the convex hull of u1 , u2 , . . . , ur ∈ Zn , regarded
+as points in Rn
+                          Newt(f ) = Conv(ui ) ⊆ Rn .
+   After reviewing the background on tropical geometry, we next reveal the
+linkage between the tropical geometry and the toric geometry of ReLU neural
+networks.
+Theorem 6.9. Let f ∈ ReLUZ0 (n0 , k), and suppose fθ ∈ F0Q realizes f :
+                       ς◦L            ς◦L           ς◦L          ς◦L            Lk+1
+           fθ : Rn0 −−−→
+                       1
+                         Rn1 −−−→
+                                2
+                                  Rn2 −−−→
+                                         3          k
+                                           · · · −−−→ Rnk −−−→ R.
+Let XΣfθ and D be the corresponding ReLU toric variety (Definition 5.5)
+and ReLU Cartier divisor (Definition 5.6). If f is a tropical polynomial,
+then
+                           P−D = −Newt(f ),
+where P−D is the polytope (Definition 4.50) associated with the Cartier di-
+visor −D.
+                TORIC GEOMETRY OF RELU NEURAL NETWORKS                            21
+
+Proof. If f is a tropical polynomial, then −f is convex in the sense of Def-
+inition 4.54, and the Cartier divisor corresponding to −f is −D. We may
+write f = xu1 ⊕ xu2 ⊕ . . . ⊕ xun , where x = (x1 , . . . , xn0 ) and ui ∈ Zn0 , ∀i,
+so −f = x−u1 ⊕ x−u2 ⊕ . . . ⊕ x−un . By convexity of −f , we know that −D
+is basepoint free and
+                            P−D = Conv(mσ |σ ∈ Σ(n)).
+With Lemma 5.7, mσ ’s are identified as slope vectors, which are precisely
+the exponents ui ’s of the tropical polynomial f , up to a minus sign. Since
+Newt(f ) = Conv(u1 , u2 , . . . , un ), we may conclude that P−D = − Newt(f ).
+                                                                           □
+Remark 6.10. There is a minus sign in Theorem 6.9. The reason behind
+this is that for a piecewise linear function f : Rn0 → R, being convex in the
+sense of Definition 4.54 means being concave in the sense of Definition 3.8.
+Definition 6.11. Let P be a lattice polytope with dim P = n. Denote by
+Vol(P ), the mixed volume of P is defined as n! times the Euclidean volume
+of P .
+Remark 6.12. Note that the mixed volume of the simplex ∆n0 = Conv(e1 , . . . , en )
+is 1, i.e., Vol(∆n0 ) = 1.
+Lemma 6.13. Let P be a lattice polytop with dim P = n. There is an
+alternative interpretation of Vol(P ), which is
+                                              #mP ∩ M
+                           Vol(P ) = n! lim           .
+                                       m→∞      mn
+Proof. Note that
+                                                  n
+                                                  X
+                       #mP ∩ M = EP (m) =               ei (P )mi
+                                                  i=0
+where EP (m) is called the Ehrhart polynomial and its coefficients ei (P )’s
+are called Ehrhart coefficients. It is known that
+                          en (P ) = Euclidean volume of P
+In the meantime, we notice that
+                               #mP ∩ M
+                          lim              = en (P )
+                         m→∞      mn
+since taking the limit above amounts to taking the leading coefficient of the
+Ehrhart polynomial, which is precisely en (P ). Therefore,
+                          #mP ∩ M
+              n! lim              = n! · en (P )
+                 m→∞        mn
+                                  = n! · Euclidean volume of P
+                                      = Vol(P )
+                                                                                  □
+Theorem 6.14. Let f ∈ ReLUZ0 (n0 , k), and suppose fθ ∈ F0Q realizes f :
+                    ς◦L         ς◦L        ς◦L          ς◦L         Lk+1
+          fθ : Rn0 −−−→
+                      1
+                        Rn1 −−−→
+                               2
+                                 Rn2 −−−→
+                                        3          k
+                                          · · · −−−→ Rnk −−−→ R.
+22                                      YAOYING FU
+
+When the output piecewise-linear function f is a tropical polynomial, we
+have
+                  Vol(Newt(f )) = Vol(OXΣf (−D)),
+                                                            θ
+where Vol(Newt(f )) is the mixed volume (Definition 6.11) of the Newton
+polytope, and Vol(OXΣf (−D)) is the volume of the line bundle OXΣf (−D)
+                           θ                                                    θ
+(Definition 4.64).
+Proof. As in Definition 4.50, note that P−D gives the global sections of the
+line bundle OXΣf (−D). This amounts to saying that
+                   θ
+
+                   h0 (XΣfθ , OXΣf (m(−D))) = #mP−D ∩ M.
+                                    θ
+
+By Definition 4.64, we see that
+                                 h0 (XΣfθ , OXΣf (m(−D)))  #mP−D ∩ M
+                                                   θ
+Vol(OXΣf (−D)) = lim sup                                         = n! lim sup
+          θ        m→∞                         mn /n!m→∞         mn
+When the limit exists, we know that lim sup = lim , which yields the
+                                                  m→∞           m→∞
+following equality:
+                                    #mP−D ∩ M
+     Vol(OXΣf (−D)) = n! lim
+               θ                 m→∞     mn
+                           = Vol(P−D ) = Vol(−Newt(f ))[by Theorem 6.9]
+                           = Vol(Newt(f ))
+as desired.                                                                         □
+Example 6.15. Continuing with Example 5.10, we note that the output
+piecewise linear function f = 0 ⊕ x ⊕ y is a tropical polynomial. By Theorem
+6.9, we know that −f is convex in the sense of Definition 4.54, thus D−f =
+−Df is basepoint free, and
+              P−Df = Conv((0, 0), (0, −1), (−1, 0)) = −Newt(f ).
+Furthermore, by Theorem 6.14, we have
+                       Vol(Newt(f )) = Vol(OXΣf (−Df )) = 1.
+                                                        θ
+
+ 7. Complete classification of functions that can be realized
+          by unbiased shallow ReLU Neural Networks
+  The classification is obtained by computing the intersection numbers of
+the ReLU Cartier divisor Df and torus-invariant curves. For the calculation
+purpose, we define the reduced ReLU representation of unbiased shallow
+ReLU neural networks as follows.
+Definition 7.1. Let f ∈ ReLUQ                   Q
+                            0 (n0 , 1)and fθ ∈ F0 realizing f :
+                                         ς◦L            L
+                               fθ : Rn0 −−−→
+                                           1
+                                             Rn1 −→
+                                                  2
+                                                    R,
+and let {aij }ni,j=1
+                 1 ,n0
+                       , {b1i }ni=1
+                                 1
+                                    denote the weights of L1 and L2 respectively.
+Then fθ is said to be a reduced ReLU representation, denoted as fθred , if
+     • there is no zero row in L1 ,
+     • a′ij s are all integers,
+     • for i ∈ {1, . . . , n1 }, gcd(ai1 , . . . , ain0 ) = 1, and
+                  TORIC GEOMETRY OF RELU NEURAL NETWORKS                                    23
+
+      • any two rows of L1 are not parallel to each other of the same direc-
+        tion.
+Lemma 7.2. (Algorithm towards reduced ReLU representation)
+  Let f ∈ ReLUQ                   Q
+              0 (n0 , 1)and fθ ∈ F0 realizing f :
+                                          ς◦L          L
+                               fθ : Rn0 −−−→
+                                           1
+                                             Rn1 −→
+                                                  2
+                                                    R,
+and let {aij }ni,j=1
+                 1 ,n0
+                       , {b1i }ni=1
+                                 1
+                                    denote the weights of L1 and L2 respectively. Run
+the following algorithm:
+      • If there is a zero row, say jth row in L1 , then we delete this jth row
+         in L1 and the jth entry in Rn1 , and modify L2 to be a 1 × (n1 − 1)
+         matrix by deleting the jth entry of L2 .
+      • If there exist k1 , k2 ∈ {1, . . . , n1 } with k1 ̸= k2 such that the row-
+         wise weights in the k1 −th row and the k2 −row are parallel of the
+         same direction, i.e., (ak1 1 , . . . , ak1 n0 ) = k(ak2 1 , . . . , ak2 n0 ) for some
+         k ∈ Q>0 , then delete the k1 −th row in L1 and Rn1 , delete b1k1 and
+         modify b1k2 to b′1k2 := b1k2 + k · b1k1 .
+                                                c
+      • Write {aij } as fractions, aij = dijij , where cij , dij ∈ Z. Let l =lcm[(dij )ni,j=1  1 ,n0
+                                                                                                     ],
+         and for each i ∈ {1, . . . , n1 }, let li = gcd(l · ai1 , . . . , l · ain0 ). Modify
+         each aij to a′ij := aij · lli , and modify each b1i to b′1i := b1i · lli .
+Then the output of the above algorithm is fθred , i.e., the reduced ReLU rep-
+resentation of fθ .
+Remark 7.3. The output piecewise linear functions of fθ and fθred are the
+same, which is f .
+Lemma 7.4. Given a reduced ReLU representation of an unbiased shallow
+                            ς◦L1             L2
+neural network fθred : Rn0 −−−→       Rn1 −→      R, if there exist k1 , k2 ∈ {1, . . . , n1 }
+with k1 ̸= k2 such that (ak1 1 , . . . , ak1 n0 ) = −(ak2 1 , . . . , ak2 n0 ), then
+                                       Dfk1 = Dfk2 .
+                                                                        (1)         (1)
+Proof. If (ak1 1 , . . . , ak1 n0 ) = −(ak2 1 , . . . , ak2 n0 ), then Hk1 = Hk2 and
+                               ak 1      ak n              −ak1 1        −ak n
+                fk2 = 0 ⊕ x1 2 · · · xn02 0 = 0 ⊕ x1                · · · xn0 1 0
+                               ak 1      ak n
+                         0 ⊕ x1 1 · · · xn01 0              fk1
+                     =      ak 1       ak n      =    ak1 1     ak n .
+                           x1 1 · · · xn01 0         x1 · · · xn01 0
+   Thus, fk1 and fk2 differ by a linear term, and by (2), we have Dfk1 = Dfk2
+as desired.                                                                □
+Lemma 7.5. Given a reduced ReLU representation of an unbiased shallow
+                            ς◦L1      L2
+neural network fθred : Rn0 −−−→  Rn1 −→  R, then for j ∈ {1, . . . , n1 } and any
+      (1)                    (1)   (1)
+τ ∈ Hi with i ̸= j and Hi ̸= Hj , we have
+                                      Dfj · V (τ ) = 0.
+Proof. Let τ = σ ∩ σ ′ . Note that for Dfj , the difference of the Cartier data
+mσ − mσ′ = 0. Then by definition of intersection number (Definition 4.60),
+we see that Dfj · V (τ ) = 0.                                                □
+24                                    YAOYING FU
+
+
+Theorem 3. Let f ∈ ReLUQ                            Q
+                       0 (n0 , 1) and suppose fθ ∈ F0 realizes f . The
+                                                               ς◦L            L
+reduced ReLU representation of f is fθred : Rn0 −−−→ 1
+                                                        Rn1 −→2
+                                                                 R. Let
+   (1)         (1)                             n
+H1 , . . . , Hn1 denote the n1 hyperplanes in R . Then for any two walls,
+                                                0
+
+             (1)
+τ1 , τ2 ⊆ Hi for i ∈ {1, . . . , n1 }, we have
+                               Df · V (τ1 ) = Df · V (τ2 ),
+where Df is the ReLU Cartier divisor supported on the ReLU fan Σf red .
+                                                                                    θ
+
+Proof. Let {aij }ni,j=1 1 ,n0
+                               , {b1i }ni=1
+                                         1
+                                            denote the weights of L1 and L2 respectively.
+Denote the piecewise linear functions in the hidden layer by fi := 0 ⊕
+             ain
+xa1i1 · · · xn0 0 . Then fi corresponds to the Cartier divisor Dfi supported
+                                                                                      (1)
+on the ReLU fan Σf red with Cartier data on one side of the hyperplane Hi
+                             θ
+equal to ai1 e∨                          ∨
+                   1 + . . . + ain0 en0 while on the other side equal to 0. Note that
+                                                 n1
+                                                 X
+                                   Df =          b1i Dfi .
+                                           i=1
+Then by Lemma 7.5 and linearity of intersection number with respect to
+divisors as in Proposition 4.63, we may conclude that for any two walls
+           (1)                                   (1)  (1)
+τ1 , τ2 ⊆ Hi , if there exist i′ ̸= i such that Hi = Hi′ , then we have
+                 Df · V (τ1 ) = b1i [Dfi · V (τ1 )] + b1i′ [Dfi′ · V (τ1 )]
+and
+           Df · V (τ2 ) = b1i [Dfi · V (τ2 )] + b1i′ [Dfi′ · V (τ2 )].
+By Lemma 7.4, we have Dfi = Dfi′ and hence
+                        Df · V (τ1 ) = (b1i + b1i′ )[Dfi · V (τ1 )]
+and
+                    Df · V (τ2 ) = (b1i + b1i′ )[Dfi · V (τ2 )].
+               ′
+Let τ1 = σ1 ∩ σ1 . We may assume that mσ1 = ai1 e∨                        ∨
+                                                        1 + . . . + ain0 en0 , mσ1′ = 0.
+Then by definition of intersection number (Definition 4.60),
+          Dfi · V (τ1 ) := ⟨mσ1 − mσ1′ , u1 ⟩ = ⟨ai1 e∨                 ∨
+                                                      1 + . . . + ain0 en0 , u1 ⟩
+
+where u1 ∈ σ1′ ∩ N maps to the minimal generator of σ¯1′ ⊆ N (τ1 )R . As
+the set up in Remark 5.4, we notice that the angle between the vector
+ai1 e∨                 ∨
+     1n+ . . . + ain0 en0 and   u1 is acute, and thus ⟨ai1 e∨                 ∨
+                                                            1 + . . . + ain0 en0 , u1 ⟩ < 0.
+                             om
+Let wl = nj=1
+               P 0
+                      ωlj ej      be the minimal generators of τ1 , for some m ∈ N
+             Pn0              l=1
+and u1 = j=1 cj ej , then the following (m + 1) × n0 matrix
+                                                        
+                                         c1 · · ·   cn0
+                                       ω11 · · · ω1n 
+                                                       0 
+                                 A =  ..
+                                      
+                                                     .. 
+                                       .     ···     . 
+                                        ωm1 · · · ωmn0
+will induce an integral injection from Zn0 to Zm+1 . Consequently there
+exists an integral n0 × (m + 1) matrix B such that BA = In0 ×n0 . Let
+v = (ai1 , . . . , ain0 )T and note that
+            1 = gcd(v T ) ≤ gcd(Av)T ≤ gcd(BAv)T = gcd(v T ) = 1.
+                    TORIC GEOMETRY OF RELU NEURAL NETWORKS                                         25
+
+Thus gcd(Av)T = 1. Let us examine Av as follows
+                                Pn0            
+                                     k=1 ck aik
+                                n0 ω1k aik 
+                                  P
+                                k=1
+                         Av =                  .
+                                                
+                                        ..
+                                 Pn0 .
+                                               
+                                    k=1 ωmk aik
+                       Pn0
+Since wl ∈ τ1 , we have k=1 ωlk aik = 0, ∀l ∈ {1, . . . , m}. It follows that
+                                                     n0
+                                                     X
+                                           T
+                               gcd(Av) =                   ck aik = 1.
+                                                     k=1
+Therefore,
+                                                                         n0
+                                                                         X
+           Dfi · V (τ1 ) = ⟨ai1 e∨                 ∨
+                                 1 + . . . + ain0 en0 , u1 ⟩ = −               ck aik = −1
+                                                                         k=1
+Similarly, we can compute that Dfi · V (τ2 ) = −1. It follows that
+                        Df · V (τ1 ) = −(b1i + b1i′ ) = Df · V (τ2 )
+                                                                           (1)       (1)
+as desired. If there does not exist i′ ̸= i such that Hi                         = Hi′ , then by
+similar computation we have
+        Df · V (τ1 ) = b1i [Dfi · V (τ1 )] = −b1i = b1i [Dfi · V (τ2 )] = Df · V (τ2 )
+as desired.                                                                                        □
+Theorem 4. Let f : Rn0 → R be a finitely-piecewise linear function. If
+extending the codimension one loci of the non-linear locus of f to be full hy-
+perplanes yields a fan Σ in Rn0 , and the ReLU Cartier divisor Df , supported
+on the fan Σ, satisfies the following:
+                                  Df · V (τ1 ) = Df · V (τ2 )
+for any two walls τ1 , τ2 coming from the same full hyperplane in Σ, then
+f ∈ ReLUQ 0 (n0 , 1).
+                                                                                             (1)
+Proof. Say that there are n1 full hyperplanes in Σ, denoted as Hi , for
+i ∈ {1, . . . , n1 }. Let
+  (1)
+Hi      := {(x1 , . . . , xn0 ) ∈ Rn0 | ai1 x1 + . . . + ain0 xn0 = 0, gcd(ai1 , . . . , ain0 ) = 1} .
+                                     (1)
+Say that for any τ1 , τ2 ∈ Hi and Df · V (τ1 ) = Df · V (τ2 ) = −ti , where
+ti ∈ Q, for i ∈ {1, . . . , n1 }. Then f is realizable by the following ReLU
+neural network, up to a linear shift:
+                                               ς◦L            L
+                                  lθ : Rn0 −−−→
+                                              1
+                                                Rn1 −→
+                                                     2
+                                                       R
+where                                                              
+                                        a11          ···      an0 1
+                                       a21          ···      a2n0 
+                                 L1 =  ..
+                                                                   
+                                                                .. 
+                                       .        ···             . 
+                                           an1 1 · · ·       an1 n0
+and                                                             
+                                    L2 = t1 · · ·            t n1 .
+26                                    YAOYING FU
+
+If the output piecewise linear function of lθ is precisely f , then we are done.
+Otherwise, denote by f ′ the output piecewise linear function of lθ . Then
+f − f ′ = g for g : Rn0 → R linear. By Theorem 1, we can also conclude that
+f ∈ ReLUQ                            Q
+           0 (n0 , 1). Thus, f ∈ ReLU0 (n0 , 1) as desired.                   □
+Example 7.6. According to Theorems 3 and 4, we have an equivalent
+condition for a function to be realizable by shallow unbiased ReLU neural
+networks with rational weights. We may interpret the equivalent condi-
+tion as some kind of symmetry, which is, nevertheless, more than merely
+a symmetric bent hyperplane arrangement. The following piecewise linear
+function has a symmetric bent hyperplane arrangement while not realizable
+by shallow ReLU neural networks with rational weights by Theorem 3:
+
+                                        x + 2y
+                                 y                   3y
+
+
+                                 0                  −4y
+                                        2x − 2y
+                                                              .
+
+                                     References
+ [1] Raman Arora, Amitabh Basu, Poorya Mianjy, and Anirbit Mukherjee. Understanding
+     deep neural networks with rectified linear units. In 6th International Conference on
+     Learning Representations (ICLR), 2018.
+ [2] Egor Bakaev, Florestan Brunck, Christoph Hertrich, Jack Stade, and Amir Yehu-
+     dayoff. Better neural network expressivity: subdividing the simplex. arXiv preprint
+     arXiv:2505.14338, 2025.
+ [3] David A Cox, John B Little, and Henry K Schenck. Toric varieties, volume 124.
+     American Mathematical Soc., 2011.
+ [4] Bella Finkel, Jose Israel Rodriguez, Chenxi Wu, and Thomas Yahl. Activation degree
+     thresholds and expressiveness of polynomial neural networks. 2025.
+ [5] J Elisenda Grigsby and Kathryn Lindsey. On transversality of bent hyperplane ar-
+     rangements and the topological expressiveness of relu neural networks. SIAM Journal
+     on Applied Algebra and Geometry, 6(2):216–242, 2022.
+ [6] Christian Haase, Christoph Hertrich, and Georg Loho. Lower bounds on the depth of
+     integral relu neural networks via lattice polytopes. arXiv preprint arXiv:2302.12553,
+     2023.
+ [7] Christoph Hertrich, Amitabh Basu, Marco Di Summa, and Martin Skutella. Towards
+     lower bounds on the depth of relu neural networks. SIAM Journal on Discrete Math-
+     ematics, 37(2):997–1029, 2023.
+ [8] Kaie Kubjas, Jiayi Li, and Maximilian Wiesmann. Geometry of polynomial neural
+     networks. Algebraic Statistics, 15(2):295–328, 2024.
+ [9] Diane Maclagan and Bernd Sturmfels. Introduction to tropical geometry, volume 161.
+     American Mathematical Society, 2021.
+[10] Giovanni Luca Marchetti, Vahid Shahverdi, Stefano Mereta, Matthew Trager, and
+     Kathlén Kohn. Algebra unveils deep learning–an invitation to neuroalgebraic geom-
+     etry. arXiv preprint arXiv:2501.18915, 2025.
+[11] Allan Pinkus. Approximation theory of the mlp model in neural networks. Acta Nu-
+     merica, 8:143–195, 1999.
+[12] Shuning Wang and Xusheng Sun. Generalization of hinging hyperplanes. IEEE Trans-
+     actions on Information Theory, 51(12):4425–4431, 2005.
+                TORIC GEOMETRY OF RELU NEURAL NETWORKS                            27
+
+[13] Liwen Zhang, Gregory Naitzat, and Lek-Heng Lim. Tropical geometry of deep neu-
+     ral networks. In International Conference on Machine Learning, pages 5824–5832.
+     PMLR, 2018.
+
+ Boston College; Department of Mathematics; 521 Maloney
+Hall; Chestnut Hill, MA 02467
+ Email address: fugh@bc.edu
+

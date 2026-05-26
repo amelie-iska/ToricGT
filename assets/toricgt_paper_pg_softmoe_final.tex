@@ -71,6 +71,11 @@
 \newcommand{\Eop}{\mathbb{E}}
 \newcommand{\dist}{\operatorname{dist}}
 \newcommand{\poly}{\operatorname{poly}}
+\newcommand{\Conv}{\operatorname{Conv}}
+\newcommand{\Newt}{\operatorname{Newt}}
+\newcommand{\ReLU}{\operatorname{ReLU}}
+\newcommand{\Fan}{\operatorname{Fan}}
+\newcommand{\Vol}{\operatorname{Vol}}
 \newcommand{\norm}[1]{\left\lVert #1\right\rVert}
 \newcommand{\abs}[1]{\left\lvert #1\right\rvert}
 \newcommand{\ip}[2]{\left\langle #1,#2\right\rangle}
@@ -85,7 +90,7 @@
 \maketitle
 
 \begin{abstract}
-This manuscript extends the ToricGT framework into a more formal, didactic, and proof-heavy specification.  ToricGT is a graph-to-graph architecture that combines TokenGT-style node and edge tokenization, exact ring evaluation of attention, tropical max-plus heads for dynamic-programming structure, finite noncommutative-torus channels for projective phase memory, and embedding-space Generative Flow Network fine-tuning.  We formalize bounded typed graph domains, prove equivariance of tokenization, masking, attention, decoding, and projective toric transports, and reduce bounded graph-to-graph universality to sequence-to-sequence Transformer universality.  We then give exact blockwise tropical ring-attention proofs, stability lemmas for active faces, and constructive simulations of Bellman-Ford-style semiring recurrences.  The operator-algebra layer is sharpened by normal-form, cocycle, trace, finite Weyl-pair, and irrational-spiral projection theorems.  A new Hebrew morphology section defines root-template graphs for biblical and classical Hebrew, including radical alignment, binyan/template structure, source-span graphs, paradigm graphs, and semiring alignment losses.  We add a visualization contract for auditing reasoning capacity: equivariance orbits, tropical active faces, toric phase maps, Hebrew paradigm lattices, GFlowNet reward landscapes, and proof-dependency graphs.  We integrate Soft-MoE routing as a typed, fully differentiable expert-slot layer for ToricGT graph tokens, prove its permutation equivariance, give low-rank and shared-expert variants for compact artifacts, and specify a Parameter-Golf-constrained micro-ToricGT language-model track with byte-accurate artifact accounting, BPB scoring, quantization-aware training, record-folder checklists, and compliance risk controls.  Finally, we integrate PolarQuant-style random preconditioning and recursive polar-angle quantization as an optional long-context KV-cache layer for ToricGT ring attention, with perturbation bounds showing when quantized keys and values preserve tropical outputs and active argmax faces.  This revision also adds two implementation-facing layers requested for the training program: Soft-MoE feed-forward replacement blocks adapted to graph tokens, and a Parameter-Golf compression track that turns ToricGT ideas into a self-contained micro language model satisfying the OpenAI Model Craft Challenge constraints.  The result is a mathematically controlled specification for a small, reproducible model family aimed at graph-structured mathematical, algebraic, tropical, Hebrew-morphological, and parameter-constrained language-model reasoning.
+This manuscript extends the ToricGT framework into a more formal, didactic, and proof-heavy specification.  ToricGT is a graph-to-graph architecture that combines TokenGT-style node and edge tokenization, exact ring evaluation of attention, tropical max-plus heads for dynamic-programming structure, finite noncommutative-torus channels for projective phase memory, and embedding-space Generative Flow Network fine-tuning.  We formalize bounded typed graph domains, prove equivariance of tokenization, masking, attention, decoding, and projective toric transports, and reduce bounded graph-to-graph universality to sequence-to-sequence Transformer universality.  We then give exact blockwise tropical ring-attention proofs, stability lemmas for active faces, and constructive simulations of Bellman-Ford-style semiring recurrences.  Motivated by the toric geometry of ReLU neural networks, we add a toric-geometric layer of explanation: tropical heads induce Newton polytopes and normal fans, active faces become exposed faces of those polytopes, and kink/bend diagnostics are interpreted as discrete analogues of Cartier-divisor intersection numbers.  The operator-algebra layer is sharpened by normal-form, cocycle, trace, finite Weyl-pair, and irrational-spiral projection theorems.  A new Hebrew morphology section defines root-template graphs for biblical and classical Hebrew, including radical alignment, binyan/template structure, source-span graphs, paradigm graphs, and semiring alignment losses.  We add a visualization contract for auditing reasoning capacity: equivariance orbits, tropical active faces, toric phase maps, Hebrew paradigm lattices, GFlowNet reward landscapes, and proof-dependency graphs.  We integrate Soft-MoE routing as a typed, fully differentiable expert-slot layer for ToricGT graph tokens, prove its permutation equivariance, give low-rank and shared-expert variants for compact artifacts, and specify a Parameter-Golf-constrained micro-ToricGT language-model track with byte-accurate artifact accounting, BPB scoring, quantization-aware training, record-folder checklists, and compliance risk controls.  Finally, we integrate PolarQuant-style random preconditioning and recursive polar-angle quantization as an optional long-context KV-cache layer for ToricGT ring attention, with perturbation bounds showing when quantized keys and values preserve tropical outputs and active argmax faces.  This revision also adds two implementation-facing layers requested for the training program: Soft-MoE feed-forward replacement blocks adapted to graph tokens, and a Parameter-Golf compression track that turns ToricGT ideas into a self-contained micro language model satisfying the OpenAI Model Craft Challenge constraints.  The result is a mathematically controlled specification for a small, reproducible model family aimed at graph-structured mathematical, algebraic, tropical, toric-geometric, Hebrew-morphological, and parameter-constrained language-model reasoning.
 \end{abstract}
 
 \tableofcontents
@@ -430,6 +435,185 @@ Each primitive semiring gate is either a max/min over finitely many affine candi
   \caption{Tropical reasoning diagnostics.  Left: a shortest-path-style active predecessor path.  Right: a piecewise-linear tropical envelope whose active face and margin provide a direct explanation of a discrete decision.}
   \label{fig:tropical-active}
 \end{figure}
+
+\section{Toric geometry of neural-network charts}
+
+The previous section treats tropical heads as max-plus computation.  A complementary view comes from toric geometry.  Fu's toric geometry of ReLU neural networks formalizes an observation that is directly useful for ToricGT: an unbiased rational ReLU network determines a polyhedral fan, a toric variety, and a Cartier divisor whose support function is the network output up to linear shift \cite{fu2025toricrelu}.  This section imports the part of that dictionary that is operational for a graph-token model.  The goal is not to make ToricGT an algebraic variety.  The goal is to expose the polyhedral and divisor-like structure already present in max-plus and ReLU subcomputations, and then use it as a diagnostic and a next-iteration training target.
+
+\subsection{Minimal toric dictionary}
+
+Let $N\simeq \Z^r$ be a cocharacter lattice and $M=\operatorname{Hom}(N,\Z)$ its character lattice, with pairing $\ip{m}{u}$ for $m\in M$ and $u\in N$ \cite{cox2011toric}.  A rational polyhedral cone is
+\begin{equation}
+  \sigma=\operatorname{Cone}(u_1,\ldots,u_s)
+  =\left\{\sum_{j=1}^s\lambda_j u_j:\lambda_j\ge0,\ u_j\in N\right\}\subset N_\R.
+\end{equation}
+A fan $\Sigma$ is a finite collection of cones closed under faces and pairwise intersections.  A toric variety $X_\Sigma$ is glued from affine charts indexed by cones of $\Sigma$.  For this manuscript, the key combinatorial object is not the variety itself but the support function of a torus-invariant Cartier divisor:
+\begin{equation}
+  \varphi_D:|\Sigma|\to\R,\qquad
+  \varphi_D(u)=\ip{m_\sigma}{u}\quad\text{for }u\in\sigma.
+\end{equation}
+The vectors $m_\sigma\in M$ are the Cartier data.  They are exactly the slopes of the piecewise-linear function on each maximal cone.  Across a shared wall $\tau=\sigma\cap\sigma'$, the difference $m_\sigma-m_{\sigma'}$ measures the bend of the support function.  In toric geometry this bend is encoded by the intersection number of $D$ with the torus-invariant curve $V(\tau)$; in a neural network it is the algebraic form of a kink.
+
+\begin{definition}[Toric chart probe]
+Let $H\in\R^{L\times d}$ be a graph-token hidden table.  A toric chart probe is a shared map
+\begin{equation}
+  \Pi(H_i)=\bigl(\ell_1(H_i),\ldots,\ell_R(H_i)\bigr),\qquad
+  \ell_r(h)=\ip{a_r}{h}+b_r,
+\end{equation}
+where $a_r\in\Q^d$ after optional rational quantization.  Its tropical output is
+\begin{equation}
+  \psi(h)=\max_{r\le R}\ell_r(h).
+\end{equation}
+The associated Newton polytope is
+\begin{equation}
+  P_\Pi=\Conv(a_1,\ldots,a_R)\subset(\Q^d)^\ast.
+\end{equation}
+\end{definition}
+
+The rationality condition is not a training restriction.  It is an audit restriction: a learned real-valued probe can be rounded to a rational lattice at evaluation time, just as finite Weyl-pair tasks approximate irrational rotations by rational phases.  This gives a reproducible, byte-stable object for visualization and comparison across checkpoints.
+
+\begin{theorem}[Active faces are normal-fan cells]
+\label{thm:active-normal-fan}
+Let $\psi(h)=\max_r(\ip{a_r}{h}+b_r)$ and let
+\begin{equation}
+  A(h)=\argmax_r(\ip{a_r}{h}+b_r).
+\end{equation}
+For any active set $A$, define the lifted face
+\begin{equation}
+  F_A=\Conv\{(a_r,b_r):r\in A\}
+  \subset(\Q^d)^\ast\times\Q.
+\end{equation}
+Then the set of hidden states with active set containing $A$ is a polyhedron cut out by linear inequalities
+\begin{equation}
+  \ip{a_r-a_s}{h}+b_r-b_s\ge0,
+  \qquad r\in A,\ s\notin A.
+\end{equation}
+Equivalently, active-face diagnostics of a tropical head are cells in the normal fan of the lifted Newton polytope $\Conv\{(a_r,b_r)\}_{r=1}^R$.
+\end{theorem}
+
+\begin{proof}
+The condition that $r$ is at least as good as $s$ is precisely
+\begin{equation}
+  \ip{a_r}{h}+b_r\ge \ip{a_s}{h}+b_s,
+\end{equation}
+which is a linear half-space condition in $h$.  Intersecting these half-spaces over all active candidates and inactive competitors gives the stated polyhedron.  A face of a polytope is exposed by a linear functional.  Here the functional is $(a,b)\mapsto \ip{a}{h}+b$, so candidates maximizing the tropical expression are exactly the vertices lying on the exposed face.  As $h$ varies, these exposed faces are organized by the normal fan.
+\end{proof}
+
+\begin{corollary}[Tropical margins are fan distances]
+For a unique active candidate $r^\star$, the margin
+\begin{equation}
+  \Delta(h)=
+  \min_{s\ne r^\star}\left[\ip{a_{r^\star}-a_s}{h}+b_{r^\star}-b_s\right]
+\end{equation}
+is the signed distance to the nearest wall of the active normal-fan cell, up to the norm of the corresponding wall normal.
+\end{corollary}
+
+\begin{proof}
+The boundary between $r^\star$ and a competitor $s$ is the affine hyperplane
+\begin{equation}
+  \ip{a_{r^\star}-a_s}{h}+b_{r^\star}-b_s=0.
+\end{equation}
+The Euclidean distance to this hyperplane is the displayed affine value divided by $\norm{a_{r^\star}-a_s}_2$.  Taking the minimum over competitors gives the nearest wall.  Without the denominator, $\Delta(h)$ is the unnormalized signed fan distance.
+\end{proof}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_toric_geometry_relu_toricgt.pdf}
+  \caption{Toric-geometric interpretation of ToricGT tropical subcomputations.  A graph-token hidden state is scored by affine candidates.  Their exponent vectors form a Newton polytope; its normal fan partitions hidden space into active regions.  Active faces and bend numbers become diagnostics for reasoning decisions and future toric auxiliary losses.}
+  \label{fig:toric-geometry-toricgt}
+\end{figure}
+
+\subsection{ReLU fans, Cartier data, and ToricGT diagnostics}
+
+A feed-forward ReLU network is continuous piecewise linear.  Fu defines its ReLU fan $\Sigma_{f_\theta}$ as the canonical polyhedral complex on which all hidden-layer piecewise-linear functions and the output are linear.  The corresponding ReLU toric variety is $X_{\Sigma_{f_\theta}}$, and the output function is the support function of a ReLU Cartier divisor $D_f$ on that fan \cite{fu2025toricrelu}.  Zhang, Naitzat, and Lim earlier showed that ReLU networks can be represented as tropical rational maps and that their decision boundaries are controlled by tropical hypersurfaces \cite{zhang2018tropical}.  Later work uses activation polytopes and classification fans to study real tropical decision regions \cite{brandenburg2024real}, and lattice-polytope arguments give depth lower bounds for integral ReLU networks \cite{haase2023lattice}.  The toric view refines this by giving a divisor and intersection-number language for the same bends.
+
+ToricGT contains two sources of piecewise-linear structure.  First, tropical attention heads are explicitly max-plus.  Second, ordinary feed-forward and Soft-MoE expert sublayers often use ReLU or GELU-like gates; ReLU subpaths admit exact fan descriptions, while smooth gates admit local linearization or temperature-controlled max approximations.  For a fixed checkpoint and a bounded evaluation corpus, one can attach an \emph{empirical ReLU fan} to any probe subnetwork by clustering hidden states according to activation signs and tropical active faces.
+
+\begin{definition}[Empirical toric shadow]
+Fix a bounded batch family $\mathcal B$ and a ToricGT checkpoint.  Let $\mathcal A(h)$ collect the binary ReLU activation pattern, tropical active-face pattern, and Soft-MoE dominant-slot pattern of a chosen subnetwork at hidden state $h$.  The empirical toric shadow is the finite cell decomposition
+\begin{equation}
+  \widehat\Sigma_{\mathcal B}=\{\,\{h\in\mathcal B:\mathcal A(h)=a\}:a\in\operatorname{im}\mathcal A\,\},
+\end{equation}
+equipped with fitted local slopes $\widehat m_\sigma$ for each occupied cell $\sigma$.
+\end{definition}
+
+Local slopes can be estimated by least squares over hidden-state/output pairs inside a cell:
+\begin{equation}
+  \widehat m_\sigma
+  =\argmin_m\sum_{h_i\in\sigma}\abs{\psi(h_i)-\ip{m}{h_i}}^2.
+\end{equation}
+The fitted slopes are not used to prove exact representability of the learned model.  They are used to inspect whether the checkpoint has learned stable polyhedral computation: low within-cell residual, large fan margins, repeated bend patterns across equivalent graph situations, and coherent Newton-polytopal active faces.
+
+\begin{proposition}[Equivariance of toric shadows]
+Assume the probe, attention masks, tropical heads, and Soft-MoE routers are shared over token rows and have no absolute token-index input.  If $P_\pi$ is a graph-token relabeling, then the empirical toric shadow of $\pi G$ is the row-permuted shadow of $G$.  In particular, the multiset of Newton polytopes, active-face dimensions, tropical margins, and fitted bend magnitudes is invariant under graph relabeling.
+\end{proposition}
+
+\begin{proof}
+By tokenization and block equivariance, hidden states transform by row permutation.  Shared probes and routers therefore produce the same activation, slot, and active-face labels on permuted rows.  The Newton polytope of a shared probe depends only on its candidate slopes, not on row order.  Least-squares slope fitting within a cell is unchanged after relabeling because the objective is a sum over the same points in permuted order.  Hence all listed diagnostics are invariant as multisets, with only token labels permuted.
+\end{proof}
+
+\begin{definition}[Bend audit]
+Let $\sigma,\sigma'$ be adjacent occupied cells in an empirical toric shadow, with shared wall normal $u_{\tau}$ after rational approximation.  The empirical bend across the wall $\tau=\sigma\cap\sigma'$ is
+\begin{equation}
+  \widehat B(\tau)=\ip{\widehat m_\sigma-\widehat m_{\sigma'}}{u_\tau}.
+\end{equation}
+\end{definition}
+
+In the exact toric setting, this quantity is the intersection number of the corresponding Cartier divisor with the torus-invariant curve $V(\tau)$.  For ToricGT it becomes a diagnostic for whether reasoning decisions change consistently across equivalent graph perturbations.  For example, in a shortest-path task, crossing a wall that changes the active predecessor should produce a bend aligned with the edge-weight difference.  In a Hebrew root-template alignment task, crossing a wall that changes a radical-slot assignment should produce a bend localized to the relevant template slot, not a global drift across unrelated graph tokens.
+
+\subsection{Moment features and compact toric regularization}
+
+Toric geometry also suggests a compact way to summarize a tropical decision.  Given affine candidates $\ell_r(h)=\ip{a_r}{h}+b_r$ and inverse temperature $\beta>0$, define the soft active-face moment
+\begin{equation}
+  \mu_\beta(h)=
+  \frac{\sum_{r=1}^R \exp(\beta\ell_r(h))a_r}
+       {\sum_{r=1}^R \exp(\beta\ell_r(h))}
+  \in P_\Pi.
+\end{equation}
+This is the moment-map analogue of a softmax over candidate exponents.  As $\beta\to\infty$, $\mu_\beta(h)$ converges to a convex combination of the active vertices of the Newton polytope.
+
+\begin{lemma}[Moment map limit]
+If $A(h)$ is the active set of $\psi(h)=\max_r\ell_r(h)$, then every accumulation point of $\mu_\beta(h)$ as $\beta\to\infty$ lies in $\Conv\{a_r:r\in A(h)\}$.  If the active maximizer is unique, $\mu_\beta(h)\to a_{r^\star}$.
+\end{lemma}
+
+\begin{proof}
+Write $M=\max_r\ell_r(h)$.  Terms with $r\notin A(h)$ are multiplied by $\exp(\beta(\ell_r(h)-M))$, which converges to $0$.  Terms with $r\in A(h)$ all have exponent $0$ after factoring out $\exp(\beta M)$.  Therefore the limit is a normalized convex combination of active $a_r$'s.  If $A(h)=\{r^\star\}$, only one term remains.
+\end{proof}
+
+This gives a low-cost diagnostic for compact models.  Rather than storing large explanation traces, a Parameter-Golf-facing model can emit quantized moments $\mu_\beta(h)$, active-face ids, and top-two margins.  These are enough to audit whether the small model uses stable polyhedral decisions without increasing the artifact by a large expert bank.
+
+\subsection{Toric auxiliary losses for future training}
+
+The toric view suggests auxiliary losses that do not require changing the present architecture.  They can be attached to probes during future fine-tuning.  Let $\mathcal R$ be a set of integer relations among exponent vectors,
+\begin{equation}
+  \sum_r \alpha_r a_r=\sum_r \beta_r a_r,
+  \qquad \alpha_r,\beta_r\in\N.
+\end{equation}
+In log-coordinate form, the associated binomial consistency loss is
+\begin{equation}
+  \mathcal L_{\mathrm{binom}}
+  =
+  \sum_{(\alpha,\beta)\in\mathcal R}
+  \left\|
+    \sum_r\alpha_r \ell_r(h)-\sum_r\beta_r \ell_r(h)
+  \right\|_2^2.
+\end{equation}
+For active-face stability, a fan-margin loss can be used:
+\begin{equation}
+  \mathcal L_{\mathrm{fan}}
+  =
+  \Eop_h\max\left(0,\gamma-
+  \min_{s\notin A(h),\,r\in A(h)}
+  \bigl[\ell_r(h)-\ell_s(h)\bigr]\right).
+\end{equation}
+For repeated graph situations expected to share the same bend, use
+\begin{equation}
+  \mathcal L_{\mathrm{bend}}
+  =
+  \sum_{(\tau,\tau')\in\mathcal P}
+  \abs{\widehat B(\tau)-\widehat B(\tau')}^2,
+\end{equation}
+where $\mathcal P$ pairs walls that are equivalent under graph relabeling, algebraic normal form, or morphology-template symmetry.  These losses are pragmatic: they regularize the geometry of reasoning decisions rather than merely increasing parameter count.
 
 \section{Rotation algebras, noncommutative tori, and spiral projections}
 
@@ -1573,9 +1757,103 @@ ToricGT is intentionally finite.  It learns finite presentations, finite approxi
 
 The practical advantage of this framing is falsifiability.  Soft-MoE routing can be inspected through slot entropy and expert mass rather than treated as magic capacity.  Parameter-Golf claims can be inspected through exact byte accounting, run logs, and validation rules rather than informal model-size estimates.  If the model violates relabeling equivariance, the error is measured.  If tropical heads collapse to a single global key, active-face entropy shows it.  If toric channels memorize denominators, held-out $q$ intervals reveal it.  If Hebrew root abstraction fails, held-out root families and paradigm completion expose it.  If PolarQuant breaks long-context retrieval, margin-preservation and exact-vs-quantized graph outputs show where.
 
+\section{A Look Ahead}
+
+This section is a concrete plan for the next ToricGT iteration after the present base model has completed training.  It does not require changing the current training run.  The central change is methodological: use toric geometry not merely as an explanatory language after the fact, but as a source of supervised tasks, auxiliary losses, checkpoint audits, and inference-time search constraints.
+
+\subsection{Checkpoint audit before retraining}
+
+The first step is to turn the trained checkpoint into a measurable geometric object.  For each evaluation family, record hidden states $h_i$, tropical candidate scores $\ell_r(h_i)$, active faces $A(h_i)$, Soft-MoE combine masses, graph labels, and correctness.  Then construct empirical toric shadows $\widehat\Sigma_{\mathcal B}$ for selected layers and heads.  The audit should report:
+\begin{enumerate}[leftmargin=2em]
+  \item occupied fan-cell count and entropy;
+  \item mean and minimum active-face margin;
+  \item within-cell affine residual $\sum_{h_i\in\sigma}\abs{\psi(h_i)-\ip{\widehat m_\sigma}{h_i}}^2$;
+  \item bend magnitudes $\widehat B(\tau)$ across high-traffic walls;
+  \item correlation between bend changes and task-level reasoning errors;
+  \item equivariance of fan cells under graph relabeling.
+\end{enumerate}
+This audit separates two failure modes that ordinary validation loss merges.  A model may know the answer but use unstable walls, which predicts poor out-of-distribution behavior.  Conversely, a model may have clean fan structure but poor task calibration, in which case fine-tuning should target heads and decoders rather than the core encoder.
+
+\subsection{Toric data curriculum}
+
+The next data pass should add explicit toric-geometric tasks alongside the existing graph, algebraic, Hebrew, and reasoning corpora.  The recommended generators are:
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Newton-polytope active-face tasks}: sample exponent sets $A=\{a_r\}$, biases $b_r$, and hidden probes $h$; predict the active face, top-two margin, normal cone, and moment $\mu_\beta(h)$.
+  \item \textbf{Cartier-divisor bend tasks}: sample rational fans and support functions; predict slope vectors $m_\sigma$, wall bends $\ip{m_\sigma-m_{\sigma'}}{u_\tau}$, and consistency of repeated walls.
+  \item \textbf{Toric ideal and binomial relation tasks}: sample exponent matrices and integer kernel relations; predict whether two monomial paths represent the same character and verify binomial constraints.
+  \item \textbf{ReLU fan realization tasks}: sample shallow and low-depth rational ReLU networks, construct their canonical polyhedral complexes, and predict whether a given finitely piecewise-linear function satisfies the equal-bend criterion for shallow unbiased realization.
+  \item \textbf{Toric graph-of-thought tasks}: serialize the above objects as typed graphs with cone, ray, face, divisor, monomial, and wall nodes, so the same graph-token machinery handles polyhedral geometry and ordinary reasoning records.
+\end{enumerate}
+These tasks should be held out by fan combinatorial type, number of rays, Newton-polytope dimension, relation-rank, and wall-equivalence class.  Random example-level splits are especially weak here because adjacent points in a normal fan can share almost all combinatorial data.
+
+\subsection{Fine-tuning objective}
+
+Let $\mathcal L_{\mathrm{base}}$ be the existing supervised and GFlowNet objective.  A toric fine-tuning phase can use
+\begin{equation}
+\begin{split}
+  \mathcal L_{\mathrm{toric}\text{-}\mathrm{ft}}
+  ={}&\mathcal L_{\mathrm{base}}
+  +\lambda_{\mathrm{face}}\mathcal L_{\mathrm{face}}
+  +\lambda_{\mathrm{fan}}\mathcal L_{\mathrm{fan}}
+  +\lambda_{\mathrm{bend}}\mathcal L_{\mathrm{bend}}\\
+  &+\lambda_{\mathrm{binom}}\mathcal L_{\mathrm{binom}}
+  +\lambda_{\mathrm{moment}}\Eop\norm{\widehat\mu_\beta-\mu_\beta^\star}_2^2
+  +\lambda_{\mathrm{eqfan}}\Eop_\pi d_{\mathrm{fan}}(\widehat\Sigma(G),P_\pi\widehat\Sigma(\pi G)).
+\end{split}
+\end{equation}
+Here $\mathcal L_{\mathrm{face}}$ is cross-entropy over active faces or face dimensions, $\mathcal L_{\mathrm{fan}}$ is the fan-margin hinge loss, $\mathcal L_{\mathrm{bend}}$ enforces repeated-wall consistency, and $\mathcal L_{\mathrm{binom}}$ enforces integer relation consistency in probe logits.  The fan distance $d_{\mathrm{fan}}$ can be implemented by comparing active-face ids and margins after relabeling, avoiding expensive exact polyhedral isomorphism during training.
+
+For compactness, the exponent probes should be low-rank and quantized.  Let
+\begin{equation}
+  A=UV\transpose,\qquad U\in\R^{R\times r},\quad V\in\R^{d\times r},\quad r\ll d.
+\end{equation}
+The probe cost is $O(r(R+d))$ rather than $O(Rd)$, and an int8 or int6 export can store the probe without threatening a Parameter-Golf artifact.  This is the same principle as low-rank Soft-MoE adapters: add geometric structure only where it buys measurable reasoning stability per byte.
+
+\subsection{Continuous GFlowNets on toric charts}
+
+The current GFlowNet acts on embedding-space graph states.  The next iteration should make the continuous part explicit by augmenting the state with moment-map and fan coordinates:
+\begin{equation}
+  s_t=(G_t,H_t,\mu_t,A_t,\widehat\Sigma_t,m_t).
+\end{equation}
+Actions are hybrid.  Discrete actions add graph-of-thought nodes, select proof obligations, choose analyzer hypotheses, or apply algebraic generators.  Continuous actions move inside a normal cone, move along a wall, or propose a new point in the Newton polytope:
+\begin{equation}
+  \mu_{t+1}=\Pi_{P_\Pi}\bigl(\mu_t+\epsilon v_t\bigr),
+  \qquad v_t\sim q_\phi(\cdot\mid s_t),
+\end{equation}
+where $\Pi_{P_\Pi}$ is projection to the polytope.  Continuous GFlowNet theory provides the density-based analogue of trajectory balance \cite{lahlou2023continuous}.  For a hybrid trajectory $\tau$, use
+\begin{equation}
+  \mathcal L_{\mathrm{CTB}}(\tau)=
+  \left(
+    \log Z+\sum_t\log p_F(s_{t+1}\mid s_t)
+    -\log R(x)
+    -\sum_t\log p_B(s_t\mid s_{t+1})
+  \right)^2,
+\end{equation}
+with densities for continuous moves and probabilities for discrete moves.  The reward should combine task correctness, verifier score, fan-margin stability, bend consistency, novelty, and complexity:
+\begin{equation}
+  R(x)=\exp\left(
+    \frac{
+      C(x)+\alpha V(x)+\beta\Delta_{\mathrm{fan}}(x)
+      -\eta E_{\mathrm{bend}}(x)-\kappa H(x)
+    }{\tau}
+  \right).
+\end{equation}
+This gives inference-time scaling a geometric search space.  Rather than sampling arbitrary latent perturbations, the model explores cells, walls, and faces that correspond to identifiable changes in reasoning.
+
+\subsection{Retraining protocol}
+
+The recommended next iteration has four stages.
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Frozen audit}: run the toric shadow audit on the current checkpoint; decide which layers and task families have unstable fan structure.
+  \item \textbf{Probe-only fine-tuning}: train low-rank toric probes and diagnostic heads while freezing the main encoder.  This establishes whether the existing representation already contains recoverable toric structure.
+  \item \textbf{Adapter fine-tuning}: unfreeze Soft-MoE adapters, tropical heads, and small toric probes; optimize $\mathcal L_{\mathrm{toric}\text{-}\mathrm{ft}}$ on the mixed curriculum.
+  \item \textbf{Scratch retraining decision}: retrain from scratch only if probe-only and adapter fine-tuning reveal that early layers lack stable fan cells on synthetic toric tasks.  Otherwise, continue from the present base model and spend compute on inference-time scaling and distillation.
+\end{enumerate}
+For the Parameter-Golf track, the practical target is not a large toric module.  It is a small model whose hidden computation has auditable fan structure: quantized exponent probes, recurrent block sharing, compact Soft-MoE adapters, and a score-before-update inference-time adaptation rule.  Tropical compression work suggests that Newton-polytopal summaries can guide structured pruning without access to training data \cite{fotopoulos2024tropnnc}; ToricGT should use that idea conservatively, as a post-training audit and compression hint rather than as a substitute for validation BPB.  The metric remains BPB under the artifact cap, but toric diagnostics become pre-submission gates: a model that improves BPB by exploiting unstable validation-specific behavior should fail the fan and leakage audits.
+
 \section{Conclusion}
 
-The extended ToricGT framework gives a rigorous path from graph-tokenized Transformers to algebraic, tropical, and morphological graph reasoning.  The central mathematical claims are exact finite statements: tokenization and layers are equivariant; tropical ring attention exactly equals full tropical attention; max-plus heads simulate bounded semiring algorithms; finite Weyl pairs and cocycles provide controlled toric features; root-template Hebrew morphology becomes a typed graph problem; Soft-MoE blocks preserve graph equivariance while routing typed computations; Parameter-Golf compression defines a separate micro-LM deployment path with byte-level constraints; and PolarQuant-style cache compression admits explicit attention perturbation bounds.  The resulting research program is small enough for single-GPU experimentation yet structured enough to support serious mathematical diagnostics.
+The extended ToricGT framework gives a rigorous path from graph-tokenized Transformers to algebraic, tropical, toric-geometric, and morphological graph reasoning.  The central mathematical claims are exact finite statements: tokenization and layers are equivariant; tropical ring attention exactly equals full tropical attention; max-plus heads simulate bounded semiring algorithms; active faces are cells in normal fans of Newton polytopes; finite Weyl pairs and cocycles provide controlled toric features; root-template Hebrew morphology becomes a typed graph problem; Soft-MoE blocks preserve graph equivariance while routing typed computations; Parameter-Golf compression defines a separate micro-LM deployment path with byte-level constraints; and PolarQuant-style cache compression admits explicit attention perturbation bounds.  The resulting research program is small enough for single-GPU experimentation yet structured enough to support serious mathematical diagnostics.
 
 \appendix
 
@@ -1650,6 +1928,36 @@ Splits & clustered 80/10/10 & no random record-level split \\
 
 \begin{thebibliography}{99}
 
+\bibitem{fu2025toricrelu}
+Yaoying Fu.
+\newblock Toric geometry of ReLU neural networks.
+\newblock arXiv:2509.05894, 2025.
+
+\bibitem{zhang2018tropical}
+Liwen Zhang, Gregory Naitzat, and Lek-Heng Lim.
+\newblock Tropical geometry of deep neural networks.
+\newblock In \emph{ICML}, Proceedings of Machine Learning Research 80:5824--5832, 2018. arXiv:1805.07091.
+
+\bibitem{brandenburg2024real}
+Marie-Charlotte Brandenburg, Georg Loho, and Guido Montufar.
+\newblock The real tropical geometry of neural networks.
+\newblock arXiv:2403.11871, 2024.
+
+\bibitem{haase2023lattice}
+Christian Haase, Christoph Hertrich, and Georg Loho.
+\newblock Lower bounds on the depth of integral ReLU neural networks via lattice polytopes.
+\newblock In \emph{ICLR}, 2023. arXiv:2302.12553.
+
+\bibitem{fotopoulos2024tropnnc}
+Konstantinos Fotopoulos, Petros Maragos, and Panagiotis Misiakos.
+\newblock TropNNC: Structured neural network compression using tropical geometry.
+\newblock arXiv:2409.03945, 2024.
+
+\bibitem{cox2011toric}
+David A. Cox, John B. Little, and Henry K. Schenck.
+\newblock \emph{Toric Varieties}.
+\newblock Graduate Studies in Mathematics 124. American Mathematical Society, 2011.
+
 \bibitem{vaswani2017attention}
 Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin.
 \newblock Attention is all you need.
@@ -1709,6 +2017,11 @@ Nikolay Malkin, Moksh Jain, Emmanuel Bengio, Chen Sun, and Yoshua Bengio.
 Kanika Madan, Jarrid Rector-Brooks, Maksym Korablyov, Emmanuel Bengio, Moksh Jain, Andrei Cristian Nica, Tom Bosc, Yoshua Bengio, and Nikolay Malkin.
 \newblock Learning GFlowNets from partial episodes for improved convergence and stability.
 \newblock In \emph{ICML}, 2023.
+
+\bibitem{lahlou2023continuous}
+Salem Lahlou, Tristan Deleu, Pablo Lemos, Dinghuai Zhang, Alexandra Volokhova, Alex Hern\'andez-Garc\'ia, Lena Nehale Ezzine, Yoshua Bengio, and Nikolay Malkin.
+\newblock A theory of continuous generative flow networks.
+\newblock In \emph{ICML}, Proceedings of Machine Learning Research 202:18269--18300, 2023. arXiv:2301.12594.
 
 \bibitem{hoffmann2022chinchilla}
 Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza Rutherford, Diego de Las Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, Tom Hennigan, Eric Noland, Katie Millican, and others.
