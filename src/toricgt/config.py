@@ -63,6 +63,9 @@ class DataConfig:
         "lamm-mit/graph-reasoning-messages-11K",
         "sequelbox/DAG-Reasoning-DeepSeek-R1-0528",
         "Gryphe/Opus-4.6-Reasoning-24k",
+        "nvidia/Nemotron-RL-ReasoningGym-v1",
+        "nvidia/Nemotron-Content-Safety-Reasoning-Dataset",
+        "nvidia/PhysicalAI-Traffic-Anomaly-Reasoning",
     )
     output_dir: str = "data/curated"
     train_frac: float = 0.8

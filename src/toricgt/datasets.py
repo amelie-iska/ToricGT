@@ -264,6 +264,41 @@ DATASET_SPECS: tuple[DatasetSpec, ...] = (
         url="https://hf.co/datasets/Gryphe/Opus-4.6-Reasoning-24k",
         expected_rows=24_000,
     ),
+    DatasetSpec(
+        name="nvidia/Nemotron-RL-ReasoningGym-v1",
+        config="default",
+        splits=("train",),
+        loader="datasets",
+        task_family="nvidia_nemotron_reasoninggym",
+        role="Nemotron RL procedural reasoning tasks across algebra, computation, cognition, geometry, graph theory, logic, and games",
+        license="cc-by-4.0",
+        language="en",
+        url="https://hf.co/datasets/nvidia/Nemotron-RL-ReasoningGym-v1",
+        expected_rows=15_000,
+    ),
+    DatasetSpec(
+        name="nvidia/Nemotron-Content-Safety-Reasoning-Dataset",
+        config="default",
+        splits=("train",),
+        loader="datasets",
+        task_family="nvidia_nemotron_safety_reasoning",
+        role="Nemotron content-safety reasoning traces with explicit label justifications",
+        license="cc-by-4.0",
+        language="en",
+        url="https://hf.co/datasets/nvidia/Nemotron-Content-Safety-Reasoning-Dataset",
+    ),
+    DatasetSpec(
+        name="nvidia/PhysicalAI-Traffic-Anomaly-Reasoning",
+        config="default",
+        splits=("train",),
+        loader="datasets",
+        task_family="nvidia_physicalai_traffic_reasoning",
+        role="PhysicalAI traffic anomaly video QA, temporal reasoning, and chain-of-thought annotations",
+        license="cc-by-4.0",
+        language="en",
+        url="https://hf.co/datasets/nvidia/PhysicalAI-Traffic-Anomaly-Reasoning",
+        expected_rows=44_040,
+    ),
 )
 
 
@@ -426,6 +461,12 @@ def family_key(spec: DatasetSpec, record: dict[str, Any], question: str, answer:
         return str(record.get("id") or record.get("uuid") or question or answer)
     if spec.name == "Gryphe/Opus-4.6-Reasoning-24k":
         return stable_hash(messages_to_text(record.get("messages")) or question or answer)
+    if spec.name == "nvidia/Nemotron-RL-ReasoningGym-v1":
+        return str(record.get("id") or record.get("uuid") or record.get("task") or question or answer)
+    if spec.name == "nvidia/Nemotron-Content-Safety-Reasoning-Dataset":
+        return stable_hash(str(record.get("prompt") or "") + str(record.get("response") or "") + question + answer)
+    if spec.name == "nvidia/PhysicalAI-Traffic-Anomaly-Reasoning":
+        return str(record.get("video_id") or record.get("clip_id") or record.get("id") or question or answer)
     return question or answer
 
 
@@ -544,6 +585,21 @@ def normalize_record(
         question = first_string(record, ("input", "prompt", "question", "problem", "messages"))
         answer = first_string(record, ("output", "answer", "response", "completion"))
         solution = first_string(record, ("reasoning", "rationale", "output", "answer", "response", "completion"))
+        reasoning = solution
+    if spec.name == "nvidia/Nemotron-RL-ReasoningGym-v1":
+        question = first_string(record, ("question", "prompt", "problem", "input", "task"))
+        answer = first_string(record, ("answer", "solution", "target", "output"))
+        solution = first_string(record, ("solution", "reasoning", "rationale", "answer", "output"))
+        reasoning = solution
+    if spec.name == "nvidia/Nemotron-Content-Safety-Reasoning-Dataset":
+        question = first_string(record, ("prompt", "user_prompt", "question", "input"))
+        answer = first_string(record, ("label", "answer", "output", "completion", "response"))
+        solution = first_string(record, ("reasoning", "rationale", "justification", "explanation", "output"))
+        reasoning = solution
+    if spec.name == "nvidia/PhysicalAI-Traffic-Anomaly-Reasoning":
+        question = first_string(record, ("question", "prompt", "query", "task", "video_id"))
+        answer = first_string(record, ("answer", "response", "output", "label"))
+        solution = first_string(record, ("reasoning", "rationale", "chain_of_thought", "explanation", "answer"))
         reasoning = solution
 
     text = "\n\n".join(part for part in (question, reasoning, solution, answer) if part)

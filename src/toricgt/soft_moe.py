@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Iterable
 
 import torch
 from torch import nn
@@ -86,6 +87,7 @@ class GraphTokenSoftMoE(nn.Module):
         self.output_scale = nn.Parameter(torch.tensor(float(residual_scale)))
         self.experts = nn.ModuleList([ExpertMLP(d_model, hidden_dim, dropout) for _ in range(num_experts)])
         self._diagnostics: SoftMoEDiagnostics | None = None
+        self._active_experts: tuple[int, ...] | None = None
         nn.init.normal_(self.slot_keys, std=d_model**-0.5)
 
     def _logits(self, x: torch.Tensor) -> torch.Tensor:
@@ -99,7 +101,19 @@ class GraphTokenSoftMoE(nn.Module):
         token_mask = token_mask.to(dtype=torch.bool, device=x.device)
 
         logits = self._logits(x)
+        slot_active = None
+        if self._active_experts is not None:
+            slot_active = torch.zeros(
+                self.num_experts,
+                self.slots_per_expert,
+                dtype=torch.bool,
+                device=x.device,
+            )
+            slot_active[list(self._active_experts), :] = True
+            logits = logits.masked_fill(~slot_active[None, None, :, :], torch.finfo(logits.dtype).min)
         dispatch = _masked_exp_normalize_over_tokens(logits, token_mask, self.eps)
+        if slot_active is not None:
+            dispatch = dispatch * slot_active[None, None, :, :].to(dtype=dispatch.dtype)
         slots = torch.einsum("bles,bld->besd", dispatch, x)
 
         expert_outputs = []
@@ -131,6 +145,19 @@ class GraphTokenSoftMoE(nn.Module):
 
     def diagnostics(self) -> SoftMoEDiagnostics | None:
         return self._diagnostics
+
+    def set_active_experts(self, expert_ids: Iterable[int] | None) -> None:
+        """Restrict routing to a subset of experts until reset with ``None``."""
+
+        if expert_ids is None:
+            self._active_experts = None
+            return
+        ids = tuple(sorted(set(int(expert_id) for expert_id in expert_ids)))
+        if not ids:
+            raise ValueError("active expert set cannot be empty")
+        if ids[0] < 0 or ids[-1] >= self.num_experts:
+            raise IndexError("active expert index out of range")
+        self._active_experts = ids
 
 
 class PrefixCausalSoftMoE(nn.Module):

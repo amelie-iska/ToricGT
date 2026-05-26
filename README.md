@@ -102,10 +102,15 @@ The full data research and segmentation plan is in [planning/DATA.md](/home/iska
 - `lamm-mit/graph-reasoning-messages-11K`
 - `sequelbox/DAG-Reasoning-DeepSeek-R1-0528`
 - `Gryphe/Opus-4.6-Reasoning-24k`
+- `nvidia/Nemotron-RL-ReasoningGym-v1`
+- `nvidia/Nemotron-Content-Safety-Reasoning-Dataset`
+- `nvidia/PhysicalAI-Traffic-Anomaly-Reasoning`
 
 The Hebrew/Jewish-text slice intentionally uses Sefaria and UniMorph Hebrew sources, and excludes Christian-branded biblical-language datasets.
 
 The frontier-reasoning slice prioritizes open or permissively licensed public traces, especially gpt-oss-120b text distillations. Logprob-only gpt-oss sidecar data is reserved for optional reward/GFlowNet work after tokenizer alignment.
+
+The NVIDIA/Nemotron slice adds procedurally verifiable reasoning, safety-label justification traces, and physical/temporal scene reasoning. Larger NVIDIA PhysicalAI spatial and PhysicsNeMo CFD datasets are documented in `planning/CYCLIC-EXPERT-GFLOWNET-PLAN.md` as opt-in graph-adapter sources rather than default text curation.
 
 Create a bounded sample curation:
 
@@ -315,6 +320,58 @@ Resume from a checkpoint by adding:
 ```
 
 When `--wandb` is enabled, the trainer reports online metrics for train loss, supervised loss, GFlowNet trajectory-balance loss, GFlowNet loss weight, graph tokens per microbatch, LR, grad norm, validation masked MSE, VRAM, and Soft-MoE routing diagnostics.
+
+Braided expert-curriculum training is available with `--expert-cyclic-curriculum`. It partitions curated Parquet rows into stable hash-disjoint subsets, trains one active Soft-MoE expert at a time, rotates experts through subsets in a cyclic or braided order, then enables inter-expert distillation and GFlowNet reward shaping after full coverage. The full plan is in `planning/CYCLIC-EXPERT-GFLOWNET-PLAN.md`.
+
+Resume the current 30M-class run from step 2000 with the braided curriculum:
+
+```bash
+tmux new-session -d -s toricgt_train_cyclic_experts '
+cd /home/iska/Documents/amelie/bio/ToricGT &&
+conda run --no-capture-output -n tokengt env PYTHONPATH=src WANDB_PROJECT=toricgt python scripts/train.py \
+  --data-path data/curated/train.parquet \
+  --val-data-path data/curated/validation.parquet \
+  --resume checkpoints/toricgt_full_30m/toricgt_step_00002000.pt \
+  --checkpoint-dir checkpoints/toricgt_full_30m \
+  --steps 98000 \
+  --attention hybrid \
+  --device cuda \
+  --d-model 384 \
+  --num-heads 8 \
+  --num-layers 8 \
+  --max-nodes 256 \
+  --max-edges 1024 \
+  --batch-size 2 \
+  --grad-accum-steps 16 \
+  --precision bf16 \
+  --lr 3e-4 \
+  --lr-schedule cosine \
+  --warmup-steps 2000 \
+  --gflownet-loss-weight 0.05 \
+  --gflownet-space embedding \
+  --expert-cyclic-curriculum \
+  --expert-curriculum-subsets 4 \
+  --expert-curriculum-phase-steps 500 \
+  --expert-curriculum-start-step 2000 \
+  --expert-curriculum-order braid \
+  --expert-curriculum-distill-weight 0.05 \
+  --eval-every 1000 \
+  --eval-batches 20 \
+  --checkpoint-every 2000 \
+  --wandb \
+  --log-interval 20 \
+  2>&1 | tee -a logs/toricgt_train_cyclic_experts.log
+'
+```
+
+Watch it with:
+
+```bash
+tmux attach -t toricgt_train_cyclic_experts
+tail -f logs/toricgt_train_cyclic_experts.log
+```
+
+Additional W&B metrics in this mode are `expert_curriculum/phase`, `expert_curriculum/round`, `expert_curriculum/active_expert`, `expert_curriculum/subset_id`, `expert_curriculum/full_coverage_complete`, `expert_curriculum/teacher_expert`, `train/expert_distill_loss`, and `train/expert_teacher_supervised_loss`.
 
 Run the full 30M-class job inside tmux:
 

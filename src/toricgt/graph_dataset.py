@@ -23,6 +23,20 @@ class GraphTrainingItem:
     target: torch.Tensor
 
 
+def stable_partition_id(
+    values: Iterable[object],
+    num_subsets: int,
+    salt: int = 17,
+) -> int:
+    """Map row identity fields to a deterministic subset id."""
+
+    if num_subsets < 1:
+        raise ValueError("num_subsets must be positive")
+    key = "||".join("" if value is None else str(value) for value in values)
+    digest = hashlib.blake2b(f"{salt}:{key}".encode("utf-8", errors="replace"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % num_subsets
+
+
 def _hash_unit(text: str, salt: int) -> float:
     digest = hashlib.blake2b(f"{salt}:{text}".encode("utf-8", errors="replace"), digest_size=4).digest()
     value = int.from_bytes(digest, "big")
@@ -117,11 +131,36 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
 class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
     """Stream graph records from curated Parquet or normalized JSONL files."""
 
-    def __init__(self, paths: Iterable[str | Path], cfg: ModelConfig, parquet_batch_size: int = 512) -> None:
+    def __init__(
+        self,
+        paths: Iterable[str | Path],
+        cfg: ModelConfig,
+        parquet_batch_size: int = 512,
+        subset_id: int | None = None,
+        num_subsets: int = 1,
+        subset_salt: int = 17,
+        subset_columns: tuple[str, ...] = ("group_hash", "content_hash", "record_id"),
+    ) -> None:
         super().__init__()
+        if num_subsets < 1:
+            raise ValueError("num_subsets must be positive")
+        if subset_id is not None and not (0 <= subset_id < num_subsets):
+            raise ValueError("subset_id must be in [0, num_subsets)")
         self.paths = [Path(path) for path in paths]
         self.cfg = cfg
         self.parquet_batch_size = parquet_batch_size
+        self.subset_id = subset_id
+        self.num_subsets = num_subsets
+        self.subset_salt = subset_salt
+        self.subset_columns = subset_columns
+
+    def _keep_record(self, record: dict[str, object]) -> bool:
+        if self.subset_id is None:
+            return True
+        values = [record.get(column) for column in self.subset_columns]
+        if not any(value not in (None, "") for value in values):
+            values = [record.get("graph_json", "")]
+        return stable_partition_id(values, self.num_subsets, self.subset_salt) == self.subset_id
 
     def __iter__(self):
         for path in self.paths:
@@ -131,10 +170,18 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
                         if not line.strip():
                             continue
                         record = json.loads(line)
-                        yield graph_json_to_item(str(record.get("graph_json") or "{}"), self.cfg)
+                        if self._keep_record(record):
+                            yield graph_json_to_item(str(record.get("graph_json") or "{}"), self.cfg)
             else:
                 parquet_file = pq.ParquetFile(path)
-                for batch in parquet_file.iter_batches(batch_size=self.parquet_batch_size, columns=["graph_json"]):
-                    graph_values = batch.column(0).to_pylist()
-                    for graph_json in graph_values:
-                        yield graph_json_to_item(graph_json, self.cfg)
+                available = set(parquet_file.schema_arrow.names)
+                columns = ["graph_json"]
+                if self.subset_id is not None:
+                    columns.extend(column for column in self.subset_columns if column in available)
+                for batch in parquet_file.iter_batches(batch_size=self.parquet_batch_size, columns=columns):
+                    batch_dict = batch.to_pydict()
+                    graph_values = batch_dict["graph_json"]
+                    for row_idx, graph_json in enumerate(graph_values):
+                        record = {column: batch_dict[column][row_idx] for column in batch_dict}
+                        if self._keep_record(record):
+                            yield graph_json_to_item(graph_json, self.cfg)

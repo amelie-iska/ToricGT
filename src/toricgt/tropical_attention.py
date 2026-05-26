@@ -260,3 +260,7 @@ class TransformerBlock(nn.Module):
         else:
             x = x + self.ffn(self.ln2(x))
         return x
+
+    def set_active_experts(self, expert_ids: list[int] | tuple[int, ...] | None) -> None:
+        if self.uses_soft_moe:
+            self.ffn.set_active_experts(expert_ids)

@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from toricgt.config import ModelConfig, TrainConfig
+from toricgt.expert_curriculum import CyclicExpertCurriculum, ExpertCurriculumAssignment
 from toricgt.gflownet import TrajectoryBatch, trajectory_balance_loss
 from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items
 from toricgt.graph_tokenizer import GraphBatch
@@ -47,18 +48,19 @@ def save_checkpoint(
     model_cfg: ModelConfig,
     train_cfg: TrainConfig,
     step: int,
+    extra_metadata: dict | None = None,
 ) -> None:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "config": model_cfg.__dict__,
-            "train_config": train_cfg.__dict__,
-            "step": step,
-        },
-        checkpoint_dir / name,
-    )
+    payload = {
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "config": model_cfg.__dict__,
+        "train_config": train_cfg.__dict__,
+        "step": step,
+    }
+    if extra_metadata:
+        payload.update(extra_metadata)
+    torch.save(payload, checkpoint_dir / name)
 
 
 def scheduled_lr(
@@ -141,6 +143,20 @@ def move_batch(batch: GraphBatch, target: torch.Tensor, device: str) -> tuple[Gr
     )
 
 
+def next_loader_batch(
+    loader: DataLoader,
+    data_iter,
+    device: str,
+) -> tuple[GraphBatch, torch.Tensor, object]:
+    try:
+        batch, target = next(data_iter)
+    except StopIteration:
+        data_iter = iter(loader)
+        batch, target = next(data_iter)
+    batch, target = move_batch(batch, target, device)
+    return batch, target, data_iter
+
+
 @torch.no_grad()
 def evaluate_loader(
     model: ToricTokenGT,
@@ -203,6 +219,13 @@ def main() -> None:
     parser.add_argument("--lr-schedule", choices=["cosine", "constant"], default="cosine")
     parser.add_argument("--warmup-steps", type=int, default=2_000)
     parser.add_argument("--min-lr-ratio", type=float, default=0.1)
+    parser.add_argument("--expert-cyclic-curriculum", action="store_true")
+    parser.add_argument("--expert-curriculum-subsets", type=int, default=0)
+    parser.add_argument("--expert-curriculum-phase-steps", type=int, default=500)
+    parser.add_argument("--expert-curriculum-order", choices=["cyclic", "braid"], default="braid")
+    parser.add_argument("--expert-curriculum-start-step", type=int, default=0)
+    parser.add_argument("--expert-curriculum-salt", type=int, default=17)
+    parser.add_argument("--expert-curriculum-distill-weight", type=float, default=0.0)
     args = parser.parse_args()
     set_seed(args.seed)
 
@@ -240,12 +263,62 @@ def main() -> None:
         if "optimizer" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer"])
         start_step = int(checkpoint.get("step", 0))
+
+    curriculum = None
+    curriculum_config = None
+    if args.expert_cyclic_curriculum:
+        if model_cfg.soft_moe_num_experts < 2:
+            raise ValueError("expert cyclic curriculum requires at least two Soft-MoE experts")
+        num_subsets = args.expert_curriculum_subsets or model_cfg.soft_moe_num_experts
+        curriculum = CyclicExpertCurriculum(
+            num_experts=model_cfg.soft_moe_num_experts,
+            num_subsets=num_subsets,
+            phase_steps=args.expert_curriculum_phase_steps,
+            order=args.expert_curriculum_order,
+            start_step=args.expert_curriculum_start_step,
+        )
+        curriculum_config = {
+            "enabled": True,
+            "num_experts": model_cfg.soft_moe_num_experts,
+            "num_subsets": num_subsets,
+            "phase_steps": args.expert_curriculum_phase_steps,
+            "order": args.expert_curriculum_order,
+            "start_step": args.expert_curriculum_start_step,
+            "subset_salt": args.expert_curriculum_salt,
+            "distill_weight": args.expert_curriculum_distill_weight,
+            "expert_orders": {
+                str(expert_idx): curriculum.expert_order(expert_idx)
+                for expert_idx in range(model_cfg.soft_moe_num_experts)
+            },
+        }
+
     data_iter = None
     loader = None
+    subset_loaders: list[DataLoader] = []
+    subset_iters: list[object] = []
     if args.data_path:
-        dataset = CuratedGraphIterableDataset(args.data_path, model_cfg, parquet_batch_size=args.parquet_batch_size)
-        loader = DataLoader(dataset, batch_size=train_cfg.batch_size, collate_fn=collate_graph_items, num_workers=0)
-        data_iter = iter(loader)
+        if curriculum is None:
+            dataset = CuratedGraphIterableDataset(args.data_path, model_cfg, parquet_batch_size=args.parquet_batch_size)
+            loader = DataLoader(dataset, batch_size=train_cfg.batch_size, collate_fn=collate_graph_items, num_workers=0)
+            data_iter = iter(loader)
+        else:
+            for subset_id in range(curriculum.num_subsets):
+                dataset = CuratedGraphIterableDataset(
+                    args.data_path,
+                    model_cfg,
+                    parquet_batch_size=args.parquet_batch_size,
+                    subset_id=subset_id,
+                    num_subsets=curriculum.num_subsets,
+                    subset_salt=args.expert_curriculum_salt,
+                )
+                subset_loader = DataLoader(
+                    dataset,
+                    batch_size=train_cfg.batch_size,
+                    collate_fn=collate_graph_items,
+                    num_workers=0,
+                )
+                subset_loaders.append(subset_loader)
+                subset_iters.append(iter(subset_loader))
     val_loader = None
     if args.val_data_path:
         val_dataset = CuratedGraphIterableDataset(args.val_data_path, model_cfg, parquet_batch_size=args.parquet_batch_size)
@@ -255,8 +328,17 @@ def main() -> None:
     if train_cfg.use_wandb:
         import wandb
 
-        run = wandb.init(project=train_cfg.wandb_project, config={**model_cfg.__dict__, **train_cfg.__dict__})
+        run = wandb.init(
+            project=train_cfg.wandb_project,
+            config={
+                **model_cfg.__dict__,
+                **train_cfg.__dict__,
+                "expert_curriculum": curriculum_config or {"enabled": False},
+            },
+        )
         run.summary["parameter_count"] = model.parameter_count()
+        if curriculum_config is not None:
+            run.summary["expert_curriculum_order"] = str(curriculum_config["expert_orders"])
 
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -264,6 +346,11 @@ def main() -> None:
     final_step = start_step + args.steps
     pbar = tqdm(range(start_step, final_step), desc="train")
     for step in pbar:
+        assignment: ExpertCurriculumAssignment | None = curriculum.assignment(step) if curriculum is not None else None
+        if assignment is not None:
+            model.set_active_soft_moe_experts([assignment.active_expert])
+        else:
+            model.set_active_soft_moe_experts(None)
         lr = scheduled_lr(
             train_cfg.lr,
             step,
@@ -276,24 +363,50 @@ def main() -> None:
         raw_loss_value = 0.0
         supervised_loss_value = 0.0
         gflownet_loss_value = 0.0
+        distill_loss_value = 0.0
+        teacher_loss_value = 0.0
         graph_tokens_value = 0
         for accum_idx in range(train_cfg.grad_accum_steps):
-            if data_iter is None:
+            if data_iter is None and not subset_loaders:
                 batch, target = synthetic_batch(model_cfg, train_cfg.batch_size, args.device)
+            elif assignment is not None:
+                subset_id = assignment.subset_id
+                batch, target, subset_iters[subset_id] = next_loader_batch(
+                    subset_loaders[subset_id],
+                    subset_iters[subset_id],
+                    args.device,
+                )
             else:
-                try:
-                    batch, target = next(data_iter)
-                except StopIteration:
-                    data_iter = iter(loader)
-                    batch, target = next(data_iter)
-                batch, target = move_batch(batch, target, args.device)
+                batch, target, data_iter = next_loader_batch(loader, data_iter, args.device)
+
+            teacher_out = None
+            teacher_supervised_loss = None
+            if (
+                assignment is not None
+                and assignment.teacher_expert is not None
+                and args.expert_curriculum_distill_weight > 0
+            ):
+                model.set_active_soft_moe_experts([assignment.teacher_expert])
+                with torch.no_grad(), autocast_context(args.device, train_cfg.precision):
+                    teacher_out = model(batch)
+                    teacher_supervised_loss = masked_mse(teacher_out["node"], target, batch.node_mask)
+                model.set_active_soft_moe_experts([assignment.active_expert])
+
             with autocast_context(args.device, train_cfg.precision):
                 out = model(batch)
                 supervised_loss = masked_mse(out["node"], target, batch.node_mask)
                 raw_loss = supervised_loss
+                distill_loss = None
+                if teacher_out is not None and args.expert_curriculum_distill_weight > 0:
+                    distill_loss = masked_mse(out["node"], teacher_out["node"].detach(), batch.node_mask)
+                    raw_loss = raw_loss + args.expert_curriculum_distill_weight * distill_loss
                 gflownet_loss = None
                 if args.gflownet_loss_weight > 0:
-                    reward = torch.exp(-supervised_loss.detach()).expand(batch.node_features.shape[0])
+                    reward_scalar = torch.exp(-supervised_loss.detach())
+                    if teacher_supervised_loss is not None:
+                        advantage = (teacher_supervised_loss - supervised_loss).detach().clamp(-5.0, 5.0)
+                        reward_scalar = reward_scalar * torch.exp(advantage)
+                    reward = reward_scalar.expand(batch.node_features.shape[0])
                     gflownet_loss = auxiliary_gflownet_loss(
                         model,
                         out,
@@ -304,6 +417,10 @@ def main() -> None:
                 loss = raw_loss / train_cfg.grad_accum_steps
             raw_loss_value += float(raw_loss.detach())
             supervised_loss_value += float(supervised_loss.detach())
+            if distill_loss is not None:
+                distill_loss_value += float(distill_loss.detach())
+            if teacher_supervised_loss is not None:
+                teacher_loss_value += float(teacher_supervised_loss.detach())
             if gflownet_loss is not None:
                 gflownet_loss_value += float(gflownet_loss.detach())
             graph_tokens_value += int(out["token_mask"].sum().detach().cpu())
@@ -317,6 +434,8 @@ def main() -> None:
         mean_loss = raw_loss_value / train_cfg.grad_accum_steps
         mean_supervised_loss = supervised_loss_value / train_cfg.grad_accum_steps
         mean_gflownet_loss = gflownet_loss_value / max(train_cfg.grad_accum_steps, 1)
+        mean_distill_loss = distill_loss_value / max(train_cfg.grad_accum_steps, 1)
+        mean_teacher_loss = teacher_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_graph_tokens = graph_tokens_value / max(train_cfg.grad_accum_steps, 1)
         pbar.set_postfix(loss=f"{mean_loss:.4f}", params=model.parameter_count())
         if run is not None and step % train_cfg.log_interval == 0:
@@ -325,11 +444,27 @@ def main() -> None:
                 "train/supervised_loss": mean_supervised_loss,
                 "train/gflownet_loss": mean_gflownet_loss,
                 "train/gflownet_loss_weight": args.gflownet_loss_weight,
+                "train/expert_distill_loss": mean_distill_loss,
+                "train/expert_teacher_supervised_loss": mean_teacher_loss,
                 "train/graph_tokens_per_microbatch": mean_graph_tokens,
                 "train/lr": lr,
                 "train/grad_norm": float(grad_norm.detach().cpu() if torch.is_tensor(grad_norm) else grad_norm),
                 "train/step": step,
             }
+            if assignment is not None:
+                metrics.update(
+                    {
+                        "expert_curriculum/phase": assignment.phase,
+                        "expert_curriculum/round": assignment.round_index,
+                        "expert_curriculum/active_expert": assignment.active_expert,
+                        "expert_curriculum/subset_id": assignment.subset_id,
+                        "expert_curriculum/full_coverage_cycles": assignment.full_coverage_cycles,
+                        "expert_curriculum/full_coverage_complete": float(assignment.full_coverage_complete),
+                        "expert_curriculum/teacher_expert": -1
+                        if assignment.teacher_expert is None
+                        else assignment.teacher_expert,
+                    }
+                )
             if args.device.startswith("cuda"):
                 metrics["system/vram_allocated_gb"] = torch.cuda.max_memory_allocated() / 1e9
             moe_diags = model.soft_moe_diagnostics()
@@ -344,14 +479,37 @@ def main() -> None:
                 )
             run.log(metrics)
         if val_loader is not None and args.eval_every > 0 and (step + 1) % args.eval_every == 0:
+            if assignment is not None:
+                model.set_active_soft_moe_experts(None)
             val_loss = evaluate_loader(model, val_loader, args.device, train_cfg.precision, args.eval_batches)
+            if assignment is not None:
+                model.set_active_soft_moe_experts([assignment.active_expert])
             pbar.write(f"validation step={step + 1} masked_mse={val_loss:.6f}")
             if run is not None:
                 run.log({"val/masked_mse": val_loss, "train/step": step + 1})
         if args.checkpoint_every > 0 and (step + 1) % args.checkpoint_every == 0:
-            save_checkpoint(ckpt_dir, f"toricgt_step_{step + 1:08d}.pt", model, optimizer, model_cfg, train_cfg, step + 1)
+            save_checkpoint(
+                ckpt_dir,
+                f"toricgt_step_{step + 1:08d}.pt",
+                model,
+                optimizer,
+                model_cfg,
+                train_cfg,
+                step + 1,
+                {"expert_curriculum": curriculum_config} if curriculum_config is not None else None,
+            )
 
-    save_checkpoint(ckpt_dir, "toricgt_final.pt", model, optimizer, model_cfg, train_cfg, final_step)
+    model.set_active_soft_moe_experts(None)
+    save_checkpoint(
+        ckpt_dir,
+        "toricgt_final.pt",
+        model,
+        optimizer,
+        model_cfg,
+        train_cfg,
+        final_step,
+        {"expert_curriculum": curriculum_config} if curriculum_config is not None else None,
+    )
 
 
 if __name__ == "__main__":

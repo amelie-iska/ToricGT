@@ -121,3 +121,10 @@ class ToricTokenGT(nn.Module):
                 }
             )
         return diagnostics
+
+    def set_active_soft_moe_experts(self, expert_ids: list[int] | tuple[int, ...] | None) -> None:
+        """Restrict all Soft-MoE blocks to selected experts for curricula."""
+
+        for block in self.blocks:
+            if getattr(block, "uses_soft_moe", False):
+                block.set_active_experts(expert_ids)
