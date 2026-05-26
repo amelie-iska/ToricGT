@@ -21,6 +21,12 @@ Collection items:
 
 ## Download Curated Splits
 
+The public dataset repo currently contains the dataset card, manifest, split
+reports, niqqud audit, and architecture image. The local split Parquet files are
+large (`train.parquet` is about 40GB; validation and test are about 5.1GB each),
+so upload or resume those files with `hf upload-large-folder` before expecting
+the command below to download Parquet data from the Hub.
+
 ```bash
 HF_HUB_ENABLE_HF_TRANSFER=1 \
 conda run --no-capture-output -n tokengt hf download \
@@ -28,6 +34,26 @@ conda run --no-capture-output -n tokengt hf download \
   --repo-type dataset \
   --local-dir data/curated \
   --max-workers 8 \
+  --include "README.md" \
+  --include "train.parquet" \
+  --include "validation.parquet" \
+  --include "test.parquet" \
+  --include "manifest.json" \
+  --include "split_report.json" \
+  --include "split_report.md" \
+  --include "niqqud_report.json"
+```
+
+Resume the large Parquet upload:
+
+```bash
+HF_HUB_ENABLE_HF_TRANSFER=1 HF_XET_HIGH_PERFORMANCE=1 \
+conda run --no-capture-output -n tokengt hf upload-large-folder \
+  AmelieSchreiber/toricgt-curated-splits \
+  data/curated \
+  --type dataset \
+  --no-private \
+  --num-workers 8 \
   --include "README.md" \
   --include "train.parquet" \
   --include "validation.parquet" \

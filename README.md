@@ -10,7 +10,7 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 
 <p align="center">
   <a href="./assets/toricgt_paper_pg_softmoe_final.tex"><img src="https://img.shields.io/badge/arXiv-94133F?style=for-the-badge&logo=arxiv" alt="arXiv"/></a>
-  <a href="https://disco-design.github.io/"><img src="https://img.shields.io/badge/📝%20Blog-007A87?style=for-the-badge&logoColor=white" alt="Blog"/></a>
+  <a href="https://github.com/amelie-iska/ToricGT/"><img src="https://img.shields.io/badge/📝%20Blog-007A87?style=for-the-badge&logoColor=white" alt="Blog"/></a>
   <a href="https://huggingface.co/blog/AmelieSchreiber/toricgt"><img src="https://img.shields.io/badge/HuggingFace-DE9B35.svg?style=for-the-badge&logo=HuggingFace" alt="HF"/></a>
 </p>
 
@@ -159,9 +159,15 @@ This preserves existing niqqud and marks Hebrew rows with `has_niqqud`, `has_heb
 The current full curation contains `5,790,736` records and about `14.52B` estimated whitespace tokens. The split is `4,633,582 / 578,319 / 578,835` rows for train/validation/test. The repaired GoT Math shard contributes `518,439` graph-of-thought records, and Hebrew rows carry niqqud coverage flags.
 
 The public curated split repository is `AmelieSchreiber/toricgt-curated-splits`.
-It is listed with the checkpoint repo in the ToricGT collection:
+It currently contains the dataset card, manifest, split reports, niqqud audit,
+and architecture image. The full local Parquet splits are large
+(`train.parquet` is about 40GB; validation and test are about 5.1GB each), so
+publish or resume them with `hf upload-large-folder` before expecting the
+download command below to fetch Parquet files. The dataset repo is listed with
+the checkpoint repo in the ToricGT collection:
 <https://huggingface.co/collections/AmelieSchreiber/toricgt>.
-Download the splits with the current Hugging Face CLI:
+After the Parquet files are present on the Hub, download the splits with the
+current Hugging Face CLI:
 
 ```bash
 HF_HUB_ENABLE_HF_TRANSFER=1 \
