@@ -6,6 +6,15 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 
 ![ToricGT architecture and training paradigm](assets/toricgt_architecture_and_training_diagram.png)
 
+![Dark-mode ToricGT torus reasoning animation](assets/toricgt_torus_reasoning_dark.gif)
+
+<p align="center">
+  <a href="./assets/toricgt_paper_pg_softmoe_final.tex"><img src="https://img.shields.io/badge/arXiv-94133F?style=for-the-badge&logo=arxiv" alt="arXiv"/></a>
+  <a href="https://disco-design.github.io/"><img src="https://img.shields.io/badge/📝%20Blog-007A87?style=for-the-badge&logoColor=white" alt="Blog"/></a>
+  <a href="https://huggingface.co/blog/AmelieSchreiber/toricgt"><img src="https://img.shields.io/badge/HuggingFace-DE9B35.svg?style=for-the-badge&logo=HuggingFace" alt="HF"/></a>
+</p>
+
+
 Current validated status:
 
 - CPU tests: `pytest -q tests` passes.
@@ -34,8 +43,10 @@ Local implementation:
 - `src/toricgt/synthetic.py`: synthetic rotation-algebra and tropical shortest-path curriculum records.
 - `src/toricgt/polar_cache.py`: recursive polar encode/decode utilities for optional KV-cache compression experiments.
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
+- `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
 - `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.
+- `assets/toricgt_torus_reasoning_dark.gif`: README animation for toric phase, tropical active-face, Soft-MoE, and GFlowNet flow intuition.
 - `assets/toricgt_paper_pg_softmoe_final.tex`: research paper source.
 - `assets/toricgt_paper_pg_softmoe_final.pdf`: compiled paper.
 - `planning/IMPLEMENTATION-PLAN.md`: detailed implementation plan.
@@ -148,7 +159,9 @@ This preserves existing niqqud and marks Hebrew rows with `has_niqqud`, `has_heb
 The current full curation contains `5,790,736` records and about `14.52B` estimated whitespace tokens. The split is `4,633,582 / 578,319 / 578,835` rows for train/validation/test. The repaired GoT Math shard contributes `518,439` graph-of-thought records, and Hebrew rows carry niqqud coverage flags.
 
 The public curated split repository is `AmelieSchreiber/toricgt-curated-splits`.
-Download it with the current Hugging Face CLI:
+It is listed with the checkpoint repo in the ToricGT collection:
+<https://huggingface.co/collections/AmelieSchreiber/toricgt>.
+Download the splits with the current Hugging Face CLI:
 
 ```bash
 HF_HUB_ENABLE_HF_TRANSFER=1 \
@@ -198,13 +211,24 @@ conda run -n tokengt env PYTHONPATH=src python scripts/publish_hf_dataset.py \
 
 The splitter uses task-family keys, exact content hashes, and SimHash prefixes before assigning train/validation/test to reduce leakage. The target split is 80/10/10. Outputs are Parquet files under `data/curated/`, with per-dataset shards under `data/curated/by_dataset/`.
 
-Publish a checkpoint to a private Hugging Face model repo:
+Publish a checkpoint to the public Hugging Face model repo:
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/publish_hf_model.py \
   --checkpoint checkpoints/<run>/toricgt_final.pt \
-  --repo-id AmelieSchreiber/toricgt-checkpoints \
-  --private
+  --repo-id AmelieSchreiber/toricgt-checkpoints
+```
+
+For large checkpoint files, git-lfs is more reliable than the HTTP helper:
+
+```bash
+git lfs install
+git clone https://huggingface.co/AmelieSchreiber/toricgt-checkpoints /tmp/toricgt-checkpoints
+cp checkpoints/<run>/toricgt_final.pt /tmp/toricgt-checkpoints/
+cd /tmp/toricgt-checkpoints
+git add .
+git commit -m "Upload ToricGT checkpoint"
+git push origin main
 ```
 
 ## Implementation Validation
@@ -385,6 +409,22 @@ conda run -n tokengt env PYTHONPATH=src python scripts/visualize.py --output-dir
 ```
 
 This writes unit-circle braid frames and a tropical decision-boundary plot.
+
+## Toric Music
+
+Generate and play an original dark analog-synth WAV driven by irrational torus
+orbits, tropical active-face selection, noncommutative-torus cocycle bias, and
+four-expert Soft-MoE-style routing:
+
+```bash
+./scripts/music_gen.sh
+```
+
+For a headless render without playback:
+
+```bash
+./scripts/music_gen.sh --no-play --output outputs/music/toricgt_torus_music.wav
+```
 
 ## Paper
 

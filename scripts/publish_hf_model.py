@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a ToricGT checkpoint to a private Hugging Face model repository."""
+"""Publish a ToricGT checkpoint to a Hugging Face model repository."""
 
 from __future__ import annotations
 
@@ -22,9 +22,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def model_card(checkpoint_path: Path, metadata: dict) -> str:
+def model_card(checkpoint_path: Path, metadata: dict, private: bool) -> str:
     config = metadata.get("config", {})
     train_config = metadata.get("train_config", {})
+    private_line = "private: true\n" if private else ""
     return f"""---
 license: other
 library_name: pytorch
@@ -34,15 +35,16 @@ tags:
   - soft-moe
   - tropical-attention
   - gflownet
-private: true
+  - toricgt
+{private_line.rstrip()}
 ---
 
 # ToricGT Checkpoint
 
 Author: Amelie Schreiber
 
-This private checkpoint is part of the ToricGT research workspace. It contains
-a TokenGT-style graph-to-graph model with tropical/ring attention, default
+This checkpoint is part of the ToricGT research workspace. It contains a
+TokenGT-style graph-to-graph model with tropical/ring attention, default
 Soft-MoE feed-forward blocks, and an embedding-space GFlowNet policy head.
 
 ## Source Checkpoint
@@ -75,7 +77,7 @@ def main() -> None:
     if not checkpoint.exists():
         raise FileNotFoundError(checkpoint)
     metadata = torch.load(checkpoint, map_location="cpu", weights_only=False)
-    card = model_card(checkpoint, metadata)
+    card = model_card(checkpoint, metadata, args.private)
     files = [
         (checkpoint, checkpoint.name),
     ]
@@ -89,8 +91,11 @@ def main() -> None:
             print(f"{path} -> {repo_path}")
         if args.dry_run:
             return
-        HfApi().whoami()
+        api = HfApi()
+        api.whoami()
         create_repo(args.repo_id, repo_type="model", private=args.private, exist_ok=True)
+        if not args.private:
+            api.update_repo_settings(args.repo_id, repo_type="model", private=False)
         for path, repo_path in files:
             upload_file(
                 path_or_fileobj=str(path),
