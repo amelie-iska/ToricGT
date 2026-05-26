@@ -118,6 +118,24 @@ competition-safe split: do not train on validation/test bytes, and do not let
 GFlowNet adaptation or score-first bias updates see a byte before its loss has
 been recorded.
 
+The Parquet loader performs multi-record packing: rows are appended into a byte
+buffer separated by a configurable delimiter until a full sequence is available.
+This lets one training example contain several problems or one large graph
+reasoning trace. The default `oai` config uses this as a curriculum: after
+step 1000, the training iterator switches to rows with known larger
+`estimated_tokens` and technical task families, so the model sees harder
+composite reasoning examples after a stable byte-model warmup. For runs meant
+to reduce optimizer steps under the challenge wallclock, use
+`config/train.parameter_golf_random_order_packed_2048.yaml`. It extends context
+to 2048 bytes, keeps tropical-ring upper layers, preserves graph projections,
+and can resume from a 1024-token checkpoint by resizing the position embedding.
+The run also exposes `min_estimated_tokens`, `task_family_keywords`, and
+`dataset_keywords` so a packed-context phase can focus on larger math, coding,
+graph, physics, biomedical, biochemical, and biophysical records. This is a
+sample-efficiency tradeoff: longer context reduces the number of optimizer
+steps needed to expose comparable byte volume only when the GPU batch geometry
+stays efficient.
+
 ## Kolmogorov-Style Diagnostics
 
 True Kolmogorov complexity is uncomputable, so the implementation reports
@@ -164,6 +182,15 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --config config/train.parameter_golf_random_order_dense.yaml
 ```
 
+Probe the long-context packed curriculum from an existing checkpoint:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/train_parameter_golf_random_order.py \
+  --config config/train.parameter_golf_random_order_packed_2048.yaml \
+  --resume checkpoints/parameter_golf_oai_dense/best.pt
+```
+
 Project early loss and BPB to any requested checkpoint:
 
 ```bash
@@ -186,13 +213,37 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --output-dir outputs/complexity/oai-validation
 ```
 
+Evaluate the reasoning-simplex visual diagnostics:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/evaluate_reasoning_simplex.py \
+  --checkpoint checkpoints/parameter_golf_oai_dense/best.pt \
+  --data-glob 'data/curated_hf_shards/validation/*.parquet' \
+  --samples 16 \
+  --budgets 1 2 4 8 \
+  --output-dir outputs/reasoning_simplex/oai-best
+```
+
+The script writes three triangle heatmaps and two tetrahedron views. The main
+triangle has vertices reasoning budget, K-proxy, and low BPB. The tetrahedra
+add either hidden-trajectory MST efficiency or GFlowNet diversity. The MST
+metric is computed from model hidden states, not source graph metadata: each
+revealed-position hidden state is a node, pairwise Euclidean distances are edge
+weights, and the minimum spanning tree measures how compactly the reasoning
+trajectory can be summarized.
+
 The default training config has graph projection and GFlowNet sampling enabled:
 
 ```yaml
 data:
   include_graph_projection: true
   coprime_row_stride: true
+  document_separator: "\n\n"
+  complex_start_step: 1000
+  complex_min_estimated_tokens: 256
 training:
+  ckpt_interval: 250
   gflownet_loss_weight: 0.01
   gflownet_entropy_weight: 0.001
   eval_gflownet_samples: 2

@@ -21,6 +21,7 @@ configuration. It keeps the research model's ToricGT bias while adapting to the
 | Attention | lower softmax, upper tropical-ring attention |
 | PolarQuant | 8-bit KV perturbation in eval/export checks |
 | Graph data | compact `graph_json` node/edge projection appended to byte stream |
+| Complex-row curriculum | after step 1000, switch to larger technical composite records |
 | Domain tags | math, code, graph, Hebrew, biomed, biochem, biophysics, toric |
 | GFlowNet | 16-action prefix-visible embedding policy with TB surrogate |
 | Cheap byte features | BigramHash, CaseOps byte classes, SmearGate confidence |
@@ -45,6 +46,8 @@ The configured run uses 50,000 optimizer steps. With `batch_size: 2`,
 `grad_accum_steps: 16`, and `max_seq_len: 1024`, one optimizer step consumes
 32 byte chunks or 32,768 supervised byte targets. The full run therefore sees
 about 1.638B supervised byte targets, plus validation passes every 500 steps.
+Full optimizer checkpoints are retained every 250 steps with no automatic
+pruning, so earlier resume points remain available for ablations and recovery.
 There is no separate unsupervised-only phase in this config. GFlowNet-style
 training runs as an auxiliary objective on all 50,000 steps with
 `gflownet_loss_weight: 0.01`; validation uses `eval_gflownet_samples: 2` by
@@ -59,6 +62,13 @@ change the BPB objective.
 The same config also enables best-checkpoint publishing. Promotion uses
 `val_bpb + 0.05 * complexity/val/prediction_target_ncd_lzma_mean`, replacing
 the previous HF checkpoint only when the composite score improves.
+
+`train.parameter_golf_random_order_packed_2048.yaml` is the longer-context
+throughput probe. It keeps the dense ToricGT architecture, extends packed
+chunks to 2048 bytes, filters toward larger technical records, and resumes from
+1024-token checkpoints by resizing only the learned position table. Use it for
+challenge-equivalent sample-efficiency experiments, not as a drop-in local
+replacement unless VRAM and wallclock are acceptable.
 
 ### Graph Research Track
 

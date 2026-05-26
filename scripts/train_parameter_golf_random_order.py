@@ -46,6 +46,10 @@ TEXT_COLUMNS = (
     "quality_flags_json",
 )
 
+FILTER_COLUMNS = (
+    "estimated_tokens",
+)
+
 
 def read_yaml(path: str | None) -> dict[str, Any]:
     if not path:
@@ -120,6 +124,10 @@ class ParquetByteChunkDataset(IterableDataset):
         graph_projection_max_chars: int = 4096,
         coprime_row_stride: bool = True,
         document_separator: str = "\n\n",
+        min_estimated_tokens: int = 0,
+        max_estimated_tokens: int = 0,
+        task_family_keywords: tuple[str, ...] = (),
+        dataset_keywords: tuple[str, ...] = (),
     ) -> None:
         super().__init__()
         self.files = sorted(glob.glob(parquet_glob))
@@ -133,6 +141,10 @@ class ParquetByteChunkDataset(IterableDataset):
         self.graph_projection_max_chars = graph_projection_max_chars
         self.coprime_row_stride = coprime_row_stride
         self.document_separator = document_separator
+        self.min_estimated_tokens = int(min_estimated_tokens or 0)
+        self.max_estimated_tokens = int(max_estimated_tokens or 0)
+        self.task_family_keywords = tuple(keyword.lower() for keyword in task_family_keywords if keyword)
+        self.dataset_keywords = tuple(keyword.lower() for keyword in dataset_keywords if keyword)
         self._separator_bytes = byte_encode(document_separator, byte_offset=byte_offset) if document_separator else []
 
     def _stride_rows(self, rows: list[dict[str, Any]], epoch: int, worker_id: int) -> list[dict[str, Any]]:
@@ -199,6 +211,26 @@ class ParquetByteChunkDataset(IterableDataset):
             parts.insert(0, domain_prefix)
         return "\n\n".join(parts)
 
+    def _row_allowed(self, row: dict[str, Any]) -> bool:
+        if self.min_estimated_tokens or self.max_estimated_tokens:
+            try:
+                estimated = int(row.get("estimated_tokens") or 0)
+            except (TypeError, ValueError):
+                estimated = 0
+            if self.min_estimated_tokens and estimated and estimated < self.min_estimated_tokens:
+                return False
+            if self.max_estimated_tokens and estimated and estimated > self.max_estimated_tokens:
+                return False
+        if self.task_family_keywords:
+            task_family = str(row.get("task_family", "")).lower()
+            if not any(keyword in task_family for keyword in self.task_family_keywords):
+                return False
+        if self.dataset_keywords:
+            dataset = str(row.get("dataset", "")).lower()
+            if not any(keyword in dataset for keyword in self.dataset_keywords):
+                return False
+        return True
+
     def _domain_prefix(self, row: dict[str, Any]) -> str:
         fields = []
         for key in ("dataset", "task_family", "language", "role"):
@@ -239,13 +271,15 @@ class ParquetByteChunkDataset(IterableDataset):
                 rng.shuffle(files)
             for file_path in files:
                 parquet = pq.ParquetFile(file_path)
-                available = [name for name in TEXT_COLUMNS if name in parquet.schema.names]
+                available = [name for name in (*TEXT_COLUMNS, *FILTER_COLUMNS) if name in parquet.schema.names]
                 for batch in parquet.iter_batches(batch_size=self.rows_per_batch, columns=available):
                     table = batch.to_pydict()
                     rows = [dict(zip(table, values)) for values in zip(*table.values())]
                     rows = self._stride_rows(rows, epoch=epoch, worker_id=worker_id)
                     buffer: list[int] = []
                     for row in rows:
+                        if not self._row_allowed(row):
+                            continue
                         text = self._row_text(row)
                         if not text:
                             continue
@@ -311,6 +345,10 @@ def build_loader(
     graph_projection_max_chars: int,
     coprime_row_stride: bool,
     document_separator: str,
+    min_estimated_tokens: int = 0,
+    max_estimated_tokens: int = 0,
+    task_family_keywords: tuple[str, ...] = (),
+    dataset_keywords: tuple[str, ...] = (),
 ) -> DataLoader:
     if synthetic or not glob.glob(parquet_glob):
         dataset = SyntheticByteChunkDataset(seq_len=seq_len, vocab_size=vocab_size, seed=seed)
@@ -327,6 +365,10 @@ def build_loader(
             graph_projection_max_chars=graph_projection_max_chars,
             coprime_row_stride=coprime_row_stride,
             document_separator=document_separator,
+            min_estimated_tokens=min_estimated_tokens,
+            max_estimated_tokens=max_estimated_tokens,
+            task_family_keywords=task_family_keywords,
+            dataset_keywords=dataset_keywords,
         )
     return DataLoader(
         dataset,
@@ -384,6 +426,39 @@ def save_checkpoint(
         },
         path,
     )
+
+
+def resize_position_embedding_weight(old_weight: torch.Tensor, new_shape: torch.Size) -> torch.Tensor:
+    """Resize learned position embeddings for longer packed-context resumes."""
+
+    if old_weight.ndim != 2 or len(new_shape) != 2 or old_weight.shape[1] != new_shape[1]:
+        raise ValueError("position embedding resize requires matching embedding dimensions")
+    if old_weight.shape[0] == new_shape[0]:
+        return old_weight
+    source = old_weight.detach().float().transpose(0, 1).unsqueeze(0)
+    resized = F.interpolate(source, size=int(new_shape[0]), mode="linear", align_corners=True)
+    return resized.squeeze(0).transpose(0, 1).to(dtype=old_weight.dtype)
+
+
+def load_state_dict_with_optional_position_resize(
+    model: DenseRandomOrderToricLM,
+    state_dict: dict[str, torch.Tensor],
+    allow_position_resize: bool,
+) -> bool:
+    model_state = model.state_dict()
+    key = "position_embedding.weight"
+    resized = False
+    if (
+        allow_position_resize
+        and key in state_dict
+        and key in model_state
+        and state_dict[key].shape != model_state[key].shape
+    ):
+        state_dict = dict(state_dict)
+        state_dict[key] = resize_position_embedding_weight(state_dict[key], model_state[key].shape)
+        resized = True
+    model.load_state_dict(state_dict)
+    return resized
 
 
 def read_json_file(path: Path) -> dict[str, Any] | None:
@@ -738,6 +813,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--coprime-row-stride", action="store_true")
     parser.add_argument("--no-coprime-row-stride", action="store_true")
     parser.add_argument("--document-separator")
+    parser.add_argument("--min-estimated-tokens", type=int)
+    parser.add_argument("--max-estimated-tokens", type=int)
+    parser.add_argument("--task-family-keywords", nargs="+")
+    parser.add_argument("--dataset-keywords", nargs="+")
+    parser.add_argument("--complex-start-step", type=int)
+    parser.add_argument("--complex-min-estimated-tokens", type=int)
+    parser.add_argument("--complex-max-estimated-tokens", type=int)
+    parser.add_argument("--complex-task-family-keywords", nargs="+")
+    parser.add_argument("--complex-dataset-keywords", nargs="+")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--attention", choices=["softmax", "tropical", "tropical_ring", "hybrid"])
     parser.add_argument("--ring-block-size", type=int)
@@ -772,6 +856,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-score-first-bias-decay", type=float)
     parser.add_argument("--eval-score-first-bias-clip", type=float)
     parser.add_argument("--causal-audit-interval", type=int)
+    parser.add_argument("--resize-position-embedding", action="store_true")
+    parser.add_argument("--no-resize-position-embedding", action="store_true")
     parser.add_argument("--complexity", action="store_true")
     parser.add_argument("--no-complexity", action="store_true")
     parser.add_argument("--complexity-eval-every", type=int)
@@ -973,6 +1059,11 @@ def main() -> None:
         if args.causal_audit_interval is not None
         else config_get(file_config, "training", "causal_audit_interval", 1000)
     )
+    resize_position_embedding = (
+        False
+        if args.no_resize_position_embedding
+        else bool(args.resize_position_embedding or config_get(file_config, "training", "resize_position_embedding", True))
+    )
     complexity_enabled = (
         False
         if args.no_complexity
@@ -1066,6 +1157,51 @@ def main() -> None:
     document_separator = (
         args.document_separator if args.document_separator is not None else config_get(file_config, "data", "document_separator", "\n\n")
     )
+    min_estimated_tokens = (
+        args.min_estimated_tokens
+        if args.min_estimated_tokens is not None
+        else config_get(file_config, "data", "min_estimated_tokens", 0)
+    )
+    max_estimated_tokens = (
+        args.max_estimated_tokens
+        if args.max_estimated_tokens is not None
+        else config_get(file_config, "data", "max_estimated_tokens", 0)
+    )
+    task_family_keywords = tuple(
+        args.task_family_keywords
+        if args.task_family_keywords is not None
+        else config_get(file_config, "data", "task_family_keywords", [])
+    )
+    dataset_keywords = tuple(
+        args.dataset_keywords
+        if args.dataset_keywords is not None
+        else config_get(file_config, "data", "dataset_keywords", [])
+    )
+    complex_start_step = (
+        args.complex_start_step
+        if args.complex_start_step is not None
+        else config_get(file_config, "data", "complex_start_step", 0)
+    )
+    complex_min_estimated_tokens = (
+        args.complex_min_estimated_tokens
+        if args.complex_min_estimated_tokens is not None
+        else config_get(file_config, "data", "complex_min_estimated_tokens", min_estimated_tokens)
+    )
+    complex_max_estimated_tokens = (
+        args.complex_max_estimated_tokens
+        if args.complex_max_estimated_tokens is not None
+        else config_get(file_config, "data", "complex_max_estimated_tokens", max_estimated_tokens)
+    )
+    complex_task_family_keywords = tuple(
+        args.complex_task_family_keywords
+        if args.complex_task_family_keywords is not None
+        else config_get(file_config, "data", "complex_task_family_keywords", task_family_keywords)
+    )
+    complex_dataset_keywords = tuple(
+        args.complex_dataset_keywords
+        if args.complex_dataset_keywords is not None
+        else config_get(file_config, "data", "complex_dataset_keywords", dataset_keywords)
+    )
     train_glob = args.train_parquet_glob or config_get(
         file_config, "data", "train_parquet_glob", "data/curated_hf_shards/train/*.parquet"
     )
@@ -1079,10 +1215,27 @@ def main() -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     start_step = 0
     best_val = float("inf")
+    optimizer_state_loaded = False
     if args.resume:
         payload = torch.load(args.resume, map_location=device)
-        model.load_state_dict(payload["model"])
-        optimizer.load_state_dict(payload["optimizer"])
+        resized_position_embedding = load_state_dict_with_optional_position_resize(
+            model,
+            payload["model"],
+            allow_position_resize=resize_position_embedding,
+        )
+        if resized_position_embedding:
+            print(
+                json.dumps(
+                    {
+                        "resume_notice": "position_embedding_resized_optimizer_state_reset",
+                        "checkpoint": args.resume,
+                        "new_max_seq_len": model_config.max_seq_len,
+                    }
+                )
+            )
+        else:
+            optimizer.load_state_dict(payload["optimizer"])
+            optimizer_state_loaded = True
         start_step = int(payload.get("step", 0))
         resume_metrics = payload.get("metrics", {})
         best_val = float(resume_metrics.get("val_bpb", resume_metrics.get("best_val_bpb", best_val)))
@@ -1118,7 +1271,33 @@ def main() -> None:
         graph_projection_max_chars=graph_projection_max_chars,
         coprime_row_stride=coprime_row_stride,
         document_separator=document_separator,
+        min_estimated_tokens=int(min_estimated_tokens or 0),
+        max_estimated_tokens=int(max_estimated_tokens or 0),
+        task_family_keywords=task_family_keywords,
+        dataset_keywords=dataset_keywords,
     )
+    complex_train_loader = None
+    if int(complex_start_step or 0) > 0:
+        complex_train_loader = build_loader(
+            parquet_glob=train_glob,
+            batch_size=batch_size,
+            seq_len=model_config.max_seq_len,
+            byte_offset=model_config.byte_offset,
+            rows_per_batch=rows_per_batch,
+            seed=seed + 500_000,
+            workers=workers,
+            repeat=True,
+            synthetic=args.synthetic,
+            vocab_size=model_config.vocab_size,
+            include_graph_projection=include_graph_projection,
+            graph_projection_max_chars=graph_projection_max_chars,
+            coprime_row_stride=coprime_row_stride,
+            document_separator=document_separator,
+            min_estimated_tokens=int(complex_min_estimated_tokens or 0),
+            max_estimated_tokens=int(complex_max_estimated_tokens or 0),
+            task_family_keywords=complex_task_family_keywords,
+            dataset_keywords=complex_dataset_keywords,
+        )
     val_loader = build_loader(
         parquet_glob=val_glob,
         batch_size=batch_size,
@@ -1134,6 +1313,10 @@ def main() -> None:
         graph_projection_max_chars=graph_projection_max_chars,
         coprime_row_stride=coprime_row_stride,
         document_separator=document_separator,
+        min_estimated_tokens=int(min_estimated_tokens or 0),
+        max_estimated_tokens=int(max_estimated_tokens or 0),
+        task_family_keywords=task_family_keywords,
+        dataset_keywords=dataset_keywords,
     )
 
     use_wandb = bool(args.wandb or config_get(file_config, "logging", "wandb", False)) and not args.no_wandb
@@ -1167,6 +1350,7 @@ def main() -> None:
                     "eval_score_first_bias_decay": eval_score_first_bias_decay,
                     "eval_score_first_bias_clip": eval_score_first_bias_clip,
                     "causal_audit_interval": causal_audit_interval,
+                    "resize_position_embedding": resize_position_embedding,
                 },
                 "complexity": {
                     "enabled": complexity_enabled,
@@ -1191,6 +1375,15 @@ def main() -> None:
                     "graph_projection_max_chars": graph_projection_max_chars,
                     "coprime_row_stride": coprime_row_stride,
                     "document_separator": document_separator,
+                    "min_estimated_tokens": min_estimated_tokens,
+                    "max_estimated_tokens": max_estimated_tokens,
+                    "task_family_keywords": list(task_family_keywords),
+                    "dataset_keywords": list(dataset_keywords),
+                    "complex_start_step": complex_start_step,
+                    "complex_min_estimated_tokens": complex_min_estimated_tokens,
+                    "complex_max_estimated_tokens": complex_max_estimated_tokens,
+                    "complex_task_family_keywords": list(complex_task_family_keywords),
+                    "complex_dataset_keywords": list(complex_dataset_keywords),
                 },
                 "artifact": {
                     "initial_bytes": report.bytes_total,
@@ -1222,6 +1415,15 @@ def main() -> None:
             "graph_projection_max_chars": graph_projection_max_chars,
             "coprime_row_stride": coprime_row_stride,
             "document_separator": document_separator,
+            "min_estimated_tokens": min_estimated_tokens,
+            "max_estimated_tokens": max_estimated_tokens,
+            "task_family_keywords": list(task_family_keywords),
+            "dataset_keywords": list(dataset_keywords),
+            "complex_start_step": complex_start_step,
+            "complex_min_estimated_tokens": complex_min_estimated_tokens,
+            "complex_max_estimated_tokens": complex_max_estimated_tokens,
+            "complex_task_family_keywords": list(complex_task_family_keywords),
+            "complex_dataset_keywords": list(complex_dataset_keywords),
             "quantization_mode": quantization_mode,
             "artifact_compression": artifact_compression,
             "deployment_parameters": report.deployment_parameters,
@@ -1230,6 +1432,8 @@ def main() -> None:
             "complexity_eval_every": complexity_eval_every,
             "complexity_eval_samples": complexity_eval_samples,
             "complexity_compressors": list(complexity_compressors),
+            "resize_position_embedding": resize_position_embedding,
+            "optimizer_state_loaded": optimizer_state_loaded,
             "hf_publish_best": publish_best_to_hf,
             "hf_repo_id": hf_repo_id,
             "hf_checkpoint_filename": hf_checkpoint_filename,
@@ -1240,6 +1444,7 @@ def main() -> None:
     ))
 
     iterator = iter(train_loader)
+    complex_iterator = iter(complex_train_loader) if complex_train_loader is not None else None
     qat_named_params = [
         item
         for item in sorted(model.named_parameters(), key=lambda pair: pair[1].numel(), reverse=True)
@@ -1270,7 +1475,8 @@ def main() -> None:
         for group in optimizer.param_groups:
             group["lr"] = lr_step
         for accum_idx in range(grad_accum):
-            batch = next(iterator)
+            complex_active = complex_iterator is not None and step >= int(complex_start_step or 0)
+            batch = next(complex_iterator if complex_active else iterator)
             tokens = batch["tokens"].to(device, non_blocking=True)
             sample_ids = batch["sample_ids"].to(device, non_blocking=True)
             last_train_batch = {"tokens": tokens.detach(), "sample_ids": sample_ids.detach()}
@@ -1388,6 +1594,10 @@ def main() -> None:
                 "artifact/excluded_tensors": report.excluded_tensors,
                 "model/parameters": params,
                 "data/coprime_row_stride": float(coprime_row_stride),
+                "data/complex_curriculum_active": float(
+                    complex_iterator is not None and step >= int(complex_start_step or 0)
+                ),
+                "data/complex_start_step": float(complex_start_step or 0),
                 "eval/score_first_bias_lr": eval_score_first_bias_lr,
             }
             if audit_error is not None:

@@ -256,6 +256,10 @@ the local ignored `keys.txt`; tokens are never printed, logged, or stored in
 checkpoints. Publish failures are reported as `hf_publish/error` in W&B and do
 not stop training.
 
+Local periodic training checkpoints are retained every 250 steps by default
+under `checkpoints/parameter_golf_oai_dense/`; they are not pruned, so earlier
+resume points remain available for ablations and recovery.
+
 For large checkpoint files, git-lfs is more reliable than the HTTP helper:
 
 ```bash
@@ -566,6 +570,31 @@ test-time-scaling studies. Do not train on validation/test bytes or use future
 validation/test bytes for adaptation; score-first state updates are allowed only
 after the current byte has been scored.
 
+The loader already packs multiple source rows into one byte chunk with a
+separator, so short problems are combined into a single random-order training
+instance. The default `oai` config now switches after `complex_start_step:
+1000` to a harder stream of larger technical rows (`min_estimated_tokens: 256`
+with math/code/graph/reasoning/health/physics/biomed/biochem task-family
+filters). Since the current run has passed that step, resuming with the latest
+code activates the harder composite stream immediately while validation remains
+on the full validation split.
+
+For challenge-time throughput experiments, use the long-context packed config:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/train_parameter_golf_random_order.py \
+  --config config/train.parameter_golf_random_order_packed_2048.yaml \
+  --resume checkpoints/parameter_golf_oai_dense/best.pt
+```
+
+That config extends the context to 2048 bytes, increases graph projection room,
+uses `<next_problem>` separators, and begins with larger technical rows before
+raising the complex-row threshold again after step 750. Position embeddings are
+resized on resume, and the optimizer state is reset only if the position table
+shape changes. This is intended for from-checkpoint challenge-equivalent probes;
+the active 1024-token run remains the safer local long run.
+
 Reference BPB target bands for the OpenAI Parameter Golf setting:
 
 | Validation BPB | Meaning |
@@ -637,6 +666,45 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --summary-json outputs/complexity/oai-validation/complexity_summary.json \
   --output-dir outputs/complexity/oai-validation/plots
 ```
+
+Evaluate reasoning-simplex diagnostics from a checkpoint. This produces
+heatmapped triangles, static tetrahedra, interactive tetrahedron HTML, and
+CSV/JSON records computed from actual model passes at several reasoning
+budgets:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/evaluate_reasoning_simplex.py \
+  --checkpoint checkpoints/parameter_golf_oai_dense/best.pt \
+  --data-glob 'data/curated_hf_shards/validation/*.parquet' \
+  --samples 16 \
+  --budgets 1 2 4 8 \
+  --output-dir outputs/reasoning_simplex/oai-best
+```
+
+For larger technical examples that better exploit tropical-ring context:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/evaluate_reasoning_simplex.py \
+  --checkpoint checkpoints/parameter_golf_oai_dense/best.pt \
+  --data-glob 'data/curated_hf_shards/validation/*.parquet' \
+  --seq-len 1024 \
+  --samples 16 \
+  --budgets 1 2 4 8 \
+  --min-estimated-tokens 256 \
+  --task-family-keywords math code graph got reasoning health physics biomed biochem \
+  --output-dir outputs/reasoning_simplex/oai-large-technical
+```
+
+The primary triangle has vertices `reasoning budget`, `K(x)`, and `low BPB`.
+The heatmap is dark near the base reasoning region and fades toward lighter
+blue as reasoning budget, trajectory length, and complexity increase. The
+tetrahedra add either hidden-trajectory MST efficiency or GFlowNet diversity as
+the fourth vertex. MST efficiency treats the hidden reasoning path as a complete
+weighted graph and asks how compactly a minimum spanning tree summarizes the
+trajectory; it is useful for spotting trajectories that gain BPB by organized
+exploration rather than noisy wandering.
 
 Export a compressed artifact from either a graph checkpoint or a dense
 random-order checkpoint:

@@ -1,9 +1,9 @@
 model:
-  # Dense is the default contest path. The research graph model still uses
-  # Soft-MoE by default, but dense shared weights are the safer 16 MB tradeoff.
+  # Long-context packed variant for challenge-equivalent throughput probes.
+  # Resume from the 1024-token dense checkpoint with position-embedding resize.
   vocab_size: 260
   byte_offset: 4
-  max_seq_len: 1024
+  max_seq_len: 2048
   d_model: 384
   num_heads: 6
   num_layers: 7
@@ -37,17 +37,27 @@ model:
 data:
   train_parquet_glob: data/curated_hf_shards/train/*.parquet
   val_parquet_glob: data/curated_hf_shards/validation/*.parquet
-  rows_per_batch: 128
+  rows_per_batch: 256
   num_workers: 2
   include_graph_projection: true
-  graph_projection_max_chars: 4096
+  graph_projection_max_chars: 6144
   coprime_row_stride: true
-  document_separator: "\n\n"
-  # After warmup, switch training to larger technical composite rows while
-  # keeping validation on the full validation split. This step has already been
-  # reached in the current oai run, so a resume activates it immediately.
-  complex_start_step: 1000
-  complex_min_estimated_tokens: 256
+  document_separator: "\n\n<next_problem>\n\n"
+  # Focus this long-context run on larger technical records. Missing estimates
+  # are kept, but rows with known shorter estimates are skipped.
+  min_estimated_tokens: 256
+  task_family_keywords:
+    - math
+    - code
+    - graph
+    - got
+    - reasoning
+    - health
+    - physics
+    - biomed
+    - biochem
+  complex_start_step: 750
+  complex_min_estimated_tokens: 512
   complex_task_family_keywords:
     - math
     - code
@@ -60,19 +70,21 @@ data:
     - biochem
 
 training:
-  checkpoint_dir: checkpoints/parameter_golf_oai_dense
-  max_steps: 50000
-  batch_size: 2
+  checkpoint_dir: checkpoints/parameter_golf_oai_dense_packed_2048
+  # Fewer optimizer steps than the exploratory 50k run.  Each chunk carries
+  # twice the byte context and usually multiple source problems.
+  max_steps: 25000
+  batch_size: 1
   grad_accum_steps: 16
-  lr: 0.0003
+  lr: 0.00025
   weight_decay: 0.05
-  warmup_steps: 1000
+  warmup_steps: 750
   precision: bf16
   device: cuda
   seed: 17
   log_interval: 10
-  eval_interval: 500
-  eval_batches: 20
+  eval_interval: 250
+  eval_batches: 12
   eval_order_samples: 1
   eval_gflownet_samples: 2
   gflownet_loss_weight: 0.01
@@ -88,8 +100,7 @@ training:
   eval_score_first_bias_clip: 3.0
   causal_audit_interval: 1000
   resize_position_embedding: true
-  # Retain dense resume points frequently. The model is small enough that
-  # keeping historical optimizer checkpoints is useful for curriculum rollbacks.
+  # Keep more historical resume points while probing long-context packing.
   ckpt_interval: 250
 
 complexity:
@@ -101,14 +112,12 @@ complexity:
     - lzma
 
 checkpoint_publishing:
-  enabled: true
+  enabled: false
   repo_id: AmelieSchreiber/toricgt-checkpoints
   repo_type: model
-  checkpoint_filename: parameter_golf_oai_best.pt
-  manifest_filename: parameter_golf_oai_best.json
-  state_path: checkpoints/parameter_golf_oai_dense/hf_best_publish_state.json
-  # Lower is better.  This composite keeps BPB primary while requiring the
-  # prediction-target complexity/NCD diagnostic to be part of promotion.
+  checkpoint_filename: parameter_golf_oai_packed_2048_best.pt
+  manifest_filename: parameter_golf_oai_packed_2048_best.json
+  state_path: checkpoints/parameter_golf_oai_dense_packed_2048/hf_best_publish_state.json
   complexity_metric: complexity/val/prediction_target_ncd_lzma_mean
   complexity_weight: 0.05
   min_score_delta: 0.0
@@ -123,4 +132,4 @@ export:
 logging:
   wandb: true
   project: toricgt-parameter-golf
-  run_name: oai-dense-random-order-toricgt-gflownet
+  run_name: oai-dense-random-order-packed-2048
