@@ -74,36 +74,6 @@ def save(fig, name):
     plt.close(fig)
 
 
-def architecture():
-    fig, ax = setup((12, 6.5))
-    ax.text(0.03, 0.95, "ToricGT training architecture", fontsize=15, weight="bold", color=COLORS["ink"])
-    xs = [0.04, 0.23, 0.43, 0.63, 0.82]
-    labels = [
-        "Typed graph\nnodes + edges",
-        "TokenGT\nnode/edge tokens",
-        "Hybrid encoder\nsoftmax + tropical ring",
-        "Toric + Soft-MoE\nphase and expert slots",
-        "Graph outputs\n+ GFlowNet policy",
-    ]
-    fills = ["#eff6ff", "#ecfeff", "#f0fdf4", "#faf5ff", "#fff7ed"]
-    for i, (x, label, fc) in enumerate(zip(xs, labels, fills)):
-        box(ax, (x, 0.62), (0.14, 0.18), label, fc=fc, size=9, weight="bold")
-        if i < len(xs) - 1:
-            arrow(ax, (x + 0.14, 0.71), (xs[i + 1], 0.71), COLORS["slate"])
-    lower = [
-        ("Clustered\nParquet data", "#e0f2fe"),
-        ("Synthetic algebra\nand DP traces", "#dcfce7"),
-        ("Hebrew root\nparadigms", "#fef3c7"),
-        ("GoT rollouts\nembedding space", "#ede9fe"),
-    ]
-    for i, (label, fc) in enumerate(lower):
-        x = 0.08 + 0.22 * i
-        box(ax, (x, 0.25), (0.16, 0.15), label, fc=fc, size=9)
-        arrow(ax, (x + 0.08, 0.40), (0.50, 0.62), COLORS["muted"], lw=1.1, rad=0.15 - 0.08 * i)
-    ax.text(0.06, 0.12, "Invariant checks: equivariance, active faces, toric cocycles, root-template consistency, reward diversity", fontsize=10, color=COLORS["muted"])
-    save(fig, "toricgt_architecture_and_training_diagram.pdf")
-
-
 def tropical_active_faces():
     fig, ax = setup((11, 5))
     pts = np.array([[0.12, 0.22], [0.25, 0.70], [0.42, 0.34], [0.58, 0.78], [0.78, 0.32], [0.90, 0.62]])
@@ -271,7 +241,6 @@ def main():
             "text.color": COLORS["ink"],
         }
     )
-    architecture()
     tropical_active_faces()
     spiral_projection()
     hebrew_root_graph()

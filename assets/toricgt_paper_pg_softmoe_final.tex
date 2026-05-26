@@ -99,7 +99,7 @@ First, there are exact statements about finite graph-token computations: permuta
 
 \begin{figure}[p]
   \centering
-  \includegraphics[width=\textwidth]{toricgt_architecture_and_training_diagram.pdf}
+  \includegraphics[width=\textwidth]{toricgt_architecture_and_training_diagram.png}
   \caption{Dark-mode architecture and training-paradigm diagram.  The central encoder mixes lower softmax/hybrid layers with middle and upper tropical ring-attention layers, while graph tokens carry endpoint, type, and toric phase features.  Training combines supervised graph-to-graph losses with embedding-space GFlowNet exploration.}
   \label{fig:architecture}
 \end{figure}
@@ -1297,7 +1297,7 @@ records/<name>/
 Before opening a pull request, run:
 \begin{verbatim}
 python train_gpt.py --dry_run_size_check
-python train_gpt.py --smoke_train --max_steps 20
+python train_gpt.py --quick_train --max_steps 20
 python train_gpt.py --roundtrip_quantize
 python train_gpt.py --eval_only --assert_no_network
 \end{verbatim}
@@ -1434,10 +1434,10 @@ conda run -n tokengt env PYTHONPATH=src python scripts/curate_datasets.py \
   --num-workers 16 \
   --normalize-batch-size 256
 \end{verbatim}
-Run a bounded smoke curation with:
+Run a bounded sample curation with:
 \begin{verbatim}
 conda run -n tokengt env PYTHONPATH=src python scripts/curate_datasets.py \
-  --output-dir data/curated_smoke \
+  --output-dir data/curated_sample \
   --raw-dir data/raw/hf \
   --max-records-per-source 1000 \
   --num-workers 4 \
@@ -1515,7 +1515,7 @@ A stable tropical objective combines margin and entropy:
 \subsection{Schedule}
 
 \begin{enumerate}[leftmargin=2em]
-  \item \textbf{Phase A: smoke tests}.  CPU-only shape tests, equivariance tests, mask tests, and exact tropical ring-vs-full comparisons.
+  \item \textbf{Phase A: implementation validation}.  CPU-only shape tests, equivariance tests, mask tests, and exact tropical ring-vs-full comparisons.
   \item \textbf{Phase B: synthetic algebra}.  Rotation words, finite tori, braid/Coxeter tasks, and tropical dynamic programming.
   \item \textbf{Phase C: curated reasoning graphs}.  Math, algorithmic, and Hebrew morphology graph records with clustered splits.
   \item \textbf{Phase D: GFlowNet fine-tuning}.  Activate trajectory or subtrajectory balance over embedding-space graph refinements.

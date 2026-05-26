@@ -197,11 +197,11 @@ conda run -n tokengt env PYTHONPATH=src python scripts/curate_datasets.py \
   --normalize-batch-size 256
 ```
 
-Run a bounded smoke curation:
+Run a bounded sample curation:
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/curate_datasets.py \
-  --output-dir data/curated_smoke \
+  --output-dir data/curated_sample \
   --raw-dir data/raw/hf \
   --max-records-per-source 1000 \
   --num-workers 4 \

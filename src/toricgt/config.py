@@ -13,7 +13,7 @@ AttentionKind = Literal["softmax", "tropical", "tropical_ring", "hybrid"]
 class ModelConfig:
     """Small TokenGT-style encoder configuration.
 
-    The default is deliberately below 8M parameters for smoke tests. Increase
+    The default is deliberately lightweight for CPU validation. Increase
     ``d_model``, ``num_layers``, and ``ffn_multiplier`` for the 8M-35M regime.
     """
 

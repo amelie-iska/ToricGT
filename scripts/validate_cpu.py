@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CPU-only smoke checks that avoid meaningful VRAM use."""
+"""CPU-only implementation validation that avoids meaningful VRAM use."""
 
 from __future__ import annotations
 

@@ -351,7 +351,7 @@ def main() -> None:
         if args.checkpoint_every > 0 and (step + 1) % args.checkpoint_every == 0:
             save_checkpoint(ckpt_dir, f"toricgt_step_{step + 1:08d}.pt", model, optimizer, model_cfg, train_cfg, step + 1)
 
-    save_checkpoint(ckpt_dir, "toricgt_smoke.pt", model, optimizer, model_cfg, train_cfg, final_step)
+    save_checkpoint(ckpt_dir, "toricgt_final.pt", model, optimizer, model_cfg, train_cfg, final_step)
 
 
 if __name__ == "__main__":

@@ -47,11 +47,11 @@ Keep upstream repositories untouched until local modules pass tests.
 │   └── IMPLEMENTATION-PLAN.md
 ├── scripts/
 │   ├── curate_datasets.py
-│   ├── cuda_stress_test.py
 │   ├── evaluate.py
 │   ├── generate_paper_figures.py
-│   ├── smoke_test.py
 │   ├── train.py
+│   ├── validate_cpu.py
+│   ├── validate_cuda_capacity.py
 │   └── visualize.py
 └── src/
     └── toricgt/
@@ -229,19 +229,19 @@ For graph tokens, count:
 
 | Name | Layers | Width | Heads | Measured Params | Use |
 |---|---:|---:|---:|---:|---|
-| `smoke` | 2 | 64 | 4 | 0.25M | CPU and CUDA tests |
+| `validation` | 2 | 64 | 4 | 0.25M | CPU and CUDA validation |
 | `tiny-10m` | 6 | 256 | 8 | 10.4M | first real training |
 | `small-30m` | 8 | 384 | 8 | 29.8M | primary 4090 model |
 | `medium-35m-cap` | 9 | 384 | 8 | 35.2M | upper edge of requested range; reduce one layer if strict $<35$M is required |
 
 Current CUDA validation on the available 24GB RTX 4090:
 
-- `smoke`: default 4-expert Soft-MoE, tropical-ring attention, and GFlowNet trajectory balance pass through `scripts/smoke_test.py`;
+- `validation`: default 4-expert Soft-MoE, tropical-ring attention, and GFlowNet trajectory balance pass through `scripts/validate_cpu.py`;
 - `tiny-10m`: curated Parquet graph records train on CUDA with `--gflownet-loss-weight 0.01`;
 - `small-30m`: one bf16 optimizer step with 256 node tokens, 1024 edge tokens, default upper-half Soft-MoE, and embedding-space GFlowNet loss peaks at about 6.0GB allocated VRAM for batch 1 and 11.9GB for batch 2.
-- Parameter-Golf export scaffold: a 10.2M curated-smoke checkpoint packs to an 8-bit compressed artifact under the 16,000,000 byte limit.
+- Parameter-Golf export scaffold: a 10.2M validation checkpoint packs to an 8-bit compressed artifact under the 16,000,000 byte limit.
 
-Recommendation: train the 10M or 30M family on the 4090 when it is free. A 2020 13-inch M1 MacBook Pro should be used only for documentation, curation inspection, and CPU/tiny smoke checks; it is not a competitive training device for this CUDA-oriented graph model.
+Recommendation: train the 10M or 30M family on the 4090 when it is free. A 2020 13-inch M1 MacBook Pro should be used only for documentation, curation inspection, and CPU/tiny validation checks; it is not a competitive training device for this CUDA-oriented graph model.
 
 ### 5.2 Attention Modes
 
@@ -301,9 +301,10 @@ Keep weights small at first: `1e-4` to `1e-3`.
 
 ### 6.1 Phases
 
-Phase A: CPU and tiny CUDA smoke tests.
+Phase A: CPU and tiny CUDA validation.
 
-- Run `scripts/smoke_test.py`.
+- Run `scripts/validate_cpu.py`.
+- Run `scripts/validate_cuda_capacity.py` when the 4090 is free.
 - Train 50-200 synthetic steps.
 - Verify no NaNs.
 - Verify tropical-ring output equals full tropical attention on small tensors.
@@ -344,7 +345,7 @@ Before any CUDA run:
 nvidia-smi
 ```
 
-If another process is using substantial VRAM, run CPU smoke tests only.
+If another process is using substantial VRAM, run CPU validation only.
 
 Default real training:
 

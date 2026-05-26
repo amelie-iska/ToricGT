@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-step CUDA capacity check for ToricGT.
+"""One-step CUDA capacity validation for ToricGT.
 
 This intentionally uses random graph batches. It verifies model construction,
 full forward/backward, optimizer update, default Soft-MoE routing, and optional

@@ -29,7 +29,7 @@ def synthetic_batch(cfg: ModelConfig, batch_size: int, device: str) -> tuple[Gra
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", default="checkpoints/toricgt_smoke.pt")
+    parser.add_argument("--checkpoint", default="checkpoints/toricgt_final.pt")
     parser.add_argument("--batches", type=int, default=20)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()

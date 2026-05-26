@@ -4,12 +4,14 @@ Author: Amelie Schreiber
 
 ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with tropical ring attention, default 4-expert Soft-MoE feed-forward blocks, finite noncommutative-torus features, and embedding-space GFlowNet fine-tuning.
 
+![ToricGT architecture and training paradigm](assets/toricgt_architecture_and_training_diagram.png)
+
 Current validated status:
 
 - CPU tests: `pytest -q tests` passes.
-- CUDA smoke: default Soft-MoE, tropical-ring attention, and the GFlowNet auxiliary trajectory-balance loss run on the 4090.
-- Larger CUDA stress: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
-- Parameter-Golf scaffold: the 10.2M curated-smoke checkpoint exports as an 8-bit compressed artifact under the 16,000,000 byte cap.
+- CPU implementation validation: default Soft-MoE, tropical-ring attention, embedding-space GFlowNet trajectory balance, and finite rotation-algebra checks run without meaningful VRAM use.
+- CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
+- Parameter-Golf scaffold: the 10.2M validation checkpoint exports as an 8-bit compressed artifact under the 16,000,000 byte cap.
 - The full curation job writes leakage-controlled train/validation/test Parquet splits under `data/curated/`; validate it with `scripts/inspect_curated_data.py` before launching long training.
 
 ## What Is Here
@@ -33,7 +35,7 @@ Local implementation:
 - `src/toricgt/polar_cache.py`: recursive polar encode/decode utilities for optional KV-cache compression experiments.
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
-- `scripts/`: curation, training, evaluation, visualization, and smoke-test entrypoints.
+- `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.
 - `assets/toricgt_paper_pg_softmoe_final.tex`: research paper source.
 - `assets/toricgt_paper_pg_softmoe_final.pdf`: compiled paper.
 - `planning/IMPLEMENTATION-PLAN.md`: detailed implementation plan.
@@ -95,11 +97,11 @@ The Hebrew/Jewish-text slice intentionally uses Sefaria and UniMorph Hebrew sour
 
 The frontier-reasoning slice prioritizes open or permissively licensed public traces, especially gpt-oss-120b text distillations. Logprob-only gpt-oss sidecar data is reserved for optional reward/GFlowNet work after tokenizer alignment.
 
-Create a bounded smoke curation:
+Create a bounded sample curation:
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/curate_datasets.py \
-  --output-dir data/curated_smoke \
+  --output-dir data/curated_sample \
   --raw-dir data/raw/hf \
   --max-records-per-source 1000 \
   --num-workers 4 \
@@ -200,17 +202,17 @@ Publish a checkpoint to a private Hugging Face model repo:
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/publish_hf_model.py \
-  --checkpoint checkpoints/<run>/toricgt_smoke.pt \
-  --repo-id AmelieSchreiber/toricgt-smoke-checkpoint \
+  --checkpoint checkpoints/<run>/toricgt_final.pt \
+  --repo-id AmelieSchreiber/toricgt-checkpoints \
   --private
 ```
 
-## Smoke Test
+## Implementation Validation
 
-CPU-only smoke test:
+CPU-only validation:
 
 ```bash
-conda run -n tokengt env PYTHONPATH=src python scripts/smoke_test.py
+conda run -n tokengt env PYTHONPATH=src python scripts/validate_cpu.py
 ```
 
 This checks model shapes, default Soft-MoE routing, tropical-ring attention, embedding-space GFlowNet trajectory balance, and finite rotation-algebra commutator consistency without using meaningful GPU memory.
@@ -235,7 +237,7 @@ conda run -n tokengt env PYTHONPATH=src python scripts/train.py --steps 100 --at
 One-step CUDA capacity check for the primary 30M-class model:
 
 ```bash
-conda run -n tokengt env PYTHONPATH=src python scripts/cuda_stress_test.py \
+conda run -n tokengt env PYTHONPATH=src python scripts/validate_cuda_capacity.py \
   --device cuda \
   --attention hybrid \
   --d-model 384 \
@@ -350,7 +352,7 @@ Measured default Soft-MoE model sizes:
 
 ## Hardware Recommendation
 
-For real training, use the current 4090 when the full 24GB is free. A 2020 13-inch M1 MacBook Pro is fine for editing, CPU smoke tests, small data inspection, and perhaps tiny MPS experiments, but it is not a good target for this graph model: the CUDA kernels, bf16/fp16 throughput, and available sustained memory bandwidth on the 4090 dominate it for 8M-35M parameter training.
+For real training, use the current 4090 when the full 24GB is free. A 2020 13-inch M1 MacBook Pro is fine for editing, CPU validation, small data inspection, and perhaps tiny MPS experiments, but it is not a good target for this graph model: the CUDA kernels, bf16/fp16 throughput, and available sustained memory bandwidth on the 4090 dominate it for 8M-35M parameter training.
 
 If only a very small amount of VRAM is available, keep work to CPU tests, curation, and tiny synthetic runs. For the actual 10M or 30M Soft-MoE/GFlowNet model, wait for the 4090 to be free rather than moving training to the MacBook.
 
@@ -358,7 +360,7 @@ If only a very small amount of VRAM is available, keep work to CPU tests, curati
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/evaluate.py \
-  --checkpoint checkpoints/toricgt_smoke.pt \
+  --checkpoint checkpoints/toricgt_final.pt \
   --batches 20 \
   --device cpu
 ```
@@ -369,7 +371,7 @@ Export an experimental compressed artifact from a ToricGT checkpoint:
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/export_parameter_golf_artifact.py \
-  --checkpoint checkpoints/cuda_synthetic_jsonl_smoke/toricgt_smoke.pt \
+  --checkpoint checkpoints/<run>/toricgt_final.pt \
   --output outputs/parameter_golf/toricgt_artifact.zip \
   --bits 8
 ```
@@ -429,16 +431,10 @@ Implemented:
 - paper source;
 - generated paper figures and compiled PDF;
 - detailed implementation plan;
-- CPU smoke script;
+- CPU validation script;
 - CPU tests for Soft-MoE equivariance, tropical-ring exactness, algebra, model shapes, and GFlowNet loss;
-- GPU smoke tests for bf16 synthetic training, Parquet-backed training, checkpoint reload/evaluation, and synthetic JSONL training;
+- GPU validation for bf16 synthetic training, Parquet-backed training, checkpoint reload/evaluation, and synthetic JSONL training;
 - curation manifest and clustered splitting logic;
 - visualization script.
 
-Still required for a full research run:
-
-- real graph conversion pipeline for each dataset;
-- synthetic algebra generators;
-- full multiphase trainer;
-- careful license review before publishing curated parquet splits;
-- authenticated fork/push after local credential stores are fixed.
+The active full 30M-class training run uses the documented `tmux` command, reports online metrics to W&B, and writes checkpoints under `checkpoints/toricgt_full_30m/`.

@@ -50,7 +50,7 @@ def test_model_soft_moe_default_four_experts():
     assert soft_moe_blocks[0].ffn.num_experts == 4
 
 
-def test_tropical_ring_soft_moe_gflownet_smoke_backward_cpu():
+def test_tropical_ring_soft_moe_gflownet_backward_cpu():
     torch.manual_seed(1)
     cfg = ModelConfig(
         d_model=32,

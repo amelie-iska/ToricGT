@@ -227,7 +227,7 @@ Before starting a long run:
 ```bash
 conda run -n tokengt python -m compileall -q src scripts
 conda run -n tokengt env PYTHONPATH=src pytest -q tests
-conda run -n tokengt env PYTHONPATH=src python scripts/cuda_stress_test.py \
+conda run -n tokengt env PYTHONPATH=src python scripts/validate_cuda_capacity.py \
   --device cuda --attention hybrid --d-model 384 --num-heads 8 --num-layers 8 \
   --max-nodes 256 --max-edges 1024 --batch-size 2 --precision bf16 \
   --gflownet-loss-weight 0.01
@@ -238,6 +238,5 @@ Post-run:
 - upload best checkpoint to the Hugging Face weights repo
 - export train/validation/test metrics
 - archive wandb run URL in README or `outputs/`
-- run inference smoke test from the saved checkpoint
+- run inference validation from the saved checkpoint
 - run eval-only validation from the saved checkpoint
-
