@@ -67,10 +67,12 @@ Required diagnostics:
 Parameter-Golf adaptation differs from the graph encoder:
 
 - graph encoder may use bidirectional graph context
-- Parameter-Golf LM must use prefix-causal Soft-MoE
-- prefix-causal dispatch is score-before-update
+- Parameter-Golf LM now defaults to a dense random-order autoregressive graph projection
+- random orders are content-independent and seeded per chunk/sample, not static across inputs
+- dense shared FFN blocks are the default 16 MB path; Soft-MoE remains a research-model and ablation feature
+- every random-order step is score-before-update
 - future validation bytes must never affect current BPB scoring
-- full expert banks are too expensive under 16 MB; use shared base experts plus low-rank adapters
+- full expert banks are too expensive under 16 MB unless a later artifact audit proves otherwise
 
 ## GFlowNet GoT Fine-Tuning
 
@@ -133,16 +135,17 @@ Constraints:
 - runnable `train_gpt.py`
 - artifact byte accounting for code, weights, tokenizer, and metadata
 
-Recommended micro model:
+Implemented micro model:
 
-- byte or 1024/2048-token small-BPE tokenizer
+- byte tokenizer with tied input/output embeddings
 - tied embeddings
-- 4 to 6 unique blocks, recurrently applied to 8 to 12 effective blocks
-- prefix-causal Soft-MoE only in upper unique blocks
-- 2 to 4 experts, 1 to 2 slots per expert
-- shared base MLP with low-rank expert adapters
-- int6/int8 QAT export
-- zstd/zlib round-trip evaluation
+- 7 dense unique blocks, recurrently applied twice by default
+- lower softmax and upper tropical-ring attention through `attention: hybrid`
+- content-independent random target-position order per chunk
+- toric phase features attached to target positions
+- optional PolarQuant KV perturbation during evaluation/export checks
+- int8 export by default, with int6/int4 still available for artifact experiments
+- initial artifact audit must stay below 16,000,000 bytes before training starts
 
 Parameter-Golf metrics:
 
@@ -161,59 +164,42 @@ Parameter-Golf metrics:
 Full run command target:
 
 ```bash
-tmux new -d -s toricgt_train "cd /home/iska/Documents/amelie/bio/ToricGT && \
-  conda run --no-capture-output -n tokengt env PYTHONPATH=src python scripts/train.py \
-  --data-path data/curated/train.parquet \
-  --val-data-path data/curated/validation.parquet \
-  --steps 100000 \
-  --attention hybrid \
-  --device cuda \
-  --d-model 384 \
-  --num-heads 8 \
-  --num-layers 8 \
-  --max-nodes 256 \
-  --max-edges 1024 \
-  --batch-size 2 \
-  --grad-accum-steps 16 \
-  --precision bf16 \
-  --lr 3e-4 \
-  --lr-schedule cosine \
-  --warmup-steps 2000 \
-  --gflownet-loss-weight 0.01 \
-  --gflownet-space embedding \
-  --eval-every 1000 \
-  --eval-batches 20 \
-  --checkpoint-every 1000 \
-  --checkpoint-dir checkpoints/toricgt_full_30m \
-  --wandb \
-  --log-interval 20 2>&1 | tee -a logs/toricgt_train.log"
+tmux new -d -s toricgt_pg_random_order "cd /home/iska/Documents/amelie/bio/ToricGT && \
+  mkdir -p logs && \
+  if [ -f keys.txt ]; then WANDB_API_KEY=\$(grep -Eo 'wandb_[^[:space:]]+' keys.txt | tail -n1); export WANDB_API_KEY; fi; \
+  conda run --no-capture-output -n tokengt env PYTHONPATH=src python \
+    scripts/train_parameter_golf_random_order.py \
+    --config config/train.parameter_golf_random_order_dense.yaml \
+    2>&1 | tee -a logs/parameter_golf_random_order.log"
 ```
 
 Watch with:
 
 ```bash
-tmux attach -t toricgt_train
-tail -f logs/toricgt_train.log
+tmux attach -t toricgt_pg_random_order
+tail -f logs/parameter_golf_random_order.log
 ```
 
 ## Wandb Reporting
 
 Online wandb reporting is required for the full run. Log:
 
-- train/supervised loss
-- train/GFlowNet loss
-- train/total loss
-- train/graph tokens per microbatch
+- train/loss and train/BPB estimate
+- validation/loss and validation/BPB estimate
+- random-order sample count and seed policy
+- recurrent effective depth
 - train/lr
 - train/grad norm
-- val/masked MSE
 - system/VRAM allocated
-- Soft-MoE expert utilization and entropy
+- artifact bytes and estimated quantized tensor bytes
+- Parameter-Golf cap pass/fail
 - checkpoint path
 - dataset rows and estimated token budget
 
 Future additions:
 
+- official `train_gpt.py` wrapper once final challenge packaging is selected
+- optional dense-vs-low-rank-Soft-MoE ablation under the same byte cap
 - GFlowNet terminal diversity
 - reward component histograms
 - tropical active-face entropy

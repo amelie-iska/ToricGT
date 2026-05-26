@@ -1,0 +1,22 @@
+model:
+  checkpoint: checkpoints/parameter_golf_random_order_dense/best.pt
+  order_samples: 4
+  seed_policy: content_independent_per_chunk
+  random_seed_base: 17
+  max_seq_len: 1024
+  polarquant_kv_bits: 8
+
+evaluation:
+  parquet_glob: data/curated_hf_shards/test/*.parquet
+  batches: 100
+  batch_size: 4
+  precision: bf16
+  device: cuda
+  report_bpb: true
+  report_order_diversity: true
+
+generation:
+  length: 512
+  temperature: 0.9
+  top_k: 64
+  samples: 8

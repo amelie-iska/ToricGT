@@ -11,6 +11,7 @@ import torch
 from toricgt.config import ModelConfig
 from toricgt.model import ToricTokenGT
 from toricgt.parameter_golf_export import write_artifact
+from toricgt.random_order_lm import DenseRandomOrderToricLM, RandomOrderLMConfig
 
 
 def main() -> None:
@@ -21,8 +22,13 @@ def main() -> None:
     args = parser.parse_args()
 
     payload = torch.load(args.checkpoint, map_location="cpu")
-    cfg = ModelConfig(**payload["config"])
-    model = ToricTokenGT(cfg)
+    model_type = payload.get("model_type", "toricgt_graph")
+    if model_type == "random_order_dense_lm":
+        cfg = RandomOrderLMConfig(**payload["config"])
+        model = DenseRandomOrderToricLM(cfg)
+    else:
+        cfg = ModelConfig(**payload["config"])
+        model = ToricTokenGT(cfg)
     model.load_state_dict(payload["model"])
     report = write_artifact(model, Path(args.output), config=payload["config"], bits=args.bits)
     print(report)

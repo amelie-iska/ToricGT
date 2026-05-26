@@ -9,6 +9,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from .polar_cache import recursive_polar_decode, recursive_polar_encode, uniform_quantize_angles
 from .soft_moe import GraphTokenSoftMoE
 
 
@@ -146,6 +147,8 @@ class MultiHeadTropicalAttention(nn.Module):
         mode: str = "tropical_ring",
         dropout: float = 0.0,
         ring_block_size: int = 256,
+        polarquant_kv_bits: int = 0,
+        polarquant_train: bool = False,
     ) -> None:
         super().__init__()
         if d_model % num_heads != 0:
@@ -155,10 +158,12 @@ class MultiHeadTropicalAttention(nn.Module):
         self.head_dim = d_model // num_heads
         self.mode = mode
         self.ring_block_size = ring_block_size
+        self.polarquant_kv_bits = polarquant_kv_bits
+        self.polarquant_train = polarquant_train
         self.qkv = nn.Linear(d_model, 3 * d_model)
         self.out = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(dropout)
-        self.norm_gate = nn.Parameter(torch.zeros(num_heads, 1, 1))
+        self.norm_gate = nn.Parameter(torch.full((num_heads, 1, 1), -2.2))
 
     def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
         bsz, seq_len, _ = x.shape
@@ -167,6 +172,18 @@ class MultiHeadTropicalAttention(nn.Module):
     def _merge_heads(self, x: torch.Tensor) -> torch.Tensor:
         bsz, heads, seq_len, dim = x.shape
         return x.transpose(1, 2).contiguous().view(bsz, seq_len, heads * dim)
+
+    def _maybe_polarquant(self, x: torch.Tensor) -> torch.Tensor:
+        if self.polarquant_kv_bits <= 0:
+            return x
+        if self.training and not self.polarquant_train:
+            return x
+        if self.head_dim < 2 or self.head_dim & (self.head_dim - 1):
+            return x
+        original_dtype = x.dtype
+        encoded = recursive_polar_encode(x.float())
+        quantized = uniform_quantize_angles(encoded, bits=self.polarquant_kv_bits)
+        return recursive_polar_decode(quantized).to(dtype=original_dtype)
 
     def forward(
         self,
@@ -181,22 +198,31 @@ class MultiHeadTropicalAttention(nn.Module):
         # tropical projective classes.
         q = q - q.amax(dim=-1, keepdim=True)
         k = k - k.amax(dim=-1, keepdim=True)
+        q = F.normalize(q, p=2, dim=-1)
+        k = F.normalize(k, p=2, dim=-1)
+        k = self._maybe_polarquant(k)
+        v = self._maybe_polarquant(v)
         if self.mode == "softmax":
-            y, scores = softmax_attention(q, k, v, mask, return_scores=True)
+            result = softmax_attention(q, k, v, mask, return_scores=return_scores)
         elif self.mode == "tropical":
-            y, scores = tropical_attention(q, k, v, mask, return_scores=True)
+            result = tropical_attention(q, k, v, mask, return_scores=return_scores)
         elif self.mode == "tropical_ring":
-            y, scores = tropical_ring_attention(
+            result = tropical_ring_attention(
                 q,
                 k,
                 v,
                 mask=mask,
                 block_size=self.ring_block_size,
-                return_scores=True,
+                return_scores=return_scores,
             )
         else:
             raise ValueError(f"unknown attention mode: {self.mode}")
+        if return_scores:
+            y, scores = result
+        else:
+            y, scores = result, None
 
+        y = y * torch.sigmoid(self.norm_gate).view(1, self.num_heads, 1, 1)
         y = self._merge_heads(y)
         y = self.out(self.dropout(y))
         return AttentionResult(output=y, scores=scores if return_scores else None)
@@ -217,6 +243,8 @@ class TransformerBlock(nn.Module):
         soft_moe_num_experts: int = 4,
         soft_moe_slots_per_expert: int = 2,
         soft_moe_residual_scale: float = 0.1,
+        polarquant_kv_bits: int = 0,
+        polarquant_train: bool = False,
     ) -> None:
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
@@ -226,6 +254,8 @@ class TransformerBlock(nn.Module):
             mode=attention,
             dropout=dropout,
             ring_block_size=ring_block_size,
+            polarquant_kv_bits=polarquant_kv_bits,
+            polarquant_train=polarquant_train,
         )
         self.ln2 = nn.LayerNorm(d_model)
         hidden = ffn_multiplier * d_model

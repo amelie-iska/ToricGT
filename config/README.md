@@ -5,6 +5,43 @@ values loaded from `--config`.
 
 ## Training
 
+### Parameter-Golf Random-Order Dense Track
+
+`train.parameter_golf_random_order_dense.yaml` is the default competition
+configuration. It keeps the research model's ToricGT bias while adapting to the
+16,000,000 byte artifact cap:
+
+| Component | Default |
+| --- | --- |
+| Tokenization | byte-level, tied input/output embedding |
+| Order | content-independent random target-position order per chunk |
+| Seed policy | new derived seed per chunk/sample; fixed base seed only for reproducible runs |
+| Stored blocks | 7 dense Transformer blocks |
+| Effective depth | 14 block applications via 2 recurrent passes |
+| Attention | lower softmax, upper tropical-ring attention |
+| PolarQuant | 8-bit KV perturbation in eval/export checks |
+| Soft-MoE | off for the contest track; still on by default in the graph research model |
+| Artifact target | `15,600,000` bytes, below the `16,000,000` byte cap |
+
+Run:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/train_parameter_golf_random_order.py \
+  --config config/train.parameter_golf_random_order_dense.yaml
+```
+
+The configured run uses 50,000 optimizer steps. With `batch_size: 2`,
+`grad_accum_steps: 16`, and `max_seq_len: 1024`, one optimizer step consumes
+32 byte chunks or 32,768 supervised byte targets. The full run therefore sees
+about 1.638B supervised byte targets, plus validation passes every 500 steps.
+There is no separate unsupervised-only phase in this config. GFlowNet-style
+inference-time scaling is represented by random-order multi-sample evaluation
+and generation; the full graph model's embedding-space GFlowNet remains in
+`train.full_30m_*`.
+
+### Graph Research Track
+
 The configured 30M-class training plan has two executable training YAMLs.
 Both use `batch_size: 2` and `grad_accum_steps: 16`, so one optimizer step
 consumes 32 graph records.

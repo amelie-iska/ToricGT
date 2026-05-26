@@ -19,7 +19,7 @@ Current validated status:
 - CPU tests: `pytest -q tests` passes.
 - CPU implementation validation: default Soft-MoE, tropical-ring attention, embedding-space GFlowNet trajectory balance, and finite rotation-algebra checks run without meaningful VRAM use.
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
-- Parameter-Golf scaffold: the 10.2M validation checkpoint exports as an 8-bit compressed artifact under the 16,000,000 byte cap.
+- Parameter-Golf dense random-order scaffold: the default 12.9M-parameter byte model exports as a 12.86MB int8 compressed artifact, below the 16,000,000 byte cap.
 - The full curation job writes leakage-controlled train/validation/test Parquet splits under `data/curated/`; validate it with `scripts/inspect_curated_data.py` before launching long training.
 
 ## What Is Here
@@ -42,6 +42,7 @@ Local implementation:
 - `src/toricgt/synthetic.py`: synthetic rotation-algebra and tropical shortest-path curriculum records.
 - `src/toricgt/polar_cache.py`: recursive polar encode/decode utilities for optional KV-cache compression experiments.
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
+- `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
 - `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.
@@ -50,6 +51,7 @@ Local implementation:
 - `assets/toricgt_paper_pg_softmoe_final.pdf`: compiled paper.
 - `planning/IMPLEMENTATION-PLAN.md`: detailed implementation plan.
 - `planning/DATA.md`: dataset research, curation, and segmentation plan.
+- `docs/PARAMETER_GOLF.md`: dense random-order Parameter-Golf adaptation notes.
 
 ## Setup
 
@@ -486,18 +488,51 @@ by default. This is a separate evaluation process and does not interrupt the
 active training tmux run. If CUDA memory is tight, run it on CPU or wait for a
 checkpoint instead of stopping training.
 
-## Parameter-Golf Export
+## Parameter-Golf Dense Random-Order Track
 
-Export an experimental compressed artifact from a ToricGT checkpoint:
+The competition-facing path is now intentionally narrow and dense. The full
+ToricGT graph encoder still uses Soft-MoE by default for graph reasoning, but
+the Parameter-Golf adapter uses dense shared feed-forward blocks because this
+is the better bytes-per-quality tradeoff under a 16,000,000 byte artifact cap.
+It stays close to ToricGT by projecting byte chunks to random-order graph
+positions, adding toric phase features, using lower softmax plus upper
+tropical-ring attention, recurrently reusing blocks for extra effective depth,
+and auditing int8 PolarQuant-style KV perturbations during evaluation/export.
+
+Train the default dense random-order model:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/train_parameter_golf_random_order.py \
+  --config config/train.parameter_golf_random_order_dense.yaml
+```
+
+The default config stores 7 dense blocks at width 384 and applies them twice,
+for 14 effective block applications. Random target orders are derived from a
+fixed run seed plus per-chunk/sample ids, so each new input gets a new
+content-independent order while reproducible runs remain possible.
+
+Watch a tmux run:
+
+```bash
+tmux attach -t toricgt_pg_random_order
+tail -f logs/parameter_golf_random_order.log
+```
+
+Export a compressed artifact from either a graph checkpoint or a dense
+random-order checkpoint:
+
 
 ```bash
 conda run -n tokengt env PYTHONPATH=src python scripts/export_parameter_golf_artifact.py \
-  --checkpoint checkpoints/<run>/toricgt_final.pt \
+  --checkpoint checkpoints/parameter_golf_random_order_dense/best.pt \
   --output outputs/parameter_golf/toricgt_artifact.zip \
   --bits 8
 ```
 
-This is a byte-accounting scaffold for local experiments, not a final contest submission script.
+This remains a byte-accounting scaffold for local experiments. The final
+competition package still needs the official `train_gpt.py` wrapper and
+challenge evaluator round-trip once the candidate checkpoint is selected.
 
 ## Visualizations
 

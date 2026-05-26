@@ -37,7 +37,7 @@
 \newcommand{\ip}[2]{\left\langle #1,#2\right\rangle}
 \newcommand{\transpose}{^{\mathsf T}}
 
-\title{\vspace{-1.4em}ToricGT: Compact Graph-Token Reasoning with Tropical Ring Attention, Toric Diagnostics, and Soft-MoE Routing}
+\title{\vspace{-1.4em}ToricGT: Compact Graph-Token Reasoning with Tropical Ring Attention, Toric Diagnostics, and Random-Order Compression}
 \author{Amelie Schreiber}
 \date{}
 
@@ -45,12 +45,12 @@
 \maketitle
 
 \begin{abstract}
-We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and replaces upper feed-forward blocks by permutation-equivariant Soft-MoE routing.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate Parameter-Golf track distills the graph model into a byte-limited micro language model with causal Soft-MoE and quantization-aware export.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, expert utilization, and GFlowNet diversity rather than scalar accuracy alone.
+We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The research model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and uses permutation-equivariant Soft-MoE routing in upper graph blocks.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate OpenAI Parameter-Golf track projects byte chunks to random-order graph positions and trains a dense recurrent micro language model with tied embeddings, toric position phases, tropical-ring attention, and byte-accounted int8 export.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, artifact bytes, BPB, and GFlowNet diversity rather than scalar accuracy alone.
 \end{abstract}
 
 \section{Introduction}
 
-Many reasoning tasks are naturally graph-to-graph transformations: proof steps depend on earlier equations, graph algorithms update node and edge states, Hebrew morphology links surface forms to roots and templates, and algebraic words reduce through local rewrite relations.  ToricGT targets this regime with three design constraints.  First, relabeling a graph should relabel node and edge outputs, not change the computation.  Second, dynamic-programming-like reasoning should be visible through max-plus active faces and margins.  Third, compactness matters: the same ideas should support a small research model and a Parameter-Golf-style micro language model under a strict artifact budget.
+Many reasoning tasks are naturally graph-to-graph transformations: proof steps depend on earlier equations, graph algorithms update node and edge states, Hebrew morphology links surface forms to roots and templates, and algebraic words reduce through local rewrite relations.  ToricGT targets this regime with three design constraints.  First, relabeling a graph should relabel node and edge outputs, not change the computation.  Second, dynamic-programming-like reasoning should be visible through max-plus active faces and margins.  Third, compactness matters: the same ideas should support a small research model and a Parameter-Golf-style byte model under a strict artifact budget.
 
 \begin{figure}[t]
   \centering
@@ -59,7 +59,7 @@ Many reasoning tasks are naturally graph-to-graph transformations: proof steps d
   \label{fig:arch-condensed}
 \end{figure}
 
-The main novelty is the integration of algebraic structure with trainable graph-token Transformers.  Tropical attention implements max-plus gates and exposes provenance.  Ring evaluation changes the schedule but not the function.  Finite Weyl pairs encode projective toric phase memory.  Soft-MoE gives typed differentiable routing without hard token dropping.  Finally, toric geometry supplies a new diagnostic layer: active candidates in tropical heads form exposed faces of Newton polytopes, and changes across cell walls behave like bend or Cartier-divisor intersection measurements.
+The main novelty is the integration of algebraic structure with trainable graph-token Transformers.  Tropical attention implements max-plus gates and exposes provenance.  Ring evaluation changes the schedule but not the function.  Finite Weyl pairs encode projective toric phase memory.  Soft-MoE gives typed differentiable routing in the research graph model.  For Parameter Golf, the same graph-token idea is compressed into random-order autoregressive decoding: each byte position becomes a graph node scored in a content-independent random order.  Finally, toric geometry supplies a new diagnostic layer: active candidates in tropical heads form exposed faces of Newton polytopes, and changes across cell walls behave like bend or Cartier-divisor intersection measurements.
 
 \section{Model}
 
@@ -96,7 +96,7 @@ For hidden states $X\in\R^{B\times L\times d}$, learned slot vectors $\Phi\in\R^
   Z_{bes}&=\sum_iD_{bies}X_{bi},\qquad
   Y_{bi}=\sum_{e,s}C_{bies}f_e(Z_{bes}).
 \end{align}
-We use $E\ge4$ experts by default in the graph model.  The Parameter-Golf micro-LM uses a prefix-causal variant in which slot accumulators at position $t$ contain only strict-prefix tokens.
+We use $E\ge4$ experts by default in the graph model.  The Parameter-Golf micro-LM is dense by default because a full expert bank is usually a poor bytes-per-quality tradeoff under a 16 MB artifact cap; prefix-causal or low-rank Soft-MoE remains an ablation after the dense baseline is stable.
 
 \section{Theory}
 
@@ -168,12 +168,16 @@ Parameter-Golf BPB/bytes & compactness and scoring compliance \\
 
 \section{Parameter-Golf Track}
 
-The contest-facing model is not the full graph encoder.  It is a micro language model distilled from graph-reasoning traces with tied embeddings, recurrent block reuse, grouped-query attention, prefix-causal Soft-MoE adapters, and quantization-aware export.  The artifact budget is
+The contest-facing model is not the full graph encoder.  It is a dense random-order byte model with tied embeddings, recurrent block reuse, toric target-position phases, lower softmax attention, upper tropical-ring attention, and byte-accounted int8 export.  The artifact budget is
 \begin{equation}
   B_{\mathrm{art}}=B_{\mathrm{code}}+B_{\mathrm{weights}}+B_{\mathrm{tokenizer}}+B_{\mathrm{metadata}}
   \le16{,}000{,}000.
 \end{equation}
-BPB is computed prequentially: predict a normalized next-symbol distribution, score the observed bytes, then update any legal online state.  This score-before-update rule is mandatory for causal Soft-MoE and test-time adaptation.
+For a byte chunk $b=(b_1,\ldots,b_T)$, sample a content-independent order $\pi\in S_T$ from public metadata and factor
+\begin{equation}
+  q_\theta(b\mid \pi)=\prod_{k=1}^Tq_\theta(b_{\pi_k}\mid b_{\pi_{<k}},\pi_{\le k}).
+\end{equation}
+BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.
 
 \section{Next Iteration}
 
@@ -191,7 +195,7 @@ Finally, make inference-time scaling geometric: continuous GFlowNets can move in
 
 \section{Conclusion}
 
-ToricGT is a finite, auditable model family.  Its exact claims are graph-token equivariance, ring-schedule exactness, max-plus semiring simulation on bounded domains, projective toric phase consistency, causal Soft-MoE for language scoring, and perturbation bounds for compressed caches.  Its practical claim is that reasoning models should expose the geometry of their decisions.  Tropical active faces, Newton polytopes, toric bends, expert utilization, and GFlowNet reward landscapes make small-model reasoning easier to test, compress, and improve.
+ToricGT is a finite, auditable model family.  Its exact claims are graph-token equivariance, ring-schedule exactness, max-plus semiring simulation on bounded domains, projective toric phase consistency, random-order score validity for byte modeling, and perturbation bounds for compressed caches.  Its practical claim is that reasoning models should expose the geometry of their decisions.  Tropical active faces, Newton polytopes, toric bends, artifact bytes, BPB, expert utilization, and GFlowNet reward landscapes make small-model reasoning easier to test, compress, and improve.
 
 \begin{thebibliography}{99}
 
