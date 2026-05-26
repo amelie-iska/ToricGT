@@ -140,11 +140,12 @@ DATASET_SPECS: tuple[DatasetSpec, ...] = (
         splits=("train",),
         loader="datasets",
         task_family="openai_graphwalks",
-        role="OpenAI GraphWalks multi-hop directed graph reasoning benchmark and augmentation source",
+        role="OpenAI GraphWalks multi-hop directed graph reasoning benchmark; forced test-time scaling set",
         license="mit",
         language="en",
         url="https://hf.co/datasets/openai/graphwalks",
         expected_rows=1_150,
+        forced_split="test",
     ),
     *(
         DatasetSpec(
@@ -322,11 +323,12 @@ DATASET_SPECS: tuple[DatasetSpec, ...] = (
         splits=("train",),
         loader="datasets",
         task_family="nvidia_nemotron_reasoninggym",
-        role="Nemotron RL procedural reasoning tasks across algebra, computation, cognition, geometry, graph theory, logic, and games",
+        role="Nemotron RL procedural reasoning tasks for held-out test-time scaling across algebra, computation, cognition, geometry, graph theory, logic, and games",
         license="cc-by-4.0",
         language="en",
         url="https://hf.co/datasets/nvidia/Nemotron-RL-ReasoningGym-v1",
         expected_rows=15_000,
+        forced_split="test",
     ),
     DatasetSpec(
         name="nvidia/Nemotron-Content-Safety-Reasoning-Dataset",
@@ -334,10 +336,11 @@ DATASET_SPECS: tuple[DatasetSpec, ...] = (
         splits=("train",),
         loader="datasets",
         task_family="nvidia_nemotron_safety_reasoning",
-        role="Nemotron content-safety reasoning traces with explicit label justifications",
+        role="Nemotron content-safety reasoning traces reserved for held-out test-time scaling",
         license="cc-by-4.0",
         language="en",
         url="https://hf.co/datasets/nvidia/Nemotron-Content-Safety-Reasoning-Dataset",
+        forced_split="test",
     ),
     DatasetSpec(
         name="nvidia/PhysicalAI-Traffic-Anomaly-Reasoning",
@@ -345,16 +348,27 @@ DATASET_SPECS: tuple[DatasetSpec, ...] = (
         splits=("train",),
         loader="datasets",
         task_family="nvidia_physicalai_traffic_reasoning",
-        role="PhysicalAI traffic anomaly video QA, temporal reasoning, and chain-of-thought annotations",
+        role="PhysicalAI traffic anomaly video QA, temporal reasoning, and chain-of-thought annotations reserved for held-out test-time scaling",
         license="cc-by-4.0",
         language="en",
         url="https://hf.co/datasets/nvidia/PhysicalAI-Traffic-Anomaly-Reasoning",
         expected_rows=44_040,
+        forced_split="test",
     ),
 )
 
 
 DATASET_MANIFEST = [asdict(spec) for spec in DATASET_SPECS]
+
+TEST_TIME_SCALING_DATASETS: tuple[str, ...] = (
+    "openai/frontierscience",
+    "openai/healthbench",
+    "openai/healthbench-professional",
+    "openai/graphwalks",
+    "nvidia/Nemotron-RL-ReasoningGym-v1",
+    "nvidia/Nemotron-Content-Safety-Reasoning-Dataset",
+    "nvidia/PhysicalAI-Traffic-Anomaly-Reasoning",
+)
 
 _SPACE_RE = re.compile(r"\s+")
 _BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")

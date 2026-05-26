@@ -92,7 +92,7 @@ The full data research and segmentation plan is in [planning/DATA.md](/home/iska
 - `openai/frontierscience` (eval-only)
 - `openai/healthbench` (eval-only)
 - `openai/healthbench-professional` (eval-only)
-- `openai/graphwalks`
+- `openai/graphwalks` (test-time scaling)
 - `EleutherAI/hendrycks_math`
 - `HuggingFaceH4/MATH-500`
 - `terrycraddock/Tree_Of_Thoughts_BASE_24k`
@@ -114,7 +114,7 @@ The Hebrew/Jewish-text slice intentionally uses Sefaria and UniMorph Hebrew sour
 
 The frontier-reasoning slice prioritizes open or permissively licensed public traces, especially gpt-oss-120b text distillations. Logprob-only gpt-oss sidecar data is reserved for optional reward/GFlowNet work after tokenizer alignment.
 
-The NVIDIA/Nemotron slice adds procedurally verifiable reasoning, safety-label justification traces, and physical/temporal scene reasoning. Larger NVIDIA PhysicalAI spatial and PhysicsNeMo CFD datasets are documented in `planning/CYCLIC-EXPERT-GFLOWNET-PLAN.md` as opt-in graph-adapter sources rather than default text curation.
+The NVIDIA/Nemotron slice adds procedurally verifiable reasoning, safety-label justification traces, and physical/temporal scene reasoning. These newly added sources are forced into the ToricGT `test` split for held-out test-time scaling. Larger NVIDIA PhysicalAI spatial and PhysicsNeMo CFD datasets are documented in `planning/CYCLIC-EXPERT-GFLOWNET-PLAN.md` as opt-in graph-adapter sources rather than default text curation.
 
 Additional OpenAI benchmark and graph-reasoning notes, plus the proposed
 SauravMaheshkar higher-order simplicial augmentation plan, are in
@@ -458,6 +458,26 @@ conda run -n tokengt env PYTHONPATH=src python scripts/evaluate.py \
   --batches 20 \
   --device cpu
 ```
+
+Held-out test-time scaling over curated test rows:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src python scripts/test_time_scaling.py \
+  --checkpoint checkpoints/toricgt_full_30m/toricgt_step_00002000.pt \
+  --device cuda \
+  --batch-size 2 \
+  --batches 20 \
+  --budgets 1 4 16 64 \
+  --gflownet-horizon 4 \
+  --output-json runs/test_time_scaling/heldout_scaling.json
+```
+
+By default, this uses the new held-out OpenAI/NVIDIA test-time scaling dataset
+group and auto-curates it into `data/test_time_scaling/new_external/test.parquet`
+if it is not already present. GFlowNet rollouts and Monte Carlo dropout are on
+by default. This is a separate evaluation process and does not interrupt the
+active training tmux run. If CUDA memory is tight, run it on CPU or wait for a
+checkpoint instead of stopping training.
 
 ## Parameter-Golf Export
 

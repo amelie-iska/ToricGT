@@ -30,10 +30,13 @@ families that are underrepresented in pure math CoT corpora.
 | `nvidia/PhysicsNeMo-CFD-Ahmed-Body` | Apache-2.0 | Optional small 3D CFD/geometry field data for graph-physics adapters. |
 | `nvidia/PhysicsNeMo-Datacenter-CFD` | Apache-2.0 | Optional OpenFOAM datacenter CFD simulations for physics reasoning over typed geometry/field graphs. |
 
-The implemented default curation manifest adds the three text/reasoning-facing
-datasets. The spatial and CFD datasets remain opt-in because they need a
-separate converter from 3D geometry, video, or simulation fields into graph
-records.
+The implemented default curation manifest includes the three text/reasoning-facing
+datasets, but the current contamination policy forces them into the ToricGT
+`test` split.  They should be used for held-out evaluation and test-time
+scaling, not for the active training mixture, unless a later approved plan
+explicitly moves them into training. The spatial and CFD datasets remain opt-in
+because they need a separate converter from 3D geometry, video, or simulation
+fields into graph records.
 
 ## Dataset Partitioning
 

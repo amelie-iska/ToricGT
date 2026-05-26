@@ -27,7 +27,7 @@ enter the default public training mixture without license review.
 | `openai/frontierscience` | `test`, 160 rows | Apache-2.0 | eval-only, forced `test` | expert-level scientific tasks across subjects |
 | `openai/healthbench` | `test`, 5,000 rows | MIT | eval-only, forced `test` | rubric-based health response evaluation |
 | `openai/healthbench-professional` | `test`, 525 rows | MIT | eval-only, forced `test` | physician-response professional health evaluation |
-| `openai/graphwalks` | `train`, 1,150 rows | MIT | train/validation/test grouped split | directed multi-hop graph operation reasoning |
+| `openai/graphwalks` | `train`, 1,150 rows | MIT | forced `test` for inference-time scaling | directed multi-hop graph operation reasoning |
 
 The eval-only decision is intentional.  `frontierscience` is explicitly marked
 on its dataset card as benchmark material that should not enter training
@@ -35,11 +35,13 @@ corpora.  HealthBench and HealthBench Professional are also evaluation datasets,
 and they are medical-domain rubrics; using them as ordinary training examples
 would contaminate evals and create a misleading health-capability signal.
 
-`openai/graphwalks` is different: the source split is named `train`, and its
-examples contain explicit directed edge-list prompts plus target answer-node
-sets.  The local implementation converts those prompts into graph-native JSON
-with graph-node tokens, directed-edge tokens, an operation node, and
-answer-node edges.
+`openai/graphwalks` is different structurally: the source split is named
+`train`, and its examples contain explicit directed edge-list prompts plus
+target answer-node sets.  Per the current contamination policy, it is still
+forced into ToricGT's `test` split and used for test-time/inference-time
+scaling rather than training.  The local implementation converts those prompts
+into graph-native JSON with graph-node tokens, directed-edge tokens, an
+operation node, and answer-node edges.
 
 ## OpenAI Normalization Details
 
@@ -116,8 +118,47 @@ Normalization:
 - create `returns_answer_node` edges from the operation to each target answer
   node.
 
-This gives ToricGT actual graph-token supervision instead of treating the graph
-as only a string.
+This gives ToricGT actual graph-token held-out evaluation examples instead of
+treating the graph as only a string.
+
+## Test-Time Scaling Protocol For New Datasets
+
+All newly added external reasoning datasets are reserved for test-time or
+inference-time scaling unless explicitly moved into a future approved training
+mixture.  This includes the NVIDIA/Nemotron datasets added in the previous
+cycle and the OpenAI datasets listed above.  The curation code therefore sets
+`forced_split="test"` for these sources.
+
+Run held-out scaling with:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src python scripts/test_time_scaling.py \
+  --checkpoint checkpoints/toricgt_full_30m/toricgt_step_00002000.pt \
+  --device cuda \
+  --batch-size 2 \
+  --batches 20 \
+  --budgets 1 4 16 64 \
+  --gflownet-horizon 4 \
+  --output-json runs/test_time_scaling/openai_nvidia_eval.json
+```
+
+Metrics:
+
+- `mean_mse`: average candidate graph reconstruction loss at a budget;
+- `best_oracle_mse`: best candidate under an oracle verifier, used only as an
+  upper-bound diagnostic;
+- `mean_reward_proxy` and `best_reward_proxy`: `exp(-loss)` reward proxies;
+- `policy_entropy`: GFlowNet action entropy;
+- `action_diversity`: unique sampled GFlowNet action coverage;
+- `mean_trajectory_logprob`: average sampled trajectory log-probability.
+
+This script does not interrupt training.  It loads a saved checkpoint in a
+separate process and can be run on CPU or CUDA.  By default it uses the
+OpenAI/NVIDIA held-out dataset group and auto-curates
+`data/test_time_scaling/new_external/test.parquet` if the file is absent.
+GFlowNet rollouts and Monte Carlo dropout are enabled by default.  If GPU memory
+is tight, run it on CPU or wait for the next checkpoint; do not stop the active
+training job just to evaluate these held-out datasets.
 
 ## Candidate Simplicial Datasets
 
