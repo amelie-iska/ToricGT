@@ -43,10 +43,11 @@ data:
   graph_projection_max_chars: 4096
   coprime_row_stride: true
   document_separator: "\n\n"
-  # After warmup, switch training to larger technical composite rows while
-  # keeping validation on the full validation split. This step has already been
-  # reached in the current oai run, so a resume activates it immediately.
+  # After warmup, mix in larger technical composite rows while keeping ordinary
+  # byte compression pressure active. This step has already been reached in the
+  # current oai run, so a resume activates the mixture immediately.
   complex_start_step: 1000
+  complex_mix_ratio: 0.35
   complex_min_estimated_tokens: 256
   complex_task_family_keywords:
     - math
@@ -64,7 +65,9 @@ training:
   max_steps: 50000
   batch_size: 2
   grad_accum_steps: 16
-  lr: 0.0003
+  # Post-analysis rescue resume from step 20000 lowers LR again to protect
+  # deterministic validation BPB while QAT and composite rows are active.
+  lr: 0.00012
   weight_decay: 0.05
   warmup_steps: 1000
   precision: bf16
@@ -76,13 +79,21 @@ training:
   eval_order_samples: 1
   eval_gflownet_samples: 2
   gflownet_loss_weight: 0.01
-  gflownet_entropy_weight: 0.001
+  # Target policy entropy keeps branching noncollapsed without rewarding a
+  # permanently uniform GFlowNet policy.
+  gflownet_entropy_weight: 0.003
+  gflownet_entropy_target: 2.05
+  toric_entropy_floor: 0.18
+  toric_entropy_loss_weight: 0.002
   mtp_loss_weight: 0.05
-  qat_loss_weight: 0.000001
+  qat_loss_weight: 0.0000005
   qat_bits: 6
-  qat_max_tensors: 16
+  qat_max_tensors: 4
+  qat_start_step: 18000
+  qat_warmup_steps: 4000
   contrastive_loss_weight: 0.01
   trajectory_flow_loss_weight: 0.002
+  trajectory_flow_target: 0.075
   eval_score_first_bias_lr: 0.025
   eval_score_first_bias_decay: 0.98
   eval_score_first_bias_clip: 3.0

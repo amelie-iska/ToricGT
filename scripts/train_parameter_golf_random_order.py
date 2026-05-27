@@ -390,6 +390,27 @@ def cosine_lr(step: int, base_lr: float, warmup_steps: int, max_steps: int) -> f
     return 0.5 * base_lr * (1.0 + math.cos(math.pi * progress))
 
 
+def linear_ramp(step: int, start_step: int, ramp_steps: int) -> float:
+    """Return a stable [0, 1] ramp for delayed regularizers."""
+
+    if step < start_step:
+        return 0.0
+    if ramp_steps <= 0:
+        return 1.0
+    return max(0.0, min(1.0, float(step - start_step) / float(ramp_steps)))
+
+
+def deterministic_ratio_choice(step: int, accum_idx: int, ratio: float) -> bool:
+    """Deterministically mix ordinary and complex curricula."""
+
+    if ratio <= 0:
+        return False
+    if ratio >= 1:
+        return True
+    value = (step * 1_103_515_245 + accum_idx * 12_345 + 97_531) & 0xFFFF_FFFF
+    return (value / 0x1_0000_0000) < ratio
+
+
 def quantization_grid_loss(named_params: list[tuple[str, torch.nn.Parameter]], bits: int) -> torch.Tensor:
     """Lightweight QAT pull toward the current symmetric quantization grid."""
 
@@ -822,6 +843,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--complex-max-estimated-tokens", type=int)
     parser.add_argument("--complex-task-family-keywords", nargs="+")
     parser.add_argument("--complex-dataset-keywords", nargs="+")
+    parser.add_argument("--complex-mix-ratio", type=float)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--attention", choices=["softmax", "tropical", "tropical_ring", "hybrid"])
     parser.add_argument("--ring-block-size", type=int)
@@ -834,6 +856,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gflownet-action-scale", type=float)
     parser.add_argument("--gflownet-loss-weight", type=float)
     parser.add_argument("--gflownet-entropy-weight", type=float)
+    parser.add_argument("--gflownet-entropy-target", type=float)
+    parser.add_argument("--toric-entropy-floor", type=float)
+    parser.add_argument("--toric-entropy-loss-weight", type=float)
     parser.add_argument("--use-bigram-hash", action="store_true")
     parser.add_argument("--no-bigram-hash", action="store_true")
     parser.add_argument("--bigram-hash-buckets", type=int)
@@ -850,8 +875,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--qat-loss-weight", type=float)
     parser.add_argument("--qat-bits", type=int, choices=[4, 6, 8])
     parser.add_argument("--qat-max-tensors", type=int)
+    parser.add_argument("--qat-start-step", type=int)
+    parser.add_argument("--qat-warmup-steps", type=int)
     parser.add_argument("--contrastive-loss-weight", type=float)
     parser.add_argument("--trajectory-flow-loss-weight", type=float)
+    parser.add_argument("--trajectory-flow-target", type=float)
     parser.add_argument("--eval-score-first-bias-lr", type=float)
     parser.add_argument("--eval-score-first-bias-decay", type=float)
     parser.add_argument("--eval-score-first-bias-clip", type=float)
@@ -1019,6 +1047,21 @@ def main() -> None:
         if args.gflownet_entropy_weight is not None
         else config_get(file_config, "training", "gflownet_entropy_weight", 0.001)
     )
+    gflownet_entropy_target = (
+        args.gflownet_entropy_target
+        if args.gflownet_entropy_target is not None
+        else config_get(file_config, "training", "gflownet_entropy_target", -1.0)
+    )
+    toric_entropy_floor = (
+        args.toric_entropy_floor
+        if args.toric_entropy_floor is not None
+        else config_get(file_config, "training", "toric_entropy_floor", 0.0)
+    )
+    toric_entropy_loss_weight = (
+        args.toric_entropy_loss_weight
+        if args.toric_entropy_loss_weight is not None
+        else config_get(file_config, "training", "toric_entropy_loss_weight", 0.0)
+    )
     mtp_loss_weight = (
         args.mtp_loss_weight if args.mtp_loss_weight is not None else config_get(file_config, "training", "mtp_loss_weight", 0.05)
     )
@@ -1029,6 +1072,14 @@ def main() -> None:
     qat_max_tensors = (
         args.qat_max_tensors if args.qat_max_tensors is not None else config_get(file_config, "training", "qat_max_tensors", 16)
     )
+    qat_start_step = (
+        args.qat_start_step if args.qat_start_step is not None else config_get(file_config, "training", "qat_start_step", 0)
+    )
+    qat_warmup_steps = (
+        args.qat_warmup_steps
+        if args.qat_warmup_steps is not None
+        else config_get(file_config, "training", "qat_warmup_steps", 0)
+    )
     contrastive_loss_weight = (
         args.contrastive_loss_weight
         if args.contrastive_loss_weight is not None
@@ -1038,6 +1089,11 @@ def main() -> None:
         args.trajectory_flow_loss_weight
         if args.trajectory_flow_loss_weight is not None
         else config_get(file_config, "training", "trajectory_flow_loss_weight", 0.002)
+    )
+    trajectory_flow_target = (
+        args.trajectory_flow_target
+        if args.trajectory_flow_target is not None
+        else config_get(file_config, "training", "trajectory_flow_target", 0.0)
     )
     eval_score_first_bias_lr = (
         args.eval_score_first_bias_lr
@@ -1202,6 +1258,12 @@ def main() -> None:
         if args.complex_dataset_keywords is not None
         else config_get(file_config, "data", "complex_dataset_keywords", dataset_keywords)
     )
+    complex_mix_ratio = (
+        args.complex_mix_ratio
+        if args.complex_mix_ratio is not None
+        else config_get(file_config, "data", "complex_mix_ratio", 1.0)
+    )
+    complex_mix_ratio = max(0.0, min(1.0, float(complex_mix_ratio)))
     train_glob = args.train_parquet_glob or config_get(
         file_config, "data", "train_parquet_glob", "data/curated_hf_shards/train/*.parquet"
     )
@@ -1306,7 +1368,7 @@ def main() -> None:
         rows_per_batch=rows_per_batch,
         seed=seed + 10_000,
         workers=max(0, min(workers, 2)),
-        repeat=True,
+        repeat=False,
         synthetic=args.synthetic,
         vocab_size=model_config.vocab_size,
         include_graph_projection=include_graph_projection,
@@ -1340,12 +1402,18 @@ def main() -> None:
                     "eval_gflownet_samples": eval_gflownet_samples,
                     "gflownet_loss_weight": gflownet_loss_weight,
                     "gflownet_entropy_weight": gflownet_entropy_weight,
+                    "gflownet_entropy_target": gflownet_entropy_target,
+                    "toric_entropy_floor": toric_entropy_floor,
+                    "toric_entropy_loss_weight": toric_entropy_loss_weight,
                     "mtp_loss_weight": mtp_loss_weight,
                     "qat_loss_weight": qat_loss_weight,
                     "qat_bits": qat_bits,
                     "qat_max_tensors": qat_max_tensors,
+                    "qat_start_step": qat_start_step,
+                    "qat_warmup_steps": qat_warmup_steps,
                     "contrastive_loss_weight": contrastive_loss_weight,
                     "trajectory_flow_loss_weight": trajectory_flow_loss_weight,
+                    "trajectory_flow_target": trajectory_flow_target,
                     "eval_score_first_bias_lr": eval_score_first_bias_lr,
                     "eval_score_first_bias_decay": eval_score_first_bias_decay,
                     "eval_score_first_bias_clip": eval_score_first_bias_clip,
@@ -1380,6 +1448,7 @@ def main() -> None:
                     "task_family_keywords": list(task_family_keywords),
                     "dataset_keywords": list(dataset_keywords),
                     "complex_start_step": complex_start_step,
+                    "complex_mix_ratio": complex_mix_ratio,
                     "complex_min_estimated_tokens": complex_min_estimated_tokens,
                     "complex_max_estimated_tokens": complex_max_estimated_tokens,
                     "complex_task_family_keywords": list(complex_task_family_keywords),
@@ -1397,6 +1466,8 @@ def main() -> None:
                 },
             },
             tags=["parameter-golf", "random-order-ar", "dense", "tropical-ring", "toricgt"],
+            id=os.environ.get("WANDB_RUN_ID") or None,
+            resume=os.environ.get("WANDB_RESUME") or None,
         )
 
     print(json.dumps(
@@ -1432,6 +1503,13 @@ def main() -> None:
             "complexity_eval_every": complexity_eval_every,
             "complexity_eval_samples": complexity_eval_samples,
             "complexity_compressors": list(complexity_compressors),
+            "gflownet_entropy_target": gflownet_entropy_target,
+            "toric_entropy_floor": toric_entropy_floor,
+            "toric_entropy_loss_weight": toric_entropy_loss_weight,
+            "trajectory_flow_target": trajectory_flow_target,
+            "qat_start_step": qat_start_step,
+            "qat_warmup_steps": qat_warmup_steps,
+            "complex_mix_ratio": complex_mix_ratio,
             "resize_position_embedding": resize_position_embedding,
             "optimizer_state_loaded": optimizer_state_loaded,
             "hf_publish_best": publish_best_to_hf,
@@ -1461,22 +1539,37 @@ def main() -> None:
         step_total_loss = 0.0
         step_gflownet_loss = 0.0
         step_gflownet_entropy = 0.0
+        step_gflownet_entropy_objective = 0.0
         step_gflownet_diversity = 0.0
         step_mtp_loss = 0.0
         step_qat_loss = 0.0
+        step_qat_weight = 0.0
         step_contrastive_loss = 0.0
         step_trajectory_flow_loss = 0.0
+        step_trajectory_flow_penalty = 0.0
         step_trajectory_kinetic = 0.0
         step_trajectory_viscous = 0.0
         step_smear_temperature = 0.0
         step_toric_memory_entropy = 0.0
+        step_toric_entropy_loss = 0.0
+        step_complex_microbatches = 0.0
         last_train_batch: dict[str, torch.Tensor] | None = None
         lr_step = cosine_lr(step, lr, warmup_steps, steps)
+        effective_qat_loss_weight = qat_loss_weight * linear_ramp(
+            step,
+            int(qat_start_step or 0),
+            int(qat_warmup_steps or 0),
+        )
         for group in optimizer.param_groups:
             group["lr"] = lr_step
         for accum_idx in range(grad_accum):
-            complex_active = complex_iterator is not None and step >= int(complex_start_step or 0)
+            complex_active = (
+                complex_iterator is not None
+                and step >= int(complex_start_step or 0)
+                and deterministic_ratio_choice(step, accum_idx, complex_mix_ratio)
+            )
             batch = next(complex_iterator if complex_active else iterator)
+            step_complex_microbatches += float(complex_active)
             tokens = batch["tokens"].to(device, non_blocking=True)
             sample_ids = batch["sample_ids"].to(device, non_blocking=True)
             last_train_batch = {"tokens": tokens.detach(), "sample_ids": sample_ids.detach()}
@@ -1491,22 +1584,37 @@ def main() -> None:
                 micro_loss = out["loss"]
                 gflownet_loss = out.get("gflownet_loss", torch.zeros((), device=device))
                 gflownet_entropy = out.get("gflownet_entropy", torch.zeros((), device=device))
+                if float(gflownet_entropy_target) >= 0:
+                    gflownet_entropy_objective = (gflownet_entropy - float(gflownet_entropy_target)).pow(2)
+                else:
+                    gflownet_entropy_objective = -gflownet_entropy
                 mtp_loss = out.get("mtp_loss", torch.zeros((), device=device))
                 qat_loss = (
                     quantization_grid_loss(qat_named_params, bits=qat_bits)
-                    if qat_loss_weight > 0 and qat_named_params
+                    if effective_qat_loss_weight > 0 and qat_named_params
                     else torch.zeros((), device=device)
                 )
                 contrastive_loss = out.get("contrastive_loss", torch.zeros((), device=device))
                 trajectory_flow_loss = out.get("trajectory_flow_loss", torch.zeros((), device=device))
+                if float(trajectory_flow_target) > 0:
+                    trajectory_flow_penalty = torch.relu(trajectory_flow_loss - float(trajectory_flow_target)).pow(2)
+                else:
+                    trajectory_flow_penalty = trajectory_flow_loss
+                toric_memory_entropy = out.get("toric_memory_entropy", torch.zeros((), device=device))
+                toric_entropy_loss = (
+                    torch.relu(torch.as_tensor(float(toric_entropy_floor), device=device) - toric_memory_entropy).pow(2)
+                    if toric_entropy_loss_weight > 0 and float(toric_entropy_floor) > 0
+                    else torch.zeros((), device=device)
+                )
                 total_micro_loss = (
                     micro_loss
                     + gflownet_loss_weight * gflownet_loss
-                    - gflownet_entropy_weight * gflownet_entropy
+                    + gflownet_entropy_weight * gflownet_entropy_objective
                     + mtp_loss_weight * mtp_loss
-                    + qat_loss_weight * qat_loss
+                    + effective_qat_loss_weight * qat_loss
                     + contrastive_loss_weight * contrastive_loss
-                    + trajectory_flow_loss_weight * trajectory_flow_loss
+                    + trajectory_flow_loss_weight * trajectory_flow_penalty
+                    + toric_entropy_loss_weight * toric_entropy_loss
                 )
                 loss = total_micro_loss / grad_accum
             loss.backward()
@@ -1514,28 +1622,37 @@ def main() -> None:
             step_total_loss += float(total_micro_loss.detach().cpu())
             step_gflownet_loss += float(gflownet_loss.detach().cpu())
             step_gflownet_entropy += float(gflownet_entropy.detach().cpu())
+            step_gflownet_entropy_objective += float(gflownet_entropy_objective.detach().cpu())
             step_gflownet_diversity += float(out.get("gflownet_action_diversity", torch.zeros(())).detach().cpu())
             step_mtp_loss += float(mtp_loss.detach().cpu())
             step_qat_loss += float(qat_loss.detach().cpu())
+            step_qat_weight += float(effective_qat_loss_weight)
             step_contrastive_loss += float(contrastive_loss.detach().cpu())
             step_trajectory_flow_loss += float(trajectory_flow_loss.detach().cpu())
+            step_trajectory_flow_penalty += float(trajectory_flow_penalty.detach().cpu())
             step_trajectory_kinetic += float(out.get("trajectory_kinetic_energy", torch.zeros(())).detach().cpu())
             step_trajectory_viscous += float(out.get("trajectory_viscous_dissipation", torch.zeros(())).detach().cpu())
             step_smear_temperature += float(out.get("smear_temperature", torch.zeros(())).detach().cpu())
             step_toric_memory_entropy += float(out.get("toric_memory_entropy", torch.zeros(())).detach().cpu())
+            step_toric_entropy_loss += float(toric_entropy_loss.detach().cpu())
         step_loss /= grad_accum
         step_total_loss /= grad_accum
         step_gflownet_loss /= grad_accum
         step_gflownet_entropy /= grad_accum
+        step_gflownet_entropy_objective /= grad_accum
         step_gflownet_diversity /= grad_accum
         step_mtp_loss /= grad_accum
         step_qat_loss /= grad_accum
+        step_qat_weight /= grad_accum
         step_contrastive_loss /= grad_accum
         step_trajectory_flow_loss /= grad_accum
+        step_trajectory_flow_penalty /= grad_accum
         step_trajectory_kinetic /= grad_accum
         step_trajectory_viscous /= grad_accum
         step_smear_temperature /= grad_accum
         step_toric_memory_entropy /= grad_accum
+        step_toric_entropy_loss /= grad_accum
+        step_complex_microbatches /= grad_accum
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         running_loss = 0.97 * running_loss + 0.03 * step_loss if running_loss else step_loss
@@ -1572,6 +1689,8 @@ def main() -> None:
                 "train/grad_norm": float(grad_norm.detach().cpu()),
                 "train/gflownet_loss": step_gflownet_loss,
                 "train/gflownet_entropy": step_gflownet_entropy,
+                "train/gflownet_entropy_objective": step_gflownet_entropy_objective,
+                "train/gflownet_entropy_target": float(gflownet_entropy_target),
                 "train/gflownet_action_diversity": step_gflownet_diversity,
                 "train/gflownet_loss_weight": gflownet_loss_weight,
                 "train/gflownet_entropy_weight": gflownet_entropy_weight,
@@ -1579,15 +1698,22 @@ def main() -> None:
                 "train/mtp_loss_weight": mtp_loss_weight,
                 "train/qat_loss": step_qat_loss,
                 "train/qat_loss_weight": qat_loss_weight,
+                "train/qat_effective_loss_weight": step_qat_weight,
+                "train/qat_start_step": float(qat_start_step or 0),
                 "train/qat_bits": qat_bits,
                 "train/contrastive_loss": step_contrastive_loss,
                 "train/contrastive_loss_weight": contrastive_loss_weight,
                 "train/trajectory_flow_loss": step_trajectory_flow_loss,
+                "train/trajectory_flow_penalty": step_trajectory_flow_penalty,
+                "train/trajectory_flow_target": float(trajectory_flow_target),
                 "train/trajectory_flow_loss_weight": trajectory_flow_loss_weight,
                 "train/trajectory_kinetic_energy": step_trajectory_kinetic,
                 "train/trajectory_viscous_dissipation": step_trajectory_viscous,
                 "train/smear_temperature": step_smear_temperature,
                 "train/toric_memory_entropy": step_toric_memory_entropy,
+                "train/toric_entropy_floor": float(toric_entropy_floor),
+                "train/toric_entropy_loss": step_toric_entropy_loss,
+                "train/toric_entropy_loss_weight": float(toric_entropy_loss_weight),
                 "artifact/initial_bytes": report.bytes_total,
                 "artifact/estimated_tensor_bytes": estimated_tensor_bytes,
                 "artifact/deployment_parameters": report.deployment_parameters,
@@ -1597,6 +1723,8 @@ def main() -> None:
                 "data/complex_curriculum_active": float(
                     complex_iterator is not None and step >= int(complex_start_step or 0)
                 ),
+                "data/complex_microbatch_fraction": step_complex_microbatches,
+                "data/complex_mix_ratio": complex_mix_ratio,
                 "data/complex_start_step": float(complex_start_step or 0),
                 "eval/score_first_bias_lr": eval_score_first_bias_lr,
             }
@@ -1612,13 +1740,39 @@ def main() -> None:
             wandb_run.log(complexity_metrics, step=step)
 
         if step % eval_interval == 0 or step == steps:
-            val = evaluate(
+            val_deterministic = evaluate(
                 model,
                 val_loader,
                 device=device,
                 batches=eval_batches,
                 precision=precision,
-                pass_id=step * 100_000,
+                pass_id=seed + 10_000,
+                order_samples=1,
+                gflownet_samples=1,
+                score_first_bias_lr=0.0,
+                score_first_bias_decay=eval_score_first_bias_decay,
+                score_first_bias_clip=eval_score_first_bias_clip,
+            )
+            val_gflownet = evaluate(
+                model,
+                val_loader,
+                device=device,
+                batches=eval_batches,
+                precision=precision,
+                pass_id=seed + 20_000 + step,
+                order_samples=eval_order_samples,
+                gflownet_samples=eval_gflownet_samples,
+                score_first_bias_lr=0.0,
+                score_first_bias_decay=eval_score_first_bias_decay,
+                score_first_bias_clip=eval_score_first_bias_clip,
+            )
+            val_score_first = evaluate(
+                model,
+                val_loader,
+                device=device,
+                batches=eval_batches,
+                precision=precision,
+                pass_id=seed + 30_000 + step,
                 order_samples=eval_order_samples,
                 gflownet_samples=eval_gflownet_samples,
                 score_first_bias_lr=eval_score_first_bias_lr,
@@ -1626,14 +1780,20 @@ def main() -> None:
                 score_first_bias_clip=eval_score_first_bias_clip,
             )
             metrics = {
-                "val/loss": val["loss"],
-                "val/bpb": val["bpb"],
+                "val/loss": val_deterministic["loss"],
+                "val/bpb": val_deterministic["bpb"],
+                "val/deterministic_loss": val_deterministic["loss"],
+                "val/deterministic_bpb": val_deterministic["bpb"],
+                "val/gflownet_loss": val_gflownet["loss"],
+                "val/gflownet_bpb": val_gflownet["bpb"],
+                "val/score_first_loss": val_score_first["loss"],
+                "val/score_first_bpb": val_score_first["bpb"],
                 "val/order_samples": eval_order_samples,
                 "val/gflownet_samples": eval_gflownet_samples,
                 "val/score_first_bias_lr": eval_score_first_bias_lr,
             }
-            if "bias_norm" in val:
-                metrics["val/score_first_bias_norm"] = val["bias_norm"]
+            if "bias_norm" in val_score_first:
+                metrics["val/score_first_bias_norm"] = val_score_first["bias_norm"]
             if complexity_enabled and complexity_eval_samples > 0:
                 try:
                     val_batch = next(iter(val_loader))
@@ -1654,10 +1814,10 @@ def main() -> None:
             print(json.dumps({"step": step, **metrics}, indent=2))
             if wandb_run is not None:
                 wandb_run.log(metrics, step=step)
-            if val["bpb"] < best_val:
-                best_val = val["bpb"]
+            if val_deterministic["bpb"] < best_val:
+                best_val = val_deterministic["bpb"]
                 best_checkpoint_path = checkpoint_dir / "best.pt"
-                checkpoint_metrics = {"val_bpb": best_val, "val_loss": val["loss"], **metrics}
+                checkpoint_metrics = {"val_bpb": best_val, "val_loss": val_deterministic["loss"], **metrics}
                 save_checkpoint(
                     best_checkpoint_path,
                     model=model,
