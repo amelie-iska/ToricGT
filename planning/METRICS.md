@@ -2548,3 +2548,184 @@ attention, toric memory, dense contest weights, embedding-space GFlowNet
 diagnostics, GraphCG, directed topology, and Kolmogorov diagnostics intact.  It
 changes only scalar training controls at the empirically identified bounce
 point.
+
+## Step 2,000 HDBSCAN-Topology Retry Review
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/step-00002000/
+```
+
+The HDBSCAN-enabled retry from step 1,500 reached a fresh step-2,000 checkpoint,
+then the watcher paused training and ran the full GPU analysis suite.  The
+result is clear: the new topology machinery is healthy, but the same local BPB
+floor-bounce remains.
+
+### Core Statistics
+
+Checkpoint metadata:
+
+| quantity | value |
+|---|---:|
+| checkpoint train BPB | `4.232872` |
+| checkpoint train loss | `2.934004` |
+| best validation BPB stored in checkpoint | `4.696106` |
+| analyzed W&B last history step | `1990` |
+
+History finite differences:
+
+| event | value |
+|---|---:|
+| local minimum train BPB | `3.474773` at step `1690` |
+| last analyzed train BPB | `4.246687` at step `1990` |
+| largest positive first difference | `+1.005582` from step `1700` to `1710` |
+| largest positive second difference | centered at step `1700` |
+
+The automatic metric classifier reports:
+
+| category | count |
+|---|---:|
+| `as_desired` | `181` |
+| `as_desired_but_not_strong_or_fast_enough` | `74` |
+| `not_as_desired` | `44` |
+
+The important manually interpreted metrics are:
+
+| metric | category | interpretation |
+|---|---|---|
+| `train/bpb`, `train/loss`, `train/loss_ema` | undesirable | The likelihood objective again leaves the good step-1690 basin after a sharp positive update. |
+| `train/grad_norm` | undesirable in the bounce window | The largest destructive BPB jump coincides with high gradient pressure; clipping alone was not enough. |
+| `train/toric_memory_entropy` | desired but monitor | Toric entropy is much healthier than earlier collapsed runs, with mean analysis toric entropy around `0.33` on most reasoning records. |
+| `train/trajectory_flow_loss` and viscous dissipation | desired but weak | The overall trend improves, but recent slope turns positive after the bounce, so turbulent trajectories return when BPB worsens. |
+| `train/gflownet_entropy` and action diversity | desired but not yet active for BPB | Early phase has GFlowNet objective effectively off; entropy movement is diagnostic rather than a failure. |
+| `train/analogy_hdbscan_*` and geometry HDBSCAN metrics | desired | Radius-HDBSCAN stability is high and noise is bounded; the robust topology term is not the cause of the BPB failure. |
+
+### Geometry And Plot Readout
+
+The geometry suite analyzed `96` records and `576` branches:
+
+| metric | value |
+|---|---:|
+| mean BPB | `4.889242` |
+| best BPB | `4.051872` |
+| mean answer BPB | `4.876394` |
+| best answer BPB | `3.610021` |
+| mean MST efficiency | `0.714938` |
+| mean path smoothness | `0.046129` |
+| mean directed topology asymmetry | `0.467627` |
+| mean directed cycle flux | `0.006199` |
+| mean HDBSCAN cluster count | `1.107205` |
+| mean HDBSCAN noise fraction | `0.200338` |
+| mean HDBSCAN stability | `0.799662` |
+| inclusion violation | `0.0` |
+
+Manual plot inspection:
+
+- The reasoning/K/BPB triangle shows a dense central-to-upper cloud with the
+  lowest-BPB points still near the lower reasoning-time side.  Extra reasoning
+  structure is visible, but not yet calibrated into lower BPB.
+- The reasoning/K/BPB/MST tetrahedron has a compact cloud with no clean
+  low-BPB branch separated at high MST efficiency.  MST structure is useful as
+  a diagnostic, not yet as a default reward.
+- The 3D GoT trajectories branch into readable basins and terminate through
+  solution spans, but branches are tightly clustered near the answer basin after
+  long straight transports.  This is stable, not yet selective.
+- Ramachandran-style phase plots show noncollapsed phase basins.  The model has
+  real directed trajectory structure.
+- Energy landscapes have coherent low-energy basins but also broad high-energy
+  sheets along long transports.  The post-bounce optimizer state raises the
+  energy floor rather than destroying geometry.
+- Directed nested-simplicial plots show monotone edge/triangle growth, bounded
+  directed asymmetry, low cycle flux, and radius-HDBSCAN stability near `0.8`.
+  This is the desired noncommutative topology behavior.
+
+### Mathematical Diagnosis
+
+Let \(L_t\) be the per-step byte cross-entropy and let
+\(\bar L_t=\alpha\bar L_{t-1}+(1-\alpha)L_t\) be the logged EMA.  The harmful
+event is not a slow curriculum drift.  It is a high-curvature impulse:
+
+\[
+  \Delta L_{1710}\gg 0,\qquad
+  \Delta^2 L_{1700}\gg 0,
+\]
+
+followed by a persistently higher \(\bar L_t\).  In optimizer terms, a hard
+batch produces an update
+
+\[
+  \theta_{t+1}
+  =\theta_t-\eta_t\,m_t/\sqrt{v_t+\epsilon},
+\]
+
+whose effective norm remains too large even after ordinary gradient clipping.
+The topology terms are not implicated because the filtered complexes satisfy
+nested inclusion, the HDBSCAN outlier fraction is bounded, and the toric entropy
+is healthy.  Therefore the correct intervention is a scalar update damper around
+the empirically observed shock window, not removal of GraphCG, persistent
+topology, random-order decoding, tropical/ring attention, toric memory, or
+embedding-space GoT diagnostics.
+
+### Decision And Implemented Controls
+
+Do not continue from step 2,000.  Restart from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt
+```
+
+The update is deliberately minimal and competition-focused:
+
+1. Keep the architecture and objectives fixed.
+2. Lower the vulnerable phase-1500--2000 scalar controls:
+   - `lr_multiplier`: `0.72 -> 0.62`;
+   - `grad_clip_norm`: `0.75 -> 0.62`;
+   - `analogy_lattice_loss_weight`: `1e-5 -> 5e-6`.
+3. Make phase 2000--3000 gentler:
+   - `lr_multiplier`: `0.80 -> 0.68`;
+   - `grad_clip_norm`: `0.85 -> 0.72`;
+   - `medium_mix_ratio`: `0.10 -> 0.03`;
+   - `graphcg_loss_weight`: `5e-5 -> 2e-5`;
+   - `analogy_lattice_loss_weight`: `3e-5 -> 1e-5`.
+4. Add an early-window shock guard.  If a step in `[1500,2200)` has both
+   high loss relative to the EMA and high gradient norm, scale that single
+   optimizer update by `0.30`.  This does not skip hard examples and does not
+   change the loss.  It only prevents one high-curvature impulse from knocking
+   the weights out of the low-BPB basin.
+
+The guard condition is:
+
+\[
+  \left[
+    \frac{L_t}{\bar L_t}\ge 1.12
+    \ \lor\
+    L_t-\bar L_t\ge 0.32
+  \right]
+  \land
+  \|g_t\|\ge 0.70.
+\]
+
+When active,
+
+\[
+  g_t \leftarrow 0.30\,g_t.
+\]
+
+New W&B metrics:
+
+| metric | meaning |
+|---|---|
+| `train/shock_guard_active` | `1` only on damped high-curvature updates |
+| `train/shock_guard_update_scale` | update multiplier, normally `1.0` |
+| `train/shock_guard_loss_delta` | \(L_t-\bar L_t\) before EMA update |
+| `train/shock_guard_loss_ratio` | \(L_t/\bar L_t\) before EMA update |
+
+Acceptance criteria for the next 500-step retry:
+
+1. BPB should remain below `3.8` through the former 1690--1710 shock window.
+2. `train/shock_guard_active` should be sparse, ideally only around the hard
+   impulse events.
+3. Toric entropy should stay above `0.25`.
+4. HDBSCAN stability should remain near `0.75--0.85` and noise below `0.25`.
+5. Step-2000 checkpoint BPB should be materially below the failed `4.23`.

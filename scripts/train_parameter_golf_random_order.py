@@ -1882,6 +1882,13 @@ def main() -> None:
         args.weight_decay if args.weight_decay is not None else config_get(file_config, "training", "weight_decay", 0.05)
     )
     grad_clip_norm = float(config_get(file_config, "training", "grad_clip_norm", 1.0) or 0.0)
+    shock_guard_enabled = bool(config_get(file_config, "training", "shock_guard_enabled", False))
+    shock_guard_start_step = int(config_get(file_config, "training", "shock_guard_start_step", 0) or 0)
+    shock_guard_end_step = int(config_get(file_config, "training", "shock_guard_end_step", 0) or 0)
+    shock_guard_loss_ratio = float(config_get(file_config, "training", "shock_guard_loss_ratio", 1.12) or 1.12)
+    shock_guard_loss_delta = float(config_get(file_config, "training", "shock_guard_loss_delta", 0.35) or 0.35)
+    shock_guard_grad_norm = float(config_get(file_config, "training", "shock_guard_grad_norm", 0.75) or 0.75)
+    shock_guard_update_scale = float(config_get(file_config, "training", "shock_guard_update_scale", 0.35) or 0.35)
     warmup_steps = (
         args.warmup_steps if args.warmup_steps is not None else config_get(file_config, "training", "warmup_steps", 1_000)
     )
@@ -2992,6 +2999,28 @@ def main() -> None:
             model.parameters(),
             max_norm=effective_grad_clip_norm if effective_grad_clip_norm > 0 else float("inf"),
         )
+        shock_guard_active = 0.0
+        shock_guard_scale = 1.0
+        shock_guard_loss_delta_value = 0.0
+        shock_guard_loss_ratio_value = 1.0
+        if shock_guard_enabled and running_loss > 0.0:
+            in_shock_window = step >= shock_guard_start_step and (
+                shock_guard_end_step <= 0 or step < shock_guard_end_step
+            )
+            shock_guard_loss_delta_value = float(step_loss - running_loss)
+            shock_guard_loss_ratio_value = float(step_loss / max(running_loss, 1e-9))
+            grad_norm_value = float(grad_norm.detach().cpu())
+            loss_is_shock = (
+                shock_guard_loss_delta_value >= shock_guard_loss_delta
+                or shock_guard_loss_ratio_value >= shock_guard_loss_ratio
+            )
+            if in_shock_window and loss_is_shock and grad_norm_value >= shock_guard_grad_norm:
+                shock_guard_active = 1.0
+                shock_guard_scale = max(0.0, min(1.0, shock_guard_update_scale))
+                if shock_guard_scale < 1.0:
+                    for parameter in model.parameters():
+                        if parameter.grad is not None:
+                            parameter.grad.mul_(shock_guard_scale)
         optimizer.step()
         running_loss = 0.97 * running_loss + 0.03 * step_loss if running_loss else step_loss
         bpb = step_loss / math.log(2)
@@ -3025,6 +3054,10 @@ def main() -> None:
                 "train/bpb": bpb,
                 "train/lr": lr_step,
                 "train/grad_norm": float(grad_norm.detach().cpu()),
+                "train/shock_guard_active": shock_guard_active,
+                "train/shock_guard_update_scale": shock_guard_scale,
+                "train/shock_guard_loss_delta": shock_guard_loss_delta_value,
+                "train/shock_guard_loss_ratio": shock_guard_loss_ratio_value,
                 "train/gflownet_loss": step_gflownet_loss,
                 "train/gflownet_entropy": step_gflownet_entropy,
                 "train/gflownet_entropy_objective": step_gflownet_entropy_objective,
