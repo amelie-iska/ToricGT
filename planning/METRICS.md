@@ -2469,3 +2469,82 @@ The loss enters at \(3\cdot10^{-5}\) in the 1500--1800 capture window, then
 ramps slowly.  If BPB ricochets again while these topology metrics improve,
 the topology term should be delayed rather than removed; the lower LR is the
 first guardrail against repeating the 1700-step floor bounce.
+
+## Step 1750 Directed-Topology Restart Review
+
+Analysis directory:
+`outputs/post_resume_analysis/oai-restart-01500-directed-topology/step-00001750/`.
+The watcher paused the run at checkpoint
+`checkpoints/parameter_golf_oai_dense/random_order_step_00001750.pt`.
+
+### Statistical Readout
+
+The relevant BPB window is not a slow plateau. It is a discrete bounce.  In the
+W&B export, `train/bpb` improves to a local minimum of `3.4743` at step 1690,
+then jumps to `4.5806` at step 1710.  `train/loss` moves in the same direction,
+from `2.4082` at step 1690 to `3.1750` at step 1710.  The clipped gradient
+norm jumps to `1.1448` at the same time, and the EMA loss continues rising
+through step 1740 (`2.9162`), so this is not merely one noisy plotted point.
+
+The finite-difference interpretation is:
+
+- before step 1700, the first difference of BPB is near-flat to negative, with
+  a favorable local minimum;
+- at step 1710, the first difference becomes sharply positive;
+- after step 1710, the instantaneous BPB partially recovers, but the EMA still
+  has positive drift because the filter has absorbed a high-loss impulse.
+
+The best saved checkpoint before the bounce is step 1500. There is no saved
+1690 or 1700 checkpoint in the current 250-step checkpoint cadence.
+
+### Metric Categories
+
+| behavior | metrics and plots | explanation |
+|---|---|---|
+| Desired | directed filtration inclusion, topology heatmaps, toric entropy, GraphCG basis diagnostics, `complexity/train/bpb` trend | The directed complexes are nested, noncommutative asymmetry is nonzero but bounded, cycle flux is low, and toric entropy rises instead of collapsing. These are the intended ToricGT structural diagnostics. |
+| Desired but too weak or slow | GFlowNet entropy/diversity, branch/test-time-scaling simplex plots, Kolmogorov/NCD proxies | Diversity remains high, but simplex plots show that extra branch budget is not yet selecting lower-BPB terminals. Complexity BPB improves overall but is sparse and noisy. This is acceptable while GFlowNet training weight is zero in the likelihood-capture phase. |
+| Undesirable | `train/bpb`, `train/loss`, `train/loss_ema`, `train/total_loss`, recent `train/gflownet_loss`, step-1710 gradient spike | The likelihood objective bounces off a local floor once effective LR enters the observed high-risk band and a sharp batch arrives. Since the topology and toric metrics are sane, removing the ToricGT structure would be the wrong intervention. |
+
+### Mathematical Explanation
+
+Let \(L_t\) be the supervised byte log loss and \(g_t=\nabla_\theta L_t\).  The
+step-1710 event is consistent with a sharp minibatch region in which
+\(\|g_t\|\) and the local directional curvature are high relative to the
+current warmup LR.  The update
+\[
+    \theta_{t+1}=\theta_t-\eta_t\,\operatorname{AdamW}(g_t)
+\]
+then overshoots the local basin even if the gradient is clipped at 1.0.  The
+EMA loss behaves as the low-pass recursion
+\[
+    \bar L_t=(1-\alpha)\bar L_{t-1}+\alpha L_t,
+\]
+so the positive EMA drift after the point spike is evidence that the optimizer
+state has moved into a worse neighborhood, not only that the display saw a hard
+batch.
+
+The directed topology metrics argue against blaming the new noncommutative
+analogy term.  The inclusion residual is controlled, directed asymmetry is
+bounded, and cycle flux is small.  In geometric terms, the filtered complexes
+are adding edges and triangles monotonically with radius, while the directed
+transport form remains nontrivial.  That is the desired scale-stable analogy
+regime.  The failure mode is therefore scalar-control instability, not a
+structural-model failure.
+
+### Decision
+
+Do not continue from step 1750. Restart from
+`random_order_step_00001500.pt` with optimizer state preserved and reduce the
+fragile capture-window controls:
+
+- extend the first sprint to steps 1500--2000;
+- lower `lr_multiplier` from `0.90` to `0.72`;
+- add phase-local `grad_clip_norm=0.75`;
+- reduce the tiny topology/analogy pressure from `3e-5` to `1e-5`;
+- delay the medium stream and GraphCG ramp into a gentler 2000--3000 phase.
+
+This keeps random-order autoregressive decoding, tropical ring/hybrid
+attention, toric memory, dense contest weights, embedding-space GFlowNet
+diagnostics, GraphCG, directed topology, and Kolmogorov diagnostics intact.  It
+changes only scalar training controls at the empirically identified bounce
+point.

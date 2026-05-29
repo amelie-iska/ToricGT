@@ -516,6 +516,7 @@ PHASE_CONTROL_KEYS = {
     "qat_start_step",
     "qat_warmup_steps",
     "lr_multiplier",
+    "grad_clip_norm",
 }
 
 
@@ -1870,6 +1871,7 @@ def main() -> None:
     weight_decay = (
         args.weight_decay if args.weight_decay is not None else config_get(file_config, "training", "weight_decay", 0.05)
     )
+    grad_clip_norm = float(config_get(file_config, "training", "grad_clip_norm", 1.0) or 0.0)
     warmup_steps = (
         args.warmup_steps if args.warmup_steps is not None else config_get(file_config, "training", "warmup_steps", 1_000)
     )
@@ -2760,6 +2762,7 @@ def main() -> None:
         effective_qat_start_step = control_int(phase_controls, "qat_start_step", int(qat_start_step or 0))
         effective_qat_warmup_steps = control_int(phase_controls, "qat_warmup_steps", int(qat_warmup_steps or 0))
         effective_lr_multiplier = max(0.0, control_float(phase_controls, "lr_multiplier", 1.0))
+        effective_grad_clip_norm = max(0.0, control_float(phase_controls, "grad_clip_norm", grad_clip_norm))
         lr_step = cosine_lr(step, lr * effective_lr_multiplier, warmup_steps, steps)
         effective_qat_loss_weight = effective_qat_base_weight * linear_ramp(
             step,
@@ -2952,7 +2955,10 @@ def main() -> None:
         step_toric_entropy_loss /= grad_accum
         step_medium_microbatches /= grad_accum
         step_complex_microbatches /= grad_accum
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            model.parameters(),
+            max_norm=effective_grad_clip_norm if effective_grad_clip_norm > 0 else float("inf"),
+        )
         optimizer.step()
         running_loss = 0.97 * running_loss + 0.03 * step_loss if running_loss else step_loss
         bpb = step_loss / math.log(2)
@@ -3073,6 +3079,7 @@ def main() -> None:
                 "eval/score_first_bias_lr": eval_score_first_bias_lr,
                 "phase/index": float(phase_index),
                 "phase/lr_multiplier": float(effective_lr_multiplier),
+                "phase/grad_clip_norm": float(effective_grad_clip_norm),
                 "phase/base_gflownet_loss_weight": float(gflownet_loss_weight),
                 "phase/base_complex_mix_ratio": float(complex_mix_ratio),
             }

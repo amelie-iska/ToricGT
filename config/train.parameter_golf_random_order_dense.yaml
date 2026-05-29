@@ -163,6 +163,7 @@ training:
   lr: 0.000042
   weight_decay: 0.03
   warmup_steps: 2500
+  grad_clip_norm: 1.0
   precision: bf16
   device: cuda
   seed: 17
@@ -263,42 +264,48 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_sprint_1500_1800
+    - name: bpb_sprint_1500_2000
       start_step: 1500
-      end_step: 1800
-      lr_multiplier: 0.90
+      end_step: 2000
+      # Step-1750 review: the local BPB floor broke when warmup pushed the
+      # effective LR into the 2.3e-5 band and a clipped-gradient spike followed.
+      # Keep this retry below that band and clip the transient batch shocks.
+      lr_multiplier: 0.72
+      grad_clip_norm: 0.75
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
       graphcg_loss_weight: 0.0
+      analogy_lattice_loss_weight: 0.00001
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.00025
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_sprint_2000_3000
+      start_step: 2000
+      end_step: 3000
+      lr_multiplier: 0.80
+      grad_clip_norm: 0.85
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.10
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.00005
       analogy_lattice_loss_weight: 0.00003
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.00025
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_sprint_1800_2600
-      start_step: 1800
-      end_step: 2600
-      lr_multiplier: 0.90
-      complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.20
-      hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.0
-      gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.0001
-      analogy_lattice_loss_weight: 0.00005
-      trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.00025
-      mtp_loss_weight: 0.0
-      toric_entropy_loss_weight: 0.0
-      qat_loss_weight: 0.0
     - name: bpb_stabilization_hold
-      start_step: 2600
+      start_step: 3000
       end_step: 6000
       lr_multiplier: 0.72
+      grad_clip_norm: 0.90
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
