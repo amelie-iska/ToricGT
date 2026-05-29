@@ -42,7 +42,12 @@ data:
   val_parquet_glob: data/curated_hf_shards/validation/*.parquet
   rows_per_batch: 128
   num_workers: 2
-  include_graph_projection: true
+  # Parameter-Golf BPB is scored on byte likelihood.  Keep the main early
+  # stream text-first so the compressor is not paying for synthetic graph JSON
+  # scaffolding before it has learned the byte distribution.  The delayed
+  # complex curriculum below can still project graph structure when it turns on.
+  include_graph_projection: false
+  complex_include_graph_projection: true
   graph_projection_max_chars: 4096
   coprime_row_stride: true
   # Mix row groups across shards instead of reading whole Parquet shards in

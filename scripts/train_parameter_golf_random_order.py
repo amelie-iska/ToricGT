@@ -1922,6 +1922,9 @@ def main() -> None:
         if args.complex_dataset_keywords is not None
         else config_get(file_config, "data", "complex_dataset_keywords", dataset_keywords)
     )
+    complex_include_graph_projection = bool(
+        config_get(file_config, "data", "complex_include_graph_projection", include_graph_projection)
+    )
     complex_mix_ratio = (
         args.complex_mix_ratio
         if args.complex_mix_ratio is not None
@@ -2055,7 +2058,7 @@ def main() -> None:
             repeat=True,
             synthetic=args.synthetic,
             vocab_size=model_config.vocab_size,
-            include_graph_projection=include_graph_projection,
+            include_graph_projection=complex_include_graph_projection,
             graph_projection_max_chars=graph_projection_max_chars,
             coprime_row_stride=coprime_row_stride,
             document_separator=document_separator,
@@ -2171,6 +2174,7 @@ def main() -> None:
                     "dataset_keywords": list(dataset_keywords),
                     "complex_start_step": complex_start_step,
                     "complex_mix_ratio": complex_mix_ratio,
+                    "complex_include_graph_projection": complex_include_graph_projection,
                     "complex_min_estimated_tokens": complex_min_estimated_tokens,
                     "complex_max_estimated_tokens": complex_max_estimated_tokens,
                     "complex_task_family_keywords": list(complex_task_family_keywords),
@@ -2221,6 +2225,7 @@ def main() -> None:
             "task_family_keywords": list(task_family_keywords),
             "dataset_keywords": list(dataset_keywords),
             "complex_start_step": complex_start_step,
+            "complex_include_graph_projection": complex_include_graph_projection,
             "complex_min_estimated_tokens": complex_min_estimated_tokens,
             "complex_max_estimated_tokens": complex_max_estimated_tokens,
             "complex_task_family_keywords": list(complex_task_family_keywords),

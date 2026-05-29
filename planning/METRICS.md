@@ -2200,3 +2200,45 @@ deliberately more forceful; if BPB is not below the old \(3.59\) neighborhood
 by then, the issue is no longer insufficient LR and the next intervention
 should target data curriculum or objective structure rather than pushing LR
 higher.
+
+### Text-First BPB Sprint After Strong-LR Failure
+
+The supervised sprint from `random_order_step_00001500.pt` restored the aligned
+data stream, disabled dropout, and raised the effective LR into the
+\(2.9\cdot10^{-5}\)--\(3.4\cdot10^{-5}\) band.  The first minibatches did not
+drop harder: BPB repeatedly revisited the \(3.8\)--\(4.3\) range.  That is a
+useful falsification.  It says the immediate bottleneck is not merely step size;
+the model is still spending byte capacity on an input representation that is
+too noisy for the early Parameter-Golf objective.
+
+The next restart therefore separates the two roles of the corpus:
+
+- the main BPB stream is text-first with `include_graph_projection=false`;
+- the delayed complex curriculum retains graph projection through
+  `complex_include_graph_projection=true`;
+- the restart remains anchored to the step-1000 stream origin and resumes from
+  the step-1500 checkpoint, so the comparison is not confounded by a new file
+  cycle.
+
+Mathematically, this reduces the entropy of the next-byte target distribution
+seen during the compression sprint without removing the ToricGT reasoning
+machinery.  Let \(X=(T,G)\) be the text plus graph-projection input and \(B\) be
+the byte target.  Early graph JSON/projection text contributes features whose
+mutual information with immediate byte prediction is weak relative to its
+surface entropy:
+
+\[
+  I(B;G\mid T) \ll H(G\mid T)
+\]
+
+in the first few thousand steps.  Keeping \(G\) in the main stream therefore
+increases optimization noise for BPB.  Delaying \(G\) until the complex
+curriculum turns on preserves the graph-of-thought and toric supervision path
+after the byte compressor has a stable basin.  This is a curriculum change, not
+an architecture retreat.
+
+The next analysis trigger remains step \(1750\).  Desired behavior is immediate
+return to the old step-1500 EMA BPB band or better, followed by a negative
+short-window slope.  If the text-first run still ricochets, the next change
+should adjust the token-order objective or optimizer state; LR increases have
+already been tested and should not be repeated blindly.
