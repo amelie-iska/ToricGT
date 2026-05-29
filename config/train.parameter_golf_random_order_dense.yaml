@@ -80,10 +80,11 @@ data:
 training:
   checkpoint_dir: checkpoints/parameter_golf_oai_dense
   max_steps: 50000
-  # Same effective token batch as 2x16, but fewer microbatches per optimizer
-  # step on the 24 GB GPU for a faster wall-clock descent sprint.
-  batch_size: 4
-  grad_accum_steps: 8
+  # Keep the stream-aligned 2x16 microbatch structure. Batch size 4 OOMs on
+  # the current tropical-ring path at 24 GB; changing accumulation also changes
+  # the iterable data state, so preserve the proven alignment.
+  batch_size: 2
+  grad_accum_steps: 16
   # The stream-aligned 1250->1750 audit showed the fast descent returned, but
   # BPB began bouncing once the warmup pushed effective LR above roughly
   # 2.3e-5.  Restart from the aligned step-1500 checkpoint with Adam moments

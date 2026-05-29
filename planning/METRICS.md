@@ -2171,8 +2171,10 @@ is therefore no longer a basin-capture schedule; it is a supervised compression
 sprint:
 
 - disable dropout during the BPB sprint: `model.dropout=0.0`;
-- keep the same effective token batch but reduce microbatch count for faster
-  wall-clock updates on the 24 GB GPU: `batch_size=4`, `grad_accum_steps=8`;
+- keep the stream-aligned `batch_size=2`, `grad_accum_steps=16` structure;
+  batch size \(4\) was tested and immediately OOMed on the tropical-ring path
+  at roughly \(23.4\) GB used, and changing accumulation also changes iterable
+  data state;
 - reduce weight decay from \(0.05\) to \(0.03\), because early BPB is dominated
   by underfit compression rather than overfit memorization;
 - raise base LR to \(4.2\cdot10^{-5}\) with warmup \(2500\);
@@ -2192,7 +2194,7 @@ The effective LR targets are:
 
 This intentionally revisits the aggressive LR band, but with three safeguards
 that earlier attempts lacked: zero dropout, no auxiliary losses during the
-compression sprint, and faster same-token optimizer steps.  The next watcher
+compression sprint, and preserved stream alignment.  The next watcher
 should interrupt at step \(1750\), not \(2000\), because this schedule is
 deliberately more forceful; if BPB is not below the old \(3.59\) neighborhood
 by then, the issue is no longer insufficient LR and the next intervention
