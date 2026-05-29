@@ -32,6 +32,17 @@ model:
   use_toric_memory: true
   toric_memory_slots: 32
   toric_memory_weight: 0.08
+  # GraphCG-style training uses a tiny learned steerable frame for hidden-space
+  # edits.  The added parameter count is negligible under the 16 MB budget, and
+  # the model is trained to align embeddings to disentangled analogy axes.
+  use_graphcg: true
+  graphcg_num_directions: 16
+  graphcg_alpha: 0.10
+  graphcg_temperature: 0.2
+  graphcg_max_codes: 192
+  graphcg_orthogonal_weight: 0.1
+  graphcg_covariance_weight: 0.05
+  graphcg_sparsity_weight: 0.00005
   contrastive_temperature: 0.2
   trajectory_flow_viscosity: 0.05
   aux_mtp_offsets: 2
@@ -64,13 +75,37 @@ data:
   stream_origin_step: 1000
   stream_burnin_steps:
   document_separator: "\n\n"
-  # Larger technical composite rows are delayed on the step-1000 restart.  The
-  # previous runs showed good reasoning diagnostics but repeated BPB ricochets
-  # when auxiliary pressure and hard rows arrived before byte compression had
-  # settled into a stable basin.
-  complex_start_step: 12000
+  # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
+  # found token quantiles p25~=123, p40~=294, p50~=489, so the buckets below
+  # separate short byte-compression rows from medium reasoning rows and long
+  # technical/graph records.
+  difficulty_curriculum_enabled: true
+  easy_min_estimated_tokens: 0
+  easy_max_estimated_tokens: 128
+  medium_start_step: 1650
+  medium_mix_ratio: 0.0
+  medium_min_estimated_tokens: 129
+  medium_max_estimated_tokens: 384
+  medium_include_graph_projection: false
+  hard_start_step: 6000
+  hard_mix_ratio: 0.00
+  hard_min_estimated_tokens: 385
+  hard_include_graph_projection: true
+  hard_task_family_keywords:
+    - math
+    - code
+    - graph
+    - got
+    - reasoning
+    - health
+    - physics
+    - biomed
+    - biochem
+  # Backward-compatible aliases for older scripts/checkpoints and the adaptive
+  # controller; hard_* is the canonical name for new runs.
+  complex_start_step: 6000
   complex_mix_ratio: 0.00
-  complex_min_estimated_tokens: 256
+  complex_min_estimated_tokens: 385
   complex_task_family_keywords:
     - math
     - code
@@ -110,6 +145,7 @@ training:
   # permanently uniform GFlowNet policy.
   gflownet_entropy_weight: 0.0005
   gflownet_entropy_target: 2.00
+  graphcg_loss_weight: 0.0002
   toric_entropy_floor: 0.20
   toric_entropy_loss_weight: 0.001
   mtp_loss_weight: 0.01
@@ -188,6 +224,7 @@ phase_curriculum:
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.00005
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.0005
       mtp_loss_weight: 0.0
@@ -196,10 +233,13 @@ phase_curriculum:
     - name: bpb_sprint_1500_1800
       start_step: 1500
       end_step: 1800
-      lr_multiplier: 1.15
+      lr_multiplier: 1.05
       complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.0
+      hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.00025
       mtp_loss_weight: 0.0
@@ -210,8 +250,11 @@ phase_curriculum:
       end_step: 2600
       lr_multiplier: 0.90
       complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.20
+      hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.0001
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.00025
       mtp_loss_weight: 0.0
@@ -222,8 +265,11 @@ phase_curriculum:
       end_step: 6000
       lr_multiplier: 0.72
       complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.35
+      hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.0002
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.0005
       mtp_loss_weight: 0.0
@@ -233,10 +279,13 @@ phase_curriculum:
       start_step: 6000
       end_step: 12000
       lr_multiplier: 1.0
-      complex_mix_ratio: 0.0
+      complex_mix_ratio: 0.02
+      medium_mix_ratio: 0.45
+      hard_mix_ratio: 0.02
       gflownet_loss_weight: 0.001
       gflownet_entropy_weight: 0.0005
       gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.0003
       trajectory_flow_loss_weight: 0.0001
       contrastive_loss_weight: 0.0015
       mtp_loss_weight: 0.015
@@ -246,7 +295,10 @@ phase_curriculum:
       start_step: 12000
       end_step: 25000
       lr_multiplier: 1.0
+      medium_mix_ratio: 0.50
+      hard_mix_ratio: 0.04
       gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.0004
       trajectory_flow_loss_weight: 0.00025
       contrastive_loss_weight: 0.002
       mtp_loss_weight: 0.02
@@ -256,7 +308,10 @@ phase_curriculum:
       start_step: 25000
       end_step:
       lr_multiplier: 0.85
+      medium_mix_ratio: 0.45
+      hard_mix_ratio: 0.04
       gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.0005
       trajectory_flow_loss_weight: 0.0004
       contrastive_loss_weight: 0.003
       mtp_loss_weight: 0.03

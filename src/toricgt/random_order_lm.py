@@ -59,6 +59,14 @@ class RandomOrderLMConfig:
     use_toric_memory: bool = True
     toric_memory_slots: int = 32
     toric_memory_weight: float = 0.08
+    use_graphcg: bool = False
+    graphcg_num_directions: int = 12
+    graphcg_alpha: float = 0.12
+    graphcg_temperature: float = 0.2
+    graphcg_max_codes: int = 256
+    graphcg_orthogonal_weight: float = 0.2
+    graphcg_covariance_weight: float = 0.05
+    graphcg_sparsity_weight: float = 0.0001
     aux_mtp_offsets: int = 2
     contrastive_temperature: float = 0.2
     trajectory_flow_viscosity: float = 0.05
@@ -241,6 +249,11 @@ class DenseRandomOrderToricLM(nn.Module):
             self.gflownet_action_embedding = None
             self.gflownet_flow = None
             self.gflownet_log_z = None
+        self.graphcg_direction_basis = (
+            nn.Parameter(torch.empty(config.graphcg_num_directions, config.d_model))
+            if config.use_graphcg and config.graphcg_num_directions > 1
+            else None
+        )
         if config.weight_tying:
             self.output = None
             self.output_bias = nn.Parameter(torch.zeros(config.vocab_size))
@@ -253,6 +266,8 @@ class DenseRandomOrderToricLM(nn.Module):
         self.apply(self._init_module)
         if self.toric_memory_value is not None:
             nn.init.normal_(self.toric_memory_value, mean=0.0, std=0.02)
+        if self.graphcg_direction_basis is not None:
+            nn.init.orthogonal_(self.graphcg_direction_basis)
         nn.init.zeros_(self.output_bias) if self.output_bias is not None else None
 
     def _init_module(self, module: nn.Module) -> None:
@@ -451,6 +466,65 @@ class DenseRandomOrderToricLM(nn.Module):
             "action_diversity": diversity,
         }
 
+    def _graphcg_losses(self, hidden: torch.Tensor) -> dict[str, torch.Tensor]:
+        """GraphCG-style disentanglement over hidden-state edit directions.
+
+        The original GraphCG objective learns steerable latent directions by
+        making same-direction edits identifiable and by suppressing
+        cross-direction correlation.  For the compact Parameter-Golf adapter we
+        keep the same geometry but avoid a separate generator: hidden states are
+        edited directly along a small learned basis and trained with a small
+        auxiliary contrastive/covariance penalty.
+        """
+
+        if self.graphcg_direction_basis is None:
+            return {}
+        max_codes = max(2, int(self.config.graphcg_max_codes))
+        codes = hidden.float().reshape(-1, hidden.shape[-1])
+        if codes.shape[0] > max_codes:
+            index = torch.linspace(0, codes.shape[0] - 1, steps=max_codes, device=codes.device).long()
+            codes = codes.index_select(0, index)
+        codes = F.normalize(codes, dim=-1)
+        directions = F.normalize(self.graphcg_direction_basis.float(), dim=-1)
+        alpha = float(self.config.graphcg_alpha)
+        temperature = max(float(self.config.graphcg_temperature), 1e-4)
+
+        edited_near = F.normalize(codes[:, None, :] + alpha * directions[None, :, :], dim=-1)
+        edited_far = F.normalize(codes[:, None, :] + (2.0 * alpha) * directions[None, :, :], dim=-1)
+        sim = torch.einsum("ndh,nkh->ndk", edited_near, edited_far) / temperature
+        n_codes, n_dirs, _ = edited_near.shape
+        labels = torch.arange(n_dirs, device=hidden.device).expand(n_codes, n_dirs).reshape(-1)
+        code_loss = F.cross_entropy(sim.reshape(n_codes * n_dirs, n_dirs), labels)
+
+        eye = torch.eye(n_dirs, device=hidden.device, dtype=directions.dtype)
+        gram = directions @ directions.transpose(0, 1)
+        offdiag_count = max(1, n_dirs * (n_dirs - 1))
+        orthogonal_loss = (gram - eye).pow(2).sum() / offdiag_count
+
+        coords = codes @ directions.transpose(0, 1)
+        coords = coords - coords.mean(dim=0, keepdim=True)
+        denom = max(1, coords.shape[0] - 1)
+        cov = coords.transpose(0, 1) @ coords / denom
+        diag = cov.diagonal().clamp_min(1e-6)
+        corr = cov / torch.sqrt(diag[:, None] * diag[None, :])
+        covariance_loss = (corr - eye).pow(2).sum() / offdiag_count
+        sparsity_loss = directions.abs().mean()
+        total = (
+            code_loss
+            + float(self.config.graphcg_orthogonal_weight) * orthogonal_loss
+            + float(self.config.graphcg_covariance_weight) * covariance_loss
+            + float(self.config.graphcg_sparsity_weight) * sparsity_loss
+        )
+        return {
+            "graphcg_loss": total,
+            "graphcg_code_loss": code_loss.detach(),
+            "graphcg_orthogonal_loss": orthogonal_loss.detach(),
+            "graphcg_covariance_loss": covariance_loss.detach(),
+            "graphcg_sparsity_loss": sparsity_loss.detach(),
+            "graphcg_basis_coherence": (gram - eye).abs().amax().detach(),
+            "graphcg_axis_variance": coords.var(dim=0, unbiased=False).mean().detach(),
+        }
+
     def forward_from_previous(
         self,
         previous_tokens: torch.Tensor,
@@ -525,6 +599,8 @@ class DenseRandomOrderToricLM(nn.Module):
         if "toric_memory_entropy" in aux:
             out["toric_memory_entropy"] = aux["toric_memory_entropy"].float()
         hidden = aux.get("hidden")
+        if hidden is not None:
+            out.update(self._graphcg_losses(hidden))
         if hidden is not None and hidden.shape[0] > 1:
             pooled = F.normalize(hidden.mean(dim=1).float(), dim=-1)
             sim = pooled @ pooled.transpose(0, 1) / max(float(self.config.contrastive_temperature), 1e-4)

@@ -2242,3 +2242,112 @@ return to the old step-1500 EMA BPB band or better, followed by a negative
 short-window slope.  If the text-first run still ricochets, the next change
 should adjust the token-order objective or optimizer state; LR increases have
 already been tested and should not be repeated blindly.
+
+### Explicit Easy-Medium-Hard Curriculum
+
+A direct shard sample of `data/curated_hf_shards/train/*.parquet` on
+2026-05-29 read 858,102 rows across 80 train shards.  The sampled
+`estimated_tokens` distribution was:
+
+| percentile | estimated tokens |
+|---:|---:|
+| 10 | 42 |
+| 25 | 123 |
+| 40 | 294 |
+| 50 | 489 |
+| 60 | 1,047 |
+| 75 | 8,393 |
+| 90 | 44,070 |
+| 95 | 70,400 |
+| 99 | 108,100 |
+
+The resulting bucket counts were:
+
+| bucket | rule | sampled rows |
+|---|---|---:|
+| easy | `estimated_tokens <= 128` | 220,323 |
+| medium | `129 <= estimated_tokens <= 384` | 169,047 |
+| hard | `estimated_tokens >= 385` | 468,732 |
+
+The top sampled families were Jewish Hebrew text (342,780), frontier
+GPT-OSS reasoning (326,482), CoT math (171,258), competition math (10,084),
+and Opus reasoning (7,498).  This validates a three-tier curriculum rather
+than a binary ordinary/complex split: the long tail is real, but exposing it
+too early makes BPB chase high-entropy scaffolding before the byte compressor
+has settled.
+
+Implementation decision:
+
+- easy stream: `estimated_tokens <= 128`, text-first, active at resume;
+- medium stream: `129..384`, text-first, starts at step 1650 but has zero
+  scheduled mass until step 1800;
+- hard stream: `>=385`, technical/reasoning keywords, graph projection enabled,
+  starts at step 6000 with a 2--4% cap;
+- W&B now logs easy, medium, and hard microbatch fractions separately;
+- `complex_*` remains as an alias for hard curriculum so old checkpoints,
+  adaptive-controller state, and analysis scripts keep working.
+
+The phase curriculum is now:
+
+| steps | easy | medium | hard | purpose |
+|---:|---:|---:|---:|---|
+| 1500--1800 | 100% | 0% | 0% | recover low-BPB basin without graph noise |
+| 1800--2600 | 80% | 20% | 0% | add moderate reasoning rows after capture |
+| 2600--6000 | 65% | 35% | 0% | stabilize text likelihood over broader rows |
+| 6000--12000 | 53% | 45% | 2% | reintroduce light GFlowNet and hard graph rows |
+| 12000+ | 46--51% | 45--50% | 4% | full reasoning curriculum under BPB guardrails |
+
+The effective LR in the 1500--1800 capture window was also reduced from the
+failed \(1.15\) multiplier to \(1.05\).  The text-first run showed good early
+minibatches around \(3.44\)--\(3.52\) but began bouncing as the warmup pushed
+the effective LR above roughly \(3.0\cdot10^{-5}\).  The curriculum restart
+therefore tries to make the descent longer by avoiding the high-curvature band,
+not by increasing force.
+
+### GraphCG Lattice-Basis Auxiliary Training
+
+The GraphCG codebase uses a learned editing function of the form
+\[
+    h = z + \alpha d_k
+\]
+where a direction basis vector is mapped to a normalized edit direction.  Its
+core losses make same-direction edits recognizable, penalize cross-direction
+similarity, and optionally sparsify the direction vectors.  The analogy
+mechanism paper `arXiv:2602.01992` argues that Transformer analogical reasoning
+depends on two separable components: geometric alignment of relational
+structure in the embedding space, and application of a functor-like map in the
+Transformer layers.  For ToricGT, this is exactly the failure mode we want to
+control: the byte-level model should not only reduce BPB; its hidden state
+should expose stable, reusable directions for graph-of-thought analogies,
+toric shifts, Hebrew root transformations, and technical reasoning moves.
+
+Implementation decision:
+
+- add a tiny learned basis `graphcg_direction_basis` with 16 directions;
+- edit hidden codes directly as \(z+\alpha d_k\), avoiding a parameter-heavy
+  generator and keeping the artifact budget intact;
+- use a direction-class contrastive loss so an edit along direction \(k\) at
+  \(\alpha\) matches the same direction at \(2\alpha\) more than other axes;
+- penalize basis coherence \(\max_{i\ne j}|\langle d_i,d_j\rangle|\) and
+  hidden-coordinate correlation in the learned basis;
+- keep the base BPB objective dominant: GraphCG starts at only 0.00005 in
+  the 1500--1800 capture window, then rises from 0.0001 to 0.0005 after the
+  medium/hard reasoning curriculum is active.
+
+W&B metrics added:
+
+| metric | intended behavior |
+|---|---|
+| `train/graphcg_loss` | should decline or stay bounded without forcing BPB upward |
+| `train/graphcg_code_loss` | lower means edit directions are more identifiable |
+| `train/graphcg_orthogonal_loss` | lower means the learned basis is closer to orthogonal |
+| `train/graphcg_covariance_loss` | lower means hidden coordinates are less entangled in that basis |
+| `train/graphcg_basis_coherence` | should remain low; spikes indicate collapsed edit axes |
+| `train/graphcg_axis_variance` | should stay nonzero; collapse means unused basis directions |
+
+The next 1750-step analysis should treat GraphCG as successful only if BPB
+continues its early descent while coherence and covariance decrease or remain
+stable.  If BPB deteriorates but GraphCG geometry improves, reduce
+`graphcg_loss_weight` before changing the base optimizer.  If GraphCG loss is
+flat and BPB behaves well, keep it as a low-pressure diagnostic until the
+medium/hard curriculum begins.

@@ -429,11 +429,42 @@ def deterministic_ratio_choice(step: int, accum_idx: int, ratio: float) -> bool:
     return (value / 0x1_0000_0000) < ratio
 
 
+def deterministic_unit_interval(step: int, accum_idx: int, salt: int = 0) -> float:
+    value = (
+        step * 1_103_515_245
+        + accum_idx * 12_345
+        + int(salt) * 2_654_435_761
+        + 97_531
+    ) & 0xFFFF_FFFF
+    return value / 0x1_0000_0000
+
+
+def choose_difficulty_stream(step: int, accum_idx: int, medium_ratio: float, hard_ratio: float) -> str:
+    """Choose easy/medium/hard stream with deterministic Bernoulli mixtures.
+
+    Hard receives the first slice of probability mass so rare hard examples are
+    not accidentally starved when medium+hard is clipped.  The remaining mass
+    is assigned to medium, and the complement is easy.
+    """
+
+    hard = max(0.0, min(1.0, float(hard_ratio)))
+    medium = max(0.0, min(1.0 - hard, float(medium_ratio)))
+    value = deterministic_unit_interval(step, accum_idx, salt=13)
+    if value < hard:
+        return "hard"
+    if value < hard + medium:
+        return "medium"
+    return "easy"
+
+
 PHASE_CONTROL_KEYS = {
     "complex_mix_ratio",
+    "hard_mix_ratio",
+    "medium_mix_ratio",
     "gflownet_loss_weight",
     "gflownet_entropy_weight",
     "gflownet_entropy_target",
+    "graphcg_loss_weight",
     "trajectory_flow_loss_weight",
     "contrastive_loss_weight",
     "mtp_loss_weight",
@@ -494,12 +525,15 @@ def control_int(controls: dict[str, Any], key: str, default: int) -> int:
 
 def burn_in_training_iterators(
     iterator: Any,
+    medium_iterator: Any | None,
     complex_iterator: Any | None,
     *,
     config: dict[str, Any],
     start_step: int,
     burnin_steps: int,
     grad_accum: int,
+    medium_start_step: int,
+    medium_mix_ratio: float,
     complex_start_step: int,
     complex_mix_ratio: float,
 ) -> dict[str, float]:
@@ -515,29 +549,54 @@ def burn_in_training_iterators(
     burnin_steps = max(0, int(burnin_steps))
     grad_accum = max(1, int(grad_accum))
     if burnin_steps <= 0:
-        return {"steps": 0.0, "microbatches": 0.0, "complex_microbatches": 0.0}
+        return {"steps": 0.0, "microbatches": 0.0, "medium_microbatches": 0.0, "complex_microbatches": 0.0}
     burn_start = max(1, int(start_step) - burnin_steps + 1)
     burn_end = int(start_step)
+    medium_microbatches = 0
     complex_microbatches = 0
     total_microbatches = 0
     for burn_step in range(burn_start, burn_end + 1):
         phase_controls, _, _ = active_phase_controls(config, burn_step)
+        effective_medium_mix_ratio = max(
+            0.0,
+            min(1.0, control_float(phase_controls, "medium_mix_ratio", medium_mix_ratio)),
+        )
         effective_complex_mix_ratio = max(
             0.0,
-            min(1.0, control_float(phase_controls, "complex_mix_ratio", complex_mix_ratio)),
+            min(
+                1.0,
+                control_float(
+                    phase_controls,
+                    "hard_mix_ratio",
+                    control_float(phase_controls, "complex_mix_ratio", complex_mix_ratio),
+                ),
+            ),
         )
         for accum_idx in range(grad_accum):
-            complex_active = (
-                complex_iterator is not None
-                and burn_step >= int(complex_start_step or 0)
-                and deterministic_ratio_choice(burn_step, accum_idx, effective_complex_mix_ratio)
+            medium_ratio = (
+                effective_medium_mix_ratio
+                if medium_iterator is not None and burn_step >= int(medium_start_step or 0)
+                else 0.0
             )
-            next(complex_iterator if complex_active else iterator)
-            complex_microbatches += int(complex_active)
+            hard_ratio = (
+                effective_complex_mix_ratio
+                if complex_iterator is not None and burn_step >= int(complex_start_step or 0)
+                else 0.0
+            )
+            stream = choose_difficulty_stream(burn_step, accum_idx, medium_ratio, hard_ratio)
+            if stream == "hard" and complex_iterator is not None:
+                next(complex_iterator)
+                complex_microbatches += 1
+            elif stream == "medium" and medium_iterator is not None:
+                next(medium_iterator)
+                medium_microbatches += 1
+            else:
+                next(iterator)
             total_microbatches += 1
     return {
         "steps": float(burnin_steps),
         "microbatches": float(total_microbatches),
+        "medium_microbatches": float(medium_microbatches),
         "complex_microbatches": float(complex_microbatches),
     }
 
@@ -1083,7 +1142,24 @@ def load_state_dict_with_optional_position_resize(
         state_dict = dict(state_dict)
         state_dict[key] = resize_position_embedding_weight(state_dict[key], model_state[key].shape)
         resized = True
-    model.load_state_dict(state_dict)
+    incompatible = model.load_state_dict(state_dict, strict=False)
+    allowed_missing_prefixes = ("graphcg_",)
+    bad_missing = [key for key in incompatible.missing_keys if not key.startswith(allowed_missing_prefixes)]
+    bad_unexpected = list(incompatible.unexpected_keys)
+    if bad_missing or bad_unexpected:
+        raise RuntimeError(
+            "checkpoint/model mismatch: "
+            f"missing={bad_missing[:8]} unexpected={bad_unexpected[:8]}"
+        )
+    if incompatible.missing_keys:
+        print(
+            json.dumps(
+                {
+                    "resume_notice": "new_parameters_initialized",
+                    "missing_keys": incompatible.missing_keys,
+                }
+            )
+        )
     return resized
 
 
@@ -1466,6 +1542,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gflownet-loss-weight", type=float)
     parser.add_argument("--gflownet-entropy-weight", type=float)
     parser.add_argument("--gflownet-entropy-target", type=float)
+    parser.add_argument("--graphcg-loss-weight", type=float)
     parser.add_argument("--toric-entropy-floor", type=float)
     parser.add_argument("--toric-entropy-loss-weight", type=float)
     parser.add_argument("--use-bigram-hash", action="store_true")
@@ -1606,6 +1683,14 @@ def main() -> None:
         use_toric_memory=config_get(file_config, "model", "use_toric_memory", True),
         toric_memory_slots=config_get(file_config, "model", "toric_memory_slots", 32),
         toric_memory_weight=config_get(file_config, "model", "toric_memory_weight", 0.08),
+        use_graphcg=config_get(file_config, "model", "use_graphcg", False),
+        graphcg_num_directions=config_get(file_config, "model", "graphcg_num_directions", 12),
+        graphcg_alpha=config_get(file_config, "model", "graphcg_alpha", 0.12),
+        graphcg_temperature=config_get(file_config, "model", "graphcg_temperature", 0.2),
+        graphcg_max_codes=config_get(file_config, "model", "graphcg_max_codes", 256),
+        graphcg_orthogonal_weight=config_get(file_config, "model", "graphcg_orthogonal_weight", 0.2),
+        graphcg_covariance_weight=config_get(file_config, "model", "graphcg_covariance_weight", 0.05),
+        graphcg_sparsity_weight=config_get(file_config, "model", "graphcg_sparsity_weight", 0.0001),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
         aux_mtp_offsets=args.aux_mtp_offsets
@@ -1668,6 +1753,11 @@ def main() -> None:
         args.gflownet_entropy_target
         if args.gflownet_entropy_target is not None
         else config_get(file_config, "training", "gflownet_entropy_target", -1.0)
+    )
+    graphcg_loss_weight = (
+        args.graphcg_loss_weight
+        if args.graphcg_loss_weight is not None
+        else config_get(file_config, "training", "graphcg_loss_weight", 0.0)
     )
     toric_entropy_floor = (
         args.toric_entropy_floor
@@ -1897,38 +1987,55 @@ def main() -> None:
         if args.dataset_keywords is not None
         else config_get(file_config, "data", "dataset_keywords", [])
     )
+    difficulty_curriculum_enabled = bool(config_get(file_config, "data", "difficulty_curriculum_enabled", False))
+    easy_min_estimated_tokens = int(config_get(file_config, "data", "easy_min_estimated_tokens", min_estimated_tokens) or 0)
+    easy_max_estimated_tokens = int(config_get(file_config, "data", "easy_max_estimated_tokens", max_estimated_tokens) or 0)
+    if difficulty_curriculum_enabled:
+        min_estimated_tokens = easy_min_estimated_tokens
+        max_estimated_tokens = easy_max_estimated_tokens
+    medium_start_step = int(config_get(file_config, "data", "medium_start_step", 0) or 0)
+    medium_mix_ratio = float(config_get(file_config, "data", "medium_mix_ratio", 0.0) or 0.0)
+    medium_min_estimated_tokens = int(
+        config_get(file_config, "data", "medium_min_estimated_tokens", max(0, int(easy_max_estimated_tokens or 128) + 1)) or 0
+    )
+    medium_max_estimated_tokens = int(config_get(file_config, "data", "medium_max_estimated_tokens", 384) or 0)
+    medium_task_family_keywords = tuple(config_get(file_config, "data", "medium_task_family_keywords", task_family_keywords) or [])
+    medium_dataset_keywords = tuple(config_get(file_config, "data", "medium_dataset_keywords", dataset_keywords) or [])
+    medium_include_graph_projection = bool(
+        config_get(file_config, "data", "medium_include_graph_projection", include_graph_projection)
+    )
     complex_start_step = (
         args.complex_start_step
         if args.complex_start_step is not None
-        else config_get(file_config, "data", "complex_start_step", 0)
+        else config_get(file_config, "data", "hard_start_step", config_get(file_config, "data", "complex_start_step", 0))
     )
     complex_min_estimated_tokens = (
         args.complex_min_estimated_tokens
         if args.complex_min_estimated_tokens is not None
-        else config_get(file_config, "data", "complex_min_estimated_tokens", min_estimated_tokens)
+        else config_get(file_config, "data", "hard_min_estimated_tokens", config_get(file_config, "data", "complex_min_estimated_tokens", min_estimated_tokens))
     )
     complex_max_estimated_tokens = (
         args.complex_max_estimated_tokens
         if args.complex_max_estimated_tokens is not None
-        else config_get(file_config, "data", "complex_max_estimated_tokens", max_estimated_tokens)
+        else config_get(file_config, "data", "hard_max_estimated_tokens", config_get(file_config, "data", "complex_max_estimated_tokens", 0))
     )
     complex_task_family_keywords = tuple(
         args.complex_task_family_keywords
         if args.complex_task_family_keywords is not None
-        else config_get(file_config, "data", "complex_task_family_keywords", task_family_keywords)
+        else config_get(file_config, "data", "hard_task_family_keywords", config_get(file_config, "data", "complex_task_family_keywords", task_family_keywords))
     )
     complex_dataset_keywords = tuple(
         args.complex_dataset_keywords
         if args.complex_dataset_keywords is not None
-        else config_get(file_config, "data", "complex_dataset_keywords", dataset_keywords)
+        else config_get(file_config, "data", "hard_dataset_keywords", config_get(file_config, "data", "complex_dataset_keywords", dataset_keywords))
     )
     complex_include_graph_projection = bool(
-        config_get(file_config, "data", "complex_include_graph_projection", include_graph_projection)
+        config_get(file_config, "data", "hard_include_graph_projection", config_get(file_config, "data", "complex_include_graph_projection", include_graph_projection))
     )
     complex_mix_ratio = (
         args.complex_mix_ratio
         if args.complex_mix_ratio is not None
-        else config_get(file_config, "data", "complex_mix_ratio", 1.0)
+        else config_get(file_config, "data", "hard_mix_ratio", config_get(file_config, "data", "complex_mix_ratio", 1.0))
     )
     complex_mix_ratio = max(0.0, min(1.0, float(complex_mix_ratio)))
     train_glob = args.train_parquet_glob or config_get(
@@ -1972,8 +2079,19 @@ def main() -> None:
                 )
             )
         else:
-            optimizer.load_state_dict(payload["optimizer"])
-            optimizer_state_loaded = True
+            try:
+                optimizer.load_state_dict(payload["optimizer"])
+                optimizer_state_loaded = True
+            except ValueError as exc:
+                print(
+                    json.dumps(
+                        {
+                            "resume_notice": "optimizer_state_reset_after_parameter_change",
+                            "checkpoint": args.resume,
+                            "reason": str(exc),
+                        }
+                    )
+                )
         start_step = int(payload.get("step", 0))
         resume_metrics = payload.get("metrics", {})
         best_val = float(resume_metrics.get("val_bpb", resume_metrics.get("best_val_bpb", best_val)))
@@ -2045,6 +2163,29 @@ def main() -> None:
         dataset_keywords=dataset_keywords,
         interleave_row_groups=interleave_row_groups,
     )
+    medium_train_loader = None
+    if difficulty_curriculum_enabled and int(medium_start_step or 0) > 0:
+        medium_train_loader = build_loader(
+            parquet_glob=train_glob,
+            batch_size=batch_size,
+            seq_len=model_config.max_seq_len,
+            byte_offset=model_config.byte_offset,
+            rows_per_batch=rows_per_batch,
+            seed=seed + 250_000 + stream_seed_offset,
+            workers=workers,
+            repeat=True,
+            synthetic=args.synthetic,
+            vocab_size=model_config.vocab_size,
+            include_graph_projection=medium_include_graph_projection,
+            graph_projection_max_chars=graph_projection_max_chars,
+            coprime_row_stride=coprime_row_stride,
+            document_separator=document_separator,
+            min_estimated_tokens=int(medium_min_estimated_tokens or 0),
+            max_estimated_tokens=int(medium_max_estimated_tokens or 0),
+            task_family_keywords=medium_task_family_keywords,
+            dataset_keywords=medium_dataset_keywords,
+            interleave_row_groups=interleave_row_groups,
+        )
     complex_train_loader = None
     if int(complex_start_step or 0) > 0:
         complex_train_loader = build_loader(
@@ -2112,6 +2253,7 @@ def main() -> None:
                     "gflownet_loss_weight": gflownet_loss_weight,
                     "gflownet_entropy_weight": gflownet_entropy_weight,
                     "gflownet_entropy_target": gflownet_entropy_target,
+                    "graphcg_loss_weight": graphcg_loss_weight,
                     "toric_entropy_floor": toric_entropy_floor,
                     "toric_entropy_loss_weight": toric_entropy_loss_weight,
                     "mtp_loss_weight": mtp_loss_weight,
@@ -2172,6 +2314,16 @@ def main() -> None:
                     "max_estimated_tokens": max_estimated_tokens,
                     "task_family_keywords": list(task_family_keywords),
                     "dataset_keywords": list(dataset_keywords),
+                    "difficulty_curriculum_enabled": difficulty_curriculum_enabled,
+                    "easy_min_estimated_tokens": easy_min_estimated_tokens,
+                    "easy_max_estimated_tokens": easy_max_estimated_tokens,
+                    "medium_start_step": medium_start_step,
+                    "medium_mix_ratio": medium_mix_ratio,
+                    "medium_include_graph_projection": medium_include_graph_projection,
+                    "medium_min_estimated_tokens": medium_min_estimated_tokens,
+                    "medium_max_estimated_tokens": medium_max_estimated_tokens,
+                    "medium_task_family_keywords": list(medium_task_family_keywords),
+                    "medium_dataset_keywords": list(medium_dataset_keywords),
                     "complex_start_step": complex_start_step,
                     "complex_mix_ratio": complex_mix_ratio,
                     "complex_include_graph_projection": complex_include_graph_projection,
@@ -2224,7 +2376,18 @@ def main() -> None:
             "max_estimated_tokens": max_estimated_tokens,
             "task_family_keywords": list(task_family_keywords),
             "dataset_keywords": list(dataset_keywords),
+            "difficulty_curriculum_enabled": difficulty_curriculum_enabled,
+            "easy_min_estimated_tokens": easy_min_estimated_tokens,
+            "easy_max_estimated_tokens": easy_max_estimated_tokens,
+            "medium_start_step": medium_start_step,
+            "medium_mix_ratio": medium_mix_ratio,
+            "medium_include_graph_projection": medium_include_graph_projection,
+            "medium_min_estimated_tokens": medium_min_estimated_tokens,
+            "medium_max_estimated_tokens": medium_max_estimated_tokens,
+            "medium_task_family_keywords": list(medium_task_family_keywords),
+            "medium_dataset_keywords": list(medium_dataset_keywords),
             "complex_start_step": complex_start_step,
+            "complex_mix_ratio": complex_mix_ratio,
             "complex_include_graph_projection": complex_include_graph_projection,
             "complex_min_estimated_tokens": complex_min_estimated_tokens,
             "complex_max_estimated_tokens": complex_max_estimated_tokens,
@@ -2266,14 +2429,18 @@ def main() -> None:
     ))
 
     iterator = iter(train_loader)
+    medium_iterator = iter(medium_train_loader) if medium_train_loader is not None else None
     complex_iterator = iter(complex_train_loader) if complex_train_loader is not None else None
     burnin_result = burn_in_training_iterators(
         iterator,
+        medium_iterator,
         complex_iterator,
         config=file_config,
         start_step=start_step,
         burnin_steps=stream_burnin_steps,
         grad_accum=grad_accum,
+        medium_start_step=int(medium_start_step or 0),
+        medium_mix_ratio=medium_mix_ratio,
         complex_start_step=int(complex_start_step or 0),
         complex_mix_ratio=complex_mix_ratio,
     )
@@ -2298,6 +2465,7 @@ def main() -> None:
                     "data/stream_origin_step": float(stream_origin_step),
                     "data/stream_burnin_steps": float(stream_burnin_steps),
                     "data/stream_burnin_microbatches": float(burnin_result["microbatches"]),
+                    "data/stream_burnin_medium_microbatches": float(burnin_result["medium_microbatches"]),
                     "data/stream_burnin_complex_microbatches": float(burnin_result["complex_microbatches"]),
                 },
                 step=start_step,
@@ -2331,10 +2499,29 @@ def main() -> None:
         step_smear_temperature = 0.0
         step_toric_memory_entropy = 0.0
         step_toric_entropy_loss = 0.0
+        step_graphcg_loss = 0.0
+        step_graphcg_code_loss = 0.0
+        step_graphcg_orthogonal_loss = 0.0
+        step_graphcg_covariance_loss = 0.0
+        step_graphcg_sparsity_loss = 0.0
+        step_graphcg_basis_coherence = 0.0
+        step_graphcg_axis_variance = 0.0
+        step_medium_microbatches = 0.0
         step_complex_microbatches = 0.0
         last_train_batch: dict[str, torch.Tensor] | None = None
         phase_controls, phase_name, phase_index = active_phase_controls(file_config, step)
-        effective_complex_mix_ratio = max(0.0, min(1.0, control_float(phase_controls, "complex_mix_ratio", complex_mix_ratio)))
+        effective_medium_mix_ratio = max(0.0, min(1.0, control_float(phase_controls, "medium_mix_ratio", medium_mix_ratio)))
+        effective_complex_mix_ratio = max(
+            0.0,
+            min(
+                1.0,
+                control_float(
+                    phase_controls,
+                    "hard_mix_ratio",
+                    control_float(phase_controls, "complex_mix_ratio", complex_mix_ratio),
+                ),
+            ),
+        )
         effective_gflownet_loss_weight = max(0.0, control_float(phase_controls, "gflownet_loss_weight", gflownet_loss_weight))
         effective_gflownet_entropy_weight = max(
             0.0,
@@ -2345,6 +2532,7 @@ def main() -> None:
             "gflownet_entropy_target",
             gflownet_entropy_target,
         )
+        effective_graphcg_loss_weight = max(0.0, control_float(phase_controls, "graphcg_loss_weight", graphcg_loss_weight))
         effective_mtp_loss_weight = max(0.0, control_float(phase_controls, "mtp_loss_weight", mtp_loss_weight))
         effective_contrastive_loss_weight = max(
             0.0,
@@ -2371,13 +2559,25 @@ def main() -> None:
         for group in optimizer.param_groups:
             group["lr"] = lr_step
         for accum_idx in range(grad_accum):
-            complex_active = (
-                complex_iterator is not None
-                and step >= int(complex_start_step or 0)
-                and deterministic_ratio_choice(step, accum_idx, effective_complex_mix_ratio)
+            medium_ratio = (
+                effective_medium_mix_ratio
+                if medium_iterator is not None and step >= int(medium_start_step or 0)
+                else 0.0
             )
-            batch = next(complex_iterator if complex_active else iterator)
-            step_complex_microbatches += float(complex_active)
+            hard_ratio = (
+                effective_complex_mix_ratio
+                if complex_iterator is not None and step >= int(complex_start_step or 0)
+                else 0.0
+            )
+            stream_name = choose_difficulty_stream(step, accum_idx, medium_ratio, hard_ratio)
+            if stream_name == "hard" and complex_iterator is not None:
+                batch = next(complex_iterator)
+                step_complex_microbatches += 1.0
+            elif stream_name == "medium" and medium_iterator is not None:
+                batch = next(medium_iterator)
+                step_medium_microbatches += 1.0
+            else:
+                batch = next(iterator)
             tokens = batch["tokens"].to(device, non_blocking=True)
             sample_ids = batch["sample_ids"].to(device, non_blocking=True)
             last_train_batch = {"tokens": tokens.detach(), "sample_ids": sample_ids.detach()}
@@ -2397,6 +2597,7 @@ def main() -> None:
                 else:
                     gflownet_entropy_objective = -gflownet_entropy
                 mtp_loss = out.get("mtp_loss", torch.zeros((), device=device))
+                graphcg_loss = out.get("graphcg_loss", torch.zeros((), device=device))
                 qat_loss = (
                     quantization_grid_loss(qat_named_params, bits=qat_bits)
                     if effective_qat_loss_weight > 0 and qat_named_params
@@ -2419,6 +2620,7 @@ def main() -> None:
                     + effective_gflownet_loss_weight * gflownet_loss
                     + effective_gflownet_entropy_weight * gflownet_entropy_objective
                     + effective_mtp_loss_weight * mtp_loss
+                    + effective_graphcg_loss_weight * graphcg_loss
                     + effective_qat_loss_weight * qat_loss
                     + effective_contrastive_loss_weight * contrastive_loss
                     + effective_trajectory_flow_loss_weight * trajectory_flow_penalty
@@ -2433,6 +2635,13 @@ def main() -> None:
             step_gflownet_entropy_objective += float(gflownet_entropy_objective.detach().cpu())
             step_gflownet_diversity += float(out.get("gflownet_action_diversity", torch.zeros(())).detach().cpu())
             step_mtp_loss += float(mtp_loss.detach().cpu())
+            step_graphcg_loss += float(graphcg_loss.detach().cpu())
+            step_graphcg_code_loss += float(out.get("graphcg_code_loss", torch.zeros(())).detach().cpu())
+            step_graphcg_orthogonal_loss += float(out.get("graphcg_orthogonal_loss", torch.zeros(())).detach().cpu())
+            step_graphcg_covariance_loss += float(out.get("graphcg_covariance_loss", torch.zeros(())).detach().cpu())
+            step_graphcg_sparsity_loss += float(out.get("graphcg_sparsity_loss", torch.zeros(())).detach().cpu())
+            step_graphcg_basis_coherence += float(out.get("graphcg_basis_coherence", torch.zeros(())).detach().cpu())
+            step_graphcg_axis_variance += float(out.get("graphcg_axis_variance", torch.zeros(())).detach().cpu())
             step_qat_loss += float(qat_loss.detach().cpu())
             step_qat_weight += float(effective_qat_loss_weight)
             step_contrastive_loss += float(contrastive_loss.detach().cpu())
@@ -2450,6 +2659,13 @@ def main() -> None:
         step_gflownet_entropy_objective /= grad_accum
         step_gflownet_diversity /= grad_accum
         step_mtp_loss /= grad_accum
+        step_graphcg_loss /= grad_accum
+        step_graphcg_code_loss /= grad_accum
+        step_graphcg_orthogonal_loss /= grad_accum
+        step_graphcg_covariance_loss /= grad_accum
+        step_graphcg_sparsity_loss /= grad_accum
+        step_graphcg_basis_coherence /= grad_accum
+        step_graphcg_axis_variance /= grad_accum
         step_qat_loss /= grad_accum
         step_qat_weight /= grad_accum
         step_contrastive_loss /= grad_accum
@@ -2460,6 +2676,7 @@ def main() -> None:
         step_smear_temperature /= grad_accum
         step_toric_memory_entropy /= grad_accum
         step_toric_entropy_loss /= grad_accum
+        step_medium_microbatches /= grad_accum
         step_complex_microbatches /= grad_accum
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
@@ -2504,6 +2721,14 @@ def main() -> None:
                 "train/gflownet_entropy_weight": effective_gflownet_entropy_weight,
                 "train/mtp_loss": step_mtp_loss,
                 "train/mtp_loss_weight": effective_mtp_loss_weight,
+                "train/graphcg_loss": step_graphcg_loss,
+                "train/graphcg_code_loss": step_graphcg_code_loss,
+                "train/graphcg_orthogonal_loss": step_graphcg_orthogonal_loss,
+                "train/graphcg_covariance_loss": step_graphcg_covariance_loss,
+                "train/graphcg_sparsity_loss": step_graphcg_sparsity_loss,
+                "train/graphcg_basis_coherence": step_graphcg_basis_coherence,
+                "train/graphcg_axis_variance": step_graphcg_axis_variance,
+                "train/graphcg_loss_weight": effective_graphcg_loss_weight,
                 "train/qat_loss": step_qat_loss,
                 "train/qat_loss_weight": effective_qat_base_weight,
                 "train/qat_effective_loss_weight": step_qat_weight,
@@ -2530,11 +2755,24 @@ def main() -> None:
                 "data/coprime_row_stride": float(coprime_row_stride),
                 "data/stream_origin_step": float(stream_origin_step),
                 "data/stream_burnin_steps": float(stream_burnin_steps),
+                "data/difficulty_curriculum_active": float(difficulty_curriculum_enabled),
+                "data/easy_microbatch_fraction": max(
+                    0.0,
+                    1.0 - float(step_medium_microbatches) - float(step_complex_microbatches),
+                ),
+                "data/medium_curriculum_active": float(
+                    medium_iterator is not None and step >= int(medium_start_step or 0)
+                ),
+                "data/medium_microbatch_fraction": step_medium_microbatches,
+                "data/medium_mix_ratio": effective_medium_mix_ratio,
+                "data/medium_start_step": float(medium_start_step or 0),
                 "data/complex_curriculum_active": float(
                     complex_iterator is not None and step >= int(complex_start_step or 0)
                 ),
                 "data/complex_microbatch_fraction": step_complex_microbatches,
                 "data/complex_mix_ratio": effective_complex_mix_ratio,
+                "data/hard_microbatch_fraction": step_complex_microbatches,
+                "data/hard_mix_ratio": effective_complex_mix_ratio,
                 "data/complex_start_step": float(complex_start_step or 0),
                 "eval/score_first_bias_lr": eval_score_first_bias_lr,
                 "phase/index": float(phase_index),
