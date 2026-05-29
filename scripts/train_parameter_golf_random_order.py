@@ -128,6 +128,7 @@ class ParquetByteChunkDataset(IterableDataset):
         max_estimated_tokens: int = 0,
         task_family_keywords: tuple[str, ...] = (),
         dataset_keywords: tuple[str, ...] = (),
+        interleave_row_groups: bool = True,
     ) -> None:
         super().__init__()
         self.files = sorted(glob.glob(parquet_glob))
@@ -145,6 +146,7 @@ class ParquetByteChunkDataset(IterableDataset):
         self.max_estimated_tokens = int(max_estimated_tokens or 0)
         self.task_family_keywords = tuple(keyword.lower() for keyword in task_family_keywords if keyword)
         self.dataset_keywords = tuple(keyword.lower() for keyword in dataset_keywords if keyword)
+        self.interleave_row_groups = bool(interleave_row_groups)
         self._separator_bytes = byte_encode(document_separator, byte_offset=byte_offset) if document_separator else []
 
     def _stride_rows(self, rows: list[dict[str, Any]], epoch: int, worker_id: int) -> list[dict[str, Any]]:
@@ -267,12 +269,25 @@ class ParquetByteChunkDataset(IterableDataset):
         counter = worker_id * 10**12
         epoch = 0
         while True:
-            if self.shuffle_files:
-                rng.shuffle(files)
-            for file_path in files:
+            if self.interleave_row_groups:
+                units: list[tuple[str, int | None]] = []
+                for file_path in files:
+                    try:
+                        parquet = pq.ParquetFile(file_path)
+                        units.extend((file_path, row_group) for row_group in range(parquet.num_row_groups))
+                    except Exception:
+                        units.append((file_path, None))
+                if self.shuffle_files:
+                    rng.shuffle(units)
+            else:
+                if self.shuffle_files:
+                    rng.shuffle(files)
+                units = [(file_path, None) for file_path in files]
+            for file_path, row_group in units:
                 parquet = pq.ParquetFile(file_path)
                 available = [name for name in (*TEXT_COLUMNS, *FILTER_COLUMNS) if name in parquet.schema.names]
-                for batch in parquet.iter_batches(batch_size=self.rows_per_batch, columns=available):
+                row_groups = None if row_group is None else [row_group]
+                for batch in parquet.iter_batches(batch_size=self.rows_per_batch, columns=available, row_groups=row_groups):
                     table = batch.to_pydict()
                     rows = [dict(zip(table, values)) for values in zip(*table.values())]
                     rows = self._stride_rows(rows, epoch=epoch, worker_id=worker_id)
@@ -349,6 +364,7 @@ def build_loader(
     max_estimated_tokens: int = 0,
     task_family_keywords: tuple[str, ...] = (),
     dataset_keywords: tuple[str, ...] = (),
+    interleave_row_groups: bool = True,
 ) -> DataLoader:
     if synthetic or not glob.glob(parquet_glob):
         dataset = SyntheticByteChunkDataset(seq_len=seq_len, vocab_size=vocab_size, seed=seed)
@@ -369,6 +385,7 @@ def build_loader(
             max_estimated_tokens=max_estimated_tokens,
             task_family_keywords=task_family_keywords,
             dataset_keywords=dataset_keywords,
+            interleave_row_groups=interleave_row_groups,
         )
     return DataLoader(
         dataset,
@@ -409,6 +426,69 @@ def deterministic_ratio_choice(step: int, accum_idx: int, ratio: float) -> bool:
         return True
     value = (step * 1_103_515_245 + accum_idx * 12_345 + 97_531) & 0xFFFF_FFFF
     return (value / 0x1_0000_0000) < ratio
+
+
+PHASE_CONTROL_KEYS = {
+    "complex_mix_ratio",
+    "gflownet_loss_weight",
+    "gflownet_entropy_weight",
+    "gflownet_entropy_target",
+    "trajectory_flow_loss_weight",
+    "contrastive_loss_weight",
+    "mtp_loss_weight",
+    "toric_entropy_loss_weight",
+    "qat_loss_weight",
+    "qat_start_step",
+    "qat_warmup_steps",
+    "lr_multiplier",
+}
+
+
+def active_phase_controls(config: dict[str, Any], step: int) -> tuple[dict[str, Any], str, int]:
+    """Return scheduled training controls for an absolute step.
+
+    The phase curriculum is intentionally a light wrapper over scalar controls:
+    it does not change architecture or optimizer state, and it can be inspected
+    directly in W&B through the active phase metrics.
+    """
+
+    section = config.get("phase_curriculum", {}) or {}
+    if not bool(section.get("enabled", False)):
+        return {}, "disabled", -1
+    phases = section.get("phases", [])
+    if not isinstance(phases, list):
+        return {}, "malformed", -1
+    fallback: tuple[dict[str, Any], str, int] = ({}, "none", -1)
+    for index, raw_phase in enumerate(phases):
+        if not isinstance(raw_phase, dict):
+            continue
+        start = int(raw_phase.get("start_step", 0) or 0)
+        end_value = raw_phase.get("end_step")
+        end = None if end_value is None else int(end_value)
+        if int(step) < start:
+            continue
+        if end is not None and int(step) >= end:
+            continue
+        controls = {key: raw_phase[key] for key in PHASE_CONTROL_KEYS if key in raw_phase}
+        name = str(raw_phase.get("name", f"phase_{index}"))
+        return controls, name, index
+    return fallback
+
+
+def control_float(controls: dict[str, Any], key: str, default: float) -> float:
+    value = controls.get(key, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def control_int(controls: dict[str, Any], key: str, default: int) -> int:
+    value = controls.get(key, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
 
 
 @dataclass
@@ -1067,6 +1147,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-parquet-glob")
     parser.add_argument("--checkpoint-dir")
     parser.add_argument("--resume")
+    parser.add_argument("--reset-optimizer", action="store_true")
     parser.add_argument("--synthetic", action="store_true")
     parser.add_argument("--device")
     parser.add_argument("--precision", choices=["bf16", "fp16", "fp32"])
@@ -1471,6 +1552,8 @@ def main() -> None:
         if args.no_coprime_row_stride
         else bool(args.coprime_row_stride or config_get(file_config, "data", "coprime_row_stride", True))
     )
+    interleave_row_groups = bool(config_get(file_config, "data", "interleave_row_groups", True))
+    resume_aware_stream_seed = bool(config_get(file_config, "data", "resume_aware_stream_seed", True))
     document_separator = (
         args.document_separator if args.document_separator is not None else config_get(file_config, "data", "document_separator", "\n\n")
     )
@@ -1556,12 +1639,22 @@ def main() -> None:
                     }
                 )
             )
+        elif args.reset_optimizer:
+            print(
+                json.dumps(
+                    {
+                        "resume_notice": "optimizer_state_reset_requested",
+                        "checkpoint": args.resume,
+                    }
+                )
+            )
         else:
             optimizer.load_state_dict(payload["optimizer"])
             optimizer_state_loaded = True
         start_step = int(payload.get("step", 0))
         resume_metrics = payload.get("metrics", {})
         best_val = float(resume_metrics.get("val_bpb", resume_metrics.get("best_val_bpb", best_val)))
+    stream_seed_offset = int(start_step if resume_aware_stream_seed else 0)
 
     adaptive_controller = AdaptiveTrainingController.from_config(
         file_config,
@@ -1598,7 +1691,7 @@ def main() -> None:
         seq_len=model_config.max_seq_len,
         byte_offset=model_config.byte_offset,
         rows_per_batch=rows_per_batch,
-        seed=seed,
+        seed=seed + stream_seed_offset,
         workers=workers,
         repeat=True,
         synthetic=args.synthetic,
@@ -1611,6 +1704,7 @@ def main() -> None:
         max_estimated_tokens=int(max_estimated_tokens or 0),
         task_family_keywords=task_family_keywords,
         dataset_keywords=dataset_keywords,
+        interleave_row_groups=interleave_row_groups,
     )
     complex_train_loader = None
     if int(complex_start_step or 0) > 0:
@@ -1620,7 +1714,7 @@ def main() -> None:
             seq_len=model_config.max_seq_len,
             byte_offset=model_config.byte_offset,
             rows_per_batch=rows_per_batch,
-            seed=seed + 500_000,
+            seed=seed + 500_000 + stream_seed_offset,
             workers=workers,
             repeat=True,
             synthetic=args.synthetic,
@@ -1633,6 +1727,7 @@ def main() -> None:
             max_estimated_tokens=int(complex_max_estimated_tokens or 0),
             task_family_keywords=complex_task_family_keywords,
             dataset_keywords=complex_dataset_keywords,
+            interleave_row_groups=interleave_row_groups,
         )
     val_loader = build_loader(
         parquet_glob=val_glob,
@@ -1653,6 +1748,7 @@ def main() -> None:
         max_estimated_tokens=int(max_estimated_tokens or 0),
         task_family_keywords=task_family_keywords,
         dataset_keywords=dataset_keywords,
+        interleave_row_groups=interleave_row_groups,
     )
 
     use_wandb = bool(args.wandb or config_get(file_config, "logging", "wandb", False)) and not args.no_wandb
@@ -1716,6 +1812,9 @@ def main() -> None:
                     "include_graph_projection": include_graph_projection,
                     "graph_projection_max_chars": graph_projection_max_chars,
                     "coprime_row_stride": coprime_row_stride,
+                    "interleave_row_groups": interleave_row_groups,
+                    "resume_aware_stream_seed": resume_aware_stream_seed,
+                    "stream_seed_offset": stream_seed_offset,
                     "document_separator": document_separator,
                     "min_estimated_tokens": min_estimated_tokens,
                     "max_estimated_tokens": max_estimated_tokens,
@@ -1729,6 +1828,7 @@ def main() -> None:
                     "complex_dataset_keywords": list(complex_dataset_keywords),
                 },
                 "adaptive_training": adaptive_controller.state_dict(),
+                "phase_curriculum": file_config.get("phase_curriculum", {}),
                 "artifact": {
                     "initial_bytes": report.bytes_total,
                     "estimated_tensor_bytes": estimated_tensor_bytes,
@@ -1760,6 +1860,9 @@ def main() -> None:
             "include_graph_projection": include_graph_projection,
             "graph_projection_max_chars": graph_projection_max_chars,
             "coprime_row_stride": coprime_row_stride,
+            "interleave_row_groups": interleave_row_groups,
+            "resume_aware_stream_seed": resume_aware_stream_seed,
+            "stream_seed_offset": stream_seed_offset,
             "document_separator": document_separator,
             "min_estimated_tokens": min_estimated_tokens,
             "max_estimated_tokens": max_estimated_tokens,
@@ -1786,6 +1889,7 @@ def main() -> None:
             "qat_warmup_steps": qat_warmup_steps,
             "complex_mix_ratio": complex_mix_ratio,
             "adaptive_training": adaptive_controller.state_dict(),
+            "phase_curriculum": file_config.get("phase_curriculum", {}),
             "resize_position_embedding": resize_position_embedding,
             "optimizer_state_loaded": optimizer_state_loaded,
             "hf_publish_best": publish_best_to_hf,
@@ -1830,11 +1934,40 @@ def main() -> None:
         step_toric_entropy_loss = 0.0
         step_complex_microbatches = 0.0
         last_train_batch: dict[str, torch.Tensor] | None = None
-        lr_step = cosine_lr(step, lr, warmup_steps, steps)
-        effective_qat_loss_weight = qat_loss_weight * linear_ramp(
+        phase_controls, phase_name, phase_index = active_phase_controls(file_config, step)
+        effective_complex_mix_ratio = max(0.0, min(1.0, control_float(phase_controls, "complex_mix_ratio", complex_mix_ratio)))
+        effective_gflownet_loss_weight = max(0.0, control_float(phase_controls, "gflownet_loss_weight", gflownet_loss_weight))
+        effective_gflownet_entropy_weight = max(
+            0.0,
+            control_float(phase_controls, "gflownet_entropy_weight", gflownet_entropy_weight),
+        )
+        effective_gflownet_entropy_target = control_float(
+            phase_controls,
+            "gflownet_entropy_target",
+            gflownet_entropy_target,
+        )
+        effective_mtp_loss_weight = max(0.0, control_float(phase_controls, "mtp_loss_weight", mtp_loss_weight))
+        effective_contrastive_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "contrastive_loss_weight", contrastive_loss_weight),
+        )
+        effective_trajectory_flow_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "trajectory_flow_loss_weight", trajectory_flow_loss_weight),
+        )
+        effective_toric_entropy_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "toric_entropy_loss_weight", toric_entropy_loss_weight),
+        )
+        effective_qat_base_weight = max(0.0, control_float(phase_controls, "qat_loss_weight", qat_loss_weight))
+        effective_qat_start_step = control_int(phase_controls, "qat_start_step", int(qat_start_step or 0))
+        effective_qat_warmup_steps = control_int(phase_controls, "qat_warmup_steps", int(qat_warmup_steps or 0))
+        effective_lr_multiplier = max(0.0, control_float(phase_controls, "lr_multiplier", 1.0))
+        lr_step = cosine_lr(step, lr * effective_lr_multiplier, warmup_steps, steps)
+        effective_qat_loss_weight = effective_qat_base_weight * linear_ramp(
             step,
-            int(qat_start_step or 0),
-            int(qat_warmup_steps or 0),
+            effective_qat_start_step,
+            effective_qat_warmup_steps,
         )
         for group in optimizer.param_groups:
             group["lr"] = lr_step
@@ -1842,7 +1975,7 @@ def main() -> None:
             complex_active = (
                 complex_iterator is not None
                 and step >= int(complex_start_step or 0)
-                and deterministic_ratio_choice(step, accum_idx, complex_mix_ratio)
+                and deterministic_ratio_choice(step, accum_idx, effective_complex_mix_ratio)
             )
             batch = next(complex_iterator if complex_active else iterator)
             step_complex_microbatches += float(complex_active)
@@ -1854,14 +1987,14 @@ def main() -> None:
                     tokens,
                     sample_ids=sample_ids,
                     pass_id=step * grad_accum + accum_idx,
-                    sample_gflownet=model_config.use_gflownet_policy and gflownet_loss_weight > 0,
+                    sample_gflownet=model_config.use_gflownet_policy and effective_gflownet_loss_weight > 0,
                     gflownet_samples=1,
                 )
                 micro_loss = out["loss"]
                 gflownet_loss = out.get("gflownet_loss", torch.zeros((), device=device))
                 gflownet_entropy = out.get("gflownet_entropy", torch.zeros((), device=device))
-                if float(gflownet_entropy_target) >= 0:
-                    gflownet_entropy_objective = (gflownet_entropy - float(gflownet_entropy_target)).pow(2)
+                if float(effective_gflownet_entropy_target) >= 0:
+                    gflownet_entropy_objective = (gflownet_entropy - float(effective_gflownet_entropy_target)).pow(2)
                 else:
                     gflownet_entropy_objective = -gflownet_entropy
                 mtp_loss = out.get("mtp_loss", torch.zeros((), device=device))
@@ -1879,18 +2012,18 @@ def main() -> None:
                 toric_memory_entropy = out.get("toric_memory_entropy", torch.zeros((), device=device))
                 toric_entropy_loss = (
                     torch.relu(torch.as_tensor(float(toric_entropy_floor), device=device) - toric_memory_entropy).pow(2)
-                    if toric_entropy_loss_weight > 0 and float(toric_entropy_floor) > 0
+                    if effective_toric_entropy_loss_weight > 0 and float(toric_entropy_floor) > 0
                     else torch.zeros((), device=device)
                 )
                 total_micro_loss = (
                     micro_loss
-                    + gflownet_loss_weight * gflownet_loss
-                    + gflownet_entropy_weight * gflownet_entropy_objective
-                    + mtp_loss_weight * mtp_loss
+                    + effective_gflownet_loss_weight * gflownet_loss
+                    + effective_gflownet_entropy_weight * gflownet_entropy_objective
+                    + effective_mtp_loss_weight * mtp_loss
                     + effective_qat_loss_weight * qat_loss
-                    + contrastive_loss_weight * contrastive_loss
-                    + trajectory_flow_loss_weight * trajectory_flow_penalty
-                    + toric_entropy_loss_weight * toric_entropy_loss
+                    + effective_contrastive_loss_weight * contrastive_loss
+                    + effective_trajectory_flow_loss_weight * trajectory_flow_penalty
+                    + effective_toric_entropy_loss_weight * toric_entropy_loss
                 )
                 loss = total_micro_loss / grad_accum
             loss.backward()
@@ -1966,30 +2099,30 @@ def main() -> None:
                 "train/gflownet_loss": step_gflownet_loss,
                 "train/gflownet_entropy": step_gflownet_entropy,
                 "train/gflownet_entropy_objective": step_gflownet_entropy_objective,
-                "train/gflownet_entropy_target": float(gflownet_entropy_target),
+                "train/gflownet_entropy_target": float(effective_gflownet_entropy_target),
                 "train/gflownet_action_diversity": step_gflownet_diversity,
-                "train/gflownet_loss_weight": gflownet_loss_weight,
-                "train/gflownet_entropy_weight": gflownet_entropy_weight,
+                "train/gflownet_loss_weight": effective_gflownet_loss_weight,
+                "train/gflownet_entropy_weight": effective_gflownet_entropy_weight,
                 "train/mtp_loss": step_mtp_loss,
-                "train/mtp_loss_weight": mtp_loss_weight,
+                "train/mtp_loss_weight": effective_mtp_loss_weight,
                 "train/qat_loss": step_qat_loss,
-                "train/qat_loss_weight": qat_loss_weight,
+                "train/qat_loss_weight": effective_qat_base_weight,
                 "train/qat_effective_loss_weight": step_qat_weight,
-                "train/qat_start_step": float(qat_start_step or 0),
+                "train/qat_start_step": float(effective_qat_start_step),
                 "train/qat_bits": qat_bits,
                 "train/contrastive_loss": step_contrastive_loss,
-                "train/contrastive_loss_weight": contrastive_loss_weight,
+                "train/contrastive_loss_weight": effective_contrastive_loss_weight,
                 "train/trajectory_flow_loss": step_trajectory_flow_loss,
                 "train/trajectory_flow_penalty": step_trajectory_flow_penalty,
                 "train/trajectory_flow_target": float(trajectory_flow_target),
-                "train/trajectory_flow_loss_weight": trajectory_flow_loss_weight,
+                "train/trajectory_flow_loss_weight": effective_trajectory_flow_loss_weight,
                 "train/trajectory_kinetic_energy": step_trajectory_kinetic,
                 "train/trajectory_viscous_dissipation": step_trajectory_viscous,
                 "train/smear_temperature": step_smear_temperature,
                 "train/toric_memory_entropy": step_toric_memory_entropy,
                 "train/toric_entropy_floor": float(toric_entropy_floor),
                 "train/toric_entropy_loss": step_toric_entropy_loss,
-                "train/toric_entropy_loss_weight": float(toric_entropy_loss_weight),
+                "train/toric_entropy_loss_weight": float(effective_toric_entropy_loss_weight),
                 "artifact/initial_bytes": report.bytes_total,
                 "artifact/estimated_tensor_bytes": estimated_tensor_bytes,
                 "artifact/deployment_parameters": report.deployment_parameters,
@@ -2000,9 +2133,13 @@ def main() -> None:
                     complex_iterator is not None and step >= int(complex_start_step or 0)
                 ),
                 "data/complex_microbatch_fraction": step_complex_microbatches,
-                "data/complex_mix_ratio": complex_mix_ratio,
+                "data/complex_mix_ratio": effective_complex_mix_ratio,
                 "data/complex_start_step": float(complex_start_step or 0),
                 "eval/score_first_bias_lr": eval_score_first_bias_lr,
+                "phase/index": float(phase_index),
+                "phase/lr_multiplier": float(effective_lr_multiplier),
+                "phase/base_gflownet_loss_weight": float(gflownet_loss_weight),
+                "phase/base_complex_mix_ratio": float(complex_mix_ratio),
             }
             metrics.update(adaptive_controller.log_metrics())
             if audit_error is not None:

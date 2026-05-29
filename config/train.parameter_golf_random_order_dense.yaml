@@ -42,12 +42,20 @@ data:
   include_graph_projection: true
   graph_projection_max_chars: 4096
   coprime_row_stride: true
+  # Mix row groups across shards instead of reading whole Parquet shards in
+  # long contiguous stretches.  This removes the easy-then-hard file cycle that
+  # showed up as a repeatable ~750-step BPB ricochet after rollbacks.
+  interleave_row_groups: true
+  # A rollback should not replay the identical data order.  The seed is offset
+  # by the checkpoint step after loading, while validation remains fixed.
+  resume_aware_stream_seed: true
   document_separator: "\n\n"
-  # After warmup, mix in larger technical composite rows while keeping ordinary
-  # byte compression pressure active. This step has already been reached in the
-  # current oai run, so a resume activates the mixture immediately.
-  complex_start_step: 1000
-  complex_mix_ratio: 0.10
+  # Larger technical composite rows are delayed on the step-1000 restart.  The
+  # previous runs showed good reasoning diagnostics but repeated BPB ricochets
+  # when auxiliary pressure and hard rows arrived before byte compression had
+  # settled into a stable basin.
+  complex_start_step: 12000
+  complex_mix_ratio: 0.00
   complex_min_estimated_tokens: 256
   complex_task_family_keywords:
     - math
@@ -65,35 +73,35 @@ training:
   max_steps: 50000
   batch_size: 2
   grad_accum_steps: 16
-  # Step-window analysis around 21.25k/22.5k/24k showed useful validation
-  # improvement but branch-quality drift at the previous rate.  Keep the
-  # optimizer moments from the checkpoint and lower the scheduled LR.
-  lr: 0.00009
+  # The step-1000 restart resets optimizer moments and uses a slower warmup.
+  # This treats the checkpoint as a useful representation initializer while
+  # removing stale Adam state from later unstable curricula.
+  lr: 0.000040
   weight_decay: 0.05
-  warmup_steps: 1000
+  warmup_steps: 2000
   precision: bf16
   device: cuda
   seed: 17
   log_interval: 10
-  eval_interval: 500
+  eval_interval: 250
   eval_batches: 20
   eval_order_samples: 1
   eval_gflownet_samples: 2
-  gflownet_loss_weight: 0.010
+  gflownet_loss_weight: 0.001
   # Target policy entropy keeps branching noncollapsed without rewarding a
   # permanently uniform GFlowNet policy.
-  gflownet_entropy_weight: 0.01
-  gflownet_entropy_target: 2.05
+  gflownet_entropy_weight: 0.0005
+  gflownet_entropy_target: 2.00
   toric_entropy_floor: 0.20
-  toric_entropy_loss_weight: 0.003
-  mtp_loss_weight: 0.05
-  qat_loss_weight: 0.0000002
+  toric_entropy_loss_weight: 0.001
+  mtp_loss_weight: 0.01
+  qat_loss_weight: 0.0000001
   qat_bits: 6
   qat_max_tensors: 2
-  qat_start_step: 18000
-  qat_warmup_steps: 4000
-  contrastive_loss_weight: 0.01
-  trajectory_flow_loss_weight: 0.003
+  qat_start_step: 25000
+  qat_warmup_steps: 5000
+  contrastive_loss_weight: 0.001
+  trajectory_flow_loss_weight: 0.0001
   trajectory_flow_target: 0.075
   eval_score_first_bias_lr: 0.025
   eval_score_first_bias_decay: 0.98
@@ -114,31 +122,82 @@ complexity:
 
 adaptive_training:
   enabled: true
-  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_23250_recovery.json
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01000_restart.json
   # Checkpoint-level controller only: updates after eval windows, never per
   # microbatch.  It keeps the architecture and optimizer state fixed while
   # gently tuning the three controls identified by the 23.25k rollback analysis.
-  entropy_target_min: 2.05
+  entropy_target_min: 2.00
   entropy_target_tau_steps: 8000
-  gflownet_loss_min: 0.006
-  gflownet_loss_max: 0.014
-  gflownet_gap_step: 0.0005
+  gflownet_loss_min: 0.001
+  gflownet_loss_max: 0.006
+  gflownet_gap_step: 0.00025
   gflownet_relax_step: 0.0005
-  complex_mix_min: 0.06
-  complex_mix_max: 0.18
-  complex_down_step: 0.04
-  complex_up_step: 0.0
+  complex_mix_min: 0.00
+  complex_mix_max: 0.04
+  complex_down_step: 0.03
+  complex_up_step: 0.005
   train_bpb_ema_beta: 0.70
-  train_drift_threshold: 0.02
+  train_drift_threshold: 0.01
   val_improvement_delta: 0.002
-  warmup_updates: 1
+  warmup_updates: 2
   reset_on_start_step_mismatch: true
-  gflownet_increase_drift_guard: 0.03
+  gflownet_increase_drift_guard: 0.00
   recovery_mode_enabled: true
-  recovery_train_drift_threshold: 0.08
+  recovery_train_drift_threshold: 0.04
   recovery_complex_down_step: 0.04
-  recovery_gflownet_down_step: 0.001
-  recovery_exit_val_improvements: 2
+  recovery_gflownet_down_step: 0.00075
+  recovery_exit_val_improvements: 3
+
+phase_curriculum:
+  enabled: true
+  phases:
+    - name: bpb_stabilization
+      start_step: 1000
+      end_step: 6000
+      lr_multiplier: 1.0
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.001
+      mtp_loss_weight: 0.01
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: light_gflownet_alignment
+      start_step: 6000
+      end_step: 12000
+      lr_multiplier: 1.0
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.001
+      gflownet_entropy_weight: 0.0005
+      gflownet_entropy_target: 2.0
+      trajectory_flow_loss_weight: 0.0001
+      contrastive_loss_weight: 0.0015
+      mtp_loss_weight: 0.015
+      toric_entropy_loss_weight: 0.00025
+      qat_loss_weight: 0.0
+    - name: adaptive_reasoning_curriculum
+      start_step: 12000
+      end_step: 25000
+      lr_multiplier: 1.0
+      gflownet_entropy_target: 2.0
+      trajectory_flow_loss_weight: 0.00025
+      contrastive_loss_weight: 0.002
+      mtp_loss_weight: 0.02
+      toric_entropy_loss_weight: 0.0005
+      qat_loss_weight: 0.0
+    - name: compression_and_scaling
+      start_step: 25000
+      end_step:
+      lr_multiplier: 0.85
+      gflownet_entropy_target: 2.0
+      trajectory_flow_loss_weight: 0.0004
+      contrastive_loss_weight: 0.003
+      mtp_loss_weight: 0.03
+      toric_entropy_loss_weight: 0.001
+      qat_loss_weight: 0.0000001
+      qat_start_step: 25000
+      qat_warmup_steps: 5000
 
 checkpoint_publishing:
   enabled: true

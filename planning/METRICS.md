@@ -1208,3 +1208,461 @@ restoring gradient alignment with BPB. The goal for the next analysis window is
 not merely lower GFlowNet loss; it is simultaneous improvement in `val/bpb`,
 `complexity/val/bpb`, and budget-2 simplex BPB without a further drop in
 GFlowNet diversity below roughly `0.95`.
+
+## Recovery Reanalysis: Step 24,000 vs Step 25,500
+
+Date: 2026-05-29 UTC.
+
+Run analyzed: `oai-resume-23250-recovery`
+(`amelie-iska-math/toricgt-parameter-golf/7qcwgddn`). Training was paused
+before analysis. The latest checkpoint from the paused recovery lineage is
+`checkpoints/parameter_golf_oai_dense/random_order_step_00025500.pt`; the older
+`25750` and `26000` files in the same directory belong to a previous lineage and
+are not part of this recovery run. The comparison target requested here is
+`checkpoints/parameter_golf_oai_dense/random_order_step_00024000.pt`.
+
+Generated artifacts:
+
+- W&B metrics export and plots:
+  `outputs/recovery_analysis/oai-resume-23250-recovery/step-00025500/metrics/`
+- Step 24k simplex:
+  `outputs/recovery_analysis/oai-resume-23250-recovery/step-00024000/simplex/`
+- Step 24k geometry:
+  `outputs/recovery_analysis/oai-resume-23250-recovery/step-00024000/geometry/`
+- Step 25.5k simplex:
+  `outputs/recovery_analysis/oai-resume-23250-recovery/step-00025500/simplex/`
+- Step 25.5k geometry:
+  `outputs/recovery_analysis/oai-resume-23250-recovery/step-00025500/geometry/`
+- Contact sheets:
+  `contact_simplex_geometry.png`, `contact_trajectories_3d.png`, and
+  `contact_energy_phase.png` in each step directory.
+
+### Metric Categorization
+
+The automatic metric analysis over steps `23260`--`25730` categorized 138
+metrics as desired, 54 as desired but too weak/slow, and 50 as not desired.
+
+Desired:
+
+- `train/gflownet_loss` dropped from median `2.2915` to `1.5215`
+  (`-33.6%`). The policy objective is learnable and continues to improve.
+- `train/contrastive_loss` dropped from median `0.4283` to `0.2916`
+  (`-31.9%`). The contrastive regularizer is not the immediate failure point.
+- Artifact-size and parameter-count diagnostics remained stable. The model is
+  still within the Parameter-Golf byte budget envelope.
+
+Desired but not strong or fast enough:
+
+- `val/bpb` improved from `4.8951` at step `23500` to `4.89299` at `24000`,
+  `4.88988` at `24500`, `4.88681` at `25000`, then regressed slightly to
+  `4.88727` at `25500`. The total improvement is real but small
+  (`-0.12%` over the interval), and the last point no longer improves.
+- `complexity/val/bpb` improved from `4.8510` at `23500` to `4.8212` at
+  `25500`, but the curve is noisy and partially decoupled from train BPB.
+- `complexity/val/argmax_byte_accuracy` stayed flat at about `0.2007`.
+  Better BPB is not yet translating into sharper argmax byte accuracy.
+- `audit/future_permutation_logit_error` remains zero. Causal/random-order
+  leakage checks are behaving correctly but do not explain quality.
+
+Not desired:
+
+- `train/bpb` rose from median `4.5364` to `4.8395`, with recent slope
+  `+0.0384 BPB / 1k steps`. This is the central failure signal.
+- `train/loss` and `train/total_loss` rose by the same relative amount
+  (`+6.7%` and `+6.3%`), confirming that the BPB rise is not a logging artifact.
+- `controller/train_bpb_drift` reached `0.1167`, triggering recovery. Recovery
+  reduced complex mix and GFlowNet weight, but not enough to restore the
+  training descent basin.
+- `train/trajectory_flow_loss` increased from median `0.0639` to `0.0824`.
+  Graph-of-thought trajectories became less smooth while policy loss improved.
+- `train/toric_memory_entropy` fell from median `0.2714` to `0.2482`.
+  Toric memory remains active, but phase-channel usage is narrowing.
+
+### Paired Checkpoint Diagnostics
+
+Simplex evaluation on the same four-record validation subset:
+
+| checkpoint | budget | BPB | MST efficiency | trajectory tokens |
+|---:|---:|---:|---:|---:|
+| 24,000 | 1 | `3.97288` | `0.69005` | `2048` |
+| 24,000 | 2 | `3.97998` | `0.72785` | `12288` |
+| 24,000 | 4 | `3.98344` | `0.73602` | `65536` |
+| 24,000 | 8 | `3.98184` | `0.72773` | `65536` |
+| 25,500 | 1 | `3.98351` | `0.65923` | `2048` |
+| 25,500 | 2 | `3.98783` | `0.68580` | `12288` |
+| 25,500 | 4 | `3.98996` | `0.69456` | `65536` |
+| 25,500 | 8 | `3.98746` | `0.69194` | `65536` |
+
+On this simplex subset, step `24,000` dominates step `25,500` on BPB at every
+budget and on MST efficiency at every budget. Extra budget still improves MST
+structure, but it does not lower BPB; the budget-1 point remains the best BPB
+point for both checkpoints.
+
+Geometry evaluation on eight reasoning-heavy records and eighty branches:
+
+| checkpoint | mean BPB | best BPB | mean answer BPB | best answer BPB | MST efficiency | path smoothness |
+|---:|---:|---:|---:|---:|---:|---:|
+| 24,000 | `4.730398` | `4.011565` | `4.622873` | `3.560267` | `0.524038` | `0.084782` |
+| 25,500 | `4.730176` | `4.020794` | `4.623317` | `3.580964` | `0.507104` | `0.104583` |
+
+The global mean BPB is statistically tied, but step `24,000` has better best
+branch BPB, better answer BPB, better MST efficiency, and lower path
+roughness. This matters because the intended test-time scaling mode depends on
+branch selection: the tails and minima are more relevant than a near-tied branch
+mean.
+
+### Plot Interpretation
+
+The step-24k simplex plots show budget points moving toward higher MST
+efficiency with small BPB penalty. The step-25.5k simplex plots show the same
+direction but with uniformly worse BPB colors and weaker MST movement. In both
+cases, the BPB color field does not reward longer reasoning budgets yet; this
+means the GFlowNet policy is producing richer trajectories before the base LM
+can reliably score or select them.
+
+The 3D trajectory contact sheets show persistent attractor clouds with long
+excursions. Step `25,500` is visibly more diffuse on several frontier-reasoning
+and math records. Hebrew text remains the most coherent manifold. The
+Ramachandran-style phase/energy sheets show useful toric modes but no clean
+alignment between phase trajectory and low-BPB terminal branches. The energy
+landscape has many shallow local basins rather than a small number of reliable
+descent channels.
+
+Mathematically, the training objective has entered a gradient-misaligned regime.
+Writing
+
+\[
+\nabla \mathcal L =
+\nabla \mathcal L_{\mathrm{BPB}}
++\lambda_{\mathrm{GFN}}\nabla \mathcal L_{\mathrm{GFN}}
++\lambda_{\mathrm{flow}}\nabla \mathcal L_{\mathrm{flow}}
++\lambda_{\mathrm{cmp}}\nabla \mathcal L_{\mathrm{complex}},
+\]
+
+the observed signs imply
+
+\[
+\left\langle \nabla \mathcal L_{\mathrm{BPB}},
+\lambda_{\mathrm{GFN}}\nabla \mathcal L_{\mathrm{GFN}}
++\lambda_{\mathrm{flow}}\nabla \mathcal L_{\mathrm{flow}}
++\lambda_{\mathrm{cmp}}\nabla \mathcal L_{\mathrm{complex}}
+\right\rangle > 0
+\]
+
+over the recent interval. GFlowNet and contrastive objectives are improving in
+their own coordinates, but their resultant update is partly adverse to byte
+likelihood. The correct response is not to remove ToricGT structure; it is to
+temporarily lower the auxiliary-gradient norm until BPB re-enters a descending
+basin.
+
+### Updated Proposal Before Resuming
+
+Do not resume from step `25,500`. Resume around step `24,000` using
+`checkpoints/parameter_golf_oai_dense/random_order_step_00024000.pt`. This
+checkpoint is close enough to retain the useful recovery-run validation
+improvement, but it precedes most of the train-BPB drift and preserves better
+simplex/geometry behavior.
+
+Recommended low-disturbance repair phase for the next `1000`--`1500` steps:
+
+1. **Resume checkpoint**:
+   `checkpoints/parameter_golf_oai_dense/random_order_step_00024000.pt`.
+
+2. **Lower the scheduled LR** from `9e-5` to `7e-5` or `6e-5`.
+   The current gradients are not exploding, but the auxiliary-gradient mixture
+   is changing the basin too quickly. A lower base LR preserves optimizer state
+   while reducing step length.
+
+3. **Throttle complex rows harder**:
+   start `complex_mix_ratio=0.03`, set `complex_mix_min=0.00`,
+   `complex_mix_max=0.08`, `complex_down_step=0.03`, and keep
+   `complex_up_step=0.0` until two consecutive validation-BPB improvements and
+   nonpositive train-BPB drift. The previous floor `0.06` was not low enough.
+
+4. **Clamp GFlowNet weight lower during repair**:
+   start `gflownet_loss_weight=0.006`, set `gflownet_loss_min=0.003`,
+   `gflownet_loss_max=0.010`, and forbid increases while
+   `controller/train_bpb_drift > 0.00`. GFlowNet loss is already improving; it
+   should not compete with the BPB repair gradient.
+
+5. **Reduce entropy and flow shaping temporarily**:
+   set `gflownet_entropy_weight=0.005` and
+   `trajectory_flow_loss_weight=0.0015` for the repair window. Entropy/diversity
+   are already near saturation; flow loss is rising, so further pressure here
+   is currently not buying lower BPB.
+
+6. **Keep the ToricGT-specific mechanisms active**:
+   retain hybrid/tropical-ring attention, random-order autoregression,
+   graph projections, toric memory, Kolmogorov metrics, and checkpoint
+   publishing. The plots show these mechanisms are active; the issue is
+   weighting and curriculum, not architectural failure.
+
+7. **Analysis trigger**:
+   re-run W&B, simplex, and geometry analysis after `1000` steps and again after
+   `1500` steps if the run is still descending. Success criterion: train BPB
+   median below the 24k--24.25k median, `val/bpb <= 4.889`, simplex budget-1
+   BPB no worse than `3.973`, and MST efficiency no worse than `0.70` at budget
+   `2` or `4`.
+
+If the repair phase succeeds, gradually reintroduce complex rows by increasing
+`complex_mix_max` to `0.12` only after validation and simplex BPB both improve.
+If it fails, rollback to `23250` remains safer than advancing to `25500`.
+
+### Repair Phase Implementation
+
+Implemented in `config/train.parameter_golf_random_order_dense.yaml` before
+resuming:
+
+- `lr=0.000065`
+- `complex_mix_ratio=0.03`
+- `complex_mix_min=0.00`, `complex_mix_max=0.08`, `complex_down_step=0.03`
+- `gflownet_loss_weight=0.006`
+- `gflownet_loss_min=0.003`, `gflownet_loss_max=0.010`
+- `gflownet_increase_drift_guard=0.00`
+- `gflownet_entropy_weight=0.005`
+- `trajectory_flow_loss_weight=0.0015`
+- fresh controller state path:
+  `checkpoints/parameter_golf_oai_dense/adaptive_controller_state_24000_repair.json`
+
+Resume target:
+`checkpoints/parameter_golf_oai_dense/random_order_step_00024000.pt`.
+
+Next automatic analysis target: first new checkpoint at or above step `25000`
+from this repair lineage, then a second manual assessment before deciding
+whether to keep the repair schedule, loosen the complex curriculum, or roll
+back again.
+
+## Bounce Analysis: Step 24,750 vs Step 26,250
+
+Date: 2026-05-29 UTC.
+
+Run analyzed: `oai-resume-24000-repair`
+(`amelie-iska-math/toricgt-parameter-golf/vrpn699z`). Training was paused
+before this analysis. The latest checkpoint in that run was
+`checkpoints/parameter_golf_oai_dense/random_order_step_00026250.pt`.
+
+Generated artifacts:
+
+- W&B metrics export and plots:
+  `outputs/bounce_analysis/oai-resume-24000-repair/step-00026250/metrics/`
+- Step 24,750 simplex:
+  `outputs/bounce_analysis/oai-resume-24000-repair/step-00024750/simplex/`
+- Step 24,750 geometry:
+  `outputs/bounce_analysis/oai-resume-24000-repair/step-00024750/geometry/`
+- Step 26,250 simplex:
+  `outputs/bounce_analysis/oai-resume-24000-repair/step-00026250/simplex/`
+- Step 26,250 geometry:
+  `outputs/bounce_analysis/oai-resume-24000-repair/step-00026250/geometry/`
+- Contact sheets:
+  `contact_simplex_geometry.png`, `contact_trajectories_3d.png`, and
+  `contact_energy_phase.png` in each paired step directory.
+
+### Metric Categorization
+
+The W&B export through step `26270` categorized 138 metrics as desired, 56 as
+desired but too weak/slow, and 48 as not desired.
+
+Desired:
+
+- `val/bpb` improved from `4.897071` at step `24500` to `4.888446` at
+  step `26000`. The validation curve is shallow but still descending.
+- `train/gflownet_loss` fell from median `2.2214` to `1.5741`
+  (`-29.1%`). The graph-of-thought policy objective remains learnable.
+- `train/contrastive_loss` fell from median `0.4529` to `0.2881`
+  (`-36.4%`), so representation alignment itself is not diverging.
+- `audit/future_permutation_logit_error` stayed exactly zero. Random-order
+  autoregressive decoding remains causal under the future-permutation audit.
+
+Desired but not strong or fast enough:
+
+- `val/bpb` is improving too slowly: recent slope is about
+  `-0.0019 BPB / 1k steps`, far below the competition target trajectory.
+- `complexity/val/argmax_byte_accuracy` stayed flat around `0.2007`. The
+  likelihood distribution improves marginally but is not sharpening.
+- `train/gflownet_entropy` and `train/gflownet_action_diversity` are near
+  saturation and slightly declining. Exploration is still broad, but broad
+  exploration is not being converted into lower BPB.
+
+Not desired:
+
+- `train/bpb` rose from median `4.5454` to `4.9671` (`+9.28%`), with recent
+  slope `+0.1145 BPB / 1k steps`.
+- `train/loss`, `train/loss_ema`, and `train/total_loss` rose with the same
+  sign, so the BPB rise is not a logging artifact.
+- `controller/train_bpb_ema` rose from `4.3144` to `4.7018`, while
+  `controller/complex_mix_ratio` had already been reduced to zero and
+  `controller/gflownet_loss_weight` to `0.003`. The previous controller could
+  detect the failure but could not remove it.
+- `train/trajectory_flow_loss` rose by about `+33.8%`. The learned embedding
+  trajectories became less smooth while policy loss improved.
+- `train/toric_memory_entropy` fell by about `12.2%`. Toric memory remains
+  active but is narrowing into fewer slots during the bounce.
+
+### Paired Checkpoint Diagnostics
+
+Simplex evaluation on the same four-record subset:
+
+| checkpoint | budget | BPB | MST efficiency |
+|---:|---:|---:|---:|
+| 24,750 | 1 | `3.990435` | `0.686287` |
+| 24,750 | 2 | `3.995005` | `0.727172` |
+| 24,750 | 4 | `3.996752` | `0.736277` |
+| 24,750 | 8 | `3.998238` | `0.730134` |
+| 26,250 | 1 | `3.988555` | `0.653758` |
+| 26,250 | 2 | `3.995069` | `0.683082` |
+| 26,250 | 4 | `3.998493` | `0.692304` |
+| 26,250 | 8 | `3.994977` | `0.688484` |
+
+Step `26,250` has a slightly better budget-1 simplex BPB, but step `24,750`
+has much better MST efficiency at budgets `2`, `4`, and `8`. Since the intended
+test-time mode selects among branches, this indicates that later training is
+not improving the reasoning geometry even when it marginally improves one
+short-budget likelihood point.
+
+Geometry evaluation on eight reasoning-heavy records and eighty branches:
+
+| checkpoint | mean BPB | best BPB | mean answer BPB | best answer BPB | MST efficiency | path smoothness |
+|---:|---:|---:|---:|---:|---:|---:|
+| 24,750 | `4.738420` | `4.025718` | `4.624610` | `3.561768` | `0.511726` | `0.091433` |
+| 26,250 | `4.723754` | `4.014822` | `4.615685` | `3.576611` | `0.500373` | `0.099359` |
+
+The later checkpoint is marginally better on mean branch BPB, but worse on best
+answer BPB, MST efficiency, and path smoothness. This is exactly the failure
+mode we care about: byte likelihood on generic branches is not enough if the
+geometry of high-quality reasoning trajectories becomes rougher and less
+tree-efficient.
+
+### Cause
+
+The repeated bounce is not explained by gradient explosion: the plotted gradient
+norm is bounded and mostly below `0.3`. It is also not explained by the complex
+curriculum alone: by the end of the repair run the controller had already
+reduced complex microbatches to zero. The remaining signals point to two causes.
+
+First, the train data stream was replaying long file-level stretches after each
+rollback. The dataset loader shuffled files, but then consumed whole Parquet
+shards. Because the resume stream restarted from the same seed, the run saw an
+easy region followed by a harder region roughly every rollback, producing an
+apparent lower-bound ricochet after hundreds of steps. This is a nonstationary
+minibatch distribution problem:
+
+\[
+\widehat{\nabla \mathcal L}_t
+  = \nabla \mathcal L_{\mathcal D_{s(t)}}(\theta_t),
+\]
+
+where shard state \(s(t)\) changes slowly. The optimizer is then estimating
+different local risks over long contiguous windows, rather than a well-mixed
+global risk.
+
+Second, auxiliary gradients remain misaligned with BPB in that hard region.
+Writing the update as
+
+\[
+\nabla \mathcal L
+  = \nabla \mathcal L_{\mathrm{BPB}}
+    + \lambda_{\mathrm{MTP}}\nabla \mathcal L_{\mathrm{MTP}}
+    + \lambda_{\mathrm{GFN}}\nabla \mathcal L_{\mathrm{GFN}}
+    + \lambda_{\mathrm{ctr}}\nabla \mathcal L_{\mathrm{ctr}}
+    + \lambda_{\mathrm{flow}}\nabla \mathcal L_{\mathrm{flow}},
+\]
+
+the observed behavior implies that the projected auxiliary component is not
+reliably descent-aligned with the BPB component in the recent shard window:
+
+\[
+\left\langle \nabla \mathcal L_{\mathrm{BPB}},
+  \nabla \mathcal L - \nabla \mathcal L_{\mathrm{BPB}}\right\rangle > 0
+\]
+
+often enough to raise `train/bpb` even while GFlowNet and contrastive losses
+improve in their own coordinates.
+
+### Stabilization Changes Before Restarting at 24,750
+
+Implemented before resuming from
+`checkpoints/parameter_golf_oai_dense/random_order_step_00024750.pt`:
+
+1. **Row-group interleaving.** The train loader now shuffles `(file, row_group)`
+   units rather than consuming whole shards contiguously. This keeps large
+   homogeneous shards from dominating several hundred steps.
+
+2. **Resume-aware stream seed.** The train stream seed is offset by the loaded
+   checkpoint step. Rollbacks no longer replay the identical easy-then-hard
+   sequence. Validation remains fixed.
+
+3. **Lower optimizer step length.** Base LR changed from `6.5e-5` to `5.0e-5`
+   while preserving optimizer state. At step `24750`, this lowers the effective
+   cosine LR from roughly `3.4e-5` to roughly `2.6e-5`.
+
+4. **Auxiliary-gradient throttling.**
+   - `gflownet_loss_weight: 0.006 -> 0.002`
+   - `gflownet_entropy_weight: 0.005 -> 0.0015`
+   - `trajectory_flow_loss_weight: 0.0015 -> 0.0004`
+   - `contrastive_loss_weight: 0.01 -> 0.003`
+   - `mtp_loss_weight: 0.05 -> 0.03`
+   - `toric_entropy_loss_weight: 0.003 -> 0.001`
+
+5. **More conservative adaptive bounds.**
+   - `gflownet_loss_min/max: 0.001/0.006`
+   - `complex_mix_min/max: 0.00/0.04`
+   - `train_drift_threshold: 0.01`
+   - `recovery_train_drift_threshold: 0.04`
+   - `recovery_exit_val_improvements: 3`
+   - fresh state path:
+     `checkpoints/parameter_golf_oai_dense/adaptive_controller_state_24750_stabilize.json`
+
+The architecture is unchanged: dense Parameter-Golf model, random-order
+autoregressive decoding, tropical-ring/hybrid attention, toric memory,
+embedding-space GFlowNet policy, graph projections, QAT hooks, Kolmogorov
+metrics, and checkpoint publishing remain active. The change is to make the
+minibatch risk more stationary and reduce non-BPB gradient pressure until the
+model exits the bounce region.
+
+## Restart-From-1K Curriculum
+
+The next run restarts from
+`checkpoints/parameter_golf_oai_dense/random_order_step_00001000.pt` with
+optimizer state reset.  This keeps the useful early representation learned by
+the random-order dense ToricGT language model, but discards Adam moments
+accumulated under later curricula that repeatedly hit the same BPB floor.
+
+The YAML now exposes the curriculum through `phase_curriculum`:
+
+| absolute steps | phase | intent |
+|---:|---|---|
+| 1,000-6,000 | `bpb_stabilization` | pure byte-model recovery with GFlowNet and toric entropy pressure disabled |
+| 6,000-12,000 | `light_gflownet_alignment` | reintroduce low-weight embedding-space Graph-of-Thought policy learning |
+| 12,000-25,000 | `adaptive_reasoning_curriculum` | allow the controller to add larger graph/composite rows only if BPB stays stable |
+| 25,000-50,000 | `compression_and_scaling` | activate QAT and stronger reasoning auxiliaries after the likelihood basin is stable |
+
+The mathematical goal is to keep the early optimization vector close to the
+byte-likelihood gradient:
+
+\[
+\nabla \mathcal L_t
+  \approx \nabla \mathcal L_{\mathrm{BPB},t}
+  + \epsilon_t \nabla \mathcal L_{\mathrm{aux},t},
+\qquad \epsilon_t \ll 1,
+\]
+
+until the model has left the high-curvature initialization region.  Once BPB is
+monotonically improving on both train and validation windows, the auxiliary
+weights increase in phases rather than by per-step oscillation.  This is the
+least invasive change consistent with the evidence: architecture, dataset,
+random-order graph decoding, tropical-ring attention, toric memory,
+Kolmogorov-complexity monitoring, and checkpoint publishing all remain in
+place.
+
+Operational controls added for this run:
+
+1. `--reset-optimizer` lets the step-1000 checkpoint initialize weights without
+   preserving stale optimizer moments.
+2. Row-group interleaving keeps Parquet shards from creating long homogeneous
+   easy/hard stretches.
+3. Resume-aware stream seeding prevents rollbacks from replaying the identical
+   data order.
+4. Phase metrics are logged to W&B as `phase/index` and scalar active weights,
+   so later analyses can compare behavior across curriculum boundaries.
+5. Checkpoints are still retained every 250 steps, making rollback selection
+   cheap for this small model.
