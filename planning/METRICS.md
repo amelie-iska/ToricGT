@@ -2729,3 +2729,106 @@ Acceptance criteria for the next 500-step retry:
 3. Toric entropy should stay above `0.25`.
 4. HDBSCAN stability should remain near `0.75--0.85` and noise below `0.25`.
 5. Step-2000 checkpoint BPB should be materially below the failed `4.23`.
+
+## Step 2,000 Shock-Guard Retry Review
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-restart-01500-shockguard/step-00002000/
+```
+
+Reviewed at `2026-05-29 23:35 UTC`.
+
+The first shock-guard retry did not solve the floor-bounce.  It reproduced the
+same local minimum and rebound:
+
+| quantity | value |
+|---|---:|
+| checkpoint train BPB | `4.233731` |
+| checkpoint train loss | `2.934598` |
+| checkpoint best validation BPB | `4.696106` |
+| W&B controller validation BPB at step 1,750 | `5.091155` |
+| local minimum train BPB | `3.474819` at step `1690` |
+| largest positive first difference | `+1.059298` from `1700` to `1710` |
+| largest positive second difference | `+0.943592` centered at the shock |
+| hessian dominant absolute curvature | `4.05e-05` |
+| hessian probe gradient norm | `0.693909` |
+
+Manual metric categorization:
+
+| group | category | reason |
+|---|---|---|
+| `train/bpb`, `train/loss`, `train/loss_ema` | undesirable | The likelihood objective again exits the step-1690 basin and remains elevated through step 2,000. |
+| validation BPB and complexity validation BPB | undesirable | The score-first validation gate worsens from the inherited `~5.03` controller value to `5.091`, and the complexity validation BPB remains `4.93`. |
+| shock guard | desired but too weak | It activates at steps `1710` and `1720`, but a `0.30` update scale is still too large for the high-curvature impulse. |
+| gradient norm | undesirable in the shock window | The destructive impulse has grad norm `1.30` before clipping and still knocks the trajectory into a higher-loss basin. |
+| GFlowNet entropy/diversity/loss | desired but too weak or slow | In this BPB-capture phase the GFlowNet loss is intentionally off, yet diagnostics drift downward after the BPB rebound. |
+| toric memory entropy | desired | Entropy improves from roughly `0.28` to `0.31`, showing the toric memory is not collapsing. |
+| trajectory flow/viscous loss | desired but too weak | Overall slope is favorable, but recent slope turns positive after the rebound. |
+| radius-HDBSCAN topology | desired | Stability is bounded and improving; the geometry suite reports mean stability `0.8005`, noise `0.1995`, and zero inclusion violation. |
+| directed topology | desired | Directed asymmetry is nonzero (`0.4678`) with low cycle flux (`0.0062`), which is the intended noncommutative topology signal. |
+
+Plot inspection agrees with the scalar metrics.  The 2-simplex and tetrahedron
+plots show a compact central cloud: useful reasoning structure exists, but the
+low-BPB branch has not separated.  3D GoT trajectories terminate through answer
+regions, but many branches bunch near the terminal basin after long transports.
+Ramachandran-style phase plots are noncollapsed.  Energy landscapes are coherent
+but broad, with high-energy sheets that match the post-shock elevated loss.  The
+directed nested-simplicial plots are healthy: edge/triangle density grows
+monotonically, cycle flux is low, HDBSCAN outlier mass decays with radius, and
+noncommutative heatmaps show real antisymmetric skew without pathological
+inclusion breaks.
+
+The data mix did not explain the rebound.  The logged microbatch fractions were
+`medium=0`, `hard=0`, `complex=0` throughout steps `1600--1990`; the failure is
+therefore a high-curvature impulse in the easy stream rather than accidental
+medium/hard curriculum exposure.  The right local model is
+
+\[
+  L_{t+1}-L_t \approx -\eta_t \lVert g_t\rVert^2
+  + \frac{1}{2}\eta_t^2 g_t^\top H_t g_t + \xi_t,
+\]
+
+where the observed positive \(\Delta L\) and \(\Delta^2L\) imply that either
+the stochastic term \(\xi_t\) or the local curvature term overwhelms the first
+order descent term around step `1710`.  Because toric entropy and topology are
+healthy, the fix should be scalar optimizer control, not removal of ToricGT
+structure.
+
+### Decision
+
+Do not continue from step `2000`.  Restart from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt
+```
+
+Implemented minimal scalar changes:
+
+| control | old | new | reason |
+|---|---:|---:|---|
+| phase 1500--2000 `lr_multiplier` | `0.62` | `0.50` | Keep the retry below the empirical high-curvature band. |
+| phase 1500--2000 `grad_clip_norm` | `0.62` | `0.45` | Reduce the maximum impulse norm before Adam updates. |
+| phase 1500--2000 `analogy_lattice_loss_weight` | `5e-6` | `0` | Remove all non-BPB auxiliary pressure during capture. |
+| shock `loss_ratio` | `1.12` | `1.035` | Detect smaller pre-bounce impulses, not only catastrophic spikes. |
+| shock `loss_delta` | `0.32` | `0.08` | Trigger from the observed smaller warning bumps. |
+| shock `grad_norm` | `0.70` | `0.55` | Catch the 1700--1720 curvature event earlier. |
+| shock `update_scale` | `0.30` | `0.05` | Make shock updates nearly no-op instead of merely damped. |
+| phase 2000--3000 `lr_multiplier` | `0.68` | `0.54` | Avoid re-entering the basin boundary immediately after recovery. |
+| phase 2000--3000 `grad_clip_norm` | `0.72` | `0.55` | Hold update norms near the stabilized capture window. |
+| phase 2000--3000 `medium_mix_ratio` | `0.03` | `0` | Delay medium rows until BPB descent is stable again. |
+| phase 2000--3000 `graphcg_loss_weight` | `2e-5` | `1e-5` | Preserve light geometry pressure without competing with BPB. |
+| phase 2000--3000 `analogy_lattice_loss_weight` | `1e-5` | `0` | Keep lattice objectives diagnostic until the BPB basin is secure. |
+
+Acceptance criteria for the next review:
+
+1. `train/bpb` may spike on the hard batch itself, but it should recover below
+   `3.8` by step `1760` and remain below `4.0` at step `2000`.
+2. `val/bpb` at the first validation gate should not exceed the inherited
+   controller value by more than `0.02`.
+3. `train/shock_guard_active` should be sparse but may fire on warning bumps
+   before the main impulse.
+4. Toric entropy should remain above `0.25`.
+5. Radius-HDBSCAN noise should remain below `0.25` and inclusion violation
+   should remain `0.0`.
