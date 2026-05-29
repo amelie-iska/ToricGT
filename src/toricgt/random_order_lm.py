@@ -86,6 +86,11 @@ class RandomOrderLMConfig:
     analogy_topology_directed_weight: float = 0.35
     analogy_topology_skew_scale: float = 0.35
     analogy_topology_cycle_weight: float = 0.1
+    analogy_hdbscan_enabled: bool = True
+    analogy_hdbscan_weight: float = 0.2
+    analogy_hdbscan_min_cluster_size: int = 4
+    analogy_hdbscan_min_samples: int = 4
+    analogy_hdbscan_stability_threshold: float = 0.18
     aux_mtp_offsets: int = 2
     contrastive_temperature: float = 0.2
     trajectory_flow_viscosity: float = 0.05
@@ -603,6 +608,11 @@ class DenseRandomOrderToricLM(nn.Module):
                 "analogy_directed_chain_map_loss": zero.detach(),
                 "analogy_directed_asymmetry": zero.detach(),
                 "analogy_directed_skew_norm": zero.detach(),
+                "analogy_hdbscan_loss": zero.detach(),
+                "analogy_hdbscan_stability": zero.detach(),
+                "analogy_hdbscan_persistent_edge_density": zero.detach(),
+                "analogy_hdbscan_outlier_score": zero.detach(),
+                "analogy_hdbscan_core_radius": zero.detach(),
                 "analogy_filtration_edge_density": zero.detach(),
                 "analogy_filtration_triangle_density": zero.detach(),
                 "analogy_basis_loss": zero.detach(),
@@ -647,6 +657,11 @@ class DenseRandomOrderToricLM(nn.Module):
         directed_chain_terms = []
         directed_asymmetry_terms = []
         directed_skew_terms = []
+        hdbscan_terms = []
+        hdbscan_stability_terms = []
+        hdbscan_persistent_edge_terms = []
+        hdbscan_outlier_terms = []
+        hdbscan_core_radius_terms = []
         edge_density_terms = []
         triangle_density_terms = []
         topology_groups = zero
@@ -660,6 +675,11 @@ class DenseRandomOrderToricLM(nn.Module):
         filtration_radii = torch.linspace(radius_min, radius_max, steps=filtration_levels, device=relation.device)
         use_directed_topology = bool(self.config.analogy_topology_directed)
         skew_scale = float(self.config.analogy_topology_skew_scale)
+        use_hdbscan = bool(self.config.analogy_hdbscan_enabled)
+        hdbscan_weight = float(self.config.analogy_hdbscan_weight)
+        hdbscan_min_cluster_size = max(2, int(self.config.analogy_hdbscan_min_cluster_size))
+        hdbscan_min_samples = max(1, int(self.config.analogy_hdbscan_min_samples))
+        hdbscan_threshold = float(self.config.analogy_hdbscan_stability_threshold)
         repeated_group_ids = unique[counts >= 4][:max_topology_groups]
         eye_cache: dict[int, torch.Tensor] = {}
         for group_id in repeated_group_ids:
@@ -693,6 +713,41 @@ class DenseRandomOrderToricLM(nn.Module):
             k = min(topology_k, n_group - 1)
             knn = masked_distances.topk(k, dim=-1, largest=False).values
             barcode_loss = knn[:, 0].mean()
+            hdbscan_loss = zero
+            hdbscan_stability = zero
+            hdbscan_persistent_edge_density = zero
+            hdbscan_outlier_score = zero
+            hdbscan_core_radius = zero
+            if use_hdbscan:
+                core_k = min(max(1, hdbscan_min_samples), n_group - 1)
+                core_radius = masked_distances.topk(core_k, dim=-1, largest=False).values[:, -1].detach()
+                mutual_reachability = torch.maximum(
+                    normalized_distances,
+                    torch.maximum(core_radius[:, None], core_radius[None, :]),
+                )
+                mutual_reachability = mutual_reachability + eye * 1.0e6
+                persistent_edges = []
+                for radius in filtration_radii:
+                    persistent_edges.append(
+                        torch.sigmoid((radius - mutual_reachability) / topology_temperature) * (1.0 - eye)
+                    )
+                persistent_affinity = torch.stack(persistent_edges, dim=0).mean(dim=0)
+                stable_degree = persistent_affinity.sum(dim=-1) / max(1, n_group - 1)
+                stable_member = (stable_degree.detach() * max(1, n_group - 1)) >= float(hdbscan_min_cluster_size - 1)
+                pair_weight = torch.relu(persistent_affinity.detach() - hdbscan_threshold).pow(2)
+                pair_weight = pair_weight * stable_member.to(pair_weight.dtype)[:, None]
+                pair_weight = pair_weight * stable_member.to(pair_weight.dtype)[None, :]
+                pair_weight = pair_weight * (1.0 - eye)
+                pair_mass = pair_weight.sum()
+                if bool((pair_mass > 1e-8).detach().cpu().item()):
+                    hdbscan_loss = (pair_weight * normalized_distances.pow(2)).sum() / pair_mass.clamp_min(1e-8)
+                hdbscan_stability = stable_degree.mean()
+                hdbscan_persistent_edge_density = (pair_weight > 0).to(dtype=relation.dtype).sum() / max(
+                    1,
+                    n_group * (n_group - 1),
+                )
+                hdbscan_outlier_score = torch.relu(hdbscan_threshold - stable_degree).mean()
+                hdbscan_core_radius = core_radius.mean()
             level_closure_terms = []
             level_edge_density_terms = []
             level_triangle_density_terms = []
@@ -784,6 +839,7 @@ class DenseRandomOrderToricLM(nn.Module):
                 + float(self.config.analogy_topology_inclusion_weight) * inclusion_loss
                 + float(self.config.analogy_topology_chain_weight) * chain_map_loss
                 + float(self.config.analogy_topology_directed_weight) * directed_topology_loss
+                + hdbscan_weight * hdbscan_loss
             )
             barcode_terms.append(barcode_loss)
             closure_terms.append(closure_loss)
@@ -795,6 +851,11 @@ class DenseRandomOrderToricLM(nn.Module):
             directed_chain_terms.append(directed_chain_map_loss)
             directed_asymmetry_terms.append(directed_asymmetry)
             directed_skew_terms.append(directed_skew_norm)
+            hdbscan_terms.append(hdbscan_loss)
+            hdbscan_stability_terms.append(hdbscan_stability)
+            hdbscan_persistent_edge_terms.append(hdbscan_persistent_edge_density)
+            hdbscan_outlier_terms.append(hdbscan_outlier_score)
+            hdbscan_core_radius_terms.append(hdbscan_core_radius)
             edge_density_terms.append(edge_density)
             triangle_density_terms.append(triangle_density)
         if topology_terms:
@@ -809,6 +870,11 @@ class DenseRandomOrderToricLM(nn.Module):
             directed_chain_map_loss = torch.stack(directed_chain_terms).mean()
             directed_asymmetry = torch.stack(directed_asymmetry_terms).mean()
             directed_skew_norm = torch.stack(directed_skew_terms).mean()
+            hdbscan_loss = torch.stack(hdbscan_terms).mean()
+            hdbscan_stability = torch.stack(hdbscan_stability_terms).mean()
+            hdbscan_persistent_edge_density = torch.stack(hdbscan_persistent_edge_terms).mean()
+            hdbscan_outlier_score = torch.stack(hdbscan_outlier_terms).mean()
+            hdbscan_core_radius = torch.stack(hdbscan_core_radius_terms).mean()
             filtration_edge_density = torch.stack(edge_density_terms).mean()
             filtration_triangle_density = torch.stack(triangle_density_terms).mean()
             topology_groups = relation.new_tensor(float(len(topology_terms)))
@@ -824,6 +890,11 @@ class DenseRandomOrderToricLM(nn.Module):
             directed_chain_map_loss = zero
             directed_asymmetry = zero
             directed_skew_norm = zero
+            hdbscan_loss = zero
+            hdbscan_stability = zero
+            hdbscan_persistent_edge_density = zero
+            hdbscan_outlier_score = zero
+            hdbscan_core_radius = zero
             filtration_edge_density = zero
             filtration_triangle_density = zero
 
@@ -884,6 +955,11 @@ class DenseRandomOrderToricLM(nn.Module):
             "analogy_directed_chain_map_loss": directed_chain_map_loss.detach(),
             "analogy_directed_asymmetry": directed_asymmetry.detach(),
             "analogy_directed_skew_norm": directed_skew_norm.detach(),
+            "analogy_hdbscan_loss": hdbscan_loss.detach(),
+            "analogy_hdbscan_stability": hdbscan_stability.detach(),
+            "analogy_hdbscan_persistent_edge_density": hdbscan_persistent_edge_density.detach(),
+            "analogy_hdbscan_outlier_score": hdbscan_outlier_score.detach(),
+            "analogy_hdbscan_core_radius": hdbscan_core_radius.detach(),
             "analogy_filtration_edge_density": filtration_edge_density.detach(),
             "analogy_filtration_triangle_density": filtration_triangle_density.detach(),
             "analogy_basis_loss": basis_loss.detach(),

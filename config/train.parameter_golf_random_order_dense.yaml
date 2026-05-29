@@ -70,6 +70,14 @@ model:
   analogy_topology_directed_weight: 0.35
   analogy_topology_skew_scale: 0.35
   analogy_topology_cycle_weight: 0.10
+  # Radius-parametrized HDBSCAN surrogate: compute mutual-reachability density
+  # across the same filtration radii, then pull only persistent high-stability
+  # relation neighbors. Unstable/outlier arrows mostly stop contributing.
+  analogy_hdbscan_enabled: true
+  analogy_hdbscan_weight: 0.20
+  analogy_hdbscan_min_cluster_size: 4
+  analogy_hdbscan_min_samples: 4
+  analogy_hdbscan_stability_threshold: 0.18
   contrastive_temperature: 0.2
   trajectory_flow_viscosity: 0.05
   aux_mtp_offsets: 2

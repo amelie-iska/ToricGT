@@ -72,8 +72,11 @@ hidden transitions into an auto-sized lattice basis; repeated byte-relation
 arrows are regularized to behave like analogical functors. The directed
 topology term builds a scale-normalized filtered complex over hidden relation
 arrows, adds an antisymmetric toric skew form, and logs nested inclusion,
-triangle-density, directed-chain, and noncommutative cycle-flux metrics. These
-terms are phased in gently from step `1500`, starting at
+triangle-density, directed-chain, and noncommutative cycle-flux metrics. The
+same relation clouds also run a radius-parametrized HDBSCAN surrogate based on
+core distances and mutual reachability; only persistent density-stable
+neighbors are pulled together, which protects BPB training from noisy analogy
+groups. These terms are phased in gently from step `1500`, starting at
 `analogy_lattice_loss_weight: 0.00003`.
 
 Complexity diagnostics run every 50 optimizer steps by default on a tiny sample.
@@ -83,7 +86,8 @@ change the BPB objective.
 Periodic analyses now also produce directed nested-simplicial plots under
 `outputs/post_resume_analysis/<run>/step-*/geometry/topology/`. These include
 per-branch filtration curves and heatmaps of normalized distances,
-antisymmetric toric skew, and directed adjacency at multiple radii.
+mutual-reachability distances, density-persistence adjacency, antisymmetric
+toric skew, and directed adjacency at multiple radii.
 
 The same config also enables best-checkpoint publishing. Promotion uses
 `val_bpb + 0.05 * complexity/val/prediction_target_ncd_lzma_mean`, replacing

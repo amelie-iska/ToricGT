@@ -180,13 +180,26 @@ directed flag complex logs transitive-closure pressure, directed cycle/holonomy
 balance, directed chain-map diagnostics, asymmetry, and skew magnitude. These
 metrics should improve reasoning geometry without replacing the BPB objective.
 
+The same point clouds now use a radius-parametrized HDBSCAN surrogate. For each
+relation group, the trainer computes core distances, mutual-reachability
+distances, and a radius sweep over the existing filtration grid. Only
+persistent high-stability mutual-reachability neighbors receive pullback weight;
+unstable and outlier arrows are mostly ignored rather than collapsed into a
+wrong analogy class. W&B reports `train/analogy_hdbscan_*` metrics for the
+auxiliary loss, stability, persistent edge density, outlier score, and core
+radius. This makes the topological analogy objective more relevant to training
+quality because it reinforces density-stable relation families while limiting
+damage from noisy early hidden states.
+
 The periodic geometry suite visualizes the same nested complexes. Each
 analysis checkpoint writes `geometry/topology/*_directed_filtration.png` with
 radius-indexed edge density, soft triangle density, directed asymmetry, and
-noncommutative cycle flux, plus `*_noncommutative_heatmaps.png` for
-scale-normalized hidden-arrow distance, antisymmetric toric skew, and directed
-adjacency at low and middle filtration radii. These plots are computed from
-model hidden states and branch losses, not hand-drawn diagrams.
+noncommutative cycle flux, radius-HDBSCAN cluster count, and HDBSCAN outlier
+fraction, plus `*_noncommutative_heatmaps.png` for scale-normalized hidden-arrow
+distance, mutual-reachability distance, density-persistence adjacency,
+antisymmetric toric skew, and directed adjacency at low and middle filtration
+radii. These plots are computed from model hidden states and branch losses, not
+hand-drawn diagrams.
 
 ## Best Checkpoint Publishing
 

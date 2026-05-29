@@ -1845,6 +1845,16 @@ def main() -> None:
         analogy_topology_directed_weight=config_get(file_config, "model", "analogy_topology_directed_weight", 0.35),
         analogy_topology_skew_scale=config_get(file_config, "model", "analogy_topology_skew_scale", 0.35),
         analogy_topology_cycle_weight=config_get(file_config, "model", "analogy_topology_cycle_weight", 0.1),
+        analogy_hdbscan_enabled=config_get(file_config, "model", "analogy_hdbscan_enabled", True),
+        analogy_hdbscan_weight=config_get(file_config, "model", "analogy_hdbscan_weight", 0.2),
+        analogy_hdbscan_min_cluster_size=config_get(file_config, "model", "analogy_hdbscan_min_cluster_size", 4),
+        analogy_hdbscan_min_samples=config_get(file_config, "model", "analogy_hdbscan_min_samples", 4),
+        analogy_hdbscan_stability_threshold=config_get(
+            file_config,
+            "model",
+            "analogy_hdbscan_stability_threshold",
+            0.18,
+        ),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
         aux_mtp_offsets=args.aux_mtp_offsets
@@ -2707,6 +2717,11 @@ def main() -> None:
         step_analogy_directed_chain_map_loss = 0.0
         step_analogy_directed_asymmetry = 0.0
         step_analogy_directed_skew_norm = 0.0
+        step_analogy_hdbscan_loss = 0.0
+        step_analogy_hdbscan_stability = 0.0
+        step_analogy_hdbscan_persistent_edge_density = 0.0
+        step_analogy_hdbscan_outlier_score = 0.0
+        step_analogy_hdbscan_core_radius = 0.0
         step_analogy_filtration_edge_density = 0.0
         step_analogy_filtration_triangle_density = 0.0
         step_analogy_basis_loss = 0.0
@@ -2887,6 +2902,19 @@ def main() -> None:
             step_analogy_directed_skew_norm += float(
                 out.get("analogy_directed_skew_norm", torch.zeros(())).detach().cpu()
             )
+            step_analogy_hdbscan_loss += float(out.get("analogy_hdbscan_loss", torch.zeros(())).detach().cpu())
+            step_analogy_hdbscan_stability += float(
+                out.get("analogy_hdbscan_stability", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_hdbscan_persistent_edge_density += float(
+                out.get("analogy_hdbscan_persistent_edge_density", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_hdbscan_outlier_score += float(
+                out.get("analogy_hdbscan_outlier_score", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_hdbscan_core_radius += float(
+                out.get("analogy_hdbscan_core_radius", torch.zeros(())).detach().cpu()
+            )
             step_analogy_filtration_edge_density += float(
                 out.get("analogy_filtration_edge_density", torch.zeros(())).detach().cpu()
             )
@@ -2936,6 +2964,11 @@ def main() -> None:
         step_analogy_directed_chain_map_loss /= grad_accum
         step_analogy_directed_asymmetry /= grad_accum
         step_analogy_directed_skew_norm /= grad_accum
+        step_analogy_hdbscan_loss /= grad_accum
+        step_analogy_hdbscan_stability /= grad_accum
+        step_analogy_hdbscan_persistent_edge_density /= grad_accum
+        step_analogy_hdbscan_outlier_score /= grad_accum
+        step_analogy_hdbscan_core_radius /= grad_accum
         step_analogy_filtration_edge_density /= grad_accum
         step_analogy_filtration_triangle_density /= grad_accum
         step_analogy_basis_loss /= grad_accum
@@ -3023,6 +3056,11 @@ def main() -> None:
                 "train/analogy_directed_chain_map_loss": step_analogy_directed_chain_map_loss,
                 "train/analogy_directed_asymmetry": step_analogy_directed_asymmetry,
                 "train/analogy_directed_skew_norm": step_analogy_directed_skew_norm,
+                "train/analogy_hdbscan_loss": step_analogy_hdbscan_loss,
+                "train/analogy_hdbscan_stability": step_analogy_hdbscan_stability,
+                "train/analogy_hdbscan_persistent_edge_density": step_analogy_hdbscan_persistent_edge_density,
+                "train/analogy_hdbscan_outlier_score": step_analogy_hdbscan_outlier_score,
+                "train/analogy_hdbscan_core_radius": step_analogy_hdbscan_core_radius,
                 "train/analogy_filtration_edge_density": step_analogy_filtration_edge_density,
                 "train/analogy_filtration_triangle_density": step_analogy_filtration_triangle_density,
                 "train/analogy_basis_loss": step_analogy_basis_loss,

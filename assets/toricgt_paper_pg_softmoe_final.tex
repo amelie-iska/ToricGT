@@ -1487,6 +1487,41 @@ The directed noncommutative adjacency is
 The collection $\{A_\ell,A_\ell^\rightarrow\}_{\ell=1}^L$ is the directed filtered analogy complex.
 \end{definition}
 
+The persistent object behind this construction should be stated explicitly.  In the hard-threshold limit, $A_\ell$ defines a Vietoris--Rips graph and hence a clique complex $K_\ell$.  Since $\rho_\ell\le\rho_{\ell+1}$, the complexes are nested:
+\begin{equation}
+  K_1\subseteq K_2\subseteq\cdots\subseteq K_L.
+\end{equation}
+For a field $\mathbb F$ and homological degree $p$, the inclusion maps induce a persistence module
+\begin{equation}
+  H_p(K_1;\mathbb F)\to H_p(K_2;\mathbb F)\to\cdots\to H_p(K_L;\mathbb F).
+\end{equation}
+Its barcode records intervals $[b,d)$ over which connected components, loops, or higher cycles persist \cite{edelsbrunner2002topological,zomorodian2005computing,carlsson2009topology}.  In the contest implementation, exact barcode computation is replaced by differentiable surrogates: $0$-dimensional persistence is approximated by nearest-neighbor/MST edge scales, $1$-dimensional cycle pressure is approximated by triangle-closure and cycle-flux terms, and higher clique growth is monitored by soft triangle density.  This is the missing bridge between the practical loss and persistent homology: the model is not merely regularizing distances, it is regularizing a small persistence module of analogical hidden-state relations.
+
+\begin{definition}[Directed persistent analogy module]
+For a directed thresholded adjacency $A_\ell^\rightarrow$, define the directed flag complex $K_\ell^\rightarrow$ whose ordered $p$-simplices $(i_0,\ldots,i_p)$ satisfy $A_\ell^\rightarrow(i_r,i_s)>0$ for every $r<s$.  If the directed adjacencies are nested with $\ell$, then
+\begin{equation}
+  K_1^\rightarrow\subseteq K_2^\rightarrow\subseteq\cdots\subseteq K_L^\rightarrow
+\end{equation}
+and the directed chain complexes induce directed persistence modules
+\begin{equation}
+  H_p(K_1^\rightarrow;\mathbb F)\to\cdots\to H_p(K_L^\rightarrow;\mathbb F).
+\end{equation}
+When the antisymmetric form $\Omega$ is nonzero, reversing an arrow can change the simplex set; this is the topology-level analogue of noncommutative toric memory.
+\end{definition}
+
+\begin{proposition}[Persistence stability for analogy filtrations]
+Let $d$ and $\widehat d$ be two symmetric distance matrices on the same relation arrows, and let $\operatorname{Dgm}_p(d)$ and $\operatorname{Dgm}_p(\widehat d)$ be the degree-$p$ persistence diagrams of their Vietoris--Rips filtrations.  Then the bottleneck distance obeys
+\begin{equation}
+  d_B(\operatorname{Dgm}_p(d),\operatorname{Dgm}_p(\widehat d))
+  \le \norm{d-\widehat d}_\infty.
+\end{equation}
+Consequently, small perturbations of hidden relation arrows cannot arbitrarily change the persistent homology unless they close or open a small-margin topological feature.
+\end{proposition}
+
+\begin{proof}
+If $\norm{d-\widehat d}_\infty\le\eta$, then every edge present in the Rips complex of $d$ at radius $\rho$ is present in the Rips complex of $\widehat d$ at radius $\rho+\eta$, and conversely with $d$ and $\widehat d$ exchanged.  Thus the two filtrations are $\eta$-interleaved.  The algebraic stability theorem for persistence diagrams then gives the bottleneck bound \cite{cohensteiner2007stability,chazal2016structure}.  The final claim follows because a topological feature whose birth-death margin is larger than $2\eta$ cannot be removed by such a perturbation.
+\end{proof}
+
 The implementation uses differentiable proxies rather than a heavy persistent-homology dependency.  It logs inclusion residuals
 \begin{equation}
   \mathcal L_{\mathrm{inc}}=\sum_{\ell<L}\norm{\max(0,A_\ell-A_{\ell+1})}_F^2,
@@ -1502,6 +1537,26 @@ soft triangle density $\sum_{ijk}A_{ij}A_{jk}A_{ik}$, directed transitive residu
   A_\ell^\rightarrow(j,k)A_\ell^\rightarrow(k,i)
   \max(0,\Omega_{ij})\max(0,\Omega_{jk})\max(0,\Omega_{ki}).
 \end{equation}
+
+The latest training branch also adds a radius-parametrized HDBSCAN surrogate \cite{campello2013density,campello2015hierarchical,mcinnes2017hdbscan}.  For each relation class, let $c_i$ be the $k$th-nearest-neighbor core distance of $a_i$ and define the mutual-reachability distance
+\begin{equation}
+  d_{\mathrm{mr}}(i,j)=\max\{c_i,c_j,d_{ij}\}.
+\end{equation}
+Across the same radii $\rho_\ell$, define persistent density affinities
+\begin{equation}
+  H(i,j)=\frac1L\sum_{\ell=1}^L
+  \sigma\left(\frac{\rho_\ell-d_{\mathrm{mr}}(i,j)}{\tau}\right)(1-\delta_{ij}).
+\end{equation}
+The auxiliary loss uses detached high-stability affinities as weights,
+\begin{equation}
+  \mathcal L_{\mathrm{HDB}}
+  =
+  \frac{\sum_{i\ne j} w_{ij}d_{ij}^2}{\sum_{i\ne j}w_{ij}+\epsilon},
+  \qquad
+  w_{ij}=\left[\max(0,H(i,j)-\alpha)\right]^2
+  \mathbf 1\{s_i\ge m-1,\ s_j\ge m-1\},
+\end{equation}
+where $s_i=\sum_jH(i,j)$ is a density-stability score and $m$ is the minimum cluster size.  The detachment of $w_{ij}$ is intentional: persistent density neighborhoods may pull together, but unstable or outlier arrows do not receive gradients that would collapse unrelated analogies.  Periodic analyses compute the corresponding hard radius sweep, stable-cluster counts, outlier fractions, mutual-reachability heatmaps, and density-persistence adjacency plots.  Thus HDBSCAN is used as a relevance gate for the topology loss, not as an extra non-differentiable optimizer inside backpropagation.
 
 \begin{proposition}[Scale stability of normalized analogy filtrations]
 If all hidden arrows in one relation class are multiplied by a common scalar $\lambda>0$, then $d_{ij}$ is unchanged.  Consequently the symmetric filtration $\{A_\ell\}$ and every diagnostic depending only on $d_{ij}$ is invariant up to numerical $\epsilon$ effects.  If both channel blocks in $\Omega$ are normalized before forming the skew matrix, the directed filtration is also invariant to the same common rescaling.
@@ -2097,6 +2152,46 @@ Konstantinos Fotopoulos, Petros Maragos, and Panagiotis Misiakos.
 David A. Cox, John B. Little, and Henry K. Schenck.
 \newblock \emph{Toric Varieties}.
 \newblock Graduate Studies in Mathematics 124. American Mathematical Society, 2011.
+
+\bibitem{edelsbrunner2002topological}
+Herbert Edelsbrunner, David Letscher, and Afra Zomorodian.
+\newblock Topological persistence and simplification.
+\newblock \emph{Discrete \& Computational Geometry}, 28:511--533, 2002.
+
+\bibitem{zomorodian2005computing}
+Afra Zomorodian and Gunnar Carlsson.
+\newblock Computing persistent homology.
+\newblock \emph{Discrete \& Computational Geometry}, 33:249--274, 2005.
+
+\bibitem{carlsson2009topology}
+Gunnar Carlsson.
+\newblock Topology and data.
+\newblock \emph{Bulletin of the American Mathematical Society}, 46(2):255--308, 2009.
+
+\bibitem{cohensteiner2007stability}
+David Cohen-Steiner, Herbert Edelsbrunner, and John Harer.
+\newblock Stability of persistence diagrams.
+\newblock \emph{Discrete \& Computational Geometry}, 37:103--120, 2007.
+
+\bibitem{chazal2016structure}
+Fr\'ed\'eric Chazal, Vin de Silva, Marc Glisse, and Steve Oudot.
+\newblock \emph{The Structure and Stability of Persistence Modules}.
+\newblock SpringerBriefs in Mathematics. Springer, 2016.
+
+\bibitem{campello2013density}
+Ricardo J. G. B. Campello, Davoud Moulavi, and J\"org Sander.
+\newblock Density-based clustering based on hierarchical density estimates.
+\newblock In \emph{PAKDD}, Lecture Notes in Computer Science 7819:160--172, 2013.
+
+\bibitem{campello2015hierarchical}
+Ricardo J. G. B. Campello, Davoud Moulavi, Arthur Zimek, and J\"org Sander.
+\newblock Hierarchical density estimates for data clustering, visualization, and outlier detection.
+\newblock \emph{ACM Transactions on Knowledge Discovery from Data}, 10(1):1--51, 2015.
+
+\bibitem{mcinnes2017hdbscan}
+Leland McInnes, John Healy, and Steve Astels.
+\newblock hdbscan: Hierarchical density based clustering.
+\newblock \emph{Journal of Open Source Software}, 2(11):205, 2017.
 
 \bibitem{vaswani2017attention}
 Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin.

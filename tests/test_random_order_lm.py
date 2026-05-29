@@ -89,6 +89,29 @@ def test_gflownet_adapter_losses_and_multi_sample_scaling():
     assert scaled["single_sample_loss"].isfinite()
 
 
+def test_analogy_hdbscan_surrogate_metrics_are_finite():
+    cfg = tiny_config(
+        vocab_size=48,
+        use_graphcg=True,
+        graphcg_num_directions=8,
+        use_analogy_lattice=True,
+        analogy_lattice_max_pairs=128,
+        analogy_topology_max_points_per_group=12,
+        analogy_topology_max_groups=8,
+        analogy_hdbscan_enabled=True,
+    )
+    model = DenseRandomOrderToricLM(cfg)
+    base = torch.tensor([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+    tokens = torch.stack([base, base.roll(1), base.roll(2)], dim=0)
+    out = model(tokens, sample_ids=torch.arange(3))
+    assert out["analogy_lattice_loss"].isfinite()
+    assert out["analogy_hdbscan_loss"].isfinite()
+    assert out["analogy_hdbscan_stability"].isfinite()
+    assert out["analogy_hdbscan_persistent_edge_density"].isfinite()
+    assert out["analogy_hdbscan_outlier_score"].isfinite()
+    assert out["analogy_hdbscan_core_radius"].isfinite()
+
+
 def test_gflownet_adapter_preserves_score_before_update():
     cfg = tiny_config(use_gflownet_policy=True, gflownet_num_actions=4, gflownet_hidden_dim=16)
     model = DenseRandomOrderToricLM(cfg).eval()

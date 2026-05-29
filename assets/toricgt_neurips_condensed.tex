@@ -222,7 +222,13 @@ and penalizes inclusion violations, chain-map commutators, and soft triangle fai
   \qquad
   A_\rho^\rightarrow(i,j)=\sigma((\rho-d_{ij}+\gamma\Omega_{ij})/\tau),
 \end{equation}
-so $i\to j$ and $j\to i$ may differ.  Periodic analyses render these noncommutative nested-complexes as directed filtration curves and heatmaps next to 3D graph-of-thought trajectories, Ramachandran-style phase plots, energy landscapes, and reasoning/K/BPB simplices.
+so $i\to j$ and $j\to i$ may differ.  In the hard-threshold limit these adjacencies define nested Vietoris--Rips or directed flag complexes
+\begin{equation}
+  K_{\rho_1}\subseteq\cdots\subseteq K_{\rho_m},
+  \qquad
+  H_p(K_{\rho_1})\to\cdots\to H_p(K_{\rho_m}),
+\end{equation}
+so the intended object is a small persistence module over hidden-state analogy arrows \cite{edelsbrunner2002topological,zomorodian2005computing,cohensteiner2007stability}.  The implementation uses differentiable persistence surrogates rather than exact barcode backpropagation.  A radius-parametrized HDBSCAN gate further computes core distances $c_i$, mutual reachability $d_{\rm mr}(i,j)=\max\{c_i,c_j,d_{ij}\}$, and persistent density affinities across the same radii.  Only high-stability neighbors receive pullback weight; outlier arrows mostly stop contributing.  Periodic analyses render these noncommutative nested-complexes and HDBSCAN density sweeps as directed filtration curves and heatmaps next to 3D graph-of-thought trajectories, Ramachandran-style phase plots, energy landscapes, and reasoning/K/BPB simplices.
 
 Operationally, the first serious BPB target is $1.20$--$1.22$, a strong run is $1.16$--$1.19$, an excellent run is $1.13$--$1.15$, and $\le1.12$ is exceptional under OpenAI's public recap.  Claims below $1.10$ BPB should trigger strict leakage, tokenizer, and score-before-update audits.
 
@@ -313,6 +319,21 @@ Insu Han, Praneeth Kacham, Amin Karbasi, Vahab Mirrokni, and Amir Zandieh.
 Marie-Charlotte Brandenburg, Georg Loho, and Guido Montufar.
 \newblock The real tropical geometry of neural networks.
 \newblock arXiv:2403.11871, 2024.
+
+\bibitem{edelsbrunner2002topological}
+Herbert Edelsbrunner, David Letscher, and Afra Zomorodian.
+\newblock Topological persistence and simplification.
+\newblock \emph{Discrete \& Computational Geometry}, 28:511--533, 2002.
+
+\bibitem{zomorodian2005computing}
+Afra Zomorodian and Gunnar Carlsson.
+\newblock Computing persistent homology.
+\newblock \emph{Discrete \& Computational Geometry}, 33:249--274, 2005.
+
+\bibitem{cohensteiner2007stability}
+David Cohen-Steiner, Herbert Edelsbrunner, and John Harer.
+\newblock Stability of persistence diagrams.
+\newblock \emph{Discrete \& Computational Geometry}, 37:103--120, 2007.
 
 \end{thebibliography}
 

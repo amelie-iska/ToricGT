@@ -1008,8 +1008,15 @@ def directed_filtration_stats(
             "directed_transitive_loss": zeros.tolist(),
             "directed_chain_commutator": zeros.tolist(),
             "inclusion_violation": zeros.tolist(),
+            "hdbscan_cluster_count": zeros.tolist(),
+            "hdbscan_noise_fraction": zeros.tolist(),
+            "hdbscan_stability": zeros.tolist(),
+            "hdbscan_persistent_edge_density": zeros.tolist(),
+            "hdbscan_core_radius": 0.0,
             "skew_norm": 0.0,
             "distance": np.zeros((1, 1), dtype=float),
+            "mutual_reachability": np.zeros((1, 1), dtype=float),
+            "hdbscan_persistence_adjacency": np.zeros((1, 1), dtype=float),
             "skew": np.zeros((1, 1), dtype=float),
             "directed_adjacency": [],
         }
@@ -1035,6 +1042,11 @@ def directed_filtration_stats(
     skew_abs = np.abs(skew[np.triu_indices(n, k=1)])
     skew_unit = skew / max(float(np.median(skew_abs)) if skew_abs.size else 1.0, 1e-6)
     skew_unit = np.clip(skew_unit, -3.0, 3.0) * float(skew_scale)
+    core_k = min(4, max(1, n - 1))
+    masked_dist = dist + eye * 1.0e6
+    core_radius = np.partition(masked_dist, kth=core_k - 1, axis=1)[:, core_k - 1]
+    mutual_reachability = np.maximum(dist, np.maximum(core_radius[:, None], core_radius[None, :]))
+    mutual_reachability = mutual_reachability + eye * 1.0e6
     radii = np.linspace(float(radius_min), float(radius_max), max(1, int(levels)))
     edge_density: list[float] = []
     triangle_density: list[float] = []
@@ -1044,12 +1056,45 @@ def directed_filtration_stats(
     directed_transitive_loss: list[float] = []
     directed_chain_commutator: list[float] = []
     inclusion_violation: list[float] = []
+    hdbscan_cluster_count: list[float] = []
+    hdbscan_noise_fraction: list[float] = []
+    hdbscan_stability: list[float] = []
+    hdbscan_persistent_edge_density: list[float] = []
     directed_adjacency: list[np.ndarray] = []
+    hdbscan_persistence = np.zeros((n, n), dtype=float)
     previous_sym: np.ndarray | None = None
     previous_dir: np.ndarray | None = None
+    def _component_sizes(adjacency: np.ndarray) -> list[list[int]]:
+        seen = np.zeros(adjacency.shape[0], dtype=bool)
+        components: list[list[int]] = []
+        for start in range(adjacency.shape[0]):
+            if seen[start]:
+                continue
+            stack = [start]
+            seen[start] = True
+            component: list[int] = []
+            while stack:
+                node = stack.pop()
+                component.append(node)
+                for nxt in np.flatnonzero(adjacency[node]):
+                    if not seen[nxt]:
+                        seen[nxt] = True
+                        stack.append(int(nxt))
+            components.append(component)
+        return components
     for radius in radii:
         sym = sigmoid_np((radius - dist) / max(float(temperature), 1e-6)) * (1.0 - eye)
         directed = sigmoid_np((radius - dist + skew_unit) / max(float(temperature), 1e-6)) * (1.0 - eye)
+        density_adj = sigmoid_np((radius - mutual_reachability) / max(float(temperature), 1e-6)) * (1.0 - eye)
+        hdbscan_persistence += density_adj / max(1, len(radii))
+        hard_density = (mutual_reachability <= radius) & (~np.eye(n, dtype=bool))
+        components = _component_sizes(hard_density | hard_density.T)
+        stable_components = [component for component in components if len(component) >= 4]
+        stable_nodes = set(node for component in stable_components for node in component)
+        hdbscan_cluster_count.append(float(len(stable_components)))
+        hdbscan_noise_fraction.append(float(1.0 - len(stable_nodes) / max(1, n)))
+        hdbscan_stability.append(float(len(stable_nodes) / max(1, n)))
+        hdbscan_persistent_edge_density.append(float(density_adj.sum() / max(1, n * (n - 1))))
         directed_adjacency.append(directed)
         edge_density.append(float(sym.sum() / max(1, n * (n - 1))))
         directed_edge_density.append(float(directed.sum() / max(1, n * (n - 1))))
@@ -1084,8 +1129,15 @@ def directed_filtration_stats(
         "directed_transitive_loss": directed_transitive_loss,
         "directed_chain_commutator": directed_chain_commutator,
         "inclusion_violation": inclusion_violation,
+        "hdbscan_cluster_count": hdbscan_cluster_count,
+        "hdbscan_noise_fraction": hdbscan_noise_fraction,
+        "hdbscan_stability": hdbscan_stability,
+        "hdbscan_persistent_edge_density": hdbscan_persistent_edge_density,
+        "hdbscan_core_radius": float(np.mean(core_radius)),
         "skew_norm": float(np.mean(np.abs(skew_unit))),
         "distance": dist,
+        "mutual_reachability": mutual_reachability,
+        "hdbscan_persistence_adjacency": hdbscan_persistence,
         "skew": skew_unit,
         "directed_adjacency": directed_adjacency,
     }
@@ -1100,16 +1152,23 @@ def attach_topology_stats(branch: dict[str, Any], stats: dict[str, Any]) -> None
     branch["topology_directed_transitive_loss"] = float(np.mean(stats["directed_transitive_loss"]))
     branch["topology_directed_chain_commutator"] = float(np.mean(stats["directed_chain_commutator"]))
     branch["topology_inclusion_violation"] = float(np.mean(stats["inclusion_violation"]))
+    branch["topology_hdbscan_cluster_count"] = float(np.mean(stats["hdbscan_cluster_count"]))
+    branch["topology_hdbscan_noise_fraction"] = float(np.mean(stats["hdbscan_noise_fraction"]))
+    branch["topology_hdbscan_stability"] = float(np.mean(stats["hdbscan_stability"]))
+    branch["topology_hdbscan_persistent_edge_density"] = float(np.mean(stats["hdbscan_persistent_edge_density"]))
+    branch["topology_hdbscan_core_radius"] = float(stats["hdbscan_core_radius"])
     branch["topology_skew_norm"] = float(stats["skew_norm"])
 
 
 def plot_directed_filtration(record_meta: dict[str, Any], branches: list[dict[str, Any]], output_path: Path) -> None:
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8), facecolor="#030712")
+    fig, axes = plt.subplots(3, 2, figsize=(11, 10.8), facecolor="#030712")
     metrics = [
         ("edge_density", "symmetric edge density"),
         ("triangle_density", "soft triangle density"),
         ("directed_asymmetry", "directed asymmetry"),
         ("directed_cycle_flux", "noncommutative cycle flux"),
+        ("hdbscan_cluster_count", "radius-HDBSCAN stable clusters"),
+        ("hdbscan_noise_fraction", "radius-HDBSCAN outlier fraction"),
     ]
     bpbs = np.array([float(branch["bpb"]) for branch in branches], dtype=float)
     lo, hi = float(bpbs.min()), float(bpbs.max())
@@ -1158,11 +1217,13 @@ def plot_topology_heatmaps(record_meta: dict[str, Any], branches: list[dict[str,
     mid = len(directed) // 2
     panels = [
         (np.asarray(stats["distance"]), "scale-normalized distance", "viridis"),
+        (np.asarray(stats["mutual_reachability"]), "mutual reachability", "viridis"),
+        (np.asarray(stats["hdbscan_persistence_adjacency"]), "density persistence adjacency", "magma"),
         (np.asarray(stats["skew"]), "antisymmetric toric skew", "coolwarm"),
         (np.asarray(directed[0]), f"directed adjacency r={stats['radii'][0]:.2f}", "viridis"),
         (np.asarray(directed[mid]), f"directed adjacency r={stats['radii'][mid]:.2f}", "viridis"),
     ]
-    fig, axes = plt.subplots(2, 2, figsize=(9.5, 8.2), facecolor="#030712")
+    fig, axes = plt.subplots(2, 3, figsize=(13.2, 8.2), facecolor="#030712")
     for ax, (matrix, title, cmap_name) in zip(axes.reshape(-1), panels):
         ax.set_facecolor("#030712")
         im = ax.imshow(matrix, cmap=cmap_name, interpolation="nearest", aspect="auto")
@@ -1303,6 +1364,15 @@ def main() -> None:
         "mean_topology_directed_cycle_flux": float(np.mean([record["topology_directed_cycle_flux"] for record in branch_records])),
         "mean_topology_triangle_density": float(np.mean([record["topology_triangle_density"] for record in branch_records])),
         "mean_topology_inclusion_violation": float(np.mean([record["topology_inclusion_violation"] for record in branch_records])),
+        "mean_topology_hdbscan_cluster_count": float(
+            np.mean([record["topology_hdbscan_cluster_count"] for record in branch_records])
+        ),
+        "mean_topology_hdbscan_noise_fraction": float(
+            np.mean([record["topology_hdbscan_noise_fraction"] for record in branch_records])
+        ),
+        "mean_topology_hdbscan_stability": float(
+            np.mean([record["topology_hdbscan_stability"] for record in branch_records])
+        ),
         "outputs": {
             "records": str(output_dir / "reasoning_geometry_records.json"),
             "selected_records": str(output_dir / "selected_records.json"),

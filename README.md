@@ -562,15 +562,23 @@ relation classes build normalized nested Vietoris-Rips/simplex-tree filtrations,
 including directed flag-complex edges from an antisymmetric noncommutative
 form. W&B logs `train/analogy_*` metrics for functor loss, filtration
 inclusions, chain-map commutators, directed transitive closure, directed
-cycle/holonomy balance, edge/triangle densities, and basis alignment.
+cycle/holonomy balance, edge/triangle densities, and basis alignment. The
+training objective also includes a radius-parametrized HDBSCAN surrogate over
+mutual-reachability distances: persistent high-stability relation neighbors are
+pulled together, while unstable/outlier relation arrows contribute little. W&B
+reports `train/analogy_hdbscan_loss`, `train/analogy_hdbscan_stability`,
+`train/analogy_hdbscan_persistent_edge_density`,
+`train/analogy_hdbscan_outlier_score`, and
+`train/analogy_hdbscan_core_radius`.
 The periodic analysis suite also renders these objects under
 `outputs/post_resume_analysis/<run>/step-*/geometry/topology/`: per-branch
 filtration curves for edge density, triangle density, directed asymmetry, and
-noncommutative cycle flux, plus heatmaps of normalized hidden-arrow distances,
-antisymmetric toric skew, and directed adjacency at several radii. These plots
-sit next to the 3D graph-of-thought trajectories, Ramachandran-style phase
-plots, energy landscapes, reasoning/K/BPB triangles, and tetrahedral simplex
-diagnostics.
+noncommutative cycle flux, plus HDBSCAN stable-cluster and outlier curves.
+The heatmaps include normalized hidden-arrow distances, mutual-reachability
+distances, density-persistence adjacency, antisymmetric toric skew, and directed
+adjacency at several radii. These plots sit next to the 3D graph-of-thought
+trajectories, Ramachandran-style phase plots, energy landscapes, reasoning/K/BPB
+triangles, and tetrahedral simplex diagnostics.
 
 Kolmogorov-style reasoning diagnostics are enabled by default on the `oai`
 branch without changing the BPB objective. The trainer periodically logs
