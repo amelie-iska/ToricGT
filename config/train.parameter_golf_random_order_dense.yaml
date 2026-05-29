@@ -9,10 +9,10 @@ model:
   num_layers: 7
   recurrent_passes: 2
   ffn_multiplier: 4
-  # The step-1500 basin is underfit rather than overfit: lower dropout gives
-  # the byte model more immediate compression capacity while QAT and
-  # score-first audits still protect the contest artifact path.
-  dropout: 0.05
+  # The BPB sprint is explicitly underfit/likelihood-first.  Disable dropout
+  # during the early supervised compression phase; later audits and QAT protect
+  # the deployable contest artifact.
+  dropout: 0.0
   attention: hybrid
   ring_block_size: 256
   polarquant_kv_bits: 8
@@ -80,15 +80,17 @@ data:
 training:
   checkpoint_dir: checkpoints/parameter_golf_oai_dense
   max_steps: 50000
-  batch_size: 2
-  grad_accum_steps: 16
+  # Same effective token batch as 2x16, but fewer microbatches per optimizer
+  # step on the 24 GB GPU for a faster wall-clock descent sprint.
+  batch_size: 4
+  grad_accum_steps: 8
   # The stream-aligned 1250->1750 audit showed the fast descent returned, but
   # BPB began bouncing once the warmup pushed effective LR above roughly
   # 2.3e-5.  Restart from the aligned step-1500 checkpoint with Adam moments
   # intact and keep the next 500-step window below that observed bounce band.
-  lr: 0.000036
-  weight_decay: 0.05
-  warmup_steps: 3000
+  lr: 0.000042
+  weight_decay: 0.03
+  warmup_steps: 2500
   precision: bf16
   device: cuda
   seed: 17
@@ -185,10 +187,10 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_capture_1500_2000
+    - name: bpb_sprint_1500_1800
       start_step: 1500
-      end_step: 2000
-      lr_multiplier: 1.05
+      end_step: 1800
+      lr_multiplier: 1.15
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
@@ -197,10 +199,10 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_capture_2000_2500
-      start_step: 2000
-      end_step: 2500
-      lr_multiplier: 0.82
+    - name: bpb_sprint_1800_2600
+      start_step: 1800
+      end_step: 2600
+      lr_multiplier: 0.90
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
@@ -210,9 +212,9 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
     - name: bpb_stabilization_hold
-      start_step: 2500
+      start_step: 2600
       end_step: 6000
-      lr_multiplier: 0.65
+      lr_multiplier: 0.72
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0

@@ -2161,3 +2161,40 @@ Undesirable:
 Decision: restart from `random_order_step_00001500.pt` with lower effective LR
 and fresh controller state, then run the next interrupting analysis at step
 2000.
+
+### Harder Faster Longer Supervised Sprint
+
+The first step-1500 capture restart recovered the stream but remained too
+conservative.  By roughly step \(1650\), train BPB was still hovering around
+\(3.7\)--\(3.9\), not falling below the step-1500 low.  The intended next move
+is therefore no longer a basin-capture schedule; it is a supervised compression
+sprint:
+
+- disable dropout during the BPB sprint: `model.dropout=0.0`;
+- keep the same effective token batch but reduce microbatch count for faster
+  wall-clock updates on the 24 GB GPU: `batch_size=4`, `grad_accum_steps=8`;
+- reduce weight decay from \(0.05\) to \(0.03\), because early BPB is dominated
+  by underfit compression rather than overfit memorization;
+- raise base LR to \(4.2\cdot10^{-5}\) with warmup \(2500\);
+- use a short high-pressure phase `bpb_sprint_1500_1800` with multiplier
+  \(1.15\), then a longer hold rather than returning immediately to the
+  over-damped setting.
+
+The effective LR targets are:
+
+| step | phase | effective LR |
+|---:|---|---:|
+| 1500 | `bpb_sprint_1500_1800` | \(2.90\cdot10^{-5}\) |
+| 1750 | `bpb_sprint_1500_1800` | \(3.38\cdot10^{-5}\) |
+| 1800 | `bpb_sprint_1800_2600` | \(2.72\cdot10^{-5}\) |
+| 2250 | `bpb_sprint_1800_2600` | \(3.40\cdot10^{-5}\) |
+| 2600+ | `bpb_stabilization_hold` | \(\approx3.0\cdot10^{-5}\) |
+
+This intentionally revisits the aggressive LR band, but with three safeguards
+that earlier attempts lacked: zero dropout, no auxiliary losses during the
+compression sprint, and faster same-token optimizer steps.  The next watcher
+should interrupt at step \(1750\), not \(2000\), because this schedule is
+deliberately more forceful; if BPB is not below the old \(3.59\) neighborhood
+by then, the issue is no longer insufficient LR and the next intervention
+should target data curriculum or objective structure rather than pushing LR
+higher.
