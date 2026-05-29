@@ -1237,6 +1237,47 @@ def sanitize_optimizer_state_shapes(optimizer: torch.optim.Optimizer) -> int:
     return resets
 
 
+def pad_optimizer_state_dict_for_new_parameters(
+    optimizer: torch.optim.Optimizer,
+    optimizer_state: dict[str, Any],
+) -> tuple[dict[str, Any], int]:
+    """Preserve optimizer moments when the current model has appended params.
+
+    PyTorch refuses to load an optimizer state if a parameter group length
+    changed. For compatible resumes where new parameters were appended, such as
+    introducing ``graphcg_direction_basis`` after an older checkpoint, the old
+    moments are still valid for every existing parameter. This pads serialized
+    parameter-id lists with fresh ids that have empty state, so AdamW initializes
+    only the new tensors on their first update.
+    """
+
+    groups = optimizer_state.get("param_groups")
+    if not isinstance(groups, list) or len(groups) != len(optimizer.param_groups):
+        return optimizer_state, 0
+    patched = dict(optimizer_state)
+    patched_groups: list[dict[str, Any]] = []
+    state = dict(patched.get("state", {}))
+    next_id = max((int(key) for key in state.keys()), default=-1) + 1
+    added = 0
+    for saved_group, current_group in zip(groups, optimizer.param_groups):
+        saved_params = list(saved_group.get("params", []))
+        current_params = list(current_group.get("params", []))
+        if len(saved_params) > len(current_params):
+            return optimizer_state, 0
+        group_copy = dict(saved_group)
+        if len(saved_params) < len(current_params):
+            for _ in range(len(current_params) - len(saved_params)):
+                saved_params.append(next_id)
+                state[next_id] = {}
+                next_id += 1
+                added += 1
+        group_copy["params"] = saved_params
+        patched_groups.append(group_copy)
+    patched["param_groups"] = patched_groups
+    patched["state"] = state
+    return patched, added
+
+
 def read_json_file(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -2198,7 +2239,21 @@ def main() -> None:
             )
         else:
             try:
-                optimizer.load_state_dict(payload["optimizer"])
+                optimizer_state, padded_optimizer_params = pad_optimizer_state_dict_for_new_parameters(
+                    optimizer,
+                    payload["optimizer"],
+                )
+                if padded_optimizer_params:
+                    print(
+                        json.dumps(
+                            {
+                                "resume_notice": "optimizer_state_padded_for_new_parameters",
+                                "checkpoint": args.resume,
+                                "new_parameter_states": padded_optimizer_params,
+                            }
+                        )
+                    )
+                optimizer.load_state_dict(optimizer_state)
                 stale_states = sanitize_optimizer_state_shapes(optimizer)
                 if stale_states:
                     print(
