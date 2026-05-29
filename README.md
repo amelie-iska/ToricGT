@@ -579,16 +579,19 @@ filters). Since the current run has passed that step, resuming with the latest
 code activates the harder composite stream immediately while validation remains
 on the full validation split.
 
-The active `oai` restart is from step `23,500`, chosen after the 23.5k/23.75k
-analysis because it had the best simplex budget-1 BPB and best geometry branch
-BPB in that window.  It keeps optimizer state, uses `lr: 9e-5`,
-`complex_mix_ratio: 0.20`, stronger GFlowNet entropy shaping, a toric entropy
-floor, and lighter QAT on the two largest matrices.  A bounded checkpoint-level
-adaptive controller is enabled for the three least invasive training controls:
-GFlowNet entropy target, GFlowNet loss weight, and complex-row mix.  The
-controller updates only after eval windows, writes
-`checkpoints/parameter_golf_oai_dense/adaptive_controller_state.json`, and logs
-`controller/*` metrics to W&B.
+The active `oai` recovery restart is from the earlier step `23,250`
+checkpoint, chosen after the later 23.5k-to-26k interval showed worse BPB/loss
+behavior. It keeps optimizer state but lowers complex-row pressure and
+GFlowNet pressure while preserving the ToricGT-specific components:
+`complex_mix_ratio: 0.10`, `gflownet_loss_weight: 0.010`, gentler entropy
+shaping, the toric entropy floor, and lightweight QAT. A bounded
+checkpoint-level adaptive controller is enabled for the three least invasive
+training controls: GFlowNet entropy target, GFlowNet loss weight, and
+complex-row mix. The controller updates only after eval windows, writes
+`checkpoints/parameter_golf_oai_dense/adaptive_controller_state_23250_recovery.json`,
+resets stale state if the resume step changes, and logs `controller/*` metrics
+to W&B. Recovery mode throttles complex rows and GFlowNet weight more
+aggressively when train BPB drifts upward without validation improvement.
 
 For challenge-time throughput experiments, use the long-context packed config:
 
@@ -630,7 +633,7 @@ Watch a tmux run:
 
 ```bash
 tmux attach -t toricgt_pg_oai
-tail -f logs/training/oai-resume-23500-adaptive.log
+tail -f logs/training/oai-resume-23250-recovery.log
 tmux attach -t toricgt_pg_oai_analysis
 ```
 

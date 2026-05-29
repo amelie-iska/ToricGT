@@ -435,6 +435,13 @@ class AdaptiveTrainingController:
     train_drift_threshold: float = 0.02
     val_improvement_delta: float = 0.002
     warmup_updates: int = 1
+    reset_on_start_step_mismatch: bool = True
+    gflownet_increase_drift_guard: float = 0.03
+    recovery_mode_enabled: bool = False
+    recovery_train_drift_threshold: float = 0.08
+    recovery_complex_down_step: float = 0.04
+    recovery_gflownet_down_step: float = 0.001
+    recovery_exit_val_improvements: int = 2
 
     def __post_init__(self) -> None:
         self.state_path = Path(self.state_path)
@@ -445,6 +452,7 @@ class AdaptiveTrainingController:
         self.gflownet_loss_weight = float(self.initial_gflownet_loss_weight)
         self.gflownet_entropy_target = float(self.initial_entropy_target)
         self.complex_mix_ratio = float(self.initial_complex_mix_ratio)
+        self.consecutive_val_improvements = 0
         self.last_metrics: dict[str, float] = {}
         self.load()
 
@@ -482,11 +490,31 @@ class AdaptiveTrainingController:
             train_drift_threshold=float(section.get("train_drift_threshold", 0.02)),
             val_improvement_delta=float(section.get("val_improvement_delta", 0.002)),
             warmup_updates=int(section.get("warmup_updates", 1)),
+            reset_on_start_step_mismatch=bool(section.get("reset_on_start_step_mismatch", True)),
+            gflownet_increase_drift_guard=float(section.get("gflownet_increase_drift_guard", 0.03)),
+            recovery_mode_enabled=bool(section.get("recovery_mode_enabled", False)),
+            recovery_train_drift_threshold=float(section.get("recovery_train_drift_threshold", 0.08)),
+            recovery_complex_down_step=float(section.get("recovery_complex_down_step", 0.04)),
+            recovery_gflownet_down_step=float(section.get("recovery_gflownet_down_step", 0.001)),
+            recovery_exit_val_improvements=int(section.get("recovery_exit_val_improvements", 2)),
         )
 
     def load(self) -> None:
         payload = read_json_file(self.state_path)
         if not payload:
+            self._clamp()
+            return
+        if self.reset_on_start_step_mismatch and int(payload.get("start_step", self.start_step)) != int(self.start_step):
+            print(
+                json.dumps(
+                    {
+                        "adaptive_controller_notice": "state_reset_start_step_mismatch",
+                        "state_path": str(self.state_path),
+                        "state_start_step": payload.get("start_step"),
+                        "resume_start_step": self.start_step,
+                    }
+                )
+            )
             self._clamp()
             return
         self.update_count = int(payload.get("update_count", self.update_count))
@@ -502,6 +530,9 @@ class AdaptiveTrainingController:
         self.gflownet_loss_weight = float(payload.get("gflownet_loss_weight", self.gflownet_loss_weight))
         self.gflownet_entropy_target = float(payload.get("gflownet_entropy_target", self.gflownet_entropy_target))
         self.complex_mix_ratio = float(payload.get("complex_mix_ratio", self.complex_mix_ratio))
+        self.consecutive_val_improvements = int(
+            payload.get("consecutive_val_improvements", self.consecutive_val_improvements)
+        )
         last_metrics = payload.get("last_metrics")
         if isinstance(last_metrics, dict):
             self.last_metrics = {str(key): float(value) for key, value in last_metrics.items()}
@@ -532,6 +563,7 @@ class AdaptiveTrainingController:
             "gflownet_loss_weight": self.gflownet_loss_weight,
             "gflownet_entropy_target": self.gflownet_entropy_target,
             "complex_mix_ratio": self.complex_mix_ratio,
+            "consecutive_val_improvements": self.consecutive_val_improvements,
             "last_metrics": self.last_metrics,
             "bounds": {
                 "gflownet_loss": [self.gflownet_loss_min, self.gflownet_loss_max],
@@ -550,6 +582,8 @@ class AdaptiveTrainingController:
             "controller/gflownet_loss_weight": float(self.gflownet_loss_weight),
             "controller/gflownet_entropy_target": float(self.gflownet_entropy_target),
             "controller/complex_mix_ratio": float(self.complex_mix_ratio),
+            "controller/recovery_mode_enabled": float(self.recovery_mode_enabled),
+            "controller/consecutive_val_improvements": float(self.consecutive_val_improvements),
         }
         metrics.update(self.last_metrics)
         return metrics
@@ -579,6 +613,7 @@ class AdaptiveTrainingController:
         val_improved = float(val_bpb) < previous_best - float(self.val_improvement_delta)
         self.best_val_bpb = min(self.best_val_bpb, float(val_bpb))
         gfn_eval_gap = float(val_gflownet_bpb) - float(val_bpb)
+        self.consecutive_val_improvements = self.consecutive_val_improvements + 1 if val_improved else 0
 
         elapsed = max(0, int(step) - int(self.start_step))
         tau = max(1.0, float(self.entropy_target_tau_steps))
@@ -587,16 +622,38 @@ class AdaptiveTrainingController:
         ) * math.exp(-elapsed / tau)
         self.gflownet_entropy_target = min(self.gflownet_entropy_target, scheduled_target)
 
+        recovery_active = False
         if self.update_count >= int(self.warmup_updates):
-            if gfn_eval_gap > 0.0:
+            recovery_active = bool(
+                self.recovery_mode_enabled
+                and (
+                    train_drift > float(self.recovery_train_drift_threshold)
+                    or (train_drift > float(self.train_drift_threshold) and not val_improved)
+                )
+            )
+            if recovery_active:
+                self.complex_mix_ratio -= self.recovery_complex_down_step
+                self.gflownet_loss_weight -= self.recovery_gflownet_down_step
+
+            if (
+                gfn_eval_gap > 0.0
+                and train_drift <= float(self.gflownet_increase_drift_guard)
+                and not recovery_active
+            ):
                 fraction = min(1.0, gfn_eval_gap / 0.02)
                 self.gflownet_loss_weight += self.gflownet_gap_step * fraction
             elif gfn_eval_gap < -0.005:
                 self.gflownet_loss_weight -= self.gflownet_relax_step
 
-            if train_drift > float(self.train_drift_threshold) and not val_improved:
+            if recovery_active:
+                pass
+            elif train_drift > float(self.train_drift_threshold) and not val_improved:
                 self.complex_mix_ratio -= self.complex_down_step
-            elif val_improved and train_drift <= float(self.train_drift_threshold):
+            elif (
+                val_improved
+                and train_drift <= float(self.train_drift_threshold)
+                and self.consecutive_val_improvements >= int(self.recovery_exit_val_improvements)
+            ):
                 self.complex_mix_ratio += self.complex_up_step
 
         self.update_count += 1
@@ -609,6 +666,7 @@ class AdaptiveTrainingController:
             "controller/val_gflownet_gap": float(gfn_eval_gap),
             "controller/val_improved": float(val_improved),
             "controller/scheduled_entropy_target": float(scheduled_target),
+            "controller/recovery_active": float(recovery_active),
         }
         self.save()
         return self.log_metrics()

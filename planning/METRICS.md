@@ -1025,3 +1025,186 @@ read the latest W&B/eval metrics every `500` steps, update only scalar training
 knobs, write a `controller_state.json`, and log `controller/*` metrics.  The
 first adaptive run should enable only items 1--3; items 4--7 are useful but more
 likely to interact with optimizer state or regularization in hard-to-debug ways.
+
+## GPU Interval Analysis: Step 23,500 to 26,150
+
+Analysis date: 2026-05-29. The active `oai-resume-23500-adaptive`
+training process was paused and the GPU was used for all model-side diagnostic
+runs. The latest checkpoint written by the active run is
+`checkpoints/parameter_golf_oai_dense/random_order_step_00026000.pt`; W&B
+history reaches step `26150`, but there is no newer checkpoint from this run.
+
+Primary artifacts:
+
+- Metrics report:
+  `outputs/gpu_interval_analysis/oai-resume-23500-adaptive/step-00026000/metrics/automatic_metrics_report.md`
+- Metrics contact sheet:
+  `outputs/gpu_interval_analysis/oai-resume-23500-adaptive/step-00026000/contact_metrics.png`
+- Reasoning simplex outputs:
+  `outputs/gpu_interval_analysis/oai-resume-23500-adaptive/step-00026000/simplex/`
+- Geometry, trajectory, energy, and phase plots:
+  `outputs/gpu_interval_analysis/oai-resume-23500-adaptive/step-00026000/geometry/`
+- Simplex/geometry contact sheet:
+  `outputs/gpu_interval_analysis/oai-resume-23500-adaptive/step-00026000/contact_simplex_geometry.png`
+- 3D trajectory contact sheet:
+  `outputs/gpu_interval_analysis/oai-resume-23500-adaptive/step-00026000/contact_trajectories_3d.png`
+- Energy/Ramachandran-style phase contact sheet:
+  `outputs/gpu_interval_analysis/oai-resume-23500-adaptive/step-00026000/contact_energy_phase.png`
+
+### Metric Categorization
+
+The automatic classifier gives `115` desired metrics, `61` metrics that are
+directionally acceptable but weak, and `63` undesirable metrics. The important
+manual categorization is:
+
+| Metric family | Behavior | Evidence | Category |
+|---|---:|---|---|
+| Base train BPB/loss | likelihood drifted upward after the 23.5k resume | `train/bpb` median increased from `4.69603` to `4.93759` (`+5.14%`); `train/loss` increased by the same relative amount; `train/total_loss` increased `+4.82%` | undesirable |
+| Recent train BPB slope | drift is weaker in the last few hundred steps but not recovered | recent `train/bpb` slope is `+0.04835` BPB/1k with low t-statistic, while the full-window slope is `+0.19098` BPB/1k | undesirable but possibly stabilizing |
+| Validation BPB | improved, but too slowly | `val/bpb` moved from `4.89233` to `4.88581` (`-0.13%`); last value is slightly worse than best `4.88540` | acceptable but not strong enough |
+| Complexity validation BPB | improved more than ordinary val BPB | `complexity/val/bpb` moved from `4.84217` to `4.82457` (`-0.36%`) | acceptable but not strong enough |
+| Prediction-target NCD | semantic/compressive similarity is not improving | `complexity/val/prediction_target_ncd_lzma_mean` worsened from `0.92175` to `0.92611` | weak/undesirable |
+| GFlowNet loss | improved strongly | `train/gflownet_loss` decreased from `2.32838` to `1.79965` (`-22.71%`) | desired |
+| GFlowNet entropy/diversity | no collapse, but slowly narrowing | entropy `2.67617 -> 2.65727`; action diversity `0.96388 -> 0.95770` | acceptable, monitor |
+| Controller complex mix | moved in the right direction but too late and not far enough | `complex_mix_ratio` decreased from `0.20` to `0.16`, yet train BPB remained elevated | desired direction, insufficient strength |
+| Controller GFlowNet weight | moved the wrong way for this interval | `gflownet_loss_weight` increased from `0.01250` to `0.01265` even though base BPB was drifting upward | undesirable |
+| Causal audit | clean | future permutation logit error stayed exactly `0` | desired |
+
+### Plot Analysis
+
+The core metric timeseries shows a step-regime change: after the composite
+curriculum resume, training BPB/loss jump upward and remain elevated. This is
+not an isolated spike; robust spike counts are zero because the issue is a new
+plateau, not a one-step outlier. Validation BPB slopes downward, but the
+absolute movement is far too small for the competition objective.
+
+The selected metric correlation plot suggests the drift is coupled to the
+trajectory-flow terms: train BPB/loss rise with kinetic/viscous trajectory
+energy, while GFlowNet loss falls. This is the expected signature of a model
+that is learning to produce structured reasoning trajectories, but paying for it
+in next-byte likelihood. That tradeoff is acceptable only if validation BPB or
+best-branch BPB improves materially; here it does not.
+
+The reasoning simplex evaluation shows budget saturation:
+
+| Budget | BPB | Loss | MST efficiency | Trajectory tokens |
+|---:|---:|---:|---:|---:|
+| 1 | `4.03596` | `2.79751` | `0.65881` | `2048` |
+| 2 | `4.03209` | `2.79483` | `0.68320` | `12288` |
+| 4 | `4.03494` | `2.79681` | `0.69107` | `65536` |
+| 8 | `4.04786` | `2.80576` | `0.68818` | `65536` |
+
+Budget `2` is the best BPB point, budget `4` only improves MST efficiency, and
+budget `8` makes BPB worse. For the current checkpoint, extra inference-time
+reasoning beyond budget `4` is over-thinking rather than useful scaling.
+
+The geometry suite reports `mean_bpb=4.74539`, `best_bpb=4.08563`,
+`mean_answer_bpb=4.62301`, `best_answer_bpb=3.57531`,
+`mean_mst_efficiency=0.50698`, and `mean_path_smoothness=0.090997`. Compared
+with the prior step-25k analysis, BPB is slightly better but MST efficiency is
+lower and smoothness worsened. Compared with the earlier 21.25k--23.75k GPU
+window, the geometry BPB is worse, though those older measurements used a
+different sample set and should not be treated as paired statistics.
+
+The 3D embedding-space graph-of-thought trajectories show the qualitative
+failure mode. Hebrew text forms a relatively coherent fan-shaped manifold, but
+frontier reasoning, GoT math, and competition math show dense attractor regions
+with long chaotic excursions. Terminal branches often orbit or skim basins
+instead of descending reliably into low-energy/high-answer-likelihood regions.
+The energy landscapes contain many local NLL hot spots and irregular ridges; the
+Ramachandran-style phase plots show toric phase modes are present and not
+collapsed, but the phase modes are not yet aligned strongly enough with lower
+BPB terminals.
+
+### Mathematical Interpretation
+
+Let the effective objective be
+
+\[
+\mathcal L =
+\mathcal L_{\mathrm{BPB}}
++ \lambda_{\mathrm{GFN}}\mathcal L_{\mathrm{GFN}}
++ \lambda_H (H-H^\star)^2
++ \lambda_{\mathrm{flow}}\mathcal L_{\mathrm{flow}}
++ \lambda_{\mathrm{complex}}\mathcal L_{\mathrm{complex}}.
+\]
+
+The interval behavior says that the gradient component from
+\(\lambda_{\mathrm{GFN}}\mathcal L_{\mathrm{GFN}}\) and the complex-row
+curriculum is coherent enough to reduce GFlowNet loss, but not aligned enough
+with \(-\nabla \mathcal L_{\mathrm{BPB}}\). In geometric terms, the reasoning
+flow is improving its internal trajectory objective while moving along a
+likelihood-neutral or likelihood-adverse tangent direction. The model has
+entered a shallow BPB floor: validation improves because some regularization and
+complex examples help generalization, but base compression is no longer
+descending quickly.
+
+The simplex result sharpens this: the first extra reasoning budget is useful,
+the second mostly helps graph connectivity, and later budgets add Kolmogorov
+program length without lowering BPB. If \(B(k)\) is BPB after reasoning budget
+\(k\), then \(B(2)<B(1)\), \(B(4)\approx B(2)\), and \(B(8)>B(2)\); the
+discrete second difference has turned positive. The current policy should
+therefore penalize long unproductive trajectories until the branch selector
+becomes more reliable.
+
+### Recommended Change Set
+
+User decision after reviewing the interval: resume from the earlier step
+`23250` checkpoint rather than attempting to recover the later 23.5k-to-26k
+run. This is justified because the later interval is worse relative to the
+pre-run checkpoint family despite a small validation BPB movement. Enter a short
+recovery curriculum from `23250` for `1000`--`1500` steps, then re-analyze.
+
+Recommended config changes:
+
+1. **Complex-row throttle.** Set the live complex mix to `0.08`--`0.10`.
+   Use `complex_mix_min=0.06`, `complex_mix_max=0.18`,
+   `complex_down_step=0.04`, and `complex_up_step=0.0` until two consecutive
+   validation BPB improvements occur. This keeps graph reasoning active but
+   restores ordinary byte-likelihood pressure.
+
+2. **GFlowNet weight guard.** Lower `gflownet_loss_weight` to `0.010`.
+   Clamp the adaptive controller to `[0.006, 0.014]` and forbid increases when
+   `controller/train_bpb_drift > 0.03`. The current policy loss is already
+   improving; it does not need more weight while BPB drifts.
+
+3. **Budget cap during training.** Train with reasoning budgets up to `4`;
+   keep budget `8` for evaluation only. The simplex shows budget `8` worsens
+   BPB while consuming the same maximum trajectory-token allocation as budget
+   `4`.
+
+4. **Gentler entropy shaping.** Keep entropy selective but reduce the squared
+   entropy pressure by setting `gflownet_entropy_weight=0.01`. Do not lower the
+   target further during recovery; the policy is already narrowing and remains
+   highly diverse.
+
+5. **Flow damping.** Increase `trajectory_flow_loss_weight` from `0.003` to
+   `0.004` only if the next geometry check still shows path smoothness worse
+   than `0.085`. The trajectories are turbulent, but over-damping can erase
+   useful graph-of-thought exploration.
+
+6. **Controller hysteresis.** Add a hard recovery mode:
+
+   \[
+   r_{\mathrm{complex}}\leftarrow \max(0.06,r_{\mathrm{complex}}-0.04),
+   \quad
+   \lambda_{\mathrm{GFN}}\leftarrow
+   \max(0.006,\lambda_{\mathrm{GFN}}-0.001)
+   \]
+
+   whenever `train_bpb_drift > 0.08` or validation fails to improve after a
+   positive train-BPB window. Recovery mode exits only after two validation
+   improvements and nonpositive recent train-BPB slope.
+
+7. **Checkpoint choice.** Resume from
+   `checkpoints/parameter_golf_oai_dense/random_order_step_00023250.pt`. Start
+   a fresh controller state for this rollback, not the stale controller state
+   from the later run. If validation BPB and budget-2 simplex BPB do not improve
+   after the recovery window, keep the same checkpoint but reduce complex mix
+   again before considering a deeper rollback.
+
+The expected effect is to keep the useful ToricGT components active while
+restoring gradient alignment with BPB. The goal for the next analysis window is
+not merely lower GFlowNet loss; it is simultaneous improvement in `val/bpb`,
+`complexity/val/bpb`, and budget-2 simplex BPB without a further drop in
+GFlowNet diversity below roughly `0.95`.
