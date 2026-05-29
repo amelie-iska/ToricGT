@@ -131,7 +131,14 @@ Requested work:
 6. If a restart is warranted, pause $TRAINING_TMUX, choose the best checkpoint
    from the evidence, resume training in tmux, and report the new tmux and W&B
    details. If continuation is better, leave training running and document why.
-7. Update planning/METRICS.md with the analysis and decision. Push branch oai
+7. After any restart or explicit continuation decision, schedule the next
+   interrupting analysis approximately 500 steps later. Use
+   scripts/watch_training_analysis.py with --target-step, --pause-training-before-analysis,
+   --device cuda, --precision bf16, --codex-review-hook
+   scripts/codex_training_review_resume.sh, and --codex-review-tmux-prefix
+   toricgt_codex_review. Use a fresh --min-mtime-unix captured at the restart
+   time so old checkpoint filenames are ignored.
+8. Update planning/METRICS.md with the analysis and decision. Push branch oai
    if code, config, docs, or planning files change.
 
 Safety:

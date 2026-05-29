@@ -1696,3 +1696,27 @@ review/resume turn whose task is to inspect the just-finished analysis, update
 `planning/METRICS.md`, implement small high-impact adjustments if justified,
 and either leave the current training run intact or pause and resume from an
 evidence-selected checkpoint.
+
+For floor-bounce debugging, the preferred operating mode is now interrupting:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/watch_training_analysis.py \
+  --checkpoint-dir checkpoints/parameter_golf_oai_dense \
+  --start-step 1000 \
+  --target-step 2250 \
+  --run-path amelie-iska-math/toricgt-parameter-golf/1ouz53jk \
+  --output-root outputs/post_resume_analysis/oai-restart-01000-phased \
+  --min-mtime-unix "$(cat outputs/post_resume_analysis/oai-restart-01000-phased/start_epoch.txt)" \
+  --pause-training-before-analysis \
+  --device cuda \
+  --precision bf16 \
+  --codex-review-hook scripts/codex_training_review_resume.sh \
+  --codex-review-tmux-prefix toricgt_codex_review \
+  --training-tmux toricgt_pg_oai
+```
+
+This waits for a fresh checkpoint, sends `Ctrl-C` to the training tmux, runs the
+analysis suite with the GPU freed, then opens a Codex review tmux.  The resumed
+review is instructed to restart or continue based on evidence and to schedule
+the next interrupting analysis roughly 500 steps later.

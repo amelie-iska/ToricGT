@@ -16,6 +16,9 @@
 #     --run-path amelie-iska-math/toricgt-parameter-golf/1ouz53jk \
 #     --output-root outputs/post_resume_analysis/oai-restart-01000-phased \
 #     --min-mtime-unix "$(cat outputs/post_resume_analysis/oai-restart-01000-phased/start_epoch.txt)" \
+#     --target-step 2250 \
+#     --pause-training-before-analysis \
+#     --device cuda --precision bf16 \
 #     --codex-review-hook scripts/codex_training_review_resume.sh \
 #     --codex-review-tmux-prefix toricgt_codex_review
 """Wait for a future checkpoint and run non-interrupting metric analyses.
@@ -46,6 +49,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-dir", default="checkpoints/parameter_golf_oai_dense")
     parser.add_argument("--start-step", type=int, required=True)
     parser.add_argument("--after-steps", type=int, default=1500)
+    parser.add_argument(
+        "--target-step",
+        type=int,
+        default=0,
+        help="Analyze the first fresh checkpoint at or above this absolute step. Overrides start-step + after-steps.",
+    )
     parser.add_argument(
         "--min-mtime-unix",
         type=float,
@@ -80,6 +89,12 @@ def parse_args() -> argparse.Namespace:
         help="If set, the hook launches codex resume in <prefix>_<step> instead of inline.",
     )
     parser.add_argument("--training-tmux", default="toricgt_pg_oai")
+    parser.add_argument(
+        "--pause-training-before-analysis",
+        action="store_true",
+        help="Send Ctrl-C to --training-tmux after the target checkpoint appears and before analysis starts.",
+    )
+    parser.add_argument("--pause-wait-seconds", type=float, default=10.0)
     return parser.parse_args()
 
 
@@ -111,6 +126,36 @@ def run_command(command: list[str], cwd: Path, log_path: Path) -> None:
         handle.write("$ " + " ".join(command) + "\n\n")
         handle.flush()
         subprocess.run(command, cwd=str(cwd), env=env, stdout=handle, stderr=subprocess.STDOUT, check=True)
+
+
+def pause_training_session(tmux_session: str, wait_seconds: float, log_path: Path) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write(f"requested training pause for tmux session: {tmux_session}\n")
+        probe = subprocess.run(
+            ["tmux", "has-session", "-t", tmux_session],
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        if probe.returncode != 0:
+            handle.write("tmux session was not present; no pause signal sent\n")
+            return
+        subprocess.run(
+            ["tmux", "send-keys", "-t", tmux_session, "C-c"],
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        handle.write(f"sent Ctrl-C; waiting {wait_seconds:.1f}s\n")
+        handle.flush()
+        time.sleep(max(0.0, wait_seconds))
+        subprocess.run(
+            ["tmux", "capture-pane", "-pt", tmux_session, "-S", "-20"],
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -224,7 +269,7 @@ def main() -> None:
     args = parse_args()
     repo = Path.cwd()
     checkpoint_dir = Path(args.checkpoint_dir)
-    target_step = args.start_step + args.after_steps
+    target_step = int(args.target_step or (args.start_step + args.after_steps))
     print(f"waiting for checkpoint >= {target_step} in {checkpoint_dir}", flush=True)
     found: tuple[int, Path] | None = None
     while found is None:
@@ -234,6 +279,12 @@ def main() -> None:
     step, checkpoint = found
     base = Path(args.output_root) / f"step-{step:08d}"
     base.mkdir(parents=True, exist_ok=True)
+    if args.pause_training_before_analysis:
+        pause_training_session(
+            tmux_session=str(args.training_tmux),
+            wait_seconds=float(args.pause_wait_seconds),
+            log_path=base / "logs" / "training_pause.log",
+        )
     print(f"analyzing checkpoint {checkpoint} at step {step}", flush=True)
 
     if args.run_path:
