@@ -1865,3 +1865,45 @@ floor is likely a sharpness/step-size problem and the repair should reduce
 effective LR or extend warmup.  If BPB turns upward without Hessian growth, the
 repair should focus first on data ordering, curriculum mixture, or auxiliary
 loss weights.
+
+### Step 1250 Elbow-Momentum Restart
+
+The first curvature-aware step-1250 run was over-damped.  It reset Adam moments,
+used base LR \(3\cdot 10^{-5}\), warmup \(3000\), and phase multiplier \(0.70\).
+At step 1250 that gives an effective learning rate of roughly
+
+\[
+3\cdot 10^{-5}\cdot 0.70\cdot \frac{1250}{3000}
+\approx 8.75\cdot 10^{-6}.
+\]
+
+The observed BPB stayed mostly in the \(4.5\)--\(4.8\) range through the first
+few hundred post-restart steps, and did not reproduce the steep descent seen
+from the phased step-1000 restart.  The likely cause is not auxiliary pressure:
+the stabilization phase still zeroes GFlowNet, MTP, trajectory-flow, and toric
+entropy losses.  The cause is under-powered optimization after discarding Adam
+moments from the already-useful steep descent.
+
+The next restart therefore uses step 1250 as an elbow checkpoint but keeps the
+optimizer state in the checkpoint.  The scalar control update is:
+
+- base LR \(4\cdot 10^{-5}\);
+- warmup \(2500\);
+- stabilization `lr_multiplier=0.95`;
+- no optimizer reset;
+- same zero-auxiliary BPB-stabilization phase;
+- fresh controller state at
+  `checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01250_elbow_momentum.json`.
+
+The effective LR near step 1250 is then approximately
+
+\[
+4\cdot 10^{-5}\cdot 0.95\cdot \frac{1250}{2500}
+\approx 1.9\cdot 10^{-5}.
+\]
+
+This is about \(2.2\times\) the over-damped run, but still below the
+approximately \(3\cdot 10^{-5}\) effective LR associated with the later
+1500-to-1750 bounce.  The next interrupting analysis remains at step 1750 and
+must compare BPB slope, second differences, Hessian sharpness, and validation
+BPB before choosing whether to continue or roll back again.
