@@ -81,7 +81,11 @@ data:
   # technical/graph records.
   difficulty_curriculum_enabled: true
   easy_min_estimated_tokens: 0
-  easy_max_estimated_tokens: 128
+  # Keep the initial byte-compression stream unfiltered.  A live GraphCG
+  # restart showed <=128-token rows were not actually easier for BPB; they were
+  # short but higher-entropy.  Medium/hard streams still provide explicit
+  # stratified reasoning exposure after the capture window.
+  easy_max_estimated_tokens: 0
   medium_start_step: 1650
   medium_mix_ratio: 0.0
   medium_min_estimated_tokens: 129

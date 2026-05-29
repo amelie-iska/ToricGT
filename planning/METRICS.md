@@ -2278,7 +2278,10 @@ has settled.
 
 Implementation decision:
 
-- easy stream: `estimated_tokens <= 128`, text-first, active at resume;
+- easy stream: unfiltered text-first rows, active at resume.  A live
+  1500-step GraphCG restart showed that the nominal `<=128` bucket was short
+  but not BPB-easy, producing early BPB around 4.3--4.5 versus the previous
+  unfiltered text-first band around 3.5--3.7;
 - medium stream: `129..384`, text-first, starts at step 1650 but has zero
   scheduled mass until step 1800;
 - hard stream: `>=385`, technical/reasoning keywords, graph projection enabled,
