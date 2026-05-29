@@ -17,7 +17,7 @@ model:
   use_gflownet_policy: true
   gflownet_num_actions: 16
   gflownet_hidden_dim: 192
-  gflownet_action_scale: 0.06
+  gflownet_action_scale: 0.12
   use_bigram_hash: true
   bigram_hash_buckets: 4096
   bigram_hash_weight: 0.35
@@ -47,7 +47,7 @@ data:
   # byte compression pressure active. This step has already been reached in the
   # current oai run, so a resume activates the mixture immediately.
   complex_start_step: 1000
-  complex_mix_ratio: 0.35
+  complex_mix_ratio: 0.20
   complex_min_estimated_tokens: 256
   complex_task_family_keywords:
     - math
@@ -65,9 +65,10 @@ training:
   max_steps: 50000
   batch_size: 2
   grad_accum_steps: 16
-  # Post-analysis rescue resume from step 20000 lowers LR again to protect
-  # deterministic validation BPB while QAT and composite rows are active.
-  lr: 0.00012
+  # Step-window analysis around 21.25k/22.5k/24k showed useful validation
+  # improvement but branch-quality drift at the previous rate.  Keep the
+  # optimizer moments from the checkpoint and lower the scheduled LR.
+  lr: 0.00009
   weight_decay: 0.05
   warmup_steps: 1000
   precision: bf16
@@ -78,21 +79,21 @@ training:
   eval_batches: 20
   eval_order_samples: 1
   eval_gflownet_samples: 2
-  gflownet_loss_weight: 0.01
+  gflownet_loss_weight: 0.0125
   # Target policy entropy keeps branching noncollapsed without rewarding a
   # permanently uniform GFlowNet policy.
-  gflownet_entropy_weight: 0.003
+  gflownet_entropy_weight: 0.02
   gflownet_entropy_target: 2.05
-  toric_entropy_floor: 0.18
-  toric_entropy_loss_weight: 0.002
+  toric_entropy_floor: 0.20
+  toric_entropy_loss_weight: 0.003
   mtp_loss_weight: 0.05
-  qat_loss_weight: 0.0000005
+  qat_loss_weight: 0.0000002
   qat_bits: 6
-  qat_max_tensors: 4
+  qat_max_tensors: 2
   qat_start_step: 18000
   qat_warmup_steps: 4000
   contrastive_loss_weight: 0.01
-  trajectory_flow_loss_weight: 0.002
+  trajectory_flow_loss_weight: 0.003
   trajectory_flow_target: 0.075
   eval_score_first_bias_lr: 0.025
   eval_score_first_bias_decay: 0.98
@@ -110,6 +111,27 @@ complexity:
   compressors:
     - zlib
     - lzma
+
+adaptive_training:
+  enabled: true
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state.json
+  # Checkpoint-level controller only: updates after eval windows, never per
+  # microbatch.  It keeps the architecture and optimizer state fixed while
+  # gently tuning the three controls identified by the 23.5k analysis.
+  entropy_target_min: 1.95
+  entropy_target_tau_steps: 8000
+  gflownet_loss_min: 0.008
+  gflownet_loss_max: 0.025
+  gflownet_gap_step: 0.001
+  gflownet_relax_step: 0.00025
+  complex_mix_min: 0.12
+  complex_mix_max: 0.30
+  complex_down_step: 0.02
+  complex_up_step: 0.005
+  train_bpb_ema_beta: 0.70
+  train_drift_threshold: 0.02
+  val_improvement_delta: 0.002
+  warmup_updates: 1
 
 checkpoint_publishing:
   enabled: true

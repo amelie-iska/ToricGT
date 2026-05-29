@@ -739,3 +739,289 @@ checkpoints/parameter_golf_oai_dense/random_order_step_00020000.pt
 
 The next automatic analysis pass should run after roughly 1,500 additional
 steps, targeting the first checkpoint at or after step 21,500.
+
+## Step 34,750 GPU Geometry Analysis And Restart Controls
+
+The GPU analysis suite at step 34,750 inspected W&B metrics, reasoning/K/BPB
+triangles, tetrahedra, Ramachandran-style phase plots, energy landscapes, and
+per-record embedding-space graph-of-thought trajectories.
+
+The key findings were:
+
+- deterministic validation BPB continued to improve, but slowly;
+- budgeted inference did not improve BPB yet: budget 1 had the best simplex BPB
+  while budgets 2, 4, and 8 mainly increased complexity and wall time;
+- the best branch in the geometry suite was substantially better than the mean
+  branch, so branch search contains useful candidates but policy selection is
+  not calibrated;
+- GFlowNet entropy stayed essentially at \(\log 16\), meaning the action policy
+  remains close to uniform;
+- trajectory flow/viscous dissipation rose, indicating turbulent embedding-space
+  paths without enough likelihood gain;
+- QAT and composite-row pressure are likely adding optimization drag.
+
+The restart from
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00034750.pt
+```
+
+therefore keeps the architecture fixed and makes only training-control changes:
+
+- `complex_mix_ratio`: `0.35` -> `0.25`;
+- `gflownet_action_scale`: `0.06` -> `0.12`;
+- `gflownet_entropy_weight`: `0.003` -> `0.01`;
+- `gflownet_entropy_target`: `2.05` -> `1.75`;
+- `qat_loss_weight`: `5e-7` -> `2e-7`;
+- `qat_max_tensors`: `4` -> `2`.
+
+The hypothesis is that the model needs a lower curriculum/QAT load and stronger
+policy selectivity before test-time graph-of-thought budget can help BPB.  Until
+the GFlowNet policy entropy moves meaningfully below \(\log 16\), checkpoint
+promotion should continue to use deterministic BPB and analysis should treat
+budget 4/8 as diagnostic rather than default.
+
+## Step 21,250--24,000 Reanalysis And 22,500 Restart Decision
+
+The run restarted from step 21,250 was paused at step 24,111 and reanalyzed on
+GPU.  The analysis artifacts are under:
+
+```text
+outputs/reanalysis_gpu/oai-resume-21250-selective-gfn/
+```
+
+The W&B export for the paused run shows a split signal:
+
+- validation BPB improved slightly from `4.890875` at step 21,500 to `4.881343`
+  at step 24,000;
+- complexity validation BPB improved from `4.855255` to `4.820594`;
+- training BPB/loss worsened over the same window, with the recent train BPB
+  slope \(+0.155\) BPB per 1,000 steps and \(t=3.17\);
+- GFlowNet entropy moved down only from about `2.772` to `2.754`, still close to
+  \(\log 16\), so the policy is not selective enough for inference-time budget
+  to help;
+- toric-memory entropy declined, approaching the entropy floor.
+
+The same checkpoint-window simplex suite gives:
+
+| checkpoint | simplex mean BPB | simplex budget-1 BPB | simplex budget-8 BPB | geometry mean BPB | best geometry BPB | mean answer BPB |
+|---|---:|---:|---:|---:|---:|---:|
+| 21,250 | 3.996044 | 3.988463 | 3.997908 | 4.608863 | 3.811952 | 4.567529 |
+| 22,500 | 3.993061 | 3.984411 | 3.997107 | 4.607221 | 3.780859 | 4.572008 |
+| 24,000 | 4.157946 | 4.120694 | 4.166791 | 4.628992 | 3.975335 | 4.557661 |
+
+The plots support the same conclusion.  At step 22,500 the reasoning/K/BPB
+simplex still has a clear low-BPB budget-1 basin, while higher budgets mostly
+move outward toward \(K(x)\), MST complexity, and wall time without lowering BPB.
+By step 24,000 the simplex and branch clouds move to a higher-BPB region even
+though deterministic validation has improved slightly.  The 3D trajectories and
+energy landscapes remain useful, but branch selection is not calibrated: the
+best terminal branch is much better than the mean branch, and the GFlowNet
+policy still explores almost uniformly.
+
+The chosen restart point is therefore:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00022500.pt
+```
+
+This is not a model-architecture change.  It is a training-control correction:
+
+- base learning rate `1.2e-4` -> `9e-5`, preserving optimizer moments but
+  lowering the resumed cosine schedule;
+- complex/composite-row mix `0.25` -> `0.20`, keeping difficult graph-reasoning
+  data active while reducing short-horizon BPB drift;
+- GFlowNet loss weight `0.01` -> `0.0125`, to make branch-policy learning more
+  visible in the total objective;
+- GFlowNet entropy shaping `0.01 @ target 1.75` -> `0.02 @ target 2.05`, which
+  applies stronger pressure away from uniform \(\log 16\) behavior while
+  avoiding premature collapse to only a few actions;
+- toric entropy floor `0.18` -> `0.20` and weight `0.002` -> `0.003`, because
+  toric entropy was drifting toward the floor;
+- trajectory-flow loss weight `0.002` -> `0.003`, to penalize turbulent
+  embedding-space paths slightly more while leaving the main BPB objective
+  dominant.
+
+The next decision point should be roughly 1,250--2,000 resumed steps after
+22,500.  The acceptance criteria are:
+
+1. validation BPB must not regress by more than about `0.01`;
+2. simplex budget-1 BPB should remain near or below the 22,500 value;
+3. GFlowNet entropy should move below `2.72` without action-diversity collapse;
+4. toric-memory entropy should remain above `0.20`;
+5. geometry mean BPB should not exceed `4.62`, and best branch BPB should remain
+   below `3.85` on the current diagnostic subset.
+
+## Step 23,500--23,750 Reanalysis And 23,600 Restart Consideration
+
+The corrected 22,500 restart was paused at step 23,797 and reanalyzed on GPU
+around the requested step-23,600 window.  There is no exact saved checkpoint at
+23,600; the adjacent checkpoints are:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00023500.pt
+checkpoints/parameter_golf_oai_dense/random_order_step_00023750.pt
+```
+
+The analysis artifacts are under:
+
+```text
+outputs/reanalysis_gpu/oai-resume-22500-window-corrected/
+```
+
+The step-window comparison is:
+
+| checkpoint | simplex mean BPB | simplex budget-1 BPB | simplex budget-8 BPB | geometry mean BPB | best geometry BPB | mean answer BPB | GFlowNet entropy | toric entropy |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 22,500 | 3.993061 | 3.984411 | 3.997107 | 4.607221 | 3.780859 | 4.572008 | 2.766903 | 0.225308 |
+| 23,500 | 3.988780 | 3.978290 | 3.990622 | 4.611664 | 3.776056 | 4.567774 | 2.678068 | 0.271882 |
+| 23,750 | 3.988625 | 3.983087 | 3.992223 | 4.600572 | 3.786171 | 4.566761 | 2.675859 | 0.251321 |
+
+The corrected controls are doing the intended first-order job.  The GFlowNet
+policy is no longer effectively uniform: entropy moved from approximately
+`2.77` toward `2.67`, while action diversity stayed high.  This should be
+categorized as desired behavior, even though the automatic metric analyzer still
+labels entropy decline as undesirable because it assumes "higher is better" for
+all entropy metrics.  Here the target is controlled selectivity, not maximum
+entropy \(\log 16\).
+
+The simplex plots show that budget-1 remains the strongest BPB point.  Additional
+reasoning budget increases \(K(x)\), MST complexity, trajectory length, and
+wall-time footprint before it improves compressed likelihood.  The tetrahedra
+show the same geometry: low BPB is still located near the low-budget/low-K
+corner, while the higher-budget points move toward graph complexity and
+diversity.  This means inference-time scaling is producing meaningful
+trajectories, but branch ranking is not yet calibrated enough for extra budget
+to reduce BPB by default.
+
+The trajectory plots are healthier than the previous 24,000 analysis: paths are
+less chaotic, the phase/Ramachandran plots retain separated basins, and energy
+landscapes show coherent basins rather than one collapsed attractor.  The mean
+path smoothness improves through 23,750, while step 23,500 has the better
+best-branch BPB.
+
+The recommended restart point for competition BPB is:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00023500.pt
+```
+
+The reason is pragmatic: step 23,500 is the best branch-selection checkpoint in
+this window.  It has the best simplex budget-1 BPB (`3.978290`) and best
+geometry BPB (`3.776056`).  Step 23,750 has slightly better geometry mean BPB
+and mean answer BPB, so it is a reasonable alternative if the next run prioritizes
+smooth trajectories over best-branch candidates.  For the Parameter-Golf
+objective, the safer restart is 23,500.
+
+### Optional Adaptive Hyperparameter Functions
+
+Adaptive controls should be checkpoint-level, not per-step, because the current
+signals are noisy and highly coupled.  The controller should update only after
+an evaluation/analysis window, log every knob to W&B, and enforce hard bounds.
+
+1. **GFlowNet entropy target schedule.**  Start broad, then anneal toward
+   selective graph-of-thought branching:
+
+   \[
+   H^\star(t)=H_{\min}+(H_{\max}-H_{\min})
+   \exp\left(-\frac{t-t_0}{\tau_H}\right),
+   \qquad
+   H_{\max}=\log(E_A),\ H_{\min}\in[1.9,2.2].
+   \]
+
+   Viability: high.  This matches the observed need to move away from uniform
+   branching without collapsing the action policy.  Use \(\tau_H\approx
+   4{,}000\)--\(8{,}000\) steps and clamp the live target to `[1.9, 2.4]`.
+
+2. **Budget-gap driven GFlowNet weight.**  If the best branch is much better
+   than the mean branch, increase policy-learning pressure:
+
+   \[
+   \lambda_{\mathrm{GFN}}(t+1)=
+   \operatorname{clip}\left(
+   \lambda_{\mathrm{GFN}}(t)
+   \left[1+\eta_g\,\operatorname{EWMA}
+   \left(\operatorname{BPB}_{\mathrm{mean}}-\operatorname{BPB}_{\mathrm{best}}\right)
+   \right],
+   0.008,0.025\right).
+   \]
+
+   Viability: high.  The current diagnostic gap says useful candidates exist,
+   but the policy/ranker does not yet exploit them.  This is the most directly
+   justified adaptive control.
+
+3. **Complex-data mix throttle.**  Reduce composite/long graph rows when short
+   horizon BPB drifts upward, then restore them when validation stabilizes:
+
+   \[
+   r_{\mathrm{complex}}(t+1)=
+   \operatorname{clip}\left(
+   r_{\mathrm{complex}}(t)
+   -\eta_c\,\max(0,z_{\nabla \mathrm{BPB}})
+   +\eta_v\,\mathbf 1[\Delta\mathrm{val\_BPB}<0],
+   0.12,0.30\right).
+   \]
+
+   Here \(z_{\nabla \mathrm{BPB}}\) is an EWMA-normalized recent train-BPB slope.
+   Viability: high if changed slowly at checkpoint boundaries.  It protects the
+   Parameter-Golf objective while retaining graph-reasoning curriculum pressure.
+
+4. **Learning-rate damping on positive BPB slope.**
+
+   \[
+   \eta_{\mathrm{eff}}(t)=
+   \frac{\eta_{\mathrm{cos}}(t)}
+   {1+\alpha \max(0,z_{\nabla \mathrm{train\_BPB}})}.
+   \]
+
+   Viability: medium.  It is safe when applied as a small multiplicative damping
+   factor, but it can overreact to stochastic batch composition.  Prefer using it
+   only after two consecutive analysis windows show positive train-BPB slope.
+
+5. **QAT ramp with BPB guard.**
+
+   \[
+   \lambda_{\mathrm{QAT}}(t)=
+   \lambda_{\max}\,
+   \sigma\left(\frac{t-t_q}{\tau_q}\right)
+   \exp\left(-\alpha_q\max(0,\operatorname{BPB}_{\mathrm{simplex}}-
+   \operatorname{BPB}_{\mathrm{baseline}})\right).
+   \]
+
+   Viability: medium-high.  This keeps quantization pressure aligned with the
+   artifact goal but backs off if it damages early likelihood.  It should remain
+   bounded below the current tiny weight until BPB is clearly improving.
+
+6. **Trajectory-flow viscosity.**  Increase flow regularization when path
+   smoothness deteriorates without a likelihood gain:
+
+   \[
+   \lambda_{\mathrm{flow}}(t+1)=
+   \operatorname{clip}\left(
+   \lambda_{\mathrm{flow}}(t)
+   \left[1+\eta_f\max(0,s^\star-s_{\mathrm{smooth}})\right],
+   0.001,0.006\right).
+   \]
+
+   Viability: medium.  It helps prevent turbulent embedding trajectories, but
+   too much viscosity can erase useful exploratory branches.
+
+7. **Toric entropy floor controller.**
+
+   \[
+   h_{\mathrm{floor}}(t+1)=
+   \operatorname{clip}\left(
+   q_{0.2}\left(h_{\Theta,t-W:t}\right)-\delta,
+   0.18,0.28\right).
+   \]
+
+   Viability: medium.  The static floor is currently working, so this is lower
+   priority.  It becomes useful if toric entropy repeatedly hits the floor or
+   oscillates sharply after GFlowNet changes.
+
+The recommended controller implementation, if added, is a bounded
+checkpoint-level callback rather than a new architecture component.  It should
+read the latest W&B/eval metrics every `500` steps, update only scalar training
+knobs, write a `controller_state.json`, and log `controller/*` metrics.  The
+first adaptive run should enable only items 1--3; items 4--7 are useful but more
+likely to interact with optimizer state or regularization in hard-to-debug ways.

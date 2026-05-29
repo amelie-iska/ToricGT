@@ -579,11 +579,16 @@ filters). Since the current run has passed that step, resuming with the latest
 code activates the harder composite stream immediately while validation remains
 on the full validation split.
 
-The active `oai` restart from step `20,000` uses a conservative stabilization
-profile: `complex_mix_ratio: 0.35`, `lr: 1.2e-4`, stronger target-entropy
-GFlowNet shaping, and lighter QAT on the four largest matrices.  The intent is
-to keep deterministic validation BPB primary while preserving graph-of-thought
-branching, toric-memory entropy, and compression-aware training signals.
+The active `oai` restart is from step `23,500`, chosen after the 23.5k/23.75k
+analysis because it had the best simplex budget-1 BPB and best geometry branch
+BPB in that window.  It keeps optimizer state, uses `lr: 9e-5`,
+`complex_mix_ratio: 0.20`, stronger GFlowNet entropy shaping, a toric entropy
+floor, and lighter QAT on the two largest matrices.  A bounded checkpoint-level
+adaptive controller is enabled for the three least invasive training controls:
+GFlowNet entropy target, GFlowNet loss weight, and complex-row mix.  The
+controller updates only after eval windows, writes
+`checkpoints/parameter_golf_oai_dense/adaptive_controller_state.json`, and logs
+`controller/*` metrics to W&B.
 
 For challenge-time throughput experiments, use the long-context packed config:
 
@@ -625,7 +630,7 @@ Watch a tmux run:
 
 ```bash
 tmux attach -t toricgt_pg_oai
-tail -f logs/training/oai-rescue-20000-tuned.log
+tail -f logs/training/oai-resume-23500-adaptive.log
 tmux attach -t toricgt_pg_oai_analysis
 ```
 

@@ -10,7 +10,7 @@ import math
 import os
 import random
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -409,6 +409,209 @@ def deterministic_ratio_choice(step: int, accum_idx: int, ratio: float) -> bool:
         return True
     value = (step * 1_103_515_245 + accum_idx * 12_345 + 97_531) & 0xFFFF_FFFF
     return (value / 0x1_0000_0000) < ratio
+
+
+@dataclass
+class AdaptiveTrainingController:
+    """Bounded checkpoint-level updates for fragile training-control scalars."""
+
+    enabled: bool
+    state_path: Path
+    start_step: int
+    initial_gflownet_loss_weight: float
+    initial_entropy_target: float
+    initial_complex_mix_ratio: float
+    entropy_target_min: float = 1.95
+    entropy_target_tau_steps: float = 8_000.0
+    gflownet_loss_min: float = 0.008
+    gflownet_loss_max: float = 0.025
+    gflownet_gap_step: float = 0.001
+    gflownet_relax_step: float = 0.00025
+    complex_mix_min: float = 0.12
+    complex_mix_max: float = 0.30
+    complex_down_step: float = 0.02
+    complex_up_step: float = 0.005
+    train_bpb_ema_beta: float = 0.7
+    train_drift_threshold: float = 0.02
+    val_improvement_delta: float = 0.002
+    warmup_updates: int = 1
+
+    def __post_init__(self) -> None:
+        self.state_path = Path(self.state_path)
+        self.update_count = 0
+        self.train_bpb_ema: float | None = None
+        self.previous_train_bpb_ema: float | None = None
+        self.best_val_bpb = float("inf")
+        self.gflownet_loss_weight = float(self.initial_gflownet_loss_weight)
+        self.gflownet_entropy_target = float(self.initial_entropy_target)
+        self.complex_mix_ratio = float(self.initial_complex_mix_ratio)
+        self.last_metrics: dict[str, float] = {}
+        self.load()
+
+    @classmethod
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        checkpoint_dir: Path,
+        start_step: int,
+        gflownet_loss_weight: float,
+        gflownet_entropy_target: float,
+        complex_mix_ratio: float,
+    ) -> "AdaptiveTrainingController":
+        section = config.get("adaptive_training", {}) or {}
+        default_state_path = checkpoint_dir / "adaptive_controller_state.json"
+        return cls(
+            enabled=bool(section.get("enabled", False)),
+            state_path=Path(section.get("state_path", default_state_path)),
+            start_step=int(start_step),
+            initial_gflownet_loss_weight=float(gflownet_loss_weight),
+            initial_entropy_target=float(gflownet_entropy_target),
+            initial_complex_mix_ratio=float(complex_mix_ratio),
+            entropy_target_min=float(section.get("entropy_target_min", 1.95)),
+            entropy_target_tau_steps=float(section.get("entropy_target_tau_steps", 8_000.0)),
+            gflownet_loss_min=float(section.get("gflownet_loss_min", 0.008)),
+            gflownet_loss_max=float(section.get("gflownet_loss_max", 0.025)),
+            gflownet_gap_step=float(section.get("gflownet_gap_step", 0.001)),
+            gflownet_relax_step=float(section.get("gflownet_relax_step", 0.00025)),
+            complex_mix_min=float(section.get("complex_mix_min", 0.12)),
+            complex_mix_max=float(section.get("complex_mix_max", 0.30)),
+            complex_down_step=float(section.get("complex_down_step", 0.02)),
+            complex_up_step=float(section.get("complex_up_step", 0.005)),
+            train_bpb_ema_beta=float(section.get("train_bpb_ema_beta", 0.7)),
+            train_drift_threshold=float(section.get("train_drift_threshold", 0.02)),
+            val_improvement_delta=float(section.get("val_improvement_delta", 0.002)),
+            warmup_updates=int(section.get("warmup_updates", 1)),
+        )
+
+    def load(self) -> None:
+        payload = read_json_file(self.state_path)
+        if not payload:
+            self._clamp()
+            return
+        self.update_count = int(payload.get("update_count", self.update_count))
+        train_bpb_ema = payload.get("train_bpb_ema")
+        previous_train_bpb_ema = payload.get("previous_train_bpb_ema")
+        best_val_bpb = payload.get("best_val_bpb")
+        if train_bpb_ema is not None:
+            self.train_bpb_ema = float(train_bpb_ema)
+        if previous_train_bpb_ema is not None:
+            self.previous_train_bpb_ema = float(previous_train_bpb_ema)
+        if best_val_bpb is not None:
+            self.best_val_bpb = float(best_val_bpb)
+        self.gflownet_loss_weight = float(payload.get("gflownet_loss_weight", self.gflownet_loss_weight))
+        self.gflownet_entropy_target = float(payload.get("gflownet_entropy_target", self.gflownet_entropy_target))
+        self.complex_mix_ratio = float(payload.get("complex_mix_ratio", self.complex_mix_ratio))
+        last_metrics = payload.get("last_metrics")
+        if isinstance(last_metrics, dict):
+            self.last_metrics = {str(key): float(value) for key, value in last_metrics.items()}
+        self._clamp()
+
+    def _clamp(self) -> None:
+        self.gflownet_loss_weight = max(
+            self.gflownet_loss_min,
+            min(self.gflownet_loss_max, float(self.gflownet_loss_weight)),
+        )
+        self.gflownet_entropy_target = max(
+            self.entropy_target_min,
+            min(float(self.initial_entropy_target), float(self.gflownet_entropy_target)),
+        )
+        self.complex_mix_ratio = max(
+            self.complex_mix_min,
+            min(self.complex_mix_max, float(self.complex_mix_ratio)),
+        )
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "update_count": self.update_count,
+            "start_step": self.start_step,
+            "train_bpb_ema": self.train_bpb_ema,
+            "previous_train_bpb_ema": self.previous_train_bpb_ema,
+            "best_val_bpb": self.best_val_bpb,
+            "gflownet_loss_weight": self.gflownet_loss_weight,
+            "gflownet_entropy_target": self.gflownet_entropy_target,
+            "complex_mix_ratio": self.complex_mix_ratio,
+            "last_metrics": self.last_metrics,
+            "bounds": {
+                "gflownet_loss": [self.gflownet_loss_min, self.gflownet_loss_max],
+                "entropy_target": [self.entropy_target_min, self.initial_entropy_target],
+                "complex_mix": [self.complex_mix_min, self.complex_mix_max],
+            },
+        }
+
+    def save(self) -> None:
+        write_json_atomic(self.state_path, self.state_dict())
+
+    def log_metrics(self) -> dict[str, float]:
+        metrics = {
+            "controller/enabled": float(self.enabled),
+            "controller/update_count": float(self.update_count),
+            "controller/gflownet_loss_weight": float(self.gflownet_loss_weight),
+            "controller/gflownet_entropy_target": float(self.gflownet_entropy_target),
+            "controller/complex_mix_ratio": float(self.complex_mix_ratio),
+        }
+        metrics.update(self.last_metrics)
+        return metrics
+
+    def update(
+        self,
+        *,
+        step: int,
+        train_bpb: float,
+        val_bpb: float,
+        val_gflownet_bpb: float,
+    ) -> dict[str, float]:
+        if not self.enabled:
+            self.save()
+            return self.log_metrics()
+
+        previous_train_ema = self.train_bpb_ema
+        if self.train_bpb_ema is None:
+            self.train_bpb_ema = float(train_bpb)
+        else:
+            beta = max(0.0, min(0.99, float(self.train_bpb_ema_beta)))
+            self.train_bpb_ema = beta * self.train_bpb_ema + (1.0 - beta) * float(train_bpb)
+        self.previous_train_bpb_ema = previous_train_ema
+
+        train_drift = 0.0 if previous_train_ema is None else self.train_bpb_ema - previous_train_ema
+        previous_best = self.best_val_bpb
+        val_improved = float(val_bpb) < previous_best - float(self.val_improvement_delta)
+        self.best_val_bpb = min(self.best_val_bpb, float(val_bpb))
+        gfn_eval_gap = float(val_gflownet_bpb) - float(val_bpb)
+
+        elapsed = max(0, int(step) - int(self.start_step))
+        tau = max(1.0, float(self.entropy_target_tau_steps))
+        scheduled_target = self.entropy_target_min + (
+            float(self.initial_entropy_target) - self.entropy_target_min
+        ) * math.exp(-elapsed / tau)
+        self.gflownet_entropy_target = min(self.gflownet_entropy_target, scheduled_target)
+
+        if self.update_count >= int(self.warmup_updates):
+            if gfn_eval_gap > 0.0:
+                fraction = min(1.0, gfn_eval_gap / 0.02)
+                self.gflownet_loss_weight += self.gflownet_gap_step * fraction
+            elif gfn_eval_gap < -0.005:
+                self.gflownet_loss_weight -= self.gflownet_relax_step
+
+            if train_drift > float(self.train_drift_threshold) and not val_improved:
+                self.complex_mix_ratio -= self.complex_down_step
+            elif val_improved and train_drift <= float(self.train_drift_threshold):
+                self.complex_mix_ratio += self.complex_up_step
+
+        self.update_count += 1
+        self._clamp()
+        self.last_metrics = {
+            "controller/train_bpb_ema": float(self.train_bpb_ema),
+            "controller/train_bpb_drift": float(train_drift),
+            "controller/val_bpb": float(val_bpb),
+            "controller/best_val_bpb": float(self.best_val_bpb),
+            "controller/val_gflownet_gap": float(gfn_eval_gap),
+            "controller/val_improved": float(val_improved),
+            "controller/scheduled_entropy_target": float(scheduled_target),
+        }
+        self.save()
+        return self.log_metrics()
 
 
 def quantization_grid_loss(named_params: list[tuple[str, torch.nn.Parameter]], bits: int) -> torch.Tensor:
@@ -1302,6 +1505,19 @@ def main() -> None:
         resume_metrics = payload.get("metrics", {})
         best_val = float(resume_metrics.get("val_bpb", resume_metrics.get("best_val_bpb", best_val)))
 
+    adaptive_controller = AdaptiveTrainingController.from_config(
+        file_config,
+        checkpoint_dir=checkpoint_dir,
+        start_step=start_step,
+        gflownet_loss_weight=gflownet_loss_weight,
+        gflownet_entropy_target=gflownet_entropy_target,
+        complex_mix_ratio=complex_mix_ratio,
+    )
+    if adaptive_controller.enabled:
+        gflownet_loss_weight = adaptive_controller.gflownet_loss_weight
+        gflownet_entropy_target = adaptive_controller.gflownet_entropy_target
+        complex_mix_ratio = adaptive_controller.complex_mix_ratio
+
     params = parameter_count(model)
     export_bits = args.export_bits or config_get(file_config, "export", "bits", 8)
     quantization_mode = args.quantization_mode or config_get(file_config, "export", "quantization_mode", "row")
@@ -1454,6 +1670,7 @@ def main() -> None:
                     "complex_task_family_keywords": list(complex_task_family_keywords),
                     "complex_dataset_keywords": list(complex_dataset_keywords),
                 },
+                "adaptive_training": adaptive_controller.state_dict(),
                 "artifact": {
                     "initial_bytes": report.bytes_total,
                     "estimated_tensor_bytes": estimated_tensor_bytes,
@@ -1510,6 +1727,7 @@ def main() -> None:
             "qat_start_step": qat_start_step,
             "qat_warmup_steps": qat_warmup_steps,
             "complex_mix_ratio": complex_mix_ratio,
+            "adaptive_training": adaptive_controller.state_dict(),
             "resize_position_embedding": resize_position_embedding,
             "optimizer_state_loaded": optimizer_state_loaded,
             "hf_publish_best": publish_best_to_hf,
@@ -1728,6 +1946,7 @@ def main() -> None:
                 "data/complex_start_step": float(complex_start_step or 0),
                 "eval/score_first_bias_lr": eval_score_first_bias_lr,
             }
+            metrics.update(adaptive_controller.log_metrics())
             if audit_error is not None:
                 metrics["audit/future_permutation_logit_error"] = audit_error
             metrics.update(complexity_metrics)
@@ -1811,6 +2030,17 @@ def main() -> None:
                     )
                 except StopIteration:
                     pass
+            controller_metrics = adaptive_controller.update(
+                step=step,
+                train_bpb=bpb,
+                val_bpb=float(val_deterministic["bpb"]),
+                val_gflownet_bpb=float(val_gflownet["bpb"]),
+            )
+            if adaptive_controller.enabled:
+                gflownet_loss_weight = adaptive_controller.gflownet_loss_weight
+                gflownet_entropy_target = adaptive_controller.gflownet_entropy_target
+                complex_mix_ratio = adaptive_controller.complex_mix_ratio
+            metrics.update(controller_metrics)
             print(json.dumps({"step": step, **metrics}, indent=2))
             if wandb_run is not None:
                 wandb_run.log(metrics, step=step)

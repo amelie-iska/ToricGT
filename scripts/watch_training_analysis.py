@@ -5,7 +5,8 @@
 #   --checkpoint-dir checkpoints/parameter_golf_oai_dense \
 #   --start-step 14750 --after-steps 1500 \
 #   --run-path amelie-iska-math/toricgt-parameter-golf/oai-rescue-14750 \
-#   --output-root outputs/post_resume_analysis/oai-rescue-14750
+#   --output-root outputs/post_resume_analysis/oai-rescue-14750 \
+#   --min-mtime-unix "$(date +%s)"
 """Wait for a future checkpoint and run non-interrupting metric analyses.
 
 The watcher intentionally evaluates on CPU by default.  This keeps the analysis
@@ -34,6 +35,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-dir", default="checkpoints/parameter_golf_oai_dense")
     parser.add_argument("--start-step", type=int, required=True)
     parser.add_argument("--after-steps", type=int, default=1500)
+    parser.add_argument(
+        "--min-mtime-unix",
+        type=float,
+        default=0.0,
+        help="Ignore checkpoints older than this Unix timestamp; useful when filenames already exist.",
+    )
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--run-path", default="")
     parser.add_argument("--output-root", default="outputs/post_resume_analysis")
@@ -49,9 +56,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def latest_checkpoint(checkpoint_dir: Path, min_step: int) -> tuple[int, Path] | None:
+def latest_checkpoint(checkpoint_dir: Path, min_step: int, min_mtime_unix: float = 0.0) -> tuple[int, Path] | None:
     best: tuple[int, Path] | None = None
     for path in checkpoint_dir.glob("random_order_step_*.pt"):
+        if min_mtime_unix > 0:
+            try:
+                if path.stat().st_mtime < min_mtime_unix:
+                    continue
+            except OSError:
+                continue
         match = CHECKPOINT_PATTERN.search(path.name)
         if not match:
             continue
@@ -158,7 +171,7 @@ def main() -> None:
     print(f"waiting for checkpoint >= {target_step} in {checkpoint_dir}", flush=True)
     found: tuple[int, Path] | None = None
     while found is None:
-        found = latest_checkpoint(checkpoint_dir, target_step)
+        found = latest_checkpoint(checkpoint_dir, target_step, min_mtime_unix=float(args.min_mtime_unix or 0.0))
         if found is None:
             time.sleep(max(1.0, args.poll_seconds))
     step, checkpoint = found

@@ -49,11 +49,17 @@ about 1.638B supervised byte targets, plus validation passes every 500 steps.
 Full optimizer checkpoints are retained every 250 steps with no automatic
 pruning, so earlier resume points remain available for ablations and recovery.
 There is no separate unsupervised-only phase in this config. GFlowNet-style
-training runs as an auxiliary objective on all 50,000 steps with
-`gflownet_loss_weight: 0.01`; validation uses `eval_gflownet_samples: 2` by
+training runs as an auxiliary objective on all 50,000 steps with an initial
+`gflownet_loss_weight: 0.0125`; validation uses `eval_gflownet_samples: 2` by
 default, plus score-first output-bias adaptation at `0.025`; inference config
 can raise random-order and GFlowNet samples to 4+ when runtime permits. The
 full graph model's richer embedding-space GFlowNet remains in `train.full_30m_*`.
+
+The dense config now enables a bounded checkpoint-level adaptive controller.
+It updates only after eval windows and only adjusts three scalar knobs:
+GFlowNet entropy target, GFlowNet loss weight, and complex-row mix.  Its state
+is written to `checkpoints/parameter_golf_oai_dense/adaptive_controller_state.json`,
+and all live values are logged as `controller/*` W&B metrics.
 
 Complexity diagnostics run every 50 optimizer steps by default on a tiny sample.
 They are logged under `complexity/train/*` and `complexity/val/*` and do not
