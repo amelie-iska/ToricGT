@@ -1962,6 +1962,54 @@ the canonical `random_order_step_*.pt` file.  This preserves rollback targets
 from earlier attempts while keeping watcher scripts compatible with the
 canonical checkpoint names.
 
+### Step 1500 Capture Restart
+
+The stream-aligned run confirmed the diagnosis: the model recovered the fast
+trajectory and reached
+
+\[
+\operatorname{BPB}_{1500}=3.5919,
+\]
+
+but then bounced upward as warmup continued to raise the effective learning
+rate.  The local sequence was:
+
+| step | effective LR | train BPB | interpretation |
+|---:|---:|---:|---|
+| 1500 | \(2.28\cdot10^{-5}\) | \(3.5919\) | useful basin reached |
+| 1600 | \(2.43\cdot10^{-5}\) | \(3.7461\) | still acceptable but no longer improving |
+| 1700 | \(2.58\cdot10^{-5}\) | \(3.9367\) | upward drift |
+| 1750 | \(2.66\cdot10^{-5}\) | \(4.0616\) | basin exit |
+
+The Hessian probe at the evaluation point did not show a large sharpness
+explosion:
+
+\[
+\widehat{\lambda}_{\mathrm{abs}}\approx 4.83\cdot 10^{-5},
+\qquad
+\|\nabla\mathcal L_{\mathrm{probe}}\|\approx 0.165.
+\]
+
+This means the failure is best treated as a warmup/curriculum overshoot rather
+than a need for a second-order optimizer.  The next run restarts from the
+stream-aligned step-1500 checkpoint, keeps the step-1000 stream origin, and uses
+a capture schedule:
+
+- lower dropout from \(0.10\) to \(0.05\), because the model is underfitting the
+  byte stream and still has validation/quantization audits downstream;
+- keep GFlowNet, MTP, trajectory-flow, toric-entropy, and QAT losses off during
+  the BPB capture interval;
+- use `bpb_capture_1500_2000` with `lr_multiplier=1.05`, so the effective LR
+  near 1750 sits near \(2.21\cdot10^{-5}\): faster than the over-damped
+  restarts but still below the \(2.66\cdot10^{-5}\) bounce point;
+- step down to `lr_multiplier=0.82` for 2000--2500 and `0.65` for 2500--6000,
+  approximating a \(2.0\cdot10^{-5}\)--\(2.5\cdot10^{-5}\) capture band after
+  the warmup ramp.
+
+This is the intended meaning of "drop harder": use the good step-1500 basin as
+the restart point, remove avoidable dropout noise, and prevent the LR warmup
+from kicking the model back out of the basin before BPB has time to compress.
+
 ### Step 1750 Stream-Aligned Audit And Decision
 
 The interrupting watcher analyzed
@@ -2027,24 +2075,29 @@ near the best checkpoint to
 
 where the EMA trend turned unfavorable.  The next restart therefore uses the
 aligned step-1500 checkpoint, preserves Adam state, keeps stream origin at
-step \(1000\), and changes only the LR schedule:
+step \(1000\), and changes the early capture controls:
 
 ```yaml
-training.lr: 0.000036
-training.warmup_steps: 3000
+model.dropout: 0.05
 adaptive_training.state_path:
-  checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_stream_origin_1000.json
+  checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_capture_schneller.json
+phase_curriculum:
+  bpb_capture_1500_2000.lr_multiplier: 1.05
+  bpb_capture_2000_2500.lr_multiplier: 0.82
+  bpb_stabilization_hold.lr_multiplier: 0.65
 ```
 
-This gives effective LR
+With base LR \(3.6\cdot10^{-5}\) and warmup \(3000\), this gives effective LR
 
 \[
-3.6\cdot10^{-5}\cdot0.95\cdot\frac{1500}{3000}
-\approx 1.71\cdot10^{-5}
+3.6\cdot10^{-5}\cdot1.05\cdot\frac{1750}{3000}
+\approx 2.21\cdot10^{-5}
 \]
 
-at restart and about \(2.28\cdot10^{-5}\) at step \(2000\), deliberately
-placing the next 500-step window below the previously observed bounce band.
+near step \(1750\), deliberately placing the next 500-step window below the
+previously observed bounce band while reducing dropout noise.  At step \(2000\)
+the phase drops to multiplier \(0.82\), lowering the LR back to
+\(1.97\cdot10^{-5}\) before warmup can push the model out of the basin.
 
 #### Plot-Level Interpretation
 

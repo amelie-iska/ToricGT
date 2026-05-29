@@ -9,7 +9,10 @@ model:
   num_layers: 7
   recurrent_passes: 2
   ffn_multiplier: 4
-  dropout: 0.1
+  # The step-1500 basin is underfit rather than overfit: lower dropout gives
+  # the byte model more immediate compression capacity while QAT and
+  # score-first audits still protect the contest artifact path.
+  dropout: 0.05
   attention: hybrid
   ring_block_size: 256
   polarquant_kv_bits: 8
@@ -129,7 +132,7 @@ complexity:
 
 adaptive_training:
   enabled: true
-  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_stream_origin_1000.json
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_capture_schneller.json
   # Checkpoint-level controller only: updates after eval windows, never per
   # microbatch.  It keeps the architecture and optimizer state fixed while
   # gently tuning the three controls identified by the 23.25k rollback analysis.
@@ -170,10 +173,46 @@ hessian:
 phase_curriculum:
   enabled: true
   phases:
-    - name: bpb_stabilization
+    - name: bpb_stream_recovery
       start_step: 1000
-      end_step: 6000
+      end_step: 1500
       lr_multiplier: 0.95
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.0005
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_capture_1500_2000
+      start_step: 1500
+      end_step: 2000
+      lr_multiplier: 1.05
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.00025
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_capture_2000_2500
+      start_step: 2000
+      end_step: 2500
+      lr_multiplier: 0.82
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.00025
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_stabilization_hold
+      start_step: 2500
+      end_step: 6000
+      lr_multiplier: 0.65
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
