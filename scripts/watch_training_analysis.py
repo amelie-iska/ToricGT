@@ -7,6 +7,17 @@
 #   --run-path amelie-iska-math/toricgt-parameter-golf/oai-rescue-14750 \
 #   --output-root outputs/post_resume_analysis/oai-rescue-14750 \
 #   --min-mtime-unix "$(date +%s)"
+#
+# Optional Codex handoff after analysis completes:
+#   conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+#     python scripts/watch_training_analysis.py \
+#     --checkpoint-dir checkpoints/parameter_golf_oai_dense \
+#     --start-step 1000 --after-steps 1500 \
+#     --run-path amelie-iska-math/toricgt-parameter-golf/1ouz53jk \
+#     --output-root outputs/post_resume_analysis/oai-restart-01000-phased \
+#     --min-mtime-unix "$(cat outputs/post_resume_analysis/oai-restart-01000-phased/start_epoch.txt)" \
+#     --codex-review-hook scripts/codex_training_review_resume.sh \
+#     --codex-review-tmux-prefix toricgt_codex_review
 """Wait for a future checkpoint and run non-interrupting metric analyses.
 
 The watcher intentionally evaluates on CPU by default.  This keeps the analysis
@@ -53,6 +64,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=10017)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--precision", default="fp32", choices=["bf16", "fp16", "fp32"])
+    parser.add_argument(
+        "--codex-review-hook",
+        default="",
+        help="Optional shell script to call after analysis; receives analysis paths and can run codex resume.",
+    )
+    parser.add_argument(
+        "--codex-review-session-id",
+        default="",
+        help="Optional Codex session/thread id passed to the review hook. Defaults to hook behavior.",
+    )
+    parser.add_argument(
+        "--codex-review-tmux-prefix",
+        default="",
+        help="If set, the hook launches codex resume in <prefix>_<step> instead of inline.",
+    )
+    parser.add_argument("--training-tmux", default="toricgt_pg_oai")
     return parser.parse_args()
 
 
@@ -163,6 +190,36 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     return out
 
 
+def trigger_codex_review_hook(args: argparse.Namespace, base: Path, checkpoint: Path, step: int) -> None:
+    if not args.codex_review_hook:
+        return
+    hook = Path(args.codex_review_hook)
+    if not hook.is_absolute():
+        hook = Path.cwd() / hook
+    command = [
+        str(hook),
+        "--analysis-dir",
+        str(base),
+        "--checkpoint",
+        str(checkpoint),
+        "--step",
+        str(step),
+        "--training-tmux",
+        str(args.training_tmux),
+    ]
+    if args.run_path:
+        command.extend(["--run-path", str(args.run_path)])
+    if args.codex_review_session_id:
+        command.extend(["--session-id", str(args.codex_review_session_id)])
+    if args.codex_review_tmux_prefix:
+        command.extend(["--tmux-session", f"{args.codex_review_tmux_prefix}_{step:08d}"])
+    run_command(
+        command,
+        cwd=Path.cwd(),
+        log_path=base / "logs" / "codex_review_hook.log",
+    )
+
+
 def main() -> None:
     args = parse_args()
     repo = Path.cwd()
@@ -257,6 +314,7 @@ def main() -> None:
     )
     synopsis = write_synopsis(base, checkpoint, step, args.run_path)
     print(f"wrote {synopsis}", flush=True)
+    trigger_codex_review_hook(args, base, checkpoint, step)
 
 
 if __name__ == "__main__":

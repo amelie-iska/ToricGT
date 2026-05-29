@@ -1666,3 +1666,33 @@ Operational controls added for this run:
    so later analyses can compare behavior across curriculum boundaries.
 5. Checkpoints are still retained every 250 steps, making rollback selection
    cheap for this small model.
+
+### Automated Analysis Handoff
+
+The analysis watcher can now trigger an explicit Codex review handoff after it
+writes `SYNOPSIS.md`.  The mechanism is intentionally transparent:
+
+```bash
+scripts/codex_training_review_resume.sh \
+  --analysis-dir outputs/post_resume_analysis/oai-restart-01000-phased/step-00002500 \
+  --checkpoint checkpoints/parameter_golf_oai_dense/random_order_step_00002500.pt \
+  --step 2500 \
+  --run-path amelie-iska-math/toricgt-parameter-golf/1ouz53jk \
+  --training-tmux toricgt_pg_oai \
+  --tmux-session toricgt_codex_review_00002500
+```
+
+`scripts/watch_training_analysis.py` exposes this through
+`--codex-review-hook scripts/codex_training_review_resume.sh` and
+`--codex-review-tmux-prefix toricgt_codex_review`.  The hook calls
+`codex resume` with a structured prompt that points to the exact metric export,
+simplex summaries, 3D trajectory diagnostics, Ramachandran-style plots, energy
+landscapes, W&B run, checkpoint, and training tmux.  If `--session-id` or
+`CODEX_RESUME_SESSION_ID` is provided, it resumes that session; otherwise it
+uses `codex resume --last`.
+
+The hook does not itself decide to kill or restart training.  It creates a
+review/resume turn whose task is to inspect the just-finished analysis, update
+`planning/METRICS.md`, implement small high-impact adjustments if justified,
+and either leave the current training run intact or pause and resume from an
+evidence-selected checkpoint.
