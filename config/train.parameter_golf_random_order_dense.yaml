@@ -49,6 +49,12 @@ data:
   # A rollback should not replay the identical data order.  The seed is offset
   # by the checkpoint step after loading, while validation remains fixed.
   resume_aware_stream_seed: true
+  # The step-1250 rollback should continue the faster phased step-1000 data
+  # stream instead of starting a new stream at step 1250.  The trainer offsets
+  # the train stream seed by this origin and burns in the intervening
+  # microbatches after loading the later checkpoint.
+  stream_origin_step: 1000
+  stream_burnin_steps:
   document_separator: "\n\n"
   # Larger technical composite rows are delayed on the step-1000 restart.  The
   # previous runs showed good reasoning diagnostics but repeated BPB ricochets
@@ -122,7 +128,7 @@ complexity:
 
 adaptive_training:
   enabled: true
-  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01250_elbow_momentum.json
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01250_stream_origin_1000.json
   # Checkpoint-level controller only: updates after eval windows, never per
   # microbatch.  It keeps the architecture and optimizer state fixed while
   # gently tuning the three controls identified by the 23.25k rollback analysis.

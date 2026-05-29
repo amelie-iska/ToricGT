@@ -9,6 +9,7 @@ import json
 import math
 import os
 import random
+import shutil
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -489,6 +490,56 @@ def control_int(controls: dict[str, Any], key: str, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return int(default)
+
+
+def burn_in_training_iterators(
+    iterator: Any,
+    complex_iterator: Any | None,
+    *,
+    config: dict[str, Any],
+    start_step: int,
+    burnin_steps: int,
+    grad_accum: int,
+    complex_start_step: int,
+    complex_mix_ratio: float,
+) -> dict[str, float]:
+    """Advance dataloaders to match an earlier stream origin.
+
+    Rollback checkpoints can intentionally reuse a previous data-order stream
+    while loading a later weight checkpoint.  This burn-in consumes the same
+    ordinary/complex microbatch choices that the training loop would have seen
+    between the stream origin and the loaded checkpoint step, without running
+    forward or backward passes.
+    """
+
+    burnin_steps = max(0, int(burnin_steps))
+    grad_accum = max(1, int(grad_accum))
+    if burnin_steps <= 0:
+        return {"steps": 0.0, "microbatches": 0.0, "complex_microbatches": 0.0}
+    burn_start = max(1, int(start_step) - burnin_steps + 1)
+    burn_end = int(start_step)
+    complex_microbatches = 0
+    total_microbatches = 0
+    for burn_step in range(burn_start, burn_end + 1):
+        phase_controls, _, _ = active_phase_controls(config, burn_step)
+        effective_complex_mix_ratio = max(
+            0.0,
+            min(1.0, control_float(phase_controls, "complex_mix_ratio", complex_mix_ratio)),
+        )
+        for accum_idx in range(grad_accum):
+            complex_active = (
+                complex_iterator is not None
+                and burn_step >= int(complex_start_step or 0)
+                and deterministic_ratio_choice(burn_step, accum_idx, effective_complex_mix_ratio)
+            )
+            next(complex_iterator if complex_active else iterator)
+            complex_microbatches += int(complex_active)
+            total_microbatches += 1
+    return {
+        "steps": float(burnin_steps),
+        "microbatches": float(total_microbatches),
+        "complex_microbatches": float(complex_microbatches),
+    }
 
 
 @dataclass
@@ -983,6 +1034,12 @@ def save_checkpoint(
     metrics: dict[str, float] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.name.startswith("random_order_step_"):
+        archive_dir = path.parent / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        archived_path = archive_dir / f"{path.stem}__archived_{timestamp}_{path.stat().st_mtime_ns}{path.suffix}"
+        shutil.copy2(path, archived_path)
     torch.save(
         {
             "model_type": "random_order_dense_lm",
@@ -1393,6 +1450,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--complex-task-family-keywords", nargs="+")
     parser.add_argument("--complex-dataset-keywords", nargs="+")
     parser.add_argument("--complex-mix-ratio", type=float)
+    parser.add_argument("--stream-origin-step", type=int)
+    parser.add_argument("--stream-burnin-steps", type=int)
+    parser.add_argument("--no-stream-burnin", action="store_true")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--attention", choices=["softmax", "tropical", "tropical_ring", "hybrid"])
     parser.add_argument("--ring-block-size", type=int)
@@ -1804,6 +1864,16 @@ def main() -> None:
     )
     interleave_row_groups = bool(config_get(file_config, "data", "interleave_row_groups", True))
     resume_aware_stream_seed = bool(config_get(file_config, "data", "resume_aware_stream_seed", True))
+    configured_stream_origin_step = (
+        args.stream_origin_step
+        if args.stream_origin_step is not None
+        else config_get(file_config, "data", "stream_origin_step", None)
+    )
+    configured_stream_burnin_steps = (
+        args.stream_burnin_steps
+        if args.stream_burnin_steps is not None
+        else config_get(file_config, "data", "stream_burnin_steps", None)
+    )
     document_separator = (
         args.document_separator if args.document_separator is not None else config_get(file_config, "data", "document_separator", "\n\n")
     )
@@ -1904,7 +1974,23 @@ def main() -> None:
         start_step = int(payload.get("step", 0))
         resume_metrics = payload.get("metrics", {})
         best_val = float(resume_metrics.get("val_bpb", resume_metrics.get("best_val_bpb", best_val)))
-    stream_seed_offset = int(start_step if resume_aware_stream_seed else 0)
+    if resume_aware_stream_seed:
+        stream_origin_step = int(
+            configured_stream_origin_step
+            if configured_stream_origin_step is not None
+            else start_step
+        )
+        stream_seed_offset = stream_origin_step
+    else:
+        stream_origin_step = 0
+        stream_seed_offset = 0
+    if args.no_stream_burnin or not resume_aware_stream_seed:
+        stream_burnin_steps = 0
+    elif configured_stream_burnin_steps is not None:
+        stream_burnin_steps = max(0, int(configured_stream_burnin_steps))
+    else:
+        stream_burnin_steps = max(0, int(start_step) - int(stream_origin_step))
+    stream_burnin_microbatches = int(stream_burnin_steps) * int(max(1, grad_accum))
 
     adaptive_controller = AdaptiveTrainingController.from_config(
         file_config,
@@ -2074,7 +2160,10 @@ def main() -> None:
                     "coprime_row_stride": coprime_row_stride,
                     "interleave_row_groups": interleave_row_groups,
                     "resume_aware_stream_seed": resume_aware_stream_seed,
+                    "stream_origin_step": stream_origin_step,
                     "stream_seed_offset": stream_seed_offset,
+                    "stream_burnin_steps": stream_burnin_steps,
+                    "stream_burnin_microbatches": stream_burnin_microbatches,
                     "document_separator": document_separator,
                     "min_estimated_tokens": min_estimated_tokens,
                     "max_estimated_tokens": max_estimated_tokens,
@@ -2122,7 +2211,10 @@ def main() -> None:
             "coprime_row_stride": coprime_row_stride,
             "interleave_row_groups": interleave_row_groups,
             "resume_aware_stream_seed": resume_aware_stream_seed,
+            "stream_origin_step": stream_origin_step,
             "stream_seed_offset": stream_seed_offset,
+            "stream_burnin_steps": stream_burnin_steps,
+            "stream_burnin_microbatches": stream_burnin_microbatches,
             "document_separator": document_separator,
             "min_estimated_tokens": min_estimated_tokens,
             "max_estimated_tokens": max_estimated_tokens,
@@ -2170,6 +2262,41 @@ def main() -> None:
 
     iterator = iter(train_loader)
     complex_iterator = iter(complex_train_loader) if complex_train_loader is not None else None
+    burnin_result = burn_in_training_iterators(
+        iterator,
+        complex_iterator,
+        config=file_config,
+        start_step=start_step,
+        burnin_steps=stream_burnin_steps,
+        grad_accum=grad_accum,
+        complex_start_step=int(complex_start_step or 0),
+        complex_mix_ratio=complex_mix_ratio,
+    )
+    if burnin_result["microbatches"] > 0:
+        print(
+            json.dumps(
+                {
+                    "stream_burnin": {
+                        "stream_origin_step": stream_origin_step,
+                        "start_step": start_step,
+                        "stream_seed_offset": stream_seed_offset,
+                        "requested_steps": stream_burnin_steps,
+                        **burnin_result,
+                    }
+                },
+                indent=2,
+            )
+        )
+        if wandb_run is not None:
+            wandb_run.log(
+                {
+                    "data/stream_origin_step": float(stream_origin_step),
+                    "data/stream_burnin_steps": float(stream_burnin_steps),
+                    "data/stream_burnin_microbatches": float(burnin_result["microbatches"]),
+                    "data/stream_burnin_complex_microbatches": float(burnin_result["complex_microbatches"]),
+                },
+                step=start_step,
+            )
     qat_named_params = [
         item
         for item in sorted(model.named_parameters(), key=lambda pair: pair[1].numel(), reverse=True)
@@ -2396,6 +2523,8 @@ def main() -> None:
                 "artifact/excluded_tensors": report.excluded_tensors,
                 "model/parameters": params,
                 "data/coprime_row_stride": float(coprime_row_stride),
+                "data/stream_origin_step": float(stream_origin_step),
+                "data/stream_burnin_steps": float(stream_burnin_steps),
                 "data/complex_curriculum_active": float(
                     complex_iterator is not None and step >= int(complex_start_step or 0)
                 ),

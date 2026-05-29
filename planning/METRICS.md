@@ -1907,3 +1907,57 @@ approximately \(3\cdot 10^{-5}\) effective LR associated with the later
 1500-to-1750 bounce.  The next interrupting analysis remains at step 1750 and
 must compare BPB slope, second differences, Hessian sharpness, and validation
 BPB before choosing whether to continue or roll back again.
+
+### Stream-Aligned Step 1250 Restart
+
+The step-1250 elbow-momentum restart still failed to reproduce the fast
+phased-1000 descent.  The discrepancy was not a nats/BPB conversion issue.  In
+the fast run, the logged byte metrics were already near
+
+| run | step | metric | value |
+|---|---:|---|---:|
+| `oai-restart-01000-phased` | 1470 | `train/bpb` | \(3.6426\) |
+| `oai-restart-01000-phased` | 1500 | `train/bpb` | \(3.5914\) |
+| `oai-restart-01000-phased` | 1500 | `controller/train_bpb_ema` | \(\approx 3.6971\) |
+| `oai-restart-01250-elbow-momentum` | 1250--1350 | `train/bpb` | mostly \(4.5\)--\(4.8\) |
+
+The causal difference is data stream alignment.  The trainer offsets the
+training stream seed by the loaded checkpoint step:
+
+\[
+\texttt{stream\_seed}=\texttt{seed}+\texttt{start\_step}.
+\]
+
+The fast trajectory resumed at step \(1000\), hence used stream seed
+\(17+1000=1017\) and then consumed \(250\) training steps before reaching step
+\(1250\).  The later step-1250 restart loaded compatible weights and optimizer
+state, but started a new stream seed \(17+1250=1267\).  That changed the local
+data distribution and invalidated the comparison.
+
+The trainer now separates the stream origin from the checkpoint step.  If
+\(s_{\mathrm{origin}}\) is the desired data-order origin,
+\(s_{\mathrm{resume}}\) is the checkpoint step, and \(G\) is gradient
+accumulation, it burns in
+
+\[
+B=(s_{\mathrm{resume}}-s_{\mathrm{origin}})G
+\]
+
+microbatches from the dataloader before resuming optimization.  For the current
+restart,
+
+\[
+B=(1250-1000)\cdot 16=4000
+\]
+
+microbatches.  No model forward or backward pass is performed during burn-in;
+only the iterable dataloader is advanced through the same ordinary/complex
+microbatch choices that the earlier run would have consumed.  The run logs
+`data/stream_origin_step`, `data/stream_burnin_steps`, and
+`data/stream_burnin_microbatches` to W&B so future audits can distinguish
+weight checkpoint step from data-order state.
+
+Checkpoint saves now archive an existing periodic checkpoint before replacing
+the canonical `random_order_step_*.pt` file.  This preserves rollback targets
+from earlier attempts while keeping watcher scripts compatible with the
+canonical checkpoint names.
