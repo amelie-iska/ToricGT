@@ -79,12 +79,13 @@ training:
   max_steps: 50000
   batch_size: 2
   grad_accum_steps: 16
-  # The step-1250 elbow restart keeps Adam moments from the fast 1000->1250
-  # descent and uses a moderate LR: faster than the over-damped curvature run,
-  # still below the unstable branch that entered the 1500->1750 BPB bounce.
-  lr: 0.000040
+  # The stream-aligned 1250->1750 audit showed the fast descent returned, but
+  # BPB began bouncing once the warmup pushed effective LR above roughly
+  # 2.3e-5.  Restart from the aligned step-1500 checkpoint with Adam moments
+  # intact and keep the next 500-step window below that observed bounce band.
+  lr: 0.000036
   weight_decay: 0.05
-  warmup_steps: 2500
+  warmup_steps: 3000
   precision: bf16
   device: cuda
   seed: 17
@@ -128,7 +129,7 @@ complexity:
 
 adaptive_training:
   enabled: true
-  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01250_stream_origin_1000.json
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_stream_origin_1000.json
   # Checkpoint-level controller only: updates after eval windows, never per
   # microbatch.  It keeps the architecture and optimizer state fixed while
   # gently tuning the three controls identified by the 23.25k rollback analysis.

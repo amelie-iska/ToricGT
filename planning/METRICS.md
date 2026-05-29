@@ -1961,3 +1961,150 @@ Checkpoint saves now archive an existing periodic checkpoint before replacing
 the canonical `random_order_step_*.pt` file.  This preserves rollback targets
 from earlier attempts while keeping watcher scripts compatible with the
 canonical checkpoint names.
+
+### Step 1750 Stream-Aligned Audit And Decision
+
+The interrupting watcher analyzed
+
+```text
+outputs/post_resume_analysis/oai-restart-01250-stream-origin-1000/step-00001750/
+```
+
+against W&B run
+
+```text
+amelie-iska-math/toricgt-parameter-golf/36e5gv5d
+```
+
+The stream-alignment fix worked.  The first resumed steps returned immediately
+to the earlier low-BPB band, and the aligned step-1500 checkpoint has
+
+```text
+random_order_step_00001500.pt: train_bpb = 3.5918896520
+```
+
+The step-1750 checkpoint, however, regressed:
+
+```text
+random_order_step_00001750.pt: train_bpb = 4.0616284461
+```
+
+The W&B export through step 1740 reports:
+
+| metric | category | first median | last median | recent slope per 1k |
+|---|---|---:|---:|---:|
+| `train/bpb` | undesirable | \(3.6904\) | \(3.9031\) | \(+1.5721\) |
+| `train/loss_ema` | undesirable | \(2.5391\) | \(2.7373\) | \(+0.9059\) |
+| `train/gflownet_loss` | undesirable as diagnostic | \(2.7252\) | \(2.8615\) | \(+0.4667\) |
+| `complexity/train/bpb` | desired | \(4.0257\) | \(3.5192\) | \(-7.8735\) |
+| `complexity/train/argmax_byte_accuracy` | desired | \(0.3994\) | \(0.4282\) | \(+0.7617\) |
+| `train/trajectory_flow_loss` | desired | \(0.1278\) | \(0.1088\) | \(-0.1487\) |
+| `train/toric_memory_entropy` | desired but weak | \(0.2786\) | \(0.2779\) | \(+0.0591\) |
+
+The Hessian probe available at step 1500 was small and not sharp:
+
+\[
+\lambda_{\mathrm{abs}}\approx 4.83\cdot 10^{-5},
+\qquad
+|\operatorname{tr}(H)|/P\approx 5.15\cdot 10^{-5}.
+\]
+
+This argues against a hard curvature wall at the best checkpoint.  The observed
+failure mode is instead a warmup-induced bounce.  With base LR \(4\cdot10^{-5}\),
+warmup \(2500\), and phase multiplier \(0.95\), the effective LR rose from
+
+\[
+4\cdot10^{-5}\cdot0.95\cdot\frac{1500}{2500}
+\approx 2.28\cdot10^{-5}
+\]
+
+near the best checkpoint to
+
+\[
+4\cdot10^{-5}\cdot0.95\cdot\frac{1750}{2500}
+\approx 2.66\cdot10^{-5},
+\]
+
+where the EMA trend turned unfavorable.  The next restart therefore uses the
+aligned step-1500 checkpoint, preserves Adam state, keeps stream origin at
+step \(1000\), and changes only the LR schedule:
+
+```yaml
+training.lr: 0.000036
+training.warmup_steps: 3000
+adaptive_training.state_path:
+  checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_stream_origin_1000.json
+```
+
+This gives effective LR
+
+\[
+3.6\cdot10^{-5}\cdot0.95\cdot\frac{1500}{3000}
+\approx 1.71\cdot10^{-5}
+\]
+
+at restart and about \(2.28\cdot10^{-5}\) at step \(2000\), deliberately
+placing the next 500-step window below the previously observed bounce band.
+
+#### Plot-Level Interpretation
+
+The core timeseries plot shows a good descent into step 1500 followed by
+large-amplitude sawtooth behavior in `train/bpb` and `train/loss`.  The EMA
+minimum occurs after the initial recovery but then bends upward; the second
+differences alternate sign, which is characteristic of a stochastic floor
+bounce rather than a smooth underfitting plateau.
+
+The correlation heatmap shows `train/bpb` is strongly anti-correlated with
+trajectory kinetic and viscous terms.  This is acceptable here: smoother,
+lower-energy trajectories are being learned, but byte likelihood is not
+benefiting monotonically once LR rises.  Therefore trajectory-flow and toric
+terms should not be increased yet.
+
+The simplex and tetrahedron plots use only four records, so they are
+diagnostics rather than promotion gates.  Their consistent message is that
+more reasoning budget and higher MST efficiency do not yet reliably move
+samples toward the low-BPB vertex.  Embedding-space GFlowNet branches remain
+diverse, but are not sufficiently likelihood-directed.  Since the stabilization
+phase deliberately sets GFlowNet loss weight to zero, this is not a reason to
+alter the architecture; it is a reason to let byte compression stabilize before
+reactivating reasoning pressure.
+
+The 3D reasoning trajectories and Ramachandran-style phase plots show healthy
+branch diversity and clear energy basins, but also long outlier chords for math
+and GoT examples.  Hebrew examples are currently the easiest: they achieve the
+best answer-span BPB in the geometry audit.  The planned restart keeps the
+graph-of-thought machinery enabled for measurement but does not amplify it
+during the current BPB-stabilization phase.
+
+#### Categorization
+
+Desired:
+
+- stream-origin burn-in restored the low-BPB data-order trajectory;
+- `complexity/train/bpb` decreased materially;
+- train argmax byte accuracy improved;
+- trajectory flow and viscous dissipation improved;
+- toric memory entropy stayed far healthier than in the earlier collapsed run;
+- random-order causal audit remains clean.
+
+Desired but too weak or slow:
+
+- GFlowNet entropy and action diversity are high, but the policy is still near
+  uniform and not yet directed by likelihood;
+- LZMA prediction-target NCD improves only weakly;
+- toric entropy is stable but not growing;
+- validation has only one deterministic point in this window and should not be
+  over-interpreted.
+
+Undesirable:
+
+- `train/bpb`, `train/loss`, and `train/loss_ema` rise after the step-1500
+  basin;
+- logged GFlowNet loss rises as a diagnostic even though it is not active in
+  the stabilization objective;
+- zlib NCD worsens on the tiny complexity slice;
+- more reasoning budget does not yet dominate BPB in the simplex plots.
+
+Decision: restart from `random_order_step_00001500.pt` with lower effective LR
+and fresh controller state, then run the next interrupting analysis at step
+2000.
