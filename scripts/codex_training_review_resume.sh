@@ -10,6 +10,10 @@
 #     --training-tmux toricgt_pg_oai \
 #     --tmux-session toricgt_codex_review_00002500
 #
+# The default handoff uses non-interactive `codex exec resume`, not interactive
+# `codex resume`, so update prompts or TUI screens cannot block the restart
+# decision loop.
+#
 # To resume a specific Codex session rather than the most recent one:
 #   CODEX_RESUME_SESSION_ID=<session-id-or-thread-name> scripts/codex_training_review_resume.sh ...
 
@@ -150,9 +154,9 @@ Safety:
 EOF
 
 if [[ -n "$SESSION_ID" ]]; then
-  CODEX_CMD=(codex resume -C "$REPO_ROOT" -s danger-full-access -a never "$SESSION_ID" "$PROMPT")
+  CODEX_CMD=(codex exec -C "$REPO_ROOT" --dangerously-bypass-approvals-and-sandbox resume "$SESSION_ID" "$PROMPT")
 else
-  CODEX_CMD=(codex resume --last --include-non-interactive -C "$REPO_ROOT" -s danger-full-access -a never "$PROMPT")
+  CODEX_CMD=(codex exec -C "$REPO_ROOT" --dangerously-bypass-approvals-and-sandbox resume --last "$PROMPT")
 fi
 
 {

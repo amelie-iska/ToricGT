@@ -1689,7 +1689,9 @@ scripts/codex_training_review_resume.sh \
 simplex summaries, 3D trajectory diagnostics, Ramachandran-style plots, energy
 landscapes, W&B run, checkpoint, and training tmux.  If `--session-id` or
 `CODEX_RESUME_SESSION_ID` is provided, it resumes that session; otherwise it
-uses `codex resume --last`.
+uses `codex exec resume --last`.  The hook deliberately uses the non-interactive
+`exec` path because an interactive `codex resume` can block on CLI update prompts
+or TUI screens before the analysis prompt is delivered.
 
 The hook does not itself decide to kill or restart training.  It creates a
 review/resume turn whose task is to inspect the just-finished analysis, update
@@ -1720,3 +1722,45 @@ This waits for a fresh checkpoint, sends `Ctrl-C` to the training tmux, runs the
 analysis suite with the GPU freed, then opens a Codex review tmux.  The resumed
 review is instructed to restart or continue based on evidence and to schedule
 the next interrupting analysis roughly 500 steps later.
+
+### Step 2250 Automation Failure And Direct Fix
+
+The step-2250 analysis completed and wrote:
+
+```text
+outputs/post_resume_analysis/oai-restart-01000-phased/step-00002250/SYNOPSIS.md
+```
+
+The restart did not happen because the first handoff used interactive
+`codex resume`, which blocked on the Codex CLI update prompt.  The hook was
+changed to use non-interactive `codex exec resume`, but the handoff still left
+restart responsibility in another agent process rather than making the training
+loop deterministic.  Going forward, interrupting analysis is the authority for
+pausing the run; restart decisions can still be reviewed by Codex, but the
+operator-visible tmux state must be checked immediately after each analysis.
+
+The metric diagnosis at step 2250 is:
+
+- `train/bpb` rose from a first-window median of `4.14777` to `4.48084`
+  (`+8.03%`) with recent slope about `+0.796 BPB / 1k steps`.
+- `train/loss` and `train/total_loss` rose by the same percentage, so this is
+  not a logging artifact.
+- `gflownet_loss_weight`, `trajectory_flow_loss_weight`,
+  `gflownet_entropy_weight`, and toric entropy pressure were zero in phase 1.
+  The bounce is therefore a base byte-likelihood optimization issue, not a
+  GFlowNet auxiliary-gradient issue.
+- The drift begins as the absolute LR approaches `4e-5`.  The phase-1 schedule
+  was too aggressive for the step-1000 restart.
+
+Direct control change:
+
+- resume from `random_order_step_00001500.pt`, before the bounce;
+- reset optimizer moments;
+- lower base LR from `4e-5` to `3e-5`;
+- extend warmup from `2000` to `3000`;
+- set phase-1 `lr_multiplier=0.70`;
+- set phase-1 `mtp_loss_weight=0.0` and reduce contrastive weight to `0.0005`.
+
+This makes the effective LR at step 1500 about `1.05e-5`, versus roughly
+`3.0e-5` in the failed branch, and keeps the first recovery window as close as
+possible to pure BPB descent.

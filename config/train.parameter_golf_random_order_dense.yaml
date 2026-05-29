@@ -76,9 +76,9 @@ training:
   # The step-1000 restart resets optimizer moments and uses a slower warmup.
   # This treats the checkpoint as a useful representation initializer while
   # removing stale Adam state from later unstable curricula.
-  lr: 0.000040
+  lr: 0.000030
   weight_decay: 0.05
-  warmup_steps: 2000
+  warmup_steps: 3000
   precision: bf16
   device: cuda
   seed: 17
@@ -154,13 +154,13 @@ phase_curriculum:
     - name: bpb_stabilization
       start_step: 1000
       end_step: 6000
-      lr_multiplier: 1.0
+      lr_multiplier: 0.70
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
       trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.001
-      mtp_loss_weight: 0.01
+      contrastive_loss_weight: 0.0005
+      mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
     - name: light_gflownet_alignment
