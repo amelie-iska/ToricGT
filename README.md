@@ -10,7 +10,7 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 
 <p align="center">
   <a href="./assets/toricgt_paper_pg_softmoe_final.tex"><img src="https://img.shields.io/badge/arXiv-94133F?style=for-the-badge&logo=arxiv" alt="arXiv"/></a>
-  <a href="https://github.com/amelie-iska/ToricGT/"><img src="https://img.shields.io/badge/📝%20Blog-007A87?style=for-the-badge&logoColor=white" alt="GitHub"/></a>
+  <a href="https://github.com/amelie-iska/ToricGT/"><img src="https://img.shields.io/badge/📝%20GitHub-007A87?style=for-the-badge&logoColor=grey" alt="GitHub"/></a>
   <a href="https://huggingface.co/blog/AmelieSchreiber/toricgt"><img src="https://img.shields.io/badge/HuggingFace-DE9B35.svg?style=for-the-badge&logo=HuggingFace" alt="HF"/></a>
 </p>
 
@@ -553,6 +553,25 @@ Hebrew, biomedicine, biochemistry, biophysics, and toric tasks, and bit-packed
 6-bit row quantized LZMA exports. JEPA is deliberately excluded from this branch per the current
 experiment scope.
 
+The same branch now adds GraphCG-style lattice-basis training and an explicit
+analogical topology objective. With CUDA memory available,
+`graphcg_num_directions: auto` expands the learned hidden-space basis under a
+10% safety margin; on the local 24GB RTX 4090 this resolves to 256 directions.
+Analogical maps are not only parallelogram vector losses: repeated hidden
+relation classes build normalized nested Vietoris-Rips/simplex-tree filtrations,
+including directed flag-complex edges from an antisymmetric noncommutative
+form. W&B logs `train/analogy_*` metrics for functor loss, filtration
+inclusions, chain-map commutators, directed transitive closure, directed
+cycle/holonomy balance, edge/triangle densities, and basis alignment.
+The periodic analysis suite also renders these objects under
+`outputs/post_resume_analysis/<run>/step-*/geometry/topology/`: per-branch
+filtration curves for edge density, triangle density, directed asymmetry, and
+noncommutative cycle flux, plus heatmaps of normalized hidden-arrow distances,
+antisymmetric toric skew, and directed adjacency at several radii. These plots
+sit next to the 3D graph-of-thought trajectories, Ramachandran-style phase
+plots, energy landscapes, reasoning/K/BPB triangles, and tetrahedral simplex
+diagnostics.
+
 Kolmogorov-style reasoning diagnostics are enabled by default on the `oai`
 branch without changing the BPB objective. The trainer periodically logs
 compressor-tagged proxies such as `complexity/train/target_cond_k_lzma_mean`,
@@ -572,26 +591,17 @@ after the current byte has been scored.
 
 The loader already packs multiple source rows into one byte chunk with a
 separator, so short problems are combined into a single random-order training
-instance. The default `oai` config now switches after `complex_start_step:
-1000` to a harder stream of larger technical rows (`min_estimated_tokens: 256`
-with math/code/graph/reasoning/health/physics/biomed/biochem task-family
-filters). Since the current run has passed that step, resuming with the latest
-code activates the harder composite stream immediately while validation remains
-on the full validation split.
-
-The active `oai` recovery restart is from the earlier step `23,250`
-checkpoint, chosen after the later 23.5k-to-26k interval showed worse BPB/loss
-behavior. It keeps optimizer state but lowers complex-row pressure and
-GFlowNet pressure while preserving the ToricGT-specific components:
-`complex_mix_ratio: 0.10`, `gflownet_loss_weight: 0.010`, gentler entropy
-shaping, the toric entropy floor, and lightweight QAT. A bounded
-checkpoint-level adaptive controller is enabled for the three least invasive
-training controls: GFlowNet entropy target, GFlowNet loss weight, and
-complex-row mix. The controller updates only after eval windows, writes
-`checkpoints/parameter_golf_oai_dense/adaptive_controller_state_23250_recovery.json`,
-resets stale state if the resume step changes, and logs `controller/*` metrics
-to W&B. Recovery mode throttles complex rows and GFlowNet weight more
-aggressively when train BPB drifts upward without validation improvement.
+instance. The default `oai` config keeps the initial BPB capture stream
+text-first, introduces medium-length rows after step `1650`, and delays the
+larger technical graph-projection stream until step `6000` with
+math/code/graph/reasoning/health/physics/biomed/biochem task-family filters.
+The current restart is from the aligned step `1,500` checkpoint with a lower
+`1500-1800` LR multiplier (`0.90`) to stay below the observed bounce band while
+the new topology metrics are introduced at very small weight. A bounded
+checkpoint-level adaptive controller remains enabled for GFlowNet entropy
+target, GFlowNet loss weight, and hard-row mix; it writes
+`checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_capture_schneller.json`
+and logs `controller/*` metrics to W&B.
 
 For challenge-time throughput experiments, use the long-context packed config:
 

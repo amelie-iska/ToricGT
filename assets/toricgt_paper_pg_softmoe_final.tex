@@ -1446,6 +1446,73 @@ If $h_k$ is $\mathcal F_k$-measurable and $a_k$ is sampled from $p_\psi(\cdot\mi
 The sampled action is a randomized function of $h_k$ and independent sampler noise.  Since $h_k$ is $\mathcal F_k$-measurable, the pair $(h_k,a_k)$ is measurable with respect to $\mathcal F_k$ augmented by legal internal randomness.  The distribution $q_\theta(\cdot\mid\mathcal F_k,a_k)$ is therefore fixed before $b_{\pi_k}$ is read.  The update including $b_{\pi_k}$ occurs after recording the log score, so the score-before-update induction remains unchanged.
 \end{proof}
 
+\subsection{GraphCG bases and directed topological analogies}
+
+The competition branch adds an auxiliary training signal inspired by graph contrastive geometry: hidden transitions should form reusable analogical arrows rather than unrelated local displacements.  This signal is deliberately auxiliary.  It does not replace BPB, and its weights are phased in only after the early byte compressor has a stable negative slope.
+
+Let $h_t\in\R^d$ be a prefix-visible hidden state and choose a short stride $s$.  Define a normalized relation arrow
+\begin{equation}
+  a_t=\frac{h_{t+s}-h_t}{\norm{h_{t+s}-h_t}_2+\epsilon}.
+\end{equation}
+Coarse byte-relation classes are obtained from source and target byte classes: for example digit-to-digit, lowercase-to-punctuation, or Hebrew-byte-to-Hebrew-byte.  If two arrows belong to the same class, they should represent the same abstract operation up to local context.  The GraphCG-style basis $B\in\R^{d\times r}$ supplies a compact lattice chart:
+\begin{equation}
+  c_t=\softmax(B\transpose a_t/\tau),\qquad
+  \widehat a_t=Bc_t.
+\end{equation}
+The basis loss combines reconstruction, entropy control, and margin terms.  An analogical functor loss reduces within-class variance of $a_t$, while a parallelogram loss penalizes failures of local closure:
+\begin{equation}
+  \mathcal L_{\mathrm{para}}
+  =\Eop\norm{(h_{t+s}-h_t)+(h_{u+s}-h_u)-(h_{v+s}-h_v)}_2^2
+\end{equation}
+over adjacent relation triples that share the same coarse arrow label.  These terms encourage byte-level reasoning moves to become reusable lattice vectors.
+
+\begin{definition}[Directed filtered analogy complex]
+Fix a relation class with arrows $a_1,\ldots,a_m$.  Let
+\begin{equation}
+  d_{ij}=\frac{\norm{a_i-a_j}_2}{\operatorname{median}_{p<q}\norm{a_p-a_q}_2+\epsilon}.
+\end{equation}
+For filtration radii $\rho_1<\cdots<\rho_L$, the symmetric soft Rips adjacency is
+\begin{equation}
+  A_\ell(i,j)=\sigma\left(\frac{\rho_\ell-d_{ij}}{\tau}\right)(1-\delta_{ij}).
+\end{equation}
+Split each arrow into two channel blocks $a_i=(a_i^{(1)},a_i^{(2)},\ldots)$ and define the antisymmetric toric skew form
+\begin{equation}
+  \Omega_{ij}=\ip{a_i^{(1)}}{a_j^{(2)}}-\ip{a_i^{(2)}}{a_j^{(1)}}.
+\end{equation}
+The directed noncommutative adjacency is
+\begin{equation}
+  A_\ell^\rightarrow(i,j)
+  =\sigma\left(\frac{\rho_\ell-d_{ij}+\gamma\Omega_{ij}}{\tau}\right)(1-\delta_{ij}).
+\end{equation}
+The collection $\{A_\ell,A_\ell^\rightarrow\}_{\ell=1}^L$ is the directed filtered analogy complex.
+\end{definition}
+
+The implementation uses differentiable proxies rather than a heavy persistent-homology dependency.  It logs inclusion residuals
+\begin{equation}
+  \mathcal L_{\mathrm{inc}}=\sum_{\ell<L}\norm{\max(0,A_\ell-A_{\ell+1})}_F^2,
+\end{equation}
+chain-map commutators for row-normalized prolongations $P_\ell$,
+\begin{equation}
+  \mathcal L_{\mathrm{chain}}=\sum_{\ell<L}\norm{P_{\ell+1}P_\ell-P_\ell P_{\ell+1}}_F^2,
+\end{equation}
+soft triangle density $\sum_{ijk}A_{ij}A_{jk}A_{ik}$, directed transitive residuals, and directed cycle/holonomy flux
+\begin{equation}
+  \Phi_\ell^\rightarrow
+  =\sum_{i,j,k}A_\ell^\rightarrow(i,j)
+  A_\ell^\rightarrow(j,k)A_\ell^\rightarrow(k,i)
+  \max(0,\Omega_{ij})\max(0,\Omega_{jk})\max(0,\Omega_{ki}).
+\end{equation}
+
+\begin{proposition}[Scale stability of normalized analogy filtrations]
+If all hidden arrows in one relation class are multiplied by a common scalar $\lambda>0$, then $d_{ij}$ is unchanged.  Consequently the symmetric filtration $\{A_\ell\}$ and every diagnostic depending only on $d_{ij}$ is invariant up to numerical $\epsilon$ effects.  If both channel blocks in $\Omega$ are normalized before forming the skew matrix, the directed filtration is also invariant to the same common rescaling.
+\end{proposition}
+
+\begin{proof}
+The numerator $\norm{\lambda a_i-\lambda a_j}_2$ and the median denominator are both multiplied by $\lambda$, so their ratio is unchanged.  Therefore each logit $(\rho_\ell-d_{ij})/\tau$ is unchanged, and so is $A_\ell$.  The inclusion, chain-map, barcode-proxy, and triangle diagnostics are deterministic functions of these adjacencies.  For the directed case, normalized channel blocks satisfy $\lambda a_i^{(r)}/\norm{\lambda a_i^{(r)}}=a_i^{(r)}/\norm{a_i^{(r)}}$ for $\lambda>0$, so $\Omega_{ij}$ is unchanged.  Hence $A_\ell^\rightarrow$ and the directed diagnostics are unchanged as well.
+\end{proof}
+
+Periodic analyses render these quantities directly.  For selected reasoning records the script writes directed filtration curves for edge density, triangle density, asymmetry, and cycle flux, plus heatmaps of normalized distances, the antisymmetric toric skew matrix, and directed adjacencies at representative radii.  Thus the noncommutative topology is both a training pressure and an auditable explanation object.
+
 \begin{proposition}[Dense recurrent blocks are the byte-efficient default]
 Under a strict serialized-byte cap, replacing a dense feed-forward block of size $O(dd_{\mathrm{ff}})$ by $E$ full experts costs $O(Edd_{\mathrm{ff}})$ stored scalars, whereas applying the same dense block recurrently $r$ times costs no additional stored scalars.  Therefore the Parameter-Golf default should be dense recurrent ToricGT blocks, with Soft-MoE retained as a measured ablation or low-rank adapter variant.
 \end{proposition}

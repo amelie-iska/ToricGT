@@ -972,8 +972,217 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
     plt.close(fig)
 
 
+def sigmoid_np(x: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -60.0, 60.0)))
+
+
+def directed_filtration_stats(
+    hidden: np.ndarray,
+    *,
+    max_points: int = 64,
+    levels: int = 4,
+    radius_min: float = 0.55,
+    radius_max: float = 1.65,
+    skew_scale: float = 0.35,
+    temperature: float = 0.12,
+) -> dict[str, Any]:
+    """Compute scale-normalized directed filtered-complex diagnostics.
+
+    The vertices are relation arrows between consecutive hidden states.  The
+    symmetric distance builds a small soft Vietoris-Rips filtration, while an
+    antisymmetric bilinear form biases edges into a directed noncommutative
+    filtration.  These quantities are diagnostics, not persistent-homology
+    replacements: they are cheap enough to run during periodic training
+    analyses and stable under global hidden-state rescalings.
+    """
+
+    if hidden.shape[0] < 4:
+        zeros = np.zeros(max(1, levels), dtype=float)
+        return {
+            "radii": np.linspace(radius_min, radius_max, max(1, levels)).tolist(),
+            "edge_density": zeros.tolist(),
+            "triangle_density": zeros.tolist(),
+            "directed_edge_density": zeros.tolist(),
+            "directed_asymmetry": zeros.tolist(),
+            "directed_cycle_flux": zeros.tolist(),
+            "directed_transitive_loss": zeros.tolist(),
+            "directed_chain_commutator": zeros.tolist(),
+            "inclusion_violation": zeros.tolist(),
+            "skew_norm": 0.0,
+            "distance": np.zeros((1, 1), dtype=float),
+            "skew": np.zeros((1, 1), dtype=float),
+            "directed_adjacency": [],
+        }
+    arrows = np.diff(hidden.astype(np.float32), axis=0)
+    if arrows.shape[0] > max_points:
+        idx = np.linspace(0, arrows.shape[0] - 1, num=max_points).round().astype(int)
+        arrows = arrows[idx]
+    norms = np.linalg.norm(arrows, axis=1, keepdims=True)
+    arrows = arrows / np.maximum(norms, 1e-8)
+    diff = arrows[:, None, :] - arrows[None, :, :]
+    dist = np.linalg.norm(diff, axis=-1)
+    positive = dist[dist > 1e-8]
+    scale = float(np.median(positive)) if positive.size else 1.0
+    dist = dist / max(scale, 1e-6)
+    n = int(arrows.shape[0])
+    eye = np.eye(n, dtype=float)
+    half = max(1, arrows.shape[1] // 2)
+    left = arrows[:, :half]
+    right = arrows[:, half : half + half]
+    if right.shape[1] < left.shape[1]:
+        right = np.pad(right, ((0, 0), (0, left.shape[1] - right.shape[1])), mode="constant")
+    skew = left @ right.T - right @ left.T
+    skew_abs = np.abs(skew[np.triu_indices(n, k=1)])
+    skew_unit = skew / max(float(np.median(skew_abs)) if skew_abs.size else 1.0, 1e-6)
+    skew_unit = np.clip(skew_unit, -3.0, 3.0) * float(skew_scale)
+    radii = np.linspace(float(radius_min), float(radius_max), max(1, int(levels)))
+    edge_density: list[float] = []
+    triangle_density: list[float] = []
+    directed_edge_density: list[float] = []
+    directed_asymmetry: list[float] = []
+    directed_cycle_flux: list[float] = []
+    directed_transitive_loss: list[float] = []
+    directed_chain_commutator: list[float] = []
+    inclusion_violation: list[float] = []
+    directed_adjacency: list[np.ndarray] = []
+    previous_sym: np.ndarray | None = None
+    previous_dir: np.ndarray | None = None
+    for radius in radii:
+        sym = sigmoid_np((radius - dist) / max(float(temperature), 1e-6)) * (1.0 - eye)
+        directed = sigmoid_np((radius - dist + skew_unit) / max(float(temperature), 1e-6)) * (1.0 - eye)
+        directed_adjacency.append(directed)
+        edge_density.append(float(sym.sum() / max(1, n * (n - 1))))
+        directed_edge_density.append(float(directed.sum() / max(1, n * (n - 1))))
+        triangle_mass = np.einsum("ij,jk,ik->", sym, sym, sym)
+        triangle_density.append(float(triangle_mass / max(1, n * (n - 1) * (n - 2))))
+        directed_asymmetry.append(float(np.mean(np.abs(directed - directed.T))))
+        flux = directed * np.maximum(0.0, skew_unit)
+        directed_cycle_flux.append(float(np.einsum("ij,jk,ki->", flux, flux, flux) / max(1, n**3)))
+        directed_square = directed @ directed
+        directed_transitive_loss.append(float(np.mean(np.maximum(0.0, directed_square - directed) ** 2)))
+        rows = directed + eye
+        rows = rows / np.maximum(rows.sum(axis=1, keepdims=True), 1e-8)
+        if previous_dir is None:
+            directed_chain_commutator.append(0.0)
+        else:
+            prev_rows = previous_dir + eye
+            prev_rows = prev_rows / np.maximum(prev_rows.sum(axis=1, keepdims=True), 1e-8)
+            directed_chain_commutator.append(float(np.mean((prev_rows @ rows - rows @ prev_rows) ** 2)))
+        if previous_sym is None:
+            inclusion_violation.append(0.0)
+        else:
+            inclusion_violation.append(float(np.mean(np.maximum(0.0, previous_sym - sym) ** 2)))
+        previous_sym = sym
+        previous_dir = directed
+    return {
+        "radii": radii.tolist(),
+        "edge_density": edge_density,
+        "triangle_density": triangle_density,
+        "directed_edge_density": directed_edge_density,
+        "directed_asymmetry": directed_asymmetry,
+        "directed_cycle_flux": directed_cycle_flux,
+        "directed_transitive_loss": directed_transitive_loss,
+        "directed_chain_commutator": directed_chain_commutator,
+        "inclusion_violation": inclusion_violation,
+        "skew_norm": float(np.mean(np.abs(skew_unit))),
+        "distance": dist,
+        "skew": skew_unit,
+        "directed_adjacency": directed_adjacency,
+    }
+
+
+def attach_topology_stats(branch: dict[str, Any], stats: dict[str, Any]) -> None:
+    branch["topology_edge_density"] = float(np.mean(stats["edge_density"]))
+    branch["topology_triangle_density"] = float(np.mean(stats["triangle_density"]))
+    branch["topology_directed_edge_density"] = float(np.mean(stats["directed_edge_density"]))
+    branch["topology_directed_asymmetry"] = float(np.mean(stats["directed_asymmetry"]))
+    branch["topology_directed_cycle_flux"] = float(np.mean(stats["directed_cycle_flux"]))
+    branch["topology_directed_transitive_loss"] = float(np.mean(stats["directed_transitive_loss"]))
+    branch["topology_directed_chain_commutator"] = float(np.mean(stats["directed_chain_commutator"]))
+    branch["topology_inclusion_violation"] = float(np.mean(stats["inclusion_violation"]))
+    branch["topology_skew_norm"] = float(stats["skew_norm"])
+
+
+def plot_directed_filtration(record_meta: dict[str, Any], branches: list[dict[str, Any]], output_path: Path) -> None:
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8), facecolor="#030712")
+    metrics = [
+        ("edge_density", "symmetric edge density"),
+        ("triangle_density", "soft triangle density"),
+        ("directed_asymmetry", "directed asymmetry"),
+        ("directed_cycle_flux", "noncommutative cycle flux"),
+    ]
+    bpbs = np.array([float(branch["bpb"]) for branch in branches], dtype=float)
+    lo, hi = float(bpbs.min()), float(bpbs.max())
+    cmap = plt.get_cmap("turbo")
+    for ax, (metric, title) in zip(axes.reshape(-1), metrics):
+        ax.set_facecolor("#030712")
+        for branch in branches:
+            stats = branch.get("topology_stats")
+            if not isinstance(stats, dict):
+                continue
+            norm = 0.5 if abs(hi - lo) < 1e-8 else (float(branch["bpb"]) - lo) / (hi - lo)
+            color = cmap(1.0 - norm)
+            ax.plot(
+                stats["radii"],
+                stats[metric],
+                color=color,
+                linewidth=1.45,
+                alpha=0.84,
+                label=f"B{branch['branch_index']} BPB={branch['bpb']:.2f}",
+            )
+        ax.set_title(title, color="white", fontsize=11)
+        ax.set_xlabel("filtration radius", color="white")
+        ax.tick_params(colors="white")
+        ax.grid(color="#1f3b52", linewidth=0.5, alpha=0.6)
+    axes[0, 0].legend(loc="best", fontsize=7, framealpha=0.18, facecolor="#07111e", labelcolor="white")
+    fig.suptitle(
+        f"Directed nested simplicial diagnostics R{record_meta['record_index']}",
+        color="white",
+        fontsize=14,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
+def plot_topology_heatmaps(record_meta: dict[str, Any], branches: list[dict[str, Any]], output_path: Path) -> None:
+    if not branches:
+        return
+    best = min(branches, key=lambda item: float(item["bpb"]))
+    stats = best.get("topology_stats")
+    if not isinstance(stats, dict):
+        return
+    directed = stats.get("directed_adjacency", [])
+    if not directed:
+        return
+    mid = len(directed) // 2
+    panels = [
+        (np.asarray(stats["distance"]), "scale-normalized distance", "viridis"),
+        (np.asarray(stats["skew"]), "antisymmetric toric skew", "coolwarm"),
+        (np.asarray(directed[0]), f"directed adjacency r={stats['radii'][0]:.2f}", "viridis"),
+        (np.asarray(directed[mid]), f"directed adjacency r={stats['radii'][mid]:.2f}", "viridis"),
+    ]
+    fig, axes = plt.subplots(2, 2, figsize=(9.5, 8.2), facecolor="#030712")
+    for ax, (matrix, title, cmap_name) in zip(axes.reshape(-1), panels):
+        ax.set_facecolor("#030712")
+        im = ax.imshow(matrix, cmap=cmap_name, interpolation="nearest", aspect="auto")
+        ax.set_title(title, color="white", fontsize=10)
+        ax.tick_params(colors="white", labelsize=7)
+        cbar = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02)
+        cbar.ax.yaxis.set_tick_params(color="white")
+        plt.setp(cbar.ax.get_yticklabels(), color="white", fontsize=7)
+    fig.suptitle(
+        f"Best branch noncommutative simplex-tree map R{record_meta['record_index']} B{best['branch_index']}",
+        color="white",
+        fontsize=13,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def serializable_record(record: dict[str, Any]) -> dict[str, Any]:
-    skip = {"hidden", "per_token_nll", "projected_path", "target_positions"}
+    skip = {"hidden", "per_token_nll", "projected_path", "target_positions", "topology_stats"}
     out: dict[str, Any] = {}
     for key, value in record.items():
         if key in skip:
@@ -1055,14 +1264,20 @@ def main() -> None:
         projected_paths, _, _ = hidden_pca([branch["hidden"] for branch in branches], max_points=args.max_pca_points, seed=args.seed + record_index)
         for branch, projected in zip(branches, projected_paths):
             branch["projected_path"] = projected
+            topology_stats = directed_filtration_stats(branch["hidden"])
+            branch["topology_stats"] = topology_stats
+            attach_topology_stats(branch, topology_stats)
         enrich_branch_scores(branches)
         branch_records.extend(branches)
         record_slug = f"R{record_index}_{slug(meta['dataset'] + '_' + meta['task_family'])}"
         traj_dir = output_dir / "trajectories"
+        topology_dir = output_dir / "topology"
         plot_trajectory_3d(meta, branches, traj_dir / f"{record_slug}_trajectory_3d.png")
         write_interactive_trajectory(meta, branches, traj_dir / f"{record_slug}_trajectory_3d.html")
         plot_phase_energy(meta, branches, traj_dir / f"{record_slug}_phase_energy.png")
         plot_energy_landscape(meta, branches, traj_dir / f"{record_slug}_energy_landscape.png")
+        plot_directed_filtration(meta, branches, topology_dir / f"{record_slug}_directed_filtration.png")
+        plot_topology_heatmaps(meta, branches, topology_dir / f"{record_slug}_noncommutative_heatmaps.png")
     enrich_branch_scores(branch_records)
     write_branch_records(branch_records, output_dir)
     (output_dir / "selected_records.json").write_text(json.dumps(record_manifest, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1084,12 +1299,17 @@ def main() -> None:
         "best_answer_bpb": float(np.min([record["answer_bpb"] for record in branch_records])),
         "mean_mst_efficiency": float(np.mean([record["mst_efficiency"] for record in branch_records])),
         "mean_path_smoothness": float(np.mean([record["path_smoothness_raw"] for record in branch_records])),
+        "mean_topology_directed_asymmetry": float(np.mean([record["topology_directed_asymmetry"] for record in branch_records])),
+        "mean_topology_directed_cycle_flux": float(np.mean([record["topology_directed_cycle_flux"] for record in branch_records])),
+        "mean_topology_triangle_density": float(np.mean([record["topology_triangle_density"] for record in branch_records])),
+        "mean_topology_inclusion_violation": float(np.mean([record["topology_inclusion_violation"] for record in branch_records])),
         "outputs": {
             "records": str(output_dir / "reasoning_geometry_records.json"),
             "selected_records": str(output_dir / "selected_records.json"),
             "triangles": str(triangle_dir),
             "tetrahedra": str(tetra_dir),
             "trajectories": str(output_dir / "trajectories"),
+            "topology": str(output_dir / "topology"),
         },
     }
     (output_dir / "reasoning_geometry_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")

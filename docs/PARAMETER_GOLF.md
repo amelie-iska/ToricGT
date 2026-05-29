@@ -28,6 +28,9 @@ changes.
 - Complexity diagnostics: compressor-tagged Kolmogorov-style proxies for
   conditional byte programs, graph projections, random-order permutations, and
   GFlowNet action traces.
+- GraphCG/analogy geometry: auto-sized hidden lattice basis, scale-normalized
+  nested simplex-tree maps, directed flag-complex topology, and analogical
+  functor diagnostics.
 - Soft-MoE: off for the contest track; still default for the graph research
   encoder.
 - Export: bit-packed 6-bit row quantization with LZMA by default; auxiliary
@@ -121,11 +124,12 @@ been recorded.
 The Parquet loader performs multi-record packing: rows are appended into a byte
 buffer separated by a configurable delimiter until a full sequence is available.
 This lets one training example contain several problems or one large graph
-reasoning trace. The default `oai` config uses this as a curriculum: after
-step 1000, the training iterator switches to rows with known larger
-`estimated_tokens` and technical task families, so the model sees harder
-composite reasoning examples after a stable byte-model warmup. For runs meant
-to reduce optimizer steps under the challenge wallclock, use
+reasoning trace. The default `oai` config uses this as a curriculum: the early
+BPB-capture stream remains text-first, medium-length rows are introduced after
+step 1650, and larger graph-projected technical examples are delayed until
+step 6000. This prevents graph scaffolding from destabilizing the early byte
+compressor while still letting later phases exploit tropical-ring context. For
+runs meant to reduce optimizer steps under the challenge wallclock, use
 `config/train.parameter_golf_random_order_packed_2048.yaml`. It extends context
 to 2048 bytes, keeps tropical-ring upper layers, preserves graph projections,
 and can resume from a 1024-token checkpoint by resizing the position embedding.
@@ -154,6 +158,35 @@ These metrics are diagnostic by default. They help detect whether BPB
 improvements come with more compact, robust reasoning programs or only local
 byte-pattern modeling. The BPB objective and causal scoring contract remain
 unchanged.
+
+## GraphCG And Directed Topological Analogies
+
+The `oai` branch includes a low-byte GraphCG-style hidden basis for analogical
+reasoning. `graphcg_num_directions: auto` chooses the largest configured
+multiple of eight under a small activation-memory budget with a ten percent
+safety margin; on the current 24GB RTX 4090 this resolves to 256 directions.
+Old checkpoints with no basis or a narrower basis can still resume: missing
+rows are initialized and stale optimizer moments are dropped only for changed
+parameters.
+
+The analogy loss is not just vector arithmetic. For repeated coarse byte
+relations, normalized hidden arrows are grouped into small point clouds. Each
+group builds nested soft Vietoris-Rips complexes at several radii, giving
+scale-insensitive simplex-tree maps. The trainer logs inclusion penalties,
+chain-map commutators, 0D-persistence/MST-style barcode proxies, edge density,
+and triangle density. A directed noncommutative extension adds an antisymmetric
+form on relation vectors, so `i -> j` and `j -> i` can differ. The resulting
+directed flag complex logs transitive-closure pressure, directed cycle/holonomy
+balance, directed chain-map diagnostics, asymmetry, and skew magnitude. These
+metrics should improve reasoning geometry without replacing the BPB objective.
+
+The periodic geometry suite visualizes the same nested complexes. Each
+analysis checkpoint writes `geometry/topology/*_directed_filtration.png` with
+radius-indexed edge density, soft triangle density, directed asymmetry, and
+noncommutative cycle flux, plus `*_noncommutative_heatmaps.png` for
+scale-normalized hidden-arrow distance, antisymmetric toric skew, and directed
+adjacency at low and middle filtration radii. These plots are computed from
+model hidden states and branch losses, not hand-drawn diagrams.
 
 ## Best Checkpoint Publishing
 
@@ -237,17 +270,21 @@ The default training config has graph projection and GFlowNet sampling enabled:
 
 ```yaml
 data:
-  include_graph_projection: true
+  include_graph_projection: false
   coprime_row_stride: true
   document_separator: "\n\n"
-  complex_start_step: 1000
-  complex_min_estimated_tokens: 256
+  medium_start_step: 1650
+  medium_min_estimated_tokens: 129
+  complex_start_step: 6000
+  complex_min_estimated_tokens: 385
 training:
   ckpt_interval: 250
-  gflownet_loss_weight: 0.01
-  gflownet_entropy_weight: 0.001
+  gflownet_loss_weight: 0.001
+  gflownet_entropy_weight: 0.0005
+  graphcg_loss_weight: 0.0002
+  analogy_lattice_loss_weight: 0.0002
   eval_gflownet_samples: 2
-  mtp_loss_weight: 0.05
+  mtp_loss_weight: 0.01
   eval_score_first_bias_lr: 0.025
 complexity:
   enabled: true
@@ -263,6 +300,10 @@ checkpoint_publishing:
 model:
   use_gflownet_policy: true
   gflownet_num_actions: 16
+  use_graphcg: true
+  graphcg_num_directions: auto
+  use_analogy_lattice: true
+  analogy_topology_directed: true
   use_bigram_hash: true
   use_caseops_features: true
   use_smear_gate: true

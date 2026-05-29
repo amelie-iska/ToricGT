@@ -211,6 +211,19 @@ BPB is computed prequentially: predict a normalized next-byte distribution, scor
 
 The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.  The local mirror of \texttt{AmelieSchreiber/toricgt-curated-splits} is used in the competition-safe split: train shards feed supervised BPB optimization, validation shards feed score-first validation, and test shards are reserved for held-out GFlowNet test-time scaling.  The byte loader packs multiple source rows into one chunk; after warmup the training iterator switches to larger technical records, and a 2048-byte packed-context config can resume from a 1024-byte checkpoint by resizing only the learned position table.  This exploits the tropical-ring upper layers for longer composite reasoning trajectories while preserving the strict prequential scoring contract.
 
+The \texttt{oai} branch also adds GraphCG-style analogical geometry without changing the exported byte model.  Let $h_t$ be a prefix-visible hidden state and let $a_t=(h_{t+s}-h_t)/(\|h_{t+s}-h_t\|+\epsilon)$ be a normalized relation arrow.  Repeated coarse byte-relation classes are encouraged to share a lattice basis $B\in\mathbb R^{d\times r}$ and to satisfy parallelogram closures.  For scale robustness, each relation class builds a nested soft Vietoris--Rips filtration
+\begin{equation}
+  A_\rho(i,j)=\sigma((\rho-\|a_i-a_j\|/\operatorname{med}\|a_p-a_q\|)/\tau),
+  \qquad \rho_1<\cdots<\rho_m,
+\end{equation}
+and penalizes inclusion violations, chain-map commutators, and soft triangle failures.  Directionality is supplied by an antisymmetric toric form
+\begin{equation}
+  \Omega_{ij}=\langle a_i^{(1)},a_j^{(2)}\rangle-\langle a_i^{(2)},a_j^{(1)}\rangle,
+  \qquad
+  A_\rho^\rightarrow(i,j)=\sigma((\rho-d_{ij}+\gamma\Omega_{ij})/\tau),
+\end{equation}
+so $i\to j$ and $j\to i$ may differ.  Periodic analyses render these noncommutative nested-complexes as directed filtration curves and heatmaps next to 3D graph-of-thought trajectories, Ramachandran-style phase plots, energy landscapes, and reasoning/K/BPB simplices.
+
 Operationally, the first serious BPB target is $1.20$--$1.22$, a strong run is $1.16$--$1.19$, an excellent run is $1.13$--$1.15$, and $\le1.12$ is exceptional under OpenAI's public recap.  Claims below $1.10$ BPB should trigger strict leakage, tokenizer, and score-before-update audits.
 
 \paragraph{Kolmogorov-style reasoning diagnostics.}

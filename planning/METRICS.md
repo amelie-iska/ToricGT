@@ -2301,7 +2301,7 @@ The phase curriculum is now:
 | 12000+ | 46--51% | 45--50% | 4% | full reasoning curriculum under BPB guardrails |
 
 The effective LR in the 1500--1800 capture window was also reduced from the
-failed \(1.15\) multiplier to \(1.05\).  The text-first run showed good early
+failed \(1.15\) multiplier to \(0.90\).  The text-first run showed good early
 minibatches around \(3.44\)--\(3.52\) but began bouncing as the warmup pushed
 the effective LR above roughly \(3.0\cdot10^{-5}\).  The curriculum restart
 therefore tries to make the descent longer by avoiding the high-curvature band,
@@ -2326,7 +2326,10 @@ toric shifts, Hebrew root transformations, and technical reasoning moves.
 
 Implementation decision:
 
-- add a tiny learned basis `graphcg_direction_basis` with 16 directions;
+- add a learned basis `graphcg_direction_basis` with `auto` directions; on the
+  current 24 GB 4090 this resolves to 256 directions under the configured
+  memory-safety envelope, while older checkpoints with fewer or no basis rows
+  are migrated by initializing the new rows;
 - edit hidden codes directly as \(z+\alpha d_k\), avoiding a parameter-heavy
   generator and keeping the artifact budget intact;
 - use a direction-class contrastive loss so an edit along direction \(k\) at
@@ -2354,3 +2357,115 @@ stable.  If BPB deteriorates but GraphCG geometry improves, reduce
 `graphcg_loss_weight` before changing the base optimizer.  If GraphCG loss is
 flat and BPB behaves well, keep it as a low-pressure diagnostic until the
 medium/hard curriculum begins.
+
+### Analogical Simplex-Tree / Persistent-Homology Loss
+
+The GraphCG basis alone makes relation vectors steerable, but raw vector
+analogies are scale-sensitive.  The new analogical lattice loss therefore
+promotes maps between *nested simplicial complexes* built on repeated hidden
+relation classes.  For a repeated coarse byte relation \(a\to b\), let
+\[
+    r_i=\frac{h_{t_i+1}-h_{t_i}}{\|h_{t_i+1}-h_{t_i}\|_2+\epsilon}
+\]
+be normalized hidden arrows.  Within each relation class, compute the normalized
+pairwise distance matrix
+\[
+    \tilde d_{ij}=d(r_i,r_j)/\operatorname{median}_{p<q} d(r_p,r_q).
+\]
+For radii
+\[
+    \rho_1<\rho_2<\cdots<\rho_m,
+\]
+the trainer builds soft Vietoris--Rips complexes
+\[
+    K_{\rho_1}\subseteq K_{\rho_2}\subseteq\cdots\subseteq K_{\rho_m},
+    \qquad
+    A_\ell(i,j)=\sigma((\rho_\ell-\tilde d_{ij})/\tau).
+\]
+The induced inclusion maps \(I_{\ell,\ell+1}:K_{\rho_\ell}\to K_{\rho_{\ell+1}}\)
+are represented on 0-chains by row-stochastic prolongation matrices
+\[
+    P_\ell=\operatorname{rowsum}^{-1}(A_\ell+I).
+\]
+Because ToricGT's toric memory is noncommutative and the graph-of-thought
+process is directed, the implemented complex is not restricted to symmetric
+metric topology.  A second directed flag complex uses an antisymmetric
+symplectic-style form on normalized relation vectors,
+\[
+    \Omega(r_i,r_j)=\langle r_i^{(1)},r_j^{(2)}\rangle
+                  -\langle r_i^{(2)},r_j^{(1)}\rangle ,
+\]
+and directed soft edges
+\[
+    A_\ell^\rightarrow(i,j)=
+    \sigma\left((\rho_\ell-\tilde d_{ij}+\gamma\Omega(r_i,r_j))/\tau\right).
+\]
+Thus \(i\to j\) and \(j\to i\) need not agree.  The directed inclusion maps
+\(P_\ell^\rightarrow=\operatorname{rowsum}^{-1}(A_\ell^\rightarrow+I)\)
+are monitored through noncommuting chain-map products
+\[
+    \|P_{\ell+1}^\rightarrow P_\ell^\rightarrow
+      -P_\ell^\rightarrow P_{\ell+1}^\rightarrow\|_F^2,
+\]
+and directed triangle fluxes \(i\to j\to k\to i\).  This is the topological
+analogue of the noncommutative torus layer: transport order matters, but the
+nested filtration still supplies scale control.
+The auxiliary objective combines:
+
+- a relation-vector functor loss that makes equal coarse arrows share
+  displacement vectors;
+- a lattice-basis reconstruction loss that expresses arrows in the GraphCG
+  direction basis;
+- a 0D-persistence/MST proxy from nearest-neighbor barcode lengths;
+- a soft clique/triangle closure term for 2-simplex consistency;
+- an inclusion penalty \(\|\max(0,A_\ell-A_{\ell+1})\|_F^2\);
+- a chain-map commutator penalty
+  \[
+      \|P_{\ell+1}P_\ell-P_\ell P_{\ell+1}\|_F^2,
+  \]
+  which measures whether nested smoothing maps commute along the filtration.
+- directed transitive closure and directed-cycle penalties for the noncommuting
+  flag complex.
+
+This gives a cheap persistent-homology surrogate without adding a heavy PH
+dependency to the Parameter-Golf path.  It is still faithful to the toric/GoT
+interpretation: analogical reasoning is trained as transport between filtered
+local complexes, so a reasoning move can persist across scale rather than
+depending on one arbitrary embedding norm.
+
+Additional W&B metrics:
+
+| metric | intended behavior |
+|---|---|
+| `train/analogy_lattice_loss` | small auxiliary pressure; must not dominate BPB |
+| `train/analogy_functor_loss` | relation arrows with the same coarse type become more reusable |
+| `train/analogy_basis_loss` | relation arrows become expressible in the GraphCG lattice frame |
+| `train/analogy_topology_loss` | filtered local complexes become more stable |
+| `train/analogy_barcode_loss` | 0D persistence proxy; should not explode |
+| `train/analogy_simplex_closure_loss` | soft triangle closure for local clique consistency |
+| `train/analogy_filtration_inclusion_loss` | should remain near zero; nonzero means nesting violations |
+| `train/analogy_chain_map_loss` | lower means filtration maps commute more cleanly |
+| `train/analogy_directed_topology_loss` | directed flag-complex pressure over repeated arrows |
+| `train/analogy_directed_transitive_loss` | lower means directed paths close into directed simplices |
+| `train/analogy_directed_cycle_loss` | directed triangle holonomy / cycle-flux imbalance |
+| `train/analogy_directed_chain_map_loss` | noncommuting directed inclusion-map diagnostic |
+| `train/analogy_directed_asymmetry` | verifies the topology is actually directed |
+| `train/analogy_directed_skew_norm` | magnitude of the antisymmetric relation form |
+| `train/analogy_filtration_edge_density` | guards against empty or saturated complexes |
+| `train/analogy_filtration_triangle_density` | tracks higher-order clique growth |
+
+Periodic analysis now renders these objects rather than relying only on scalar
+W&B logs. For each selected reasoning record, the watcher writes directed
+filtration curves and noncommutative heatmaps to
+`outputs/post_resume_analysis/<run>/step-*/geometry/topology/`. The curves show
+edge density, soft triangle density, directed asymmetry, and cycle/holonomy flux
+as the filtration radius grows. The heatmaps show normalized hidden-arrow
+distances, the antisymmetric toric skew matrix, and directed adjacency at
+representative filtration radii. Desired behavior is nested inclusion with
+nonzero but bounded asymmetry: useful directed structure should appear before
+cycle flux or transitive-closure residuals explode.
+
+The loss enters at \(3\cdot10^{-5}\) in the 1500--1800 capture window, then
+ramps slowly.  If BPB ricochets again while these topology metrics improve,
+the topology term should be delayed rather than removed; the lower LR is the
+first guardrail against repeating the 1700-step floor bounce.

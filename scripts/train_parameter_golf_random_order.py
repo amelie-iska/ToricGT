@@ -418,6 +418,48 @@ def linear_ramp(step: int, start_step: int, ramp_steps: int) -> float:
     return max(0.0, min(1.0, float(step - start_step) / float(ramp_steps)))
 
 
+def graphcg_aux_activation_bytes(max_codes: int, directions: int, d_model: int) -> int:
+    """Approximate fp32 activation bytes for one GraphCG auxiliary pass."""
+
+    n = max(2, int(max_codes))
+    d = max(2, int(directions))
+    width = max(1, int(d_model))
+    floats = (2 * n * d * width) + (n * d * d) + (d * d) + (n * d)
+    return int(4 * floats)
+
+
+def resolve_graphcg_num_directions(raw_value: Any, config: dict[str, Any], d_model: int, max_codes: int) -> int:
+    """Resolve an integer or ``auto`` GraphCG basis width.
+
+    ``auto`` chooses the largest multiple of eight under a small auxiliary
+    memory budget with a ten percent safety margin, then caps the result for
+    throughput.  On a 24 GB 4090 this resolves to the practical cap rather than
+    the memory ceiling.
+    """
+
+    if not isinstance(raw_value, str) or raw_value.lower() != "auto":
+        return int(raw_value)
+    model_section = config.get("model", {}) or {}
+    cap = int(model_section.get("graphcg_max_directions", 96))
+    floor = int(model_section.get("graphcg_min_directions", 16))
+    memory_fraction = float(model_section.get("graphcg_memory_fraction", 0.09))
+    safety = float(model_section.get("graphcg_direction_safety", 0.90))
+    total_memory = 0
+    if torch.cuda.is_available():
+        try:
+            total_memory = int(torch.cuda.get_device_properties(0).total_memory)
+        except RuntimeError:
+            total_memory = 0
+    if total_memory <= 0:
+        return max(2, floor)
+    budget = int(total_memory * max(0.0, memory_fraction) * max(0.1, min(1.0, safety)))
+    best = max(2, floor)
+    for directions in range(max(8, floor), max(8, cap) + 1, 8):
+        if graphcg_aux_activation_bytes(max_codes, directions, d_model) <= budget:
+            best = directions
+    return int(best)
+
+
 def deterministic_ratio_choice(step: int, accum_idx: int, ratio: float) -> bool:
     """Deterministically mix ordinary and complex curricula."""
 
@@ -465,6 +507,7 @@ PHASE_CONTROL_KEYS = {
     "gflownet_entropy_weight",
     "gflownet_entropy_target",
     "graphcg_loss_weight",
+    "analogy_lattice_loss_weight",
     "trajectory_flow_loss_weight",
     "contrastive_loss_weight",
     "mtp_loss_weight",
@@ -1129,10 +1172,10 @@ def load_state_dict_with_optional_position_resize(
     model: DenseRandomOrderToricLM,
     state_dict: dict[str, torch.Tensor],
     allow_position_resize: bool,
-) -> bool:
+) -> list[str]:
     model_state = model.state_dict()
+    adjusted_keys: list[str] = []
     key = "position_embedding.weight"
-    resized = False
     if (
         allow_position_resize
         and key in state_dict
@@ -1141,7 +1184,18 @@ def load_state_dict_with_optional_position_resize(
     ):
         state_dict = dict(state_dict)
         state_dict[key] = resize_position_embedding_weight(state_dict[key], model_state[key].shape)
-        resized = True
+        adjusted_keys.append(key)
+    key = "graphcg_direction_basis"
+    if key in state_dict and key in model_state and state_dict[key].shape != model_state[key].shape:
+        state_dict = dict(state_dict)
+        if state_dict[key].ndim == 2 and model_state[key].ndim == 2 and state_dict[key].shape[1] == model_state[key].shape[1]:
+            resized_basis = model_state[key].detach().clone()
+            rows = min(int(resized_basis.shape[0]), int(state_dict[key].shape[0]))
+            resized_basis[:rows] = state_dict[key].detach()[:rows].to(dtype=resized_basis.dtype, device=resized_basis.device)
+            state_dict[key] = resized_basis
+            adjusted_keys.append(key)
+        else:
+            del state_dict[key]
     incompatible = model.load_state_dict(state_dict, strict=False)
     allowed_missing_prefixes = ("graphcg_",)
     bad_missing = [key for key in incompatible.missing_keys if not key.startswith(allowed_missing_prefixes)]
@@ -1160,7 +1214,27 @@ def load_state_dict_with_optional_position_resize(
                 }
             )
         )
-    return resized
+    return adjusted_keys
+
+
+def sanitize_optimizer_state_shapes(optimizer: torch.optim.Optimizer) -> int:
+    """Drop stale per-parameter moments whose tensor shape no longer matches."""
+
+    resets = 0
+    for group in optimizer.param_groups:
+        for parameter in group["params"]:
+            state = optimizer.state.get(parameter)
+            if not state:
+                continue
+            bad_shape = False
+            for value in state.values():
+                if torch.is_tensor(value) and value.ndim > 0 and value.shape != parameter.shape:
+                    bad_shape = True
+                    break
+            if bad_shape:
+                optimizer.state[parameter] = {}
+                resets += 1
+    return resets
 
 
 def read_json_file(path: Path) -> dict[str, Any] | None:
@@ -1543,6 +1617,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gflownet-entropy-weight", type=float)
     parser.add_argument("--gflownet-entropy-target", type=float)
     parser.add_argument("--graphcg-loss-weight", type=float)
+    parser.add_argument("--analogy-lattice-loss-weight", type=float)
     parser.add_argument("--toric-entropy-floor", type=float)
     parser.add_argument("--toric-entropy-loss-weight", type=float)
     parser.add_argument("--use-bigram-hash", action="store_true")
@@ -1616,10 +1691,18 @@ def main() -> None:
     torch.manual_seed(seed)
     random.seed(seed)
 
+    configured_d_model = args.d_model if args.d_model is not None else config_get(file_config, "model", "d_model", 384)
+    configured_graphcg_max_codes = config_get(file_config, "model", "graphcg_max_codes", 256)
+    configured_graphcg_directions = resolve_graphcg_num_directions(
+        config_get(file_config, "model", "graphcg_num_directions", 12),
+        file_config,
+        d_model=int(configured_d_model),
+        max_codes=int(configured_graphcg_max_codes),
+    )
     model_config = RandomOrderLMConfig(
         vocab_size=config_get(file_config, "model", "vocab_size", 260),
         max_seq_len=args.seq_len if args.seq_len is not None else config_get(file_config, "model", "max_seq_len", 1024),
-        d_model=args.d_model if args.d_model is not None else config_get(file_config, "model", "d_model", 384),
+        d_model=configured_d_model,
         num_heads=args.num_heads if args.num_heads is not None else config_get(file_config, "model", "num_heads", 6),
         num_layers=args.num_layers if args.num_layers is not None else config_get(file_config, "model", "num_layers", 7),
         recurrent_passes=args.recurrent_passes
@@ -1684,13 +1767,42 @@ def main() -> None:
         toric_memory_slots=config_get(file_config, "model", "toric_memory_slots", 32),
         toric_memory_weight=config_get(file_config, "model", "toric_memory_weight", 0.08),
         use_graphcg=config_get(file_config, "model", "use_graphcg", False),
-        graphcg_num_directions=config_get(file_config, "model", "graphcg_num_directions", 12),
+        graphcg_num_directions=configured_graphcg_directions,
         graphcg_alpha=config_get(file_config, "model", "graphcg_alpha", 0.12),
         graphcg_temperature=config_get(file_config, "model", "graphcg_temperature", 0.2),
-        graphcg_max_codes=config_get(file_config, "model", "graphcg_max_codes", 256),
+        graphcg_max_codes=configured_graphcg_max_codes,
         graphcg_orthogonal_weight=config_get(file_config, "model", "graphcg_orthogonal_weight", 0.2),
         graphcg_covariance_weight=config_get(file_config, "model", "graphcg_covariance_weight", 0.05),
         graphcg_sparsity_weight=config_get(file_config, "model", "graphcg_sparsity_weight", 0.0001),
+        use_analogy_lattice=config_get(file_config, "model", "use_analogy_lattice", False),
+        analogy_lattice_max_pairs=config_get(file_config, "model", "analogy_lattice_max_pairs", 256),
+        analogy_lattice_stride=config_get(file_config, "model", "analogy_lattice_stride", 1),
+        analogy_lattice_temperature=config_get(file_config, "model", "analogy_lattice_temperature", 0.2),
+        analogy_lattice_basis_weight=config_get(file_config, "model", "analogy_lattice_basis_weight", 0.5),
+        analogy_lattice_parallelogram_weight=config_get(
+            file_config,
+            "model",
+            "analogy_lattice_parallelogram_weight",
+            0.5,
+        ),
+        analogy_lattice_topology_weight=config_get(file_config, "model", "analogy_lattice_topology_weight", 0.25),
+        analogy_topology_max_points_per_group=config_get(
+            file_config,
+            "model",
+            "analogy_topology_max_points_per_group",
+            16,
+        ),
+        analogy_topology_max_groups=config_get(file_config, "model", "analogy_topology_max_groups", 24),
+        analogy_topology_k=config_get(file_config, "model", "analogy_topology_k", 4),
+        analogy_topology_filtration_levels=config_get(file_config, "model", "analogy_topology_filtration_levels", 4),
+        analogy_topology_radius_min=config_get(file_config, "model", "analogy_topology_radius_min", 0.55),
+        analogy_topology_radius_max=config_get(file_config, "model", "analogy_topology_radius_max", 1.65),
+        analogy_topology_chain_weight=config_get(file_config, "model", "analogy_topology_chain_weight", 0.25),
+        analogy_topology_inclusion_weight=config_get(file_config, "model", "analogy_topology_inclusion_weight", 0.1),
+        analogy_topology_directed=config_get(file_config, "model", "analogy_topology_directed", True),
+        analogy_topology_directed_weight=config_get(file_config, "model", "analogy_topology_directed_weight", 0.35),
+        analogy_topology_skew_scale=config_get(file_config, "model", "analogy_topology_skew_scale", 0.35),
+        analogy_topology_cycle_weight=config_get(file_config, "model", "analogy_topology_cycle_weight", 0.1),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
         aux_mtp_offsets=args.aux_mtp_offsets
@@ -1758,6 +1870,11 @@ def main() -> None:
         args.graphcg_loss_weight
         if args.graphcg_loss_weight is not None
         else config_get(file_config, "training", "graphcg_loss_weight", 0.0)
+    )
+    analogy_lattice_loss_weight = (
+        args.analogy_lattice_loss_weight
+        if args.analogy_lattice_loss_weight is not None
+        else config_get(file_config, "training", "analogy_lattice_loss_weight", 0.0)
     )
     toric_entropy_floor = (
         args.toric_entropy_floor
@@ -2054,22 +2171,23 @@ def main() -> None:
     optimizer_state_loaded = False
     if args.resume:
         payload = torch.load(args.resume, map_location=device)
-        resized_position_embedding = load_state_dict_with_optional_position_resize(
+        state_adjustments = load_state_dict_with_optional_position_resize(
             model,
             payload["model"],
             allow_position_resize=resize_position_embedding,
         )
-        if resized_position_embedding:
+        if state_adjustments:
             print(
                 json.dumps(
                     {
-                        "resume_notice": "position_embedding_resized_optimizer_state_reset",
+                        "resume_notice": "checkpoint_tensors_adjusted",
                         "checkpoint": args.resume,
                         "new_max_seq_len": model_config.max_seq_len,
+                        "adjusted_keys": state_adjustments,
                     }
                 )
             )
-        elif args.reset_optimizer:
+        if args.reset_optimizer:
             print(
                 json.dumps(
                     {
@@ -2081,6 +2199,17 @@ def main() -> None:
         else:
             try:
                 optimizer.load_state_dict(payload["optimizer"])
+                stale_states = sanitize_optimizer_state_shapes(optimizer)
+                if stale_states:
+                    print(
+                        json.dumps(
+                            {
+                                "resume_notice": "optimizer_state_partially_reset_after_shape_change",
+                                "checkpoint": args.resume,
+                                "stale_parameter_states": stale_states,
+                            }
+                        )
+                    )
                 optimizer_state_loaded = True
             except ValueError as exc:
                 print(
@@ -2254,6 +2383,7 @@ def main() -> None:
                     "gflownet_entropy_weight": gflownet_entropy_weight,
                     "gflownet_entropy_target": gflownet_entropy_target,
                     "graphcg_loss_weight": graphcg_loss_weight,
+                    "analogy_lattice_loss_weight": analogy_lattice_loss_weight,
                     "toric_entropy_floor": toric_entropy_floor,
                     "toric_entropy_loss_weight": toric_entropy_loss_weight,
                     "mtp_loss_weight": mtp_loss_weight,
@@ -2506,6 +2636,27 @@ def main() -> None:
         step_graphcg_sparsity_loss = 0.0
         step_graphcg_basis_coherence = 0.0
         step_graphcg_axis_variance = 0.0
+        step_analogy_lattice_loss = 0.0
+        step_analogy_functor_loss = 0.0
+        step_analogy_parallelogram_loss = 0.0
+        step_analogy_topology_loss = 0.0
+        step_analogy_barcode_loss = 0.0
+        step_analogy_simplex_closure_loss = 0.0
+        step_analogy_filtration_inclusion_loss = 0.0
+        step_analogy_chain_map_loss = 0.0
+        step_analogy_directed_topology_loss = 0.0
+        step_analogy_directed_transitive_loss = 0.0
+        step_analogy_directed_cycle_loss = 0.0
+        step_analogy_directed_chain_map_loss = 0.0
+        step_analogy_directed_asymmetry = 0.0
+        step_analogy_directed_skew_norm = 0.0
+        step_analogy_filtration_edge_density = 0.0
+        step_analogy_filtration_triangle_density = 0.0
+        step_analogy_basis_loss = 0.0
+        step_analogy_axis_entropy = 0.0
+        step_analogy_lattice_margin = 0.0
+        step_analogy_relation_groups = 0.0
+        step_analogy_topology_groups = 0.0
         step_medium_microbatches = 0.0
         step_complex_microbatches = 0.0
         last_train_batch: dict[str, torch.Tensor] | None = None
@@ -2533,6 +2684,10 @@ def main() -> None:
             gflownet_entropy_target,
         )
         effective_graphcg_loss_weight = max(0.0, control_float(phase_controls, "graphcg_loss_weight", graphcg_loss_weight))
+        effective_analogy_lattice_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "analogy_lattice_loss_weight", analogy_lattice_loss_weight),
+        )
         effective_mtp_loss_weight = max(0.0, control_float(phase_controls, "mtp_loss_weight", mtp_loss_weight))
         effective_contrastive_loss_weight = max(
             0.0,
@@ -2598,6 +2753,7 @@ def main() -> None:
                     gflownet_entropy_objective = -gflownet_entropy
                 mtp_loss = out.get("mtp_loss", torch.zeros((), device=device))
                 graphcg_loss = out.get("graphcg_loss", torch.zeros((), device=device))
+                analogy_lattice_loss = out.get("analogy_lattice_loss", torch.zeros((), device=device))
                 qat_loss = (
                     quantization_grid_loss(qat_named_params, bits=qat_bits)
                     if effective_qat_loss_weight > 0 and qat_named_params
@@ -2621,6 +2777,7 @@ def main() -> None:
                     + effective_gflownet_entropy_weight * gflownet_entropy_objective
                     + effective_mtp_loss_weight * mtp_loss
                     + effective_graphcg_loss_weight * graphcg_loss
+                    + effective_analogy_lattice_loss_weight * analogy_lattice_loss
                     + effective_qat_loss_weight * qat_loss
                     + effective_contrastive_loss_weight * contrastive_loss
                     + effective_trajectory_flow_loss_weight * trajectory_flow_penalty
@@ -2642,6 +2799,47 @@ def main() -> None:
             step_graphcg_sparsity_loss += float(out.get("graphcg_sparsity_loss", torch.zeros(())).detach().cpu())
             step_graphcg_basis_coherence += float(out.get("graphcg_basis_coherence", torch.zeros(())).detach().cpu())
             step_graphcg_axis_variance += float(out.get("graphcg_axis_variance", torch.zeros(())).detach().cpu())
+            step_analogy_lattice_loss += float(analogy_lattice_loss.detach().cpu())
+            step_analogy_functor_loss += float(out.get("analogy_functor_loss", torch.zeros(())).detach().cpu())
+            step_analogy_parallelogram_loss += float(out.get("analogy_parallelogram_loss", torch.zeros(())).detach().cpu())
+            step_analogy_topology_loss += float(out.get("analogy_topology_loss", torch.zeros(())).detach().cpu())
+            step_analogy_barcode_loss += float(out.get("analogy_barcode_loss", torch.zeros(())).detach().cpu())
+            step_analogy_simplex_closure_loss += float(
+                out.get("analogy_simplex_closure_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_filtration_inclusion_loss += float(
+                out.get("analogy_filtration_inclusion_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_chain_map_loss += float(out.get("analogy_chain_map_loss", torch.zeros(())).detach().cpu())
+            step_analogy_directed_topology_loss += float(
+                out.get("analogy_directed_topology_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_directed_transitive_loss += float(
+                out.get("analogy_directed_transitive_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_directed_cycle_loss += float(
+                out.get("analogy_directed_cycle_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_directed_chain_map_loss += float(
+                out.get("analogy_directed_chain_map_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_directed_asymmetry += float(
+                out.get("analogy_directed_asymmetry", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_directed_skew_norm += float(
+                out.get("analogy_directed_skew_norm", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_filtration_edge_density += float(
+                out.get("analogy_filtration_edge_density", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_filtration_triangle_density += float(
+                out.get("analogy_filtration_triangle_density", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_basis_loss += float(out.get("analogy_basis_loss", torch.zeros(())).detach().cpu())
+            step_analogy_axis_entropy += float(out.get("analogy_axis_entropy", torch.zeros(())).detach().cpu())
+            step_analogy_lattice_margin += float(out.get("analogy_lattice_margin", torch.zeros(())).detach().cpu())
+            step_analogy_relation_groups += float(out.get("analogy_relation_groups", torch.zeros(())).detach().cpu())
+            step_analogy_topology_groups += float(out.get("analogy_topology_groups", torch.zeros(())).detach().cpu())
             step_qat_loss += float(qat_loss.detach().cpu())
             step_qat_weight += float(effective_qat_loss_weight)
             step_contrastive_loss += float(contrastive_loss.detach().cpu())
@@ -2666,6 +2864,27 @@ def main() -> None:
         step_graphcg_sparsity_loss /= grad_accum
         step_graphcg_basis_coherence /= grad_accum
         step_graphcg_axis_variance /= grad_accum
+        step_analogy_lattice_loss /= grad_accum
+        step_analogy_functor_loss /= grad_accum
+        step_analogy_parallelogram_loss /= grad_accum
+        step_analogy_topology_loss /= grad_accum
+        step_analogy_barcode_loss /= grad_accum
+        step_analogy_simplex_closure_loss /= grad_accum
+        step_analogy_filtration_inclusion_loss /= grad_accum
+        step_analogy_chain_map_loss /= grad_accum
+        step_analogy_directed_topology_loss /= grad_accum
+        step_analogy_directed_transitive_loss /= grad_accum
+        step_analogy_directed_cycle_loss /= grad_accum
+        step_analogy_directed_chain_map_loss /= grad_accum
+        step_analogy_directed_asymmetry /= grad_accum
+        step_analogy_directed_skew_norm /= grad_accum
+        step_analogy_filtration_edge_density /= grad_accum
+        step_analogy_filtration_triangle_density /= grad_accum
+        step_analogy_basis_loss /= grad_accum
+        step_analogy_axis_entropy /= grad_accum
+        step_analogy_lattice_margin /= grad_accum
+        step_analogy_relation_groups /= grad_accum
+        step_analogy_topology_groups /= grad_accum
         step_qat_loss /= grad_accum
         step_qat_weight /= grad_accum
         step_contrastive_loss /= grad_accum
@@ -2729,6 +2948,28 @@ def main() -> None:
                 "train/graphcg_basis_coherence": step_graphcg_basis_coherence,
                 "train/graphcg_axis_variance": step_graphcg_axis_variance,
                 "train/graphcg_loss_weight": effective_graphcg_loss_weight,
+                "train/analogy_lattice_loss": step_analogy_lattice_loss,
+                "train/analogy_functor_loss": step_analogy_functor_loss,
+                "train/analogy_parallelogram_loss": step_analogy_parallelogram_loss,
+                "train/analogy_topology_loss": step_analogy_topology_loss,
+                "train/analogy_barcode_loss": step_analogy_barcode_loss,
+                "train/analogy_simplex_closure_loss": step_analogy_simplex_closure_loss,
+                "train/analogy_filtration_inclusion_loss": step_analogy_filtration_inclusion_loss,
+                "train/analogy_chain_map_loss": step_analogy_chain_map_loss,
+                "train/analogy_directed_topology_loss": step_analogy_directed_topology_loss,
+                "train/analogy_directed_transitive_loss": step_analogy_directed_transitive_loss,
+                "train/analogy_directed_cycle_loss": step_analogy_directed_cycle_loss,
+                "train/analogy_directed_chain_map_loss": step_analogy_directed_chain_map_loss,
+                "train/analogy_directed_asymmetry": step_analogy_directed_asymmetry,
+                "train/analogy_directed_skew_norm": step_analogy_directed_skew_norm,
+                "train/analogy_filtration_edge_density": step_analogy_filtration_edge_density,
+                "train/analogy_filtration_triangle_density": step_analogy_filtration_triangle_density,
+                "train/analogy_basis_loss": step_analogy_basis_loss,
+                "train/analogy_axis_entropy": step_analogy_axis_entropy,
+                "train/analogy_lattice_margin": step_analogy_lattice_margin,
+                "train/analogy_relation_groups": step_analogy_relation_groups,
+                "train/analogy_topology_groups": step_analogy_topology_groups,
+                "train/analogy_lattice_loss_weight": effective_analogy_lattice_loss_weight,
                 "train/qat_loss": step_qat_loss,
                 "train/qat_loss_weight": effective_qat_base_weight,
                 "train/qat_effective_loss_weight": step_qat_weight,

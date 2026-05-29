@@ -67,6 +67,25 @@ class RandomOrderLMConfig:
     graphcg_orthogonal_weight: float = 0.2
     graphcg_covariance_weight: float = 0.05
     graphcg_sparsity_weight: float = 0.0001
+    use_analogy_lattice: bool = False
+    analogy_lattice_max_pairs: int = 256
+    analogy_lattice_stride: int = 1
+    analogy_lattice_temperature: float = 0.2
+    analogy_lattice_basis_weight: float = 0.5
+    analogy_lattice_parallelogram_weight: float = 0.5
+    analogy_lattice_topology_weight: float = 0.25
+    analogy_topology_max_points_per_group: int = 16
+    analogy_topology_max_groups: int = 24
+    analogy_topology_k: int = 4
+    analogy_topology_filtration_levels: int = 4
+    analogy_topology_radius_min: float = 0.55
+    analogy_topology_radius_max: float = 1.65
+    analogy_topology_chain_weight: float = 0.25
+    analogy_topology_inclusion_weight: float = 0.1
+    analogy_topology_directed: bool = True
+    analogy_topology_directed_weight: float = 0.35
+    analogy_topology_skew_scale: float = 0.35
+    analogy_topology_cycle_weight: float = 0.1
     aux_mtp_offsets: int = 2
     contrastive_temperature: float = 0.2
     trajectory_flow_viscosity: float = 0.05
@@ -525,6 +544,355 @@ class DenseRandomOrderToricLM(nn.Module):
             "graphcg_axis_variance": coords.var(dim=0, unbiased=False).mean().detach(),
         }
 
+    def _byte_class_ids(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Map byte-token ids to coarse relation classes for analogy mining."""
+
+        byte = (tokens - int(self.config.byte_offset)).clamp(0, 255)
+        cls = torch.full_like(byte, 8)
+        cls = torch.where((byte >= 97) & (byte <= 122), torch.ones_like(cls), cls)
+        cls = torch.where((byte >= 65) & (byte <= 90), torch.full_like(cls, 2), cls)
+        cls = torch.where((byte >= 48) & (byte <= 57), torch.full_like(cls, 3), cls)
+        cls = torch.where(
+            (byte == 9) | (byte == 11) | (byte == 12) | (byte == 13) | (byte == 32),
+            torch.full_like(cls, 4),
+            cls,
+        )
+        cls = torch.where(byte == 10, torch.full_like(cls, 5), cls)
+        punctuation = (
+            ((byte >= 33) & (byte <= 47))
+            | ((byte >= 58) & (byte <= 64))
+            | ((byte >= 91) & (byte <= 96))
+            | ((byte >= 123) & (byte <= 126))
+        )
+        cls = torch.where(punctuation, torch.full_like(cls, 6), cls)
+        cls = torch.where(byte >= 128, torch.full_like(cls, 7), cls)
+        return cls
+
+    def _analogy_lattice_losses(
+        self,
+        hidden: torch.Tensor,
+        target_tokens: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Explicit analogical/functor loss over hidden relation vectors.
+
+        Repeated coarse byte transitions should induce reusable displacement
+        vectors in hidden space.  This is the direct category-theoretic analogy
+        objective: if two observed arrows have the same coarse source/target
+        type, then their hidden differences should agree, and those differences
+        should be expressible in the GraphCG lattice basis when that basis is
+        enabled.
+        """
+
+        if not self.config.use_analogy_lattice:
+            return {}
+        zero = hidden.float().sum() * 0.0
+        stride = max(1, int(self.config.analogy_lattice_stride))
+        if hidden.ndim != 3 or target_tokens.ndim != 2 or hidden.shape[1] <= stride:
+            return {
+                "analogy_lattice_loss": zero,
+                "analogy_functor_loss": zero.detach(),
+                "analogy_parallelogram_loss": zero.detach(),
+                "analogy_topology_loss": zero.detach(),
+                "analogy_barcode_loss": zero.detach(),
+                "analogy_simplex_closure_loss": zero.detach(),
+                "analogy_filtration_inclusion_loss": zero.detach(),
+                "analogy_chain_map_loss": zero.detach(),
+                "analogy_directed_topology_loss": zero.detach(),
+                "analogy_directed_transitive_loss": zero.detach(),
+                "analogy_directed_cycle_loss": zero.detach(),
+                "analogy_directed_chain_map_loss": zero.detach(),
+                "analogy_directed_asymmetry": zero.detach(),
+                "analogy_directed_skew_norm": zero.detach(),
+                "analogy_filtration_edge_density": zero.detach(),
+                "analogy_filtration_triangle_density": zero.detach(),
+                "analogy_basis_loss": zero.detach(),
+                "analogy_axis_entropy": zero.detach(),
+                "analogy_lattice_margin": zero.detach(),
+                "analogy_relation_groups": zero.detach(),
+                "analogy_topology_groups": zero.detach(),
+            }
+
+        relation = hidden[:, stride:, :].float() - hidden[:, :-stride, :].float()
+        relation = F.normalize(relation.reshape(-1, relation.shape[-1]), dim=-1)
+        classes = self._byte_class_ids(target_tokens)
+        keys = (classes[:, :-stride] * 16 + classes[:, stride:]).reshape(-1)
+        max_pairs = max(2, int(self.config.analogy_lattice_max_pairs))
+        if relation.shape[0] > max_pairs:
+            index = torch.linspace(0, relation.shape[0] - 1, steps=max_pairs, device=relation.device).long()
+            relation = relation.index_select(0, index)
+            keys = keys.index_select(0, index)
+
+        unique, inverse, counts = torch.unique(keys, return_inverse=True, return_counts=True)
+        repeated = counts[inverse] > 1
+        if bool(repeated.any()):
+            sums = relation.new_zeros(unique.shape[0], relation.shape[-1])
+            sums.index_add_(0, inverse[repeated], relation[repeated])
+            group_counts = counts.clamp_min(1).to(dtype=relation.dtype).unsqueeze(-1)
+            means = F.normalize(sums / group_counts, dim=-1)
+            residual = relation[repeated] - means[inverse[repeated]]
+            functor_loss = residual.pow(2).mean()
+            relation_groups = (counts > 1).to(dtype=relation.dtype).sum()
+        else:
+            functor_loss = zero
+            relation_groups = zero
+
+        topology_terms = []
+        barcode_terms = []
+        closure_terms = []
+        inclusion_terms = []
+        chain_map_terms = []
+        directed_terms = []
+        directed_transitive_terms = []
+        directed_cycle_terms = []
+        directed_chain_terms = []
+        directed_asymmetry_terms = []
+        directed_skew_terms = []
+        edge_density_terms = []
+        triangle_density_terms = []
+        topology_groups = zero
+        max_topology_groups = max(1, int(self.config.analogy_topology_max_groups))
+        max_group_points = max(4, int(self.config.analogy_topology_max_points_per_group))
+        topology_k = max(1, int(self.config.analogy_topology_k))
+        topology_temperature = max(float(self.config.analogy_lattice_temperature), 1e-4)
+        filtration_levels = max(2, int(self.config.analogy_topology_filtration_levels))
+        radius_min = float(self.config.analogy_topology_radius_min)
+        radius_max = max(radius_min + 1e-4, float(self.config.analogy_topology_radius_max))
+        filtration_radii = torch.linspace(radius_min, radius_max, steps=filtration_levels, device=relation.device)
+        use_directed_topology = bool(self.config.analogy_topology_directed)
+        skew_scale = float(self.config.analogy_topology_skew_scale)
+        repeated_group_ids = unique[counts >= 4][:max_topology_groups]
+        eye_cache: dict[int, torch.Tensor] = {}
+        for group_id in repeated_group_ids:
+            group = relation[keys == group_id]
+            if group.shape[0] > max_group_points:
+                index = torch.linspace(0, group.shape[0] - 1, steps=max_group_points, device=group.device).long()
+                group = group.index_select(0, index)
+            n_group = int(group.shape[0])
+            if n_group < 4:
+                continue
+            distances = torch.cdist(group, group, p=2)
+            nonzero = distances[distances > 1e-6]
+            if nonzero.numel() == 0:
+                continue
+            scale = nonzero.median().detach().clamp_min(1e-4)
+            normalized_distances = distances / scale
+            eye = eye_cache.get(n_group)
+            if eye is None or eye.device != group.device:
+                eye = torch.eye(n_group, device=group.device, dtype=group.dtype)
+                eye_cache[n_group] = eye
+            if use_directed_topology and group.shape[-1] >= 2:
+                half = group.shape[-1] // 2
+                left = group[:, :half]
+                right = group[:, half : half + half]
+                skew = (left @ right.transpose(0, 1) - right @ left.transpose(0, 1)) / math.sqrt(max(1, half))
+                skew = skew / skew.detach().abs().median().clamp_min(1e-4)
+                skew = skew.clamp(-4.0, 4.0) * skew_scale
+            else:
+                skew = normalized_distances.new_zeros(normalized_distances.shape)
+            masked_distances = normalized_distances + eye * 1.0e6
+            k = min(topology_k, n_group - 1)
+            knn = masked_distances.topk(k, dim=-1, largest=False).values
+            barcode_loss = knn[:, 0].mean()
+            level_closure_terms = []
+            level_edge_density_terms = []
+            level_triangle_density_terms = []
+            level_inclusion_terms = []
+            level_chain_terms = []
+            level_directed_transitive_terms = []
+            level_directed_cycle_terms = []
+            level_directed_asymmetry_terms = []
+            level_directed_skew_terms = []
+            prev_adjacency = None
+            prev_prolongation = None
+            prev_directed = None
+            prev_directed_prolongation = None
+            for radius in filtration_radii:
+                adjacency = torch.sigmoid((radius - normalized_distances) / topology_temperature) * (1.0 - eye)
+                directed_adjacency = torch.sigmoid((radius - normalized_distances + skew) / topology_temperature) * (
+                    1.0 - eye
+                )
+                two_step = adjacency @ adjacency / max(1, n_group - 2)
+                closure_loss = (two_step * (1.0 - adjacency)).mean()
+                directed_two_step = directed_adjacency @ directed_adjacency / max(1, n_group - 2)
+                directed_transitive_loss = (directed_two_step * (1.0 - directed_adjacency)).mean()
+                directed_cycle_flux = torch.einsum(
+                    "ij,jk,ki->",
+                    directed_adjacency,
+                    directed_adjacency,
+                    directed_adjacency,
+                ) / max(1, n_group * (n_group - 1) * (n_group - 2))
+                reverse_cycle_flux = torch.einsum(
+                    "ji,kj,ik->",
+                    directed_adjacency,
+                    directed_adjacency,
+                    directed_adjacency,
+                ) / max(1, n_group * (n_group - 1) * (n_group - 2))
+                directed_cycle_loss = (directed_cycle_flux - reverse_cycle_flux).abs()
+                directed_asymmetry = (directed_adjacency - directed_adjacency.transpose(0, 1)).abs().mean()
+                directed_skew_norm = (skew * (1.0 - eye)).abs().mean()
+                edge_density = adjacency.sum() / max(1, n_group * (n_group - 1))
+                triangle_density = torch.einsum("ij,jk,ik->", adjacency, adjacency, adjacency) / max(
+                    1,
+                    n_group * (n_group - 1) * (n_group - 2),
+                )
+                prolongation = adjacency + eye
+                prolongation = prolongation / prolongation.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+                directed_prolongation = directed_adjacency + eye
+                directed_prolongation = directed_prolongation / directed_prolongation.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+                level_closure_terms.append(closure_loss)
+                level_edge_density_terms.append(edge_density)
+                level_triangle_density_terms.append(triangle_density)
+                level_directed_transitive_terms.append(directed_transitive_loss)
+                level_directed_cycle_terms.append(directed_cycle_loss)
+                level_directed_asymmetry_terms.append(directed_asymmetry)
+                level_directed_skew_terms.append(directed_skew_norm)
+                if prev_adjacency is not None and prev_prolongation is not None:
+                    # Inclusion K_r -> K_R should only add simplices.  The
+                    # row-stochastic prolongations model the induced chain map
+                    # on 0-chains; nested maps should commute along the
+                    # filtration up to the local softening temperature.
+                    level_inclusion_terms.append(torch.relu(prev_adjacency - adjacency).pow(2).mean())
+                    level_chain_terms.append((prolongation @ prev_prolongation - prev_prolongation @ prolongation).pow(2).mean())
+                    if prev_directed is not None and prev_directed_prolongation is not None:
+                        level_inclusion_terms.append(torch.relu(prev_directed - directed_adjacency).pow(2).mean())
+                        level_chain_terms.append(
+                            (
+                                directed_prolongation @ prev_directed_prolongation
+                                - prev_directed_prolongation @ directed_prolongation
+                            )
+                            .pow(2)
+                            .mean()
+                        )
+                prev_adjacency = adjacency
+                prev_directed = directed_adjacency
+                prev_prolongation = prolongation
+                prev_directed_prolongation = directed_prolongation
+            closure_loss = torch.stack(level_closure_terms).mean()
+            edge_density = torch.stack(level_edge_density_terms).mean()
+            triangle_density = torch.stack(level_triangle_density_terms).mean()
+            inclusion_loss = torch.stack(level_inclusion_terms).mean() if level_inclusion_terms else zero
+            chain_map_loss = torch.stack(level_chain_terms).mean() if level_chain_terms else zero
+            directed_transitive_loss = torch.stack(level_directed_transitive_terms).mean()
+            directed_cycle_loss = torch.stack(level_directed_cycle_terms).mean()
+            directed_chain_map_loss = chain_map_loss
+            directed_asymmetry = torch.stack(level_directed_asymmetry_terms).mean()
+            directed_skew_norm = torch.stack(level_directed_skew_terms).mean()
+            directed_topology_loss = directed_transitive_loss + float(self.config.analogy_topology_cycle_weight) * directed_cycle_loss
+            topology_terms.append(
+                barcode_loss
+                + closure_loss
+                + float(self.config.analogy_topology_inclusion_weight) * inclusion_loss
+                + float(self.config.analogy_topology_chain_weight) * chain_map_loss
+                + float(self.config.analogy_topology_directed_weight) * directed_topology_loss
+            )
+            barcode_terms.append(barcode_loss)
+            closure_terms.append(closure_loss)
+            inclusion_terms.append(inclusion_loss)
+            chain_map_terms.append(chain_map_loss)
+            directed_terms.append(directed_topology_loss)
+            directed_transitive_terms.append(directed_transitive_loss)
+            directed_cycle_terms.append(directed_cycle_loss)
+            directed_chain_terms.append(directed_chain_map_loss)
+            directed_asymmetry_terms.append(directed_asymmetry)
+            directed_skew_terms.append(directed_skew_norm)
+            edge_density_terms.append(edge_density)
+            triangle_density_terms.append(triangle_density)
+        if topology_terms:
+            topology_loss = torch.stack(topology_terms).mean()
+            barcode_loss = torch.stack(barcode_terms).mean()
+            simplex_closure_loss = torch.stack(closure_terms).mean()
+            filtration_inclusion_loss = torch.stack(inclusion_terms).mean()
+            chain_map_loss = torch.stack(chain_map_terms).mean()
+            directed_topology_loss = torch.stack(directed_terms).mean()
+            directed_transitive_loss = torch.stack(directed_transitive_terms).mean()
+            directed_cycle_loss = torch.stack(directed_cycle_terms).mean()
+            directed_chain_map_loss = torch.stack(directed_chain_terms).mean()
+            directed_asymmetry = torch.stack(directed_asymmetry_terms).mean()
+            directed_skew_norm = torch.stack(directed_skew_terms).mean()
+            filtration_edge_density = torch.stack(edge_density_terms).mean()
+            filtration_triangle_density = torch.stack(triangle_density_terms).mean()
+            topology_groups = relation.new_tensor(float(len(topology_terms)))
+        else:
+            topology_loss = zero
+            barcode_loss = zero
+            simplex_closure_loss = zero
+            filtration_inclusion_loss = zero
+            chain_map_loss = zero
+            directed_topology_loss = zero
+            directed_transitive_loss = zero
+            directed_cycle_loss = zero
+            directed_chain_map_loss = zero
+            directed_asymmetry = zero
+            directed_skew_norm = zero
+            filtration_edge_density = zero
+            filtration_triangle_density = zero
+
+        if hidden.shape[1] > 2 * stride:
+            rel_left = hidden[:, stride:-stride, :].float() - hidden[:, :-2 * stride, :].float()
+            rel_right = hidden[:, 2 * stride :, :].float() - hidden[:, stride:-stride, :].float()
+            key_left = classes[:, :-2 * stride] * 16 + classes[:, stride:-stride]
+            key_right = classes[:, stride:-stride] * 16 + classes[:, 2 * stride :]
+            same_arrow = key_left == key_right
+            if bool(same_arrow.any()):
+                closure = F.normalize(rel_left[same_arrow], dim=-1) - F.normalize(rel_right[same_arrow], dim=-1)
+                parallelogram_loss = closure.pow(2).mean()
+            else:
+                parallelogram_loss = zero
+        else:
+            parallelogram_loss = zero
+
+        if self.graphcg_direction_basis is not None:
+            directions = F.normalize(self.graphcg_direction_basis.float(), dim=-1)
+            coords = relation @ directions.transpose(0, 1)
+            abs_coords = coords.abs()
+            temperature = max(float(self.config.analogy_lattice_temperature), 1e-4)
+            axis_probs = torch.softmax(abs_coords / temperature, dim=-1)
+            signed_axis_probs = axis_probs * coords.sign()
+            reconstructed = F.normalize(signed_axis_probs @ directions, dim=-1)
+            basis_loss = (1.0 - (relation * reconstructed).sum(dim=-1)).mean()
+            axis_entropy = -(axis_probs * (axis_probs + 1e-8).log()).sum(dim=-1).mean() / math.log(
+                max(2, directions.shape[0])
+            )
+            if directions.shape[0] > 1:
+                top2 = abs_coords.topk(2, dim=-1).values
+                lattice_margin = (top2[:, 0] - top2[:, 1]).mean()
+            else:
+                lattice_margin = abs_coords.mean()
+        else:
+            basis_loss = zero
+            axis_entropy = zero
+            lattice_margin = zero
+
+        total = (
+            functor_loss
+            + float(self.config.analogy_lattice_basis_weight) * basis_loss
+            + float(self.config.analogy_lattice_parallelogram_weight) * parallelogram_loss
+            + float(self.config.analogy_lattice_topology_weight) * topology_loss
+        )
+        return {
+            "analogy_lattice_loss": total,
+            "analogy_functor_loss": functor_loss.detach(),
+            "analogy_parallelogram_loss": parallelogram_loss.detach(),
+            "analogy_topology_loss": topology_loss.detach(),
+            "analogy_barcode_loss": barcode_loss.detach(),
+            "analogy_simplex_closure_loss": simplex_closure_loss.detach(),
+            "analogy_filtration_inclusion_loss": filtration_inclusion_loss.detach(),
+            "analogy_chain_map_loss": chain_map_loss.detach(),
+            "analogy_directed_topology_loss": directed_topology_loss.detach(),
+            "analogy_directed_transitive_loss": directed_transitive_loss.detach(),
+            "analogy_directed_cycle_loss": directed_cycle_loss.detach(),
+            "analogy_directed_chain_map_loss": directed_chain_map_loss.detach(),
+            "analogy_directed_asymmetry": directed_asymmetry.detach(),
+            "analogy_directed_skew_norm": directed_skew_norm.detach(),
+            "analogy_filtration_edge_density": filtration_edge_density.detach(),
+            "analogy_filtration_triangle_density": filtration_triangle_density.detach(),
+            "analogy_basis_loss": basis_loss.detach(),
+            "analogy_axis_entropy": axis_entropy.detach(),
+            "analogy_lattice_margin": lattice_margin.detach(),
+            "analogy_relation_groups": relation_groups.detach(),
+            "analogy_topology_groups": topology_groups.detach(),
+        }
+
     def forward_from_previous(
         self,
         previous_tokens: torch.Tensor,
@@ -601,6 +969,7 @@ class DenseRandomOrderToricLM(nn.Module):
         hidden = aux.get("hidden")
         if hidden is not None:
             out.update(self._graphcg_losses(hidden))
+            out.update(self._analogy_lattice_losses(hidden, target_tokens))
         if hidden is not None and hidden.shape[0] > 1:
             pooled = F.normalize(hidden.mean(dim=1).float(), dim=-1)
             sim = pooled @ pooled.transpose(0, 1) / max(float(self.config.contrastive_temperature), 1e-4)

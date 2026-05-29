@@ -27,6 +27,8 @@ The watcher intentionally evaluates on CPU by default.  This keeps the analysis
 from competing with the active training tmux for GPU memory.  It writes a
 compact Markdown synopsis after W&B metrics, budget simplices, branch
 trajectories, Ramachandran-style phase plots, and energy landscapes complete.
+The geometry suite also writes directed nested-simplicial diagnostics for the
+noncommutative topology induced by hidden-state relation arrows.
 """
 
 from __future__ import annotations
@@ -220,6 +222,9 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
             f"- Best answer BPB: `{geometry.get('best_answer_bpb', 'n/a')}`",
             f"- Mean MST efficiency: `{geometry.get('mean_mst_efficiency', 'n/a')}`",
             f"- Mean path smoothness: `{geometry.get('mean_path_smoothness', 'n/a')}`",
+            f"- Mean directed topology asymmetry: `{geometry.get('mean_topology_directed_asymmetry', 'n/a')}`",
+            f"- Mean directed cycle flux: `{geometry.get('mean_topology_directed_cycle_flux', 'n/a')}`",
+            f"- Nested-simplicial topology plots: `{geometry_dir / 'topology'}`",
             "",
             "## Initial Interpretation",
             "",
@@ -227,7 +232,8 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
             "GFlowNet and score-first values are test-time-scaling diagnostics,",
             "not promotion metrics.  Geometry is considered useful only when lower",
             "BPB or lower answer-span BPB accompanies higher MST efficiency, lower",
-            "curvature, or healthier toric entropy.",
+            "curvature, healthier toric entropy, and directed nested-complex metrics",
+            "that show useful noncommutative structure without exploding cycle flux.",
         ]
     )
     out = base / "SYNOPSIS.md"

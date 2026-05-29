@@ -20,12 +20,14 @@ configuration. It keeps the research model's ToricGT bias while adapting to the
 | Effective depth | 14 block applications via 2 recurrent passes |
 | Attention | lower softmax, upper tropical-ring attention |
 | PolarQuant | 8-bit KV perturbation in eval/export checks |
-| Graph data | compact `graph_json` node/edge projection appended to byte stream |
-| Complex-row curriculum | after step 1000, switch to larger technical composite records |
+| Graph data | compact `graph_json` node/edge projection is delayed until the hard-composite phase |
+| Complex-row curriculum | text-first restart at step 1500; medium rows at 1650, hard graph-technical rows at 6000 |
 | Domain tags | math, code, graph, Hebrew, biomed, biochem, biophysics, toric |
 | GFlowNet | 16-action prefix-visible embedding policy with TB surrogate |
 | Cheap byte features | BigramHash, CaseOps byte classes, SmearGate confidence |
 | Toric memory | 32 compact irrational clock/shift/cocycle slots |
+| GraphCG | auto-sized lattice basis, resolving to 256 directions on the 24 GB 4090 under the 10% VRAM guard |
+| Directed topology | nested scale-normalized simplex-tree analogies with noncommutative skew maps |
 | Complexity diagnostics | compressor-tagged conditional-K, NCD, order-program, and GFlowNet action-trace metrics |
 | HF best checkpoint | promotes `parameter_golf_oai_best.pt` to `AmelieSchreiber/toricgt-checkpoints` only when BPB plus complexity score improves |
 | Auxiliary heads | 2 offset multi-token heads plus contrastive hidden regularization, stripped from export |
@@ -56,20 +58,32 @@ default, plus score-first output-bias adaptation at `0.025`; inference config
 can raise random-order and GFlowNet samples to 4+ when runtime permits. The
 full graph model's richer embedding-space GFlowNet remains in `train.full_30m_*`.
 
-The dense config now enables a bounded checkpoint-level adaptive controller.
-It updates only after eval windows and only adjusts three scalar knobs:
-GFlowNet entropy target, GFlowNet loss weight, and complex-row mix.  Its state
-is written to
-`checkpoints/parameter_golf_oai_dense/adaptive_controller_state_23250_recovery.json`,
-and all live values are logged as `controller/*` W&B metrics. The current
-recovery settings are intended for a rollback from step `23,250`: complex-row
-mix starts at `0.10`, can fall to `0.06`, GFlowNet loss weight is clamped to
-`[0.006, 0.014]`, entropy shaping is gentler, and stale controller state is
-ignored if the resume checkpoint step does not match the controller state.
+The dense config enables a bounded checkpoint-level adaptive controller. It
+updates only after eval windows and only adjusts scalar knobs such as GFlowNet
+entropy target, GFlowNet loss weight, and complex-row mix. For the current
+`oai` restart, the controller state is fresh from step `1500`, the first
+post-restart window uses a reduced LR multiplier of `0.90`, and graph-heavy
+rows remain delayed so the byte model first regains a strong negative BPB slope.
+Stale controller state is ignored if the resume checkpoint step does not match
+the controller state.
+
+GraphCG and analogy topology are auxiliary objectives. GraphCG disentangles
+hidden transitions into an auto-sized lattice basis; repeated byte-relation
+arrows are regularized to behave like analogical functors. The directed
+topology term builds a scale-normalized filtered complex over hidden relation
+arrows, adds an antisymmetric toric skew form, and logs nested inclusion,
+triangle-density, directed-chain, and noncommutative cycle-flux metrics. These
+terms are phased in gently from step `1500`, starting at
+`analogy_lattice_loss_weight: 0.00003`.
 
 Complexity diagnostics run every 50 optimizer steps by default on a tiny sample.
 They are logged under `complexity/train/*` and `complexity/val/*` and do not
 change the BPB objective.
+
+Periodic analyses now also produce directed nested-simplicial plots under
+`outputs/post_resume_analysis/<run>/step-*/geometry/topology/`. These include
+per-branch filtration curves and heatmaps of normalized distances,
+antisymmetric toric skew, and directed adjacency at multiple radii.
 
 The same config also enables best-checkpoint publishing. Promotion uses
 `val_bpb + 0.05 * complexity/val/prediction_target_ncd_lzma_mean`, replacing
