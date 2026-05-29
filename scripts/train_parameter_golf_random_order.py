@@ -766,6 +766,213 @@ def quantization_grid_loss(named_params: list[tuple[str, torch.nn.Parameter]], b
     return torch.stack(losses).mean()
 
 
+def _flattened_vector_norm(vectors: list[torch.Tensor]) -> torch.Tensor:
+    if not vectors:
+        return torch.zeros(())
+    total = None
+    for vector in vectors:
+        value = vector.float().pow(2).sum()
+        total = value if total is None else total + value
+    if total is None:
+        return torch.zeros(())
+    return total.sqrt()
+
+
+def _normalize_parameter_vector(vectors: list[torch.Tensor], eps: float = 1e-12) -> list[torch.Tensor]:
+    norm = _flattened_vector_norm(vectors).clamp_min(eps)
+    return [vector / norm.to(device=vector.device, dtype=vector.dtype) for vector in vectors]
+
+
+def _rademacher_like(parameters: list[torch.nn.Parameter]) -> list[torch.Tensor]:
+    vectors = []
+    for param in parameters:
+        sample = torch.randint(
+            low=0,
+            high=2,
+            size=param.shape,
+            device=param.device,
+            dtype=torch.int8,
+        )
+        vectors.append(sample.to(dtype=param.dtype).mul_(2).sub_(1))
+    return vectors
+
+
+def select_hessian_probe_parameters(
+    model: DenseRandomOrderToricLM,
+    max_tensors: int,
+    max_parameters: int,
+) -> list[torch.nn.Parameter]:
+    """Select a bounded high-impact parameter subset for Hessian probes.
+
+    Full Hessians are intractable here and full-model HVPs are too expensive
+    for an interruptible competition run.  The probe therefore targets the
+    largest trainable matrices, which capture the sharpness of the main
+    embedding/projection/backbone surfaces while keeping memory bounded.
+    """
+
+    candidates = [
+        param
+        for _, param in sorted(
+            ((name, param) for name, param in model.named_parameters() if param.requires_grad and param.ndim >= 2),
+            key=lambda item: item[1].numel(),
+            reverse=True,
+        )
+    ]
+    selected: list[torch.nn.Parameter] = []
+    total = 0
+    for param in candidates:
+        if max_tensors > 0 and len(selected) >= max_tensors:
+            break
+        if max_parameters > 0 and total + param.numel() > max_parameters:
+            if selected:
+                break
+            continue
+        selected.append(param)
+        total += param.numel()
+        if max_parameters > 0 and total >= max_parameters:
+            break
+    if not selected and candidates:
+        selected = [min(candidates, key=lambda param: param.numel())]
+    return selected
+
+
+def hessian_probe_metrics(
+    model: DenseRandomOrderToricLM,
+    batch: dict[str, torch.Tensor],
+    device: torch.device,
+    precision: str,
+    pass_id: int,
+    *,
+    max_tokens: int,
+    trace_samples: int,
+    power_iters: int,
+    max_tensors: int,
+    max_parameters: int,
+    prefix: str = "hessian",
+) -> dict[str, float]:
+    """Estimate local Hessian sharpness with stochastic HVP probes.
+
+    The reported values are diagnostics, not optimizer inputs.  `trace_per_param`
+    is a Hutchinson estimate of average curvature on the probed parameter
+    subspace.  `dominant_curvature` is a small power-iteration Rayleigh estimate
+    and can be negative for nonconvex local geometry; its absolute value is the
+    sharpness proxy used in the metric review.
+    """
+
+    if trace_samples <= 0 and power_iters <= 0:
+        return {}
+    parameters = select_hessian_probe_parameters(
+        model,
+        max_tensors=max(0, int(max_tensors)),
+        max_parameters=max(0, int(max_parameters)),
+    )
+    if not parameters:
+        return {}
+    was_training = model.training
+    model.eval()
+    tokens = batch["tokens"][:1, : max(8, min(int(max_tokens), batch["tokens"].shape[1]))].to(device, non_blocking=True)
+    sample_ids = batch["sample_ids"][:1].to(device, non_blocking=True)
+    amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
+    use_amp = device.type == "cuda" and precision in {"bf16", "fp16"}
+
+    def loss_closure() -> torch.Tensor:
+        model.zero_grad(set_to_none=True)
+        with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp):
+            out = model(
+                tokens,
+                sample_ids=sample_ids,
+                pass_id=pass_id,
+                sample_gflownet=False,
+                gflownet_samples=1,
+            )
+            loss = out["loss"]
+        return loss.float()
+
+    def hvp(vectors: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor, torch.Tensor]:
+        loss = loss_closure()
+        grads = torch.autograd.grad(
+            loss,
+            parameters,
+            create_graph=True,
+            retain_graph=True,
+            allow_unused=True,
+        )
+        grad_norm_terms = [grad.detach().float().pow(2).sum() for grad in grads if grad is not None]
+        grad_norm = torch.stack(grad_norm_terms).sum().sqrt() if grad_norm_terms else torch.zeros((), device=device)
+        dot = None
+        for grad, vector in zip(grads, vectors):
+            if grad is None:
+                continue
+            term = (grad.float() * vector.float()).sum()
+            dot = term if dot is None else dot + term
+        if dot is None:
+            zeros = [torch.zeros_like(param) for param in parameters]
+            return zeros, loss.detach(), grad_norm.detach()
+        hessian_vectors = torch.autograd.grad(
+            dot,
+            parameters,
+            retain_graph=False,
+            allow_unused=True,
+        )
+        out = [
+            hv.detach() if hv is not None else torch.zeros_like(param)
+            for hv, param in zip(hessian_vectors, parameters)
+        ]
+        return out, loss.detach(), grad_norm.detach()
+
+    metrics: dict[str, float] = {}
+    parameter_count = int(sum(param.numel() for param in parameters))
+    metrics[f"{prefix}/probed_parameter_count"] = float(parameter_count)
+    metrics[f"{prefix}/probed_tensor_count"] = float(len(parameters))
+    trace_values = []
+    last_loss = None
+    last_grad_norm = None
+    for _ in range(max(0, int(trace_samples))):
+        vector = _rademacher_like(parameters)
+        hessian_vector, loss_value, grad_norm = hvp(vector)
+        trace_values.append(
+            float(
+                sum((v.float() * hv.float()).sum().detach().cpu() for v, hv in zip(vector, hessian_vector))
+            )
+        )
+        last_loss = loss_value
+        last_grad_norm = grad_norm
+    if trace_values:
+        trace = float(sum(trace_values) / len(trace_values))
+        metrics[f"{prefix}/trace_estimate"] = trace
+        metrics[f"{prefix}/trace_per_param"] = trace / max(1, parameter_count)
+        metrics[f"{prefix}/trace_abs_per_param"] = abs(trace) / max(1, parameter_count)
+
+    if int(power_iters) > 0:
+        vector = _normalize_parameter_vector(_rademacher_like(parameters))
+        rayleigh = 0.0
+        hv_norm = 0.0
+        for _ in range(int(power_iters)):
+            hessian_vector, loss_value, grad_norm = hvp(vector)
+            rayleigh = float(
+                sum((v.float() * hv.float()).sum().detach().cpu() for v, hv in zip(vector, hessian_vector))
+            )
+            hv_norm = float(_flattened_vector_norm(hessian_vector).detach().cpu())
+            if hv_norm <= 1e-12:
+                break
+            vector = [hv / hv_norm for hv in hessian_vector]
+            last_loss = loss_value
+            last_grad_norm = grad_norm
+        metrics[f"{prefix}/dominant_curvature"] = rayleigh
+        metrics[f"{prefix}/dominant_abs_curvature"] = abs(rayleigh)
+        metrics[f"{prefix}/hvp_norm"] = hv_norm
+    if last_loss is not None:
+        metrics[f"{prefix}/probe_loss"] = float(last_loss.detach().cpu())
+    if last_grad_norm is not None:
+        metrics[f"{prefix}/probe_grad_norm"] = float(last_grad_norm.detach().cpu())
+    model.zero_grad(set_to_none=True)
+    if was_training:
+        model.train()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    return metrics
+
+
 def save_checkpoint(
     path: Path,
     model: DenseRandomOrderToricLM,
@@ -1233,6 +1440,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--complexity-eval-every", type=int)
     parser.add_argument("--complexity-eval-samples", type=int)
     parser.add_argument("--complexity-compressors", nargs="+")
+    parser.add_argument("--hessian-probes", action="store_true")
+    parser.add_argument("--no-hessian-probes", action="store_true")
+    parser.add_argument("--hessian-eval-every", type=int)
+    parser.add_argument("--hessian-max-tokens", type=int)
+    parser.add_argument("--hessian-trace-samples", type=int)
+    parser.add_argument("--hessian-power-iters", type=int)
+    parser.add_argument("--hessian-max-tensors", type=int)
+    parser.add_argument("--hessian-max-parameters", type=int)
     parser.add_argument("--hf-publish-best", action="store_true")
     parser.add_argument("--no-hf-publish-best", action="store_true")
     parser.add_argument("--hf-repo-id")
@@ -1481,6 +1696,41 @@ def main() -> None:
         args.complexity_compressors
         if args.complexity_compressors is not None
         else config_get(file_config, "complexity", "compressors", ["zlib", "lzma"])
+    )
+    hessian_enabled = (
+        False
+        if args.no_hessian_probes
+        else bool(args.hessian_probes or config_get(file_config, "hessian", "enabled", False))
+    )
+    hessian_eval_every = (
+        args.hessian_eval_every
+        if args.hessian_eval_every is not None
+        else config_get(file_config, "hessian", "eval_every", 250)
+    )
+    hessian_max_tokens = (
+        args.hessian_max_tokens
+        if args.hessian_max_tokens is not None
+        else config_get(file_config, "hessian", "max_tokens", 128)
+    )
+    hessian_trace_samples = (
+        args.hessian_trace_samples
+        if args.hessian_trace_samples is not None
+        else config_get(file_config, "hessian", "trace_samples", 1)
+    )
+    hessian_power_iters = (
+        args.hessian_power_iters
+        if args.hessian_power_iters is not None
+        else config_get(file_config, "hessian", "power_iters", 1)
+    )
+    hessian_max_tensors = (
+        args.hessian_max_tensors
+        if args.hessian_max_tensors is not None
+        else config_get(file_config, "hessian", "max_tensors", 4)
+    )
+    hessian_max_parameters = (
+        args.hessian_max_parameters
+        if args.hessian_max_parameters is not None
+        else config_get(file_config, "hessian", "max_parameters", 1_500_000)
     )
     publish_best_to_hf = (
         False
@@ -1797,6 +2047,16 @@ def main() -> None:
                     "compressors": list(complexity_compressors),
                     "training_regularizer_weight": 0.0,
                 },
+                "hessian": {
+                    "enabled": hessian_enabled,
+                    "eval_every": hessian_eval_every,
+                    "max_tokens": hessian_max_tokens,
+                    "trace_samples": hessian_trace_samples,
+                    "power_iters": hessian_power_iters,
+                    "max_tensors": hessian_max_tensors,
+                    "max_parameters": hessian_max_parameters,
+                    "role": "diagnostic_only",
+                },
                 "checkpoint_publishing": {
                     "enabled": publish_best_to_hf,
                     "repo_id": hf_repo_id,
@@ -1881,6 +2141,13 @@ def main() -> None:
             "complexity_eval_every": complexity_eval_every,
             "complexity_eval_samples": complexity_eval_samples,
             "complexity_compressors": list(complexity_compressors),
+            "hessian_enabled": hessian_enabled,
+            "hessian_eval_every": hessian_eval_every,
+            "hessian_max_tokens": hessian_max_tokens,
+            "hessian_trace_samples": hessian_trace_samples,
+            "hessian_power_iters": hessian_power_iters,
+            "hessian_max_tensors": hessian_max_tensors,
+            "hessian_max_parameters": hessian_max_parameters,
             "gflownet_entropy_target": gflownet_entropy_target,
             "toric_entropy_floor": toric_entropy_floor,
             "toric_entropy_loss_weight": toric_entropy_loss_weight,
@@ -2225,6 +2492,36 @@ def main() -> None:
                     )
                 except StopIteration:
                     pass
+            hessian_due = (
+                hessian_enabled
+                and last_train_batch is not None
+                and int(hessian_eval_every or 0) > 0
+                and step % int(hessian_eval_every) == 0
+            )
+            if hessian_due:
+                try:
+                    metrics.update(
+                        hessian_probe_metrics(
+                            model=model,
+                            batch=last_train_batch,
+                            device=device,
+                            precision=precision,
+                            pass_id=step * 1_000_003 + 29,
+                            max_tokens=int(hessian_max_tokens),
+                            trace_samples=int(hessian_trace_samples),
+                            power_iters=int(hessian_power_iters),
+                            max_tensors=int(hessian_max_tensors),
+                            max_parameters=int(hessian_max_parameters),
+                            prefix="hessian/train",
+                        )
+                    )
+                except RuntimeError as exc:
+                    model.train()
+                    model.zero_grad(set_to_none=True)
+                    if device.type == "cuda":
+                        torch.cuda.empty_cache()
+                    metrics["hessian/train/error"] = 1.0
+                    print(json.dumps({"step": step, "hessian_probe_error": str(exc)}))
             controller_metrics = adaptive_controller.update(
                 step=step,
                 train_bpb=bpb,

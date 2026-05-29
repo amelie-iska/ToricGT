@@ -1764,3 +1764,104 @@ Direct control change:
 This makes the effective LR at step 1500 about `1.05e-5`, versus roughly
 `3.0e-5` in the failed branch, and keeps the first recovery window as close as
 possible to pure BPB descent.
+
+### Curvature-Aware Restart Update: Step 1250
+
+The step-1500 rollback was still too late.  After re-reading the checkpoint
+trajectory as a finite-difference curve, the correct rollback point is step
+1250: it is the last checkpoint after the large initial BPB drop but before the
+loss trajectory enters the floor-bounce basin.
+
+Let \(m_t\) denote checkpoint BPB at step \(t\).  For checkpoints spaced by
+\(h=250\), the first and second finite differences are
+
+\[
+\Delta_h m_t=m_{t+h}-m_t,\qquad
+\Delta_h^2 m_t=m_{t+h}-2m_t+m_{t-h}.
+\]
+
+The observed early BPB values were:
+
+| step | train BPB | train loss | best val BPB |
+|---:|---:|---:|---:|
+| 1000 | 5.21745 | 3.61646 | 4.69611 |
+| 1250 | 3.74245 | 2.59407 | 4.69611 |
+| 1500 | 3.59144 | 2.48940 | 4.69611 |
+| 1750 | 4.05973 | 2.81399 | 4.69611 |
+| 2000 | 4.46622 | 3.09575 | 4.69611 |
+| 2250 | 4.53774 | 3.14532 | 4.69611 |
+
+The first differences per 1000 steps are:
+
+| interval | BPB delta | slope / 1k steps |
+|---|---:|---:|
+| 1000 to 1250 | -1.47500 | -5.90001 |
+| 1250 to 1500 | -0.15101 | -0.60403 |
+| 1500 to 1750 | +0.46829 | +1.87317 |
+| 1750 to 2000 | +0.40649 | +1.62595 |
+| 2000 to 2250 | +0.07153 | +0.28610 |
+
+The second differences per \(1000^2\) steps are:
+
+| centered window | \(\Delta_h^2\) BPB | curvature / \(1000^2\) steps |
+|---|---:|---:|
+| 1000, 1250, 1500 | +1.32399 | +21.18393 |
+| 1250, 1500, 1750 | +0.61930 | +9.90880 |
+| 1500, 1750, 2000 | -0.06181 | -0.98888 |
+| 1750, 2000, 2250 | -0.33496 | -5.35939 |
+
+The first derivative is still negative at step 1250, but its magnitude has
+already collapsed by roughly an order of magnitude.  The positive second
+difference centered at step 1250 is the warning signal: training is decelerating
+hard before the first derivative turns positive.  By step 1500 the model is
+already too close to the instability, and by 1750 it has crossed into upward
+BPB drift.
+
+This changes the restart policy:
+
+1. restart from `random_order_step_00001250.pt`;
+2. reset Adam moments;
+3. keep the lower LR and longer warmup from the step-1500 repair;
+4. use a fresh adaptive-controller state at
+   `checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01250_curvature.json`;
+5. run the next interrupting analysis at step 1750, not 2000.
+
+### Hessian-Probe Diagnostics
+
+Finite differences diagnose the observed training trajectory, but they do not
+directly measure local parameter-space sharpness.  The next run therefore logs
+diagnostic-only Hessian-vector probe metrics on a tiny cropped batch:
+
+\[
+H_t=\nabla_\theta^2\mathcal L_t(\theta),\qquad
+\widehat{\operatorname{tr}}(H_t)=\frac{1}{K}\sum_{k=1}^K v_k^\top H_t v_k,
+\]
+
+where \(v_k\) are Rademacher Hutchinson probes on a bounded subset of large
+trainable matrices.  A one-step power iteration also reports a Rayleigh
+dominant-curvature estimate
+
+\[
+\lambda_{\mathrm{probe}}\approx
+\frac{v^\top H_t v}{v^\top v}.
+\]
+
+These quantities are not used as second-order optimizer updates.  They are
+W&B diagnostics only:
+
+- `hessian/train/trace_per_param`: average signed curvature on the probed
+  subspace;
+- `hessian/train/trace_abs_per_param`: scale of average curvature regardless
+  of sign;
+- `hessian/train/dominant_curvature`: Rayleigh estimate of local directional
+  curvature;
+- `hessian/train/dominant_abs_curvature`: sharpness proxy;
+- `hessian/train/probe_grad_norm`: gradient norm on the same loss used for the
+  HVP.
+
+Interpretation rule: if BPB turns upward while
+`hessian/train/dominant_abs_curvature` or `trace_abs_per_param` rises, the
+floor is likely a sharpness/step-size problem and the repair should reduce
+effective LR or extend warmup.  If BPB turns upward without Hessian growth, the
+repair should focus first on data ordering, curriculum mixture, or auxiliary
+loss weights.

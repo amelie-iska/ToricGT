@@ -122,7 +122,7 @@ complexity:
 
 adaptive_training:
   enabled: true
-  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01000_restart.json
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01250_curvature.json
   # Checkpoint-level controller only: updates after eval windows, never per
   # microbatch.  It keeps the architecture and optimizer state fixed while
   # gently tuning the three controls identified by the 23.25k rollback analysis.
@@ -147,6 +147,18 @@ adaptive_training:
   recovery_complex_down_step: 0.04
   recovery_gflownet_down_step: 0.00075
   recovery_exit_val_improvements: 3
+
+hessian:
+  enabled: true
+  # Diagnostic-only stochastic HVP probes on a cropped batch.  These estimate
+  # local sharpness and average curvature around rollback checkpoints without
+  # attempting a full Hessian or adding an optimizer-side second-order method.
+  eval_every: 250
+  max_tokens: 128
+  trace_samples: 1
+  power_iters: 1
+  max_tensors: 4
+  max_parameters: 1500000
 
 phase_curriculum:
   enabled: true

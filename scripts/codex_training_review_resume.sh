@@ -125,7 +125,9 @@ Requested work:
 4. Explain the behavior mathematically and statistically, focusing on BPB,
    train/validation loss, GFlowNet graph-of-thought quality, Kolmogorov
    complexity proxies, MST efficiency, trajectory smoothness, toric entropy,
-   tropical/ring behavior, and branch/test-time-scaling diagnostics.
+   tropical/ring behavior, branch/test-time-scaling diagnostics, finite
+   differences of checkpoint metrics, second differences, and Hessian probe
+   sharpness/trace when available.
 5. If adjustments are warranted, implement the smallest high-impact code/config
    changes that preserve the ToricGT Parameter-Golf architecture. Do not use
    JEPA. Keep random-order autoregressive graph decoding, tropical ring/hybrid
@@ -133,8 +135,11 @@ Requested work:
    graph-of-thought, and Kolmogorov diagnostics unless the data gives a clear
    reason to alter a scalar control.
 6. If a restart is warranted, pause $TRAINING_TMUX, choose the best checkpoint
-   from the evidence, resume training in tmux, and report the new tmux and W&B
-   details. If continuation is better, leave training running and document why.
+   from the evidence. Prefer the last checkpoint before the first derivative
+   turns positive or before the second derivative/Hessian sharpness indicates
+   a floor-bounce basin. Resume training in tmux and report the new tmux and
+   W&B details. If continuation is better, leave training running and document
+   why.
 7. After any restart or explicit continuation decision, schedule the next
    interrupting analysis approximately 500 steps later. Use
    scripts/watch_training_analysis.py with --target-step, --pause-training-before-analysis,
