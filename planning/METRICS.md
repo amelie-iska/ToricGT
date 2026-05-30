@@ -2935,3 +2935,123 @@ Acceptance criteria for the stream-rotated review:
 4. Toric entropy should remain above `0.25`.
 5. Radius-HDBSCAN noise should remain below `0.25`, stability above `0.75`, and
    inclusion violation at `0.0`.
+
+## Step 2,000 Stream-Rotate Review
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-restart-01500-stream-rotate/step-00002000/
+```
+
+Reviewed at `2026-05-30 02:35 UTC`.
+
+The stream-rotation change improved topology and removed the exact old single
+step-1710 impulse, but it did not produce an acceptable likelihood trajectory.
+The checkpoint at step `2000` has `train_bpb=4.280771` and `train_loss=2.967204`;
+the step-1750 checkpoint is also post-shelf with `train_bpb=4.075140`, so the
+best available restart point remains the inherited pre-shelf step-1500
+checkpoint with `train_bpb=3.591890`.  W&B validation at the first gate reported
+`controller/val_bpb=5.279697`, `complexity/val/bpb=4.923261`, and
+`complexity/val/loss=3.412544`: slightly better than the previous
+shock-quarantine validation complexity BPB, but still above the acceptance gate.
+
+The local finite-difference picture changed:
+
+| quantity | value |
+|---|---:|
+| local minimum train BPB | `3.670442` at step `1550` |
+| broad shelf maximum | `5.008273` at step `1720` |
+| largest positive first difference | `+0.346669` at step `1690` |
+| largest positive second difference | `+0.667419` at step `1690` |
+| shock-guard active rows | `1590,1600,1610,1630,1660,1670,1690,1700,1710,1720,1730,1860,1870` |
+| hessian dominant curvature | `4.81e-06` |
+| hessian trace per parameter | `4.70e-06` |
+
+The Hessian probe is now small and well-conditioned, so this is not a sharp
+curvature cliff.  It is a broad stochastic-data shelf: high-loss microbatches
+arrive repeatedly, and the step-level shock guard only scales the final
+accumulated update after the high-loss rows have already dominated the averaged
+gradient estimate.  The right local model is a robust stochastic-estimation
+problem:
+
+\[
+  g_t=\frac1{M}\sum_{m=1}^M \nabla_\theta \ell(\theta;z_{t,m}),\qquad
+  \widehat g_t=\frac1{M}\sum_{m=1}^M w_{t,m}\nabla_\theta \ell(\theta;z_{t,m}),
+\]
+
+where \(w_{t,m}=\min(1,c_t/\ell(\theta;z_{t,m}))\) for high-loss microbatches.
+The raw loss remains logged, but the optimizer receives a Huber-style gradient
+estimate whose influence function is bounded.  This is a smaller and better
+targeted control than changing architecture or deleting datasets.
+
+Manual categorization:
+
+| group | category | reason |
+|---|---|---|
+| `train/bpb`, `train/loss`, `train/loss_ema` | undesirable | The broad 1660--1730 shelf pushes BPB above `5.0` and the step-2000 checkpoint is worse than the previous failed checkpoint. |
+| validation BPB | undesirable | `controller/val_bpb=5.279697` is still well above the `5.10` gate. |
+| complexity validation BPB | desired but too weak | It improved to `4.923261`, but the improvement is not enough to continue from this checkpoint. |
+| step-level shock guard | desired but insufficient | It fires repeatedly and correctly, but it acts too late: after microbatch gradients have already accumulated. |
+| Hessian probes | desired | Curvature is small and finite, indicating the remedy should be robust stochastic control, not a lower-order model change. |
+| GFlowNet entropy/action diversity | desired but too weak | Entropy and diversity remain noncollapsed, but the low-BPB branch has not separated in the simplex/tetrahedron diagnostics. |
+| toric memory entropy | desired | `train/toric_memory_entropy` remains around `0.31`, comfortably above the floor. |
+| radius-HDBSCAN topology | desired | Stability improved to `0.8366`, noise fell to `0.1634`, and inclusion violation stayed `0.0`. |
+| directed topology | desired | Directed asymmetry remained nonzero (`0.4626`) with low cycle flux (`0.00617`). |
+
+Plot inspection:
+
+- `geometry/triangles/reasoning_k_bpb.png`: the cloud shifted and became more
+  elongated, but low-BPB points still do not form a clean boundary face.
+- `geometry/tetrahedra/reasoning_k_bpb_mst.png`: the point mass is still
+  central; MST efficiency is informative but not yet a selection objective.
+- `geometry/trajectories/..._trajectory_3d.png`: branches remain readable and
+  terminate in a compact answer basin, but branch separation is weak.
+- `geometry/trajectories/..._phase_energy.png`: phase occupancy remains
+  noncollapsed, supporting continued toric-memory use.
+- `geometry/trajectories/..._energy_landscape.png`: energy surfaces are
+  smoother than the previous run, matching the smaller Hessian estimate, but
+  there is still a high-energy sheet consistent with the broad BPB shelf.
+- `geometry/topology/..._directed_filtration.png`: directed nested topology is
+  healthier than before; radius-HDBSCAN outlier mass collapses after the first
+  radius and cycle flux remains small.
+
+### Decision
+
+Do not continue from step `2000` or `1750`.  Restart again from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt
+```
+
+Implemented minimal controls:
+
+| control | old | new | reason |
+|---|---:|---:|---|
+| `data.stream_origin_step` | `1500` | `2500` | Avoid replaying either analyzed 1500--2000 data segment. |
+| `training.robust_micro_loss_guard_enabled` | absent | `true` | Bound high-loss microbatch gradient influence during early BPB capture. |
+| `training.robust_micro_loss_guard_start_step` | absent | `1500` | Start exactly at the rollback checkpoint. |
+| `training.robust_micro_loss_guard_end_step` | absent | `2600` | Cover the observed shelf and the next validation interval. |
+| `training.robust_micro_loss_guard_ratio` | absent | `1.04` | Catch microbatch losses above the short-run EMA band. |
+| `training.robust_micro_loss_guard_delta` | absent | `0.10` | Catch absolute loss jumps comparable to the observed shelf onset. |
+| `training.robust_micro_loss_guard_min_scale` | absent | `0.10` | Keep high-entropy rows visible but prevent them from controlling the step. |
+
+The guard is deliberately diagnostic-preserving: it logs raw BPB/loss unchanged
+and adds W&B metrics
+`train/robust_micro_loss_guard_fraction`,
+`train/robust_micro_loss_guard_scale`, and
+`train/robust_micro_loss_guard_cap`.
+
+Acceptance criteria for the robust-guard review:
+
+1. Raw `train/bpb` may show difficult rows, but the post-shelf EMA must recover
+   below `3.9` before step `2000`.
+2. `train/robust_micro_loss_guard_fraction` should be sparse to moderate; a
+   value near `1.0` for many consecutive steps means the stream itself is too
+   hard for this capture phase.
+3. Step-2000 checkpoint BPB should beat both failed checkpoints:
+   `4.2347` and `4.2808`.
+4. `controller/val_bpb` should be below `5.10`, with `5.03` still the near-term
+   promotion target.
+5. Toric entropy, radius-HDBSCAN stability, directed asymmetry, and inclusion
+   violation should remain in their current healthy bands.

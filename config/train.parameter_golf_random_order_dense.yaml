@@ -103,12 +103,11 @@ data:
   # A rollback should not replay the identical data order.  The seed is offset
   # by the checkpoint step after loading, while validation remains fixed.
   resume_aware_stream_seed: true
-  # The strict step-1500 shock-quarantine retry still replayed the same
-  # high-entropy easy-stream impulse around step 1710 even with near no-op
-  # shock updates.  Rotate the resume stream origin to the actual restart
-  # checkpoint and skip burn-in so the next retry changes data order while
-  # keeping random-order AR decoding, optimizer state, and model structure.
-  stream_origin_step: 1500
+  # The stream-rotated retry moved the old single impulse into a broader
+  # high-entropy shelf.  Keep zero burn-in, but rotate the resume seed again so
+  # the next step-1500 restart does not replay either analyzed 1500--2000 row
+  # segment.  This preserves random-order AR decoding and optimizer state.
+  stream_origin_step: 2500
   stream_burnin_steps: 0
   document_separator: "\n\n"
   # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
@@ -185,6 +184,17 @@ training:
   shock_guard_loss_delta: 0.08
   shock_guard_grad_norm: 0.55
   shock_guard_update_scale: 0.05
+  # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
+  # high-loss microbatches in the early capture window.  This is a Huber-style
+  # stochastic-gradient estimator, not a data deletion path, and it keeps the
+  # high-entropy examples visible in metrics while preventing them from
+  # dominating the optimizer step.
+  robust_micro_loss_guard_enabled: true
+  robust_micro_loss_guard_start_step: 1500
+  robust_micro_loss_guard_end_step: 2600
+  robust_micro_loss_guard_ratio: 1.04
+  robust_micro_loss_guard_delta: 0.10
+  robust_micro_loss_guard_min_scale: 0.10
   precision: bf16
   device: cuda
   seed: 17

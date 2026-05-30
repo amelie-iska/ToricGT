@@ -1889,6 +1889,13 @@ def main() -> None:
     shock_guard_loss_delta = float(config_get(file_config, "training", "shock_guard_loss_delta", 0.35) or 0.35)
     shock_guard_grad_norm = float(config_get(file_config, "training", "shock_guard_grad_norm", 0.75) or 0.75)
     shock_guard_update_scale = float(config_get(file_config, "training", "shock_guard_update_scale", 0.35) or 0.35)
+    robust_micro_loss_guard_enabled = bool(config_get(file_config, "training", "robust_micro_loss_guard_enabled", False))
+    robust_micro_loss_guard_start_step = int(config_get(file_config, "training", "robust_micro_loss_guard_start_step", 0) or 0)
+    robust_micro_loss_guard_end_step = int(config_get(file_config, "training", "robust_micro_loss_guard_end_step", 0) or 0)
+    robust_micro_loss_guard_ratio = float(config_get(file_config, "training", "robust_micro_loss_guard_ratio", 1.08) or 1.08)
+    robust_micro_loss_guard_delta = float(config_get(file_config, "training", "robust_micro_loss_guard_delta", 0.18) or 0.18)
+    robust_micro_loss_guard_min_scale = float(config_get(file_config, "training", "robust_micro_loss_guard_min_scale", 0.10) or 0.10)
+    robust_micro_loss_guard_min_scale = max(0.0, min(1.0, robust_micro_loss_guard_min_scale))
     warmup_steps = (
         args.warmup_steps if args.warmup_steps is not None else config_get(file_config, "training", "warmup_steps", 1_000)
     )
@@ -2064,6 +2071,17 @@ def main() -> None:
         if args.no_hf_publish_best
         else bool(args.hf_publish_best or config_get(file_config, "checkpoint_publishing", "enabled", False))
     )
+    if args.synthetic and publish_best_to_hf:
+        publish_best_to_hf = False
+        print(
+            json.dumps(
+                {
+                    "checkpoint_publishing_notice": "disabled_for_synthetic_smoke",
+                    "reason": "Synthetic smoke runs must not replace real best checkpoints.",
+                },
+                indent=2,
+            )
+        )
     hf_repo_id = args.hf_repo_id or config_get(
         file_config, "checkpoint_publishing", "repo_id", "AmelieSchreiber/toricgt-checkpoints"
     )
@@ -2474,6 +2492,12 @@ def main() -> None:
                     "eval_score_first_bias_clip": eval_score_first_bias_clip,
                     "causal_audit_interval": causal_audit_interval,
                     "resize_position_embedding": resize_position_embedding,
+                    "robust_micro_loss_guard_enabled": robust_micro_loss_guard_enabled,
+                    "robust_micro_loss_guard_start_step": robust_micro_loss_guard_start_step,
+                    "robust_micro_loss_guard_end_step": robust_micro_loss_guard_end_step,
+                    "robust_micro_loss_guard_ratio": robust_micro_loss_guard_ratio,
+                    "robust_micro_loss_guard_delta": robust_micro_loss_guard_delta,
+                    "robust_micro_loss_guard_min_scale": robust_micro_loss_guard_min_scale,
                 },
                 "complexity": {
                     "enabled": complexity_enabled,
@@ -2622,6 +2646,12 @@ def main() -> None:
             "adaptive_training": adaptive_controller.state_dict(),
             "phase_curriculum": file_config.get("phase_curriculum", {}),
             "resize_position_embedding": resize_position_embedding,
+            "robust_micro_loss_guard_enabled": robust_micro_loss_guard_enabled,
+            "robust_micro_loss_guard_start_step": robust_micro_loss_guard_start_step,
+            "robust_micro_loss_guard_end_step": robust_micro_loss_guard_end_step,
+            "robust_micro_loss_guard_ratio": robust_micro_loss_guard_ratio,
+            "robust_micro_loss_guard_delta": robust_micro_loss_guard_delta,
+            "robust_micro_loss_guard_min_scale": robust_micro_loss_guard_min_scale,
             "optimizer_state_loaded": optimizer_state_loaded,
             "hf_publish_best": publish_best_to_hf,
             "hf_repo_id": hf_repo_id,
@@ -2703,6 +2733,9 @@ def main() -> None:
         step_smear_temperature = 0.0
         step_toric_memory_entropy = 0.0
         step_toric_entropy_loss = 0.0
+        step_robust_micro_loss_guard_fraction = 0.0
+        step_robust_micro_loss_guard_scale = 0.0
+        step_robust_micro_loss_guard_cap = 0.0
         step_graphcg_loss = 0.0
         step_graphcg_code_loss = 0.0
         step_graphcg_orthogonal_loss = 0.0
@@ -2863,8 +2896,28 @@ def main() -> None:
                     + effective_trajectory_flow_loss_weight * trajectory_flow_penalty
                     + effective_toric_entropy_loss_weight * toric_entropy_loss
                 )
-                loss = total_micro_loss / grad_accum
+                micro_guard_scale = 1.0
+                micro_guard_cap = 0.0
+                if robust_micro_loss_guard_enabled and running_loss > 0.0:
+                    in_micro_guard_window = step >= robust_micro_loss_guard_start_step and (
+                        robust_micro_loss_guard_end_step <= 0 or step < robust_micro_loss_guard_end_step
+                    )
+                    if in_micro_guard_window:
+                        micro_guard_cap = min(
+                            running_loss + robust_micro_loss_guard_delta,
+                            running_loss * robust_micro_loss_guard_ratio,
+                        )
+                        micro_loss_value = float(micro_loss.detach().cpu())
+                        if micro_loss_value > micro_guard_cap > 0.0:
+                            micro_guard_scale = max(
+                                robust_micro_loss_guard_min_scale,
+                                min(1.0, micro_guard_cap / max(micro_loss_value, 1e-9)),
+                            )
+                loss = (total_micro_loss * micro_guard_scale) / grad_accum
             loss.backward()
+            step_robust_micro_loss_guard_fraction += 1.0 if micro_guard_scale < 0.999 else 0.0
+            step_robust_micro_loss_guard_scale += float(micro_guard_scale)
+            step_robust_micro_loss_guard_cap += float(micro_guard_cap)
             step_loss += float(micro_loss.detach().cpu())
             step_total_loss += float(total_micro_loss.detach().cpu())
             step_gflownet_loss += float(gflownet_loss.detach().cpu())
@@ -2993,6 +3046,9 @@ def main() -> None:
         step_smear_temperature /= grad_accum
         step_toric_memory_entropy /= grad_accum
         step_toric_entropy_loss /= grad_accum
+        step_robust_micro_loss_guard_fraction /= grad_accum
+        step_robust_micro_loss_guard_scale /= grad_accum
+        step_robust_micro_loss_guard_cap /= grad_accum
         step_medium_microbatches /= grad_accum
         step_complex_microbatches /= grad_accum
         grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -3058,6 +3114,9 @@ def main() -> None:
                 "train/shock_guard_update_scale": shock_guard_scale,
                 "train/shock_guard_loss_delta": shock_guard_loss_delta_value,
                 "train/shock_guard_loss_ratio": shock_guard_loss_ratio_value,
+                "train/robust_micro_loss_guard_fraction": step_robust_micro_loss_guard_fraction,
+                "train/robust_micro_loss_guard_scale": step_robust_micro_loss_guard_scale,
+                "train/robust_micro_loss_guard_cap": step_robust_micro_loss_guard_cap,
                 "train/gflownet_loss": step_gflownet_loss,
                 "train/gflownet_entropy": step_gflownet_entropy,
                 "train/gflownet_entropy_objective": step_gflownet_entropy_objective,
