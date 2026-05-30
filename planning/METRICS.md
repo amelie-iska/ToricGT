@@ -2832,3 +2832,106 @@ Acceptance criteria for the next review:
 4. Toric entropy should remain above `0.25`.
 5. Radius-HDBSCAN noise should remain below `0.25` and inclusion violation
    should remain `0.0`.
+
+## Step 2,000 Shock-Quarantine Review
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-restart-01500-shock-quarantine/step-00002000/
+```
+
+Reviewed at `2026-05-30 01:06 UTC`.
+
+The stricter shock-quarantine run reproduced the same failure geometry as the
+previous retry.  The checkpoint at step `2000` has `train_bpb=4.234739` and
+`best_val_bpb=4.696106`; the live W&B validation gate at step `1750` reported
+`controller/val_bpb=5.302042`, `complexity/val/bpb=4.989566`, and
+`complexity/val/loss=3.458504`.  The local train-BPB minimum remained at
+step `1690` with `train/bpb=3.475286`, `train/loss=2.408885`, and
+`grad_norm=0.578810`.  The destructive impulse again appeared at step `1710`,
+where `train/bpb=4.774089`, the first difference was `+1.183588`, the second
+difference was `+1.068373`, `grad_norm=1.665371`, and the shock guard already
+had `update_scale=0.05`.
+
+This changes the diagnosis.  The optimizer update was already almost removed,
+so the observed jump cannot be explained primarily as an excessive parameter
+step.  The correct decomposition is
+
+\[
+  L(\theta_{t+1}; z_{t+1}) - L(\theta_t; z_t)
+  =
+  \underbrace{L(\theta_t; z_{t+1})-L(\theta_t; z_t)}_{\text{stream/data shock}}
+  +
+  \underbrace{\nabla_\theta L(\theta_t;z_{t+1})^\top \Delta\theta_t
+  + O(\|\Delta\theta_t\|^2)}_{\text{optimizer response}}.
+\]
+
+Because the same row-window shock survives a near no-op update, the first term
+dominates.  The rollback was continuing the step-1000 stream by burning in to
+step `1500`, which reintroduced the same high-entropy easy-stream segment after
+the checkpoint.  The fix should therefore rotate the resume-aware stream origin,
+not weaken the ToricGT architecture.
+
+Manual categorization:
+
+| group | category | reason |
+|---|---|---|
+| `train/bpb`, `train/loss`, `train/loss_ema` | undesirable | The train likelihood falls into the same local floor near step `1690` and rebounds sharply at `1710`. |
+| validation BPB and complexity validation BPB | undesirable | The first validation gate worsened to `5.302`, so the checkpoint is not promotable. |
+| shock guard | desired but no longer sufficient | It detects and damps the shock, but the loss observation itself is dominated by the replayed stream segment. |
+| gradient norm | undesirable in the impulse window | The high-entropy row segment produces a large gradient norm even under the easy-only curriculum. |
+| GFlowNet entropy/action diversity | desired but too weak | Branching remains noncollapsed, but it does not yet produce a separable low-BPB face. |
+| toric memory entropy | desired | The toric channel remains live and improves rather than collapsing. |
+| radius-HDBSCAN and directed topology | desired | Mean stability is `0.8068`, noise is `0.1932`, inclusion violation is `0.0`, directed asymmetry is `0.4671`, and cycle flux is only `0.0062`. |
+| Hessian probes | not decision-grade | The available summary contains NaNs for several Hessian quantities; use finite differences and observed gradients for this decision. |
+
+Plot inspection:
+
+- `geometry/triangles/reasoning_k_bpb.png`: the branch cloud is still compact
+  and central; low BPB is not separated by reasoning time or \(K(x)\).
+- `geometry/tetrahedra/reasoning_k_bpb_mst.png`: MST efficiency is useful as a
+  diagnostic but does not yet identify a clean low-BPB face.
+- `geometry/trajectories/..._trajectory_3d.png`: GoT branches are readable but
+  tightly bunched near the answer basin, with long transports into the terminal
+  region.
+- `geometry/trajectories/..._phase_energy.png`: phase clusters are noncollapsed,
+  so toric memory should remain active.
+- `geometry/trajectories/..._energy_landscape.png`: broad high-energy sheets
+  match the elevated post-shock likelihood floor.
+- `geometry/topology/..._directed_filtration.png` and
+  `..._noncommutative_heatmaps.png`: nested directed topology is healthy, with
+  monotone filtration growth, low cycle flux, real antisymmetric skew, and
+  stable radius-HDBSCAN behavior.
+
+### Decision
+
+Do not continue from step `2000`.  Restart again from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt
+```
+
+Minimal implemented change:
+
+| control | old | new | reason |
+|---|---:|---:|---|
+| `data.stream_origin_step` | `1000` | `1500` | Change the deterministic resume-aware training stream after loading the step-1500 checkpoint. |
+| `data.stream_burnin_steps` | unset | `0` | Avoid replaying the same 1500--2000 microbatch segment. |
+
+All scalar shock-quarantine controls remain intact.  The model remains dense for
+the contest artifact, with random-order autoregressive decoding, hybrid
+tropical ring attention, toric memory, embedding-space GFlowNet GoT diagnostics,
+GraphCG/analogy topology diagnostics, and Kolmogorov-complexity monitors.
+
+Acceptance criteria for the stream-rotated review:
+
+1. `train/bpb` should avoid the old deterministic 1710 impulse; if a new hard
+   row appears, recovery below `3.8` within `50--80` steps is acceptable.
+2. Step-2000 checkpoint `train_bpb` should be materially below the failed
+   `4.2347`.
+3. The first validation gate should be below `5.10`; values near or below the
+   inherited controller `5.03` are promotable for this phase.
+4. Toric entropy should remain above `0.25`.
+5. Radius-HDBSCAN noise should remain below `0.25`, stability above `0.75`, and
+   inclusion violation at `0.0`.

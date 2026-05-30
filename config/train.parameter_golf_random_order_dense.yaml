@@ -103,12 +103,13 @@ data:
   # A rollback should not replay the identical data order.  The seed is offset
   # by the checkpoint step after loading, while validation remains fixed.
   resume_aware_stream_seed: true
-  # The step-1250 rollback should continue the faster phased step-1000 data
-  # stream instead of starting a new stream at step 1250.  The trainer offsets
-  # the train stream seed by this origin and burns in the intervening
-  # microbatches after loading the later checkpoint.
-  stream_origin_step: 1000
-  stream_burnin_steps:
+  # The strict step-1500 shock-quarantine retry still replayed the same
+  # high-entropy easy-stream impulse around step 1710 even with near no-op
+  # shock updates.  Rotate the resume stream origin to the actual restart
+  # checkpoint and skip burn-in so the next retry changes data order while
+  # keeping random-order AR decoding, optimizer state, and model structure.
+  stream_origin_step: 1500
+  stream_burnin_steps: 0
   document_separator: "\n\n"
   # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
   # found token quantiles p25~=123, p40~=294, p50~=489, so the buckets below
