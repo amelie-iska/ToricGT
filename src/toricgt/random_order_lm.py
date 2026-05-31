@@ -23,6 +23,7 @@ from torch.nn import functional as F
 from .config import AttentionKind
 from .tropical_attention import TransformerBlock
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
+from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,21 @@ class RandomOrderLMConfig:
     use_toric_memory: bool = True
     toric_memory_slots: int = 32
     toric_memory_weight: float = 0.08
+    use_toric_geometry_tasks: bool = True
+    toric_geometry_num_exponents: int = 16
+    toric_geometry_exponent_dim: int = 4
+    toric_geometry_probe_rank: int = 12
+    toric_geometry_quant_bits: int = 6
+    toric_geometry_teacher_temperature: float = 0.55
+    toric_geometry_margin: float = 0.18
+    toric_geometry_fan_weight: float = 1.0
+    toric_geometry_bend_weight: float = 0.3
+    toric_geometry_binom_weight: float = 0.3
+    toric_geometry_moment_weight: float = 0.5
+    toric_geometry_coxeter_weight: float = 0.2
+    toric_geometry_braid_weight: float = 0.1
+    toric_geometry_leaf_weight: float = 0.25
+    toric_geometry_max_positions: int = 256
     use_graphcg: bool = False
     graphcg_num_directions: int = 12
     graphcg_alpha: float = 0.12
@@ -293,6 +309,32 @@ class DenseRandomOrderToricLM(nn.Module):
             self.output_bias = None
         self.aux_mtp_heads = nn.ModuleList(
             [nn.Linear(config.d_model, config.vocab_size) for _ in range(max(0, config.aux_mtp_offsets))]
+        )
+        self.toric_geometry_probe = (
+            LowRankToricGeometryProbe(
+                config.d_model,
+                ToricGeometryConfig(
+                    enabled=True,
+                    num_exponents=config.toric_geometry_num_exponents,
+                    exponent_dim=config.toric_geometry_exponent_dim,
+                    probe_rank=config.toric_geometry_probe_rank,
+                    quant_bits=config.toric_geometry_quant_bits,
+                    theta=config.theta,
+                    beta=config.beta,
+                    teacher_temperature=config.toric_geometry_teacher_temperature,
+                    margin=config.toric_geometry_margin,
+                    fan_weight=config.toric_geometry_fan_weight,
+                    bend_weight=config.toric_geometry_bend_weight,
+                    binom_weight=config.toric_geometry_binom_weight,
+                    moment_weight=config.toric_geometry_moment_weight,
+                    coxeter_weight=config.toric_geometry_coxeter_weight,
+                    braid_weight=config.toric_geometry_braid_weight,
+                    leaf_weight=config.toric_geometry_leaf_weight,
+                    max_positions=config.toric_geometry_max_positions,
+                ),
+            )
+            if config.use_toric_geometry_tasks
+            else None
         )
         self.apply(self._init_module)
         if self.toric_memory_value is not None:
@@ -628,6 +670,13 @@ class DenseRandomOrderToricLM(nn.Module):
                 "analogy_step_filtration_inclusion_loss": zero.detach(),
                 "analogy_step_boundary_residual": zero.detach(),
                 "analogy_step_dirichlet_energy": zero.detach(),
+                "analogy_step_dec_conservation_loss": zero.detach(),
+                "analogy_step_dec_mass_residual": zero.detach(),
+                "analogy_step_dec_vorticity_drift": zero.detach(),
+                "analogy_step_dec_kinetic_energy": zero.detach(),
+                "analogy_step_dec_kinetic_energy_drift": zero.detach(),
+                "analogy_step_dec_hodge_balance": zero.detach(),
+                "analogy_step_dec_wedge_interior_residual": zero.detach(),
                 "analogy_step_directed_topology_loss": zero.detach(),
                 "analogy_step_directed_transitive_loss": zero.detach(),
                 "analogy_step_directed_cycle_flux": zero.detach(),
@@ -1038,6 +1087,17 @@ class DenseRandomOrderToricLM(nn.Module):
             ].detach(),
             "analogy_step_boundary_residual": step_topology["reasoning_step_boundary_residual"].detach(),
             "analogy_step_dirichlet_energy": step_topology["reasoning_step_dirichlet_energy"].detach(),
+            "analogy_step_dec_conservation_loss": step_topology["reasoning_step_dec_conservation_loss"].detach(),
+            "analogy_step_dec_mass_residual": step_topology["reasoning_step_dec_mass_residual"].detach(),
+            "analogy_step_dec_vorticity_drift": step_topology["reasoning_step_dec_vorticity_drift"].detach(),
+            "analogy_step_dec_kinetic_energy": step_topology["reasoning_step_dec_kinetic_energy"].detach(),
+            "analogy_step_dec_kinetic_energy_drift": step_topology[
+                "reasoning_step_dec_kinetic_energy_drift"
+            ].detach(),
+            "analogy_step_dec_hodge_balance": step_topology["reasoning_step_dec_hodge_balance"].detach(),
+            "analogy_step_dec_wedge_interior_residual": step_topology[
+                "reasoning_step_dec_wedge_interior_residual"
+            ].detach(),
             "analogy_step_directed_topology_loss": step_topology["reasoning_step_directed_topology_loss"].detach(),
             "analogy_step_directed_transitive_loss": step_topology[
                 "reasoning_step_directed_transitive_loss"
@@ -1109,6 +1169,7 @@ class DenseRandomOrderToricLM(nn.Module):
         self,
         aux: dict[str, torch.Tensor],
         target_tokens: torch.Tensor,
+        target_positions: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         logits = aux["logits"]
         flat_logits = logits.reshape(-1, logits.shape[-1])
@@ -1150,6 +1211,8 @@ class DenseRandomOrderToricLM(nn.Module):
         if hidden is not None:
             out.update(self._graphcg_losses(hidden))
             out.update(self._analogy_lattice_losses(hidden, target_tokens))
+            if self.toric_geometry_probe is not None and target_positions is not None:
+                out.update(self.toric_geometry_probe(hidden, target_positions, target_tokens))
         if hidden is not None and hidden.shape[0] > 1:
             pooled = F.normalize(hidden.mean(dim=1).float(), dim=-1)
             sim = pooled @ pooled.transpose(0, 1) / max(float(self.config.contrastive_temperature), 1e-4)
@@ -1204,7 +1267,7 @@ class DenseRandomOrderToricLM(nn.Module):
                 )
                 if not isinstance(aux, dict):
                     raise RuntimeError("expected auxiliary output")
-                losses = self._supervised_and_gflownet_losses(aux, batch.target_tokens)
+                losses = self._supervised_and_gflownet_losses(aux, batch.target_tokens, batch.target_positions)
                 logp = F.log_softmax(aux["logits"], dim=-1).gather(-1, batch.target_tokens.unsqueeze(-1)).squeeze(-1)
                 sample_logps.append(logp)
                 sample_losses.append(losses["loss"])
@@ -1236,7 +1299,7 @@ class DenseRandomOrderToricLM(nn.Module):
                 raise RuntimeError("expected auxiliary output")
             logits = aux["logits"]
             order_aux = aux
-            aux_losses = self._supervised_and_gflownet_losses(aux, batch.target_tokens)
+            aux_losses = self._supervised_and_gflownet_losses(aux, batch.target_tokens, batch.target_positions)
             loss = aux_losses["loss"]
         out: dict[str, torch.Tensor] = {
             "logits": logits,
@@ -1386,7 +1449,7 @@ class DenseRandomOrderToricLM(nn.Module):
 def estimate_uncompressed_quantized_bytes(
     model: nn.Module,
     bits: Literal[4, 6, 8] = 8,
-    exclude_prefixes: tuple[str, ...] = ("aux_",),
+    exclude_prefixes: tuple[str, ...] = ("aux_", "graphcg_direction_basis", "toric_geometry_probe."),
 ) -> int:
     """Conservative tensor-only byte estimate before zip compression."""
 

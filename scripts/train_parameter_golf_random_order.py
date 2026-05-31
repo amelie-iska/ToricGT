@@ -511,6 +511,7 @@ PHASE_CONTROL_KEYS = {
     "trajectory_flow_loss_weight",
     "contrastive_loss_weight",
     "mtp_loss_weight",
+    "toric_geometry_loss_weight",
     "toric_entropy_loss_weight",
     "qat_loss_weight",
     "qat_start_step",
@@ -1198,7 +1199,7 @@ def load_state_dict_with_optional_position_resize(
         else:
             del state_dict[key]
     incompatible = model.load_state_dict(state_dict, strict=False)
-    allowed_missing_prefixes = ("graphcg_",)
+    allowed_missing_prefixes = ("graphcg_", "toric_geometry_probe.")
     bad_missing = [key for key in incompatible.missing_keys if not key.startswith(allowed_missing_prefixes)]
     bad_unexpected = list(incompatible.unexpected_keys)
     if bad_missing or bad_unexpected:
@@ -1660,6 +1661,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gflownet-entropy-target", type=float)
     parser.add_argument("--graphcg-loss-weight", type=float)
     parser.add_argument("--analogy-lattice-loss-weight", type=float)
+    parser.add_argument("--toric-geometry-loss-weight", type=float)
     parser.add_argument("--toric-entropy-floor", type=float)
     parser.add_argument("--toric-entropy-loss-weight", type=float)
     parser.add_argument("--use-bigram-hash", action="store_true")
@@ -1808,6 +1810,26 @@ def main() -> None:
         use_toric_memory=config_get(file_config, "model", "use_toric_memory", True),
         toric_memory_slots=config_get(file_config, "model", "toric_memory_slots", 32),
         toric_memory_weight=config_get(file_config, "model", "toric_memory_weight", 0.08),
+        use_toric_geometry_tasks=config_get(file_config, "model", "use_toric_geometry_tasks", True),
+        toric_geometry_num_exponents=config_get(file_config, "model", "toric_geometry_num_exponents", 16),
+        toric_geometry_exponent_dim=config_get(file_config, "model", "toric_geometry_exponent_dim", 4),
+        toric_geometry_probe_rank=config_get(file_config, "model", "toric_geometry_probe_rank", 12),
+        toric_geometry_quant_bits=config_get(file_config, "model", "toric_geometry_quant_bits", 6),
+        toric_geometry_teacher_temperature=config_get(
+            file_config,
+            "model",
+            "toric_geometry_teacher_temperature",
+            0.55,
+        ),
+        toric_geometry_margin=config_get(file_config, "model", "toric_geometry_margin", 0.18),
+        toric_geometry_fan_weight=config_get(file_config, "model", "toric_geometry_fan_weight", 1.0),
+        toric_geometry_bend_weight=config_get(file_config, "model", "toric_geometry_bend_weight", 0.3),
+        toric_geometry_binom_weight=config_get(file_config, "model", "toric_geometry_binom_weight", 0.3),
+        toric_geometry_moment_weight=config_get(file_config, "model", "toric_geometry_moment_weight", 0.5),
+        toric_geometry_coxeter_weight=config_get(file_config, "model", "toric_geometry_coxeter_weight", 0.2),
+        toric_geometry_braid_weight=config_get(file_config, "model", "toric_geometry_braid_weight", 0.1),
+        toric_geometry_leaf_weight=config_get(file_config, "model", "toric_geometry_leaf_weight", 0.25),
+        toric_geometry_max_positions=config_get(file_config, "model", "toric_geometry_max_positions", 256),
         use_graphcg=config_get(file_config, "model", "use_graphcg", False),
         graphcg_num_directions=configured_graphcg_directions,
         graphcg_alpha=config_get(file_config, "model", "graphcg_alpha", 0.12),
@@ -1948,6 +1970,11 @@ def main() -> None:
         args.analogy_lattice_loss_weight
         if args.analogy_lattice_loss_weight is not None
         else config_get(file_config, "training", "analogy_lattice_loss_weight", 0.0)
+    )
+    toric_geometry_loss_weight = (
+        args.toric_geometry_loss_weight
+        if args.toric_geometry_loss_weight is not None
+        else config_get(file_config, "training", "toric_geometry_loss_weight", 0.0)
     )
     toric_entropy_floor = (
         args.toric_entropy_floor
@@ -2482,6 +2509,7 @@ def main() -> None:
                     "gflownet_entropy_target": gflownet_entropy_target,
                     "graphcg_loss_weight": graphcg_loss_weight,
                     "analogy_lattice_loss_weight": analogy_lattice_loss_weight,
+                    "toric_geometry_loss_weight": toric_geometry_loss_weight,
                     "toric_entropy_floor": toric_entropy_floor,
                     "toric_entropy_loss_weight": toric_entropy_loss_weight,
                     "mtp_loss_weight": mtp_loss_weight,
@@ -2645,6 +2673,7 @@ def main() -> None:
             "gflownet_entropy_target": gflownet_entropy_target,
             "toric_entropy_floor": toric_entropy_floor,
             "toric_entropy_loss_weight": toric_entropy_loss_weight,
+            "toric_geometry_loss_weight": toric_geometry_loss_weight,
             "trajectory_flow_target": trajectory_flow_target,
             "qat_start_step": qat_start_step,
             "qat_warmup_steps": qat_warmup_steps,
@@ -2739,6 +2768,22 @@ def main() -> None:
         step_smear_temperature = 0.0
         step_toric_memory_entropy = 0.0
         step_toric_entropy_loss = 0.0
+        step_toric_geometry_loss = 0.0
+        step_toric_fan_loss = 0.0
+        step_toric_active_face_ce = 0.0
+        step_toric_active_face_margin = 0.0
+        step_toric_active_face_entropy = 0.0
+        step_toric_bend_loss = 0.0
+        step_toric_bend_magnitude = 0.0
+        step_toric_binomial_loss = 0.0
+        step_toric_binomial_residual = 0.0
+        step_toric_moment_loss = 0.0
+        step_toric_coxeter_loss = 0.0
+        step_toric_affine_wall_distance = 0.0
+        step_toric_braid_loss = 0.0
+        step_toric_leaf_residual = 0.0
+        step_toric_probe_rank = 0.0
+        step_toric_probe_quant_bits = 0.0
         step_robust_micro_loss_guard_fraction = 0.0
         step_robust_micro_loss_guard_scale = 0.0
         step_robust_micro_loss_guard_cap = 0.0
@@ -2776,6 +2821,13 @@ def main() -> None:
         step_analogy_step_filtration_inclusion_loss = 0.0
         step_analogy_step_boundary_residual = 0.0
         step_analogy_step_dirichlet_energy = 0.0
+        step_analogy_step_dec_conservation_loss = 0.0
+        step_analogy_step_dec_mass_residual = 0.0
+        step_analogy_step_dec_vorticity_drift = 0.0
+        step_analogy_step_dec_kinetic_energy = 0.0
+        step_analogy_step_dec_kinetic_energy_drift = 0.0
+        step_analogy_step_dec_hodge_balance = 0.0
+        step_analogy_step_dec_wedge_interior_residual = 0.0
         step_analogy_step_directed_topology_loss = 0.0
         step_analogy_step_directed_transitive_loss = 0.0
         step_analogy_step_directed_cycle_flux = 0.0
@@ -2831,6 +2883,10 @@ def main() -> None:
         effective_analogy_lattice_loss_weight = max(
             0.0,
             control_float(phase_controls, "analogy_lattice_loss_weight", analogy_lattice_loss_weight),
+        )
+        effective_toric_geometry_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "toric_geometry_loss_weight", toric_geometry_loss_weight),
         )
         effective_mtp_loss_weight = max(0.0, control_float(phase_controls, "mtp_loss_weight", mtp_loss_weight))
         effective_contrastive_loss_weight = max(
@@ -2899,6 +2955,7 @@ def main() -> None:
                 mtp_loss = out.get("mtp_loss", torch.zeros((), device=device))
                 graphcg_loss = out.get("graphcg_loss", torch.zeros((), device=device))
                 analogy_lattice_loss = out.get("analogy_lattice_loss", torch.zeros((), device=device))
+                toric_geometry_loss = out.get("toric_geometry_loss", torch.zeros((), device=device))
                 qat_loss = (
                     quantization_grid_loss(qat_named_params, bits=qat_bits)
                     if effective_qat_loss_weight > 0 and qat_named_params
@@ -2923,6 +2980,7 @@ def main() -> None:
                     + effective_mtp_loss_weight * mtp_loss
                     + effective_graphcg_loss_weight * graphcg_loss
                     + effective_analogy_lattice_loss_weight * analogy_lattice_loss
+                    + effective_toric_geometry_loss_weight * toric_geometry_loss
                     + effective_qat_loss_weight * qat_loss
                     + effective_contrastive_loss_weight * contrastive_loss
                     + effective_trajectory_flow_loss_weight * trajectory_flow_penalty
@@ -3027,6 +3085,27 @@ def main() -> None:
             step_analogy_step_dirichlet_energy += float(
                 out.get("analogy_step_dirichlet_energy", torch.zeros(())).detach().cpu()
             )
+            step_analogy_step_dec_conservation_loss += float(
+                out.get("analogy_step_dec_conservation_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_dec_mass_residual += float(
+                out.get("analogy_step_dec_mass_residual", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_dec_vorticity_drift += float(
+                out.get("analogy_step_dec_vorticity_drift", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_dec_kinetic_energy += float(
+                out.get("analogy_step_dec_kinetic_energy", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_dec_kinetic_energy_drift += float(
+                out.get("analogy_step_dec_kinetic_energy_drift", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_dec_hodge_balance += float(
+                out.get("analogy_step_dec_hodge_balance", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_dec_wedge_interior_residual += float(
+                out.get("analogy_step_dec_wedge_interior_residual", torch.zeros(())).detach().cpu()
+            )
             step_analogy_step_directed_topology_loss += float(
                 out.get("analogy_step_directed_topology_loss", torch.zeros(())).detach().cpu()
             )
@@ -3082,6 +3161,32 @@ def main() -> None:
             step_analogy_graphcg_chart_energy += float(
                 out.get("analogy_graphcg_chart_energy", torch.zeros(())).detach().cpu()
             )
+            step_toric_geometry_loss += float(toric_geometry_loss.detach().cpu())
+            step_toric_fan_loss += float(out.get("toric_fan_loss", torch.zeros(())).detach().cpu())
+            step_toric_active_face_ce += float(out.get("toric_active_face_ce", torch.zeros(())).detach().cpu())
+            step_toric_active_face_margin += float(
+                out.get("toric_active_face_margin", torch.zeros(())).detach().cpu()
+            )
+            step_toric_active_face_entropy += float(
+                out.get("toric_active_face_entropy", torch.zeros(())).detach().cpu()
+            )
+            step_toric_bend_loss += float(out.get("toric_bend_loss", torch.zeros(())).detach().cpu())
+            step_toric_bend_magnitude += float(out.get("toric_bend_magnitude", torch.zeros(())).detach().cpu())
+            step_toric_binomial_loss += float(out.get("toric_binomial_loss", torch.zeros(())).detach().cpu())
+            step_toric_binomial_residual += float(
+                out.get("toric_binomial_residual", torch.zeros(())).detach().cpu()
+            )
+            step_toric_moment_loss += float(out.get("toric_moment_loss", torch.zeros(())).detach().cpu())
+            step_toric_coxeter_loss += float(out.get("toric_coxeter_loss", torch.zeros(())).detach().cpu())
+            step_toric_affine_wall_distance += float(
+                out.get("toric_affine_wall_distance", torch.zeros(())).detach().cpu()
+            )
+            step_toric_braid_loss += float(out.get("toric_braid_loss", torch.zeros(())).detach().cpu())
+            step_toric_leaf_residual += float(out.get("toric_leaf_residual", torch.zeros(())).detach().cpu())
+            step_toric_probe_rank += float(out.get("toric_probe_rank", torch.zeros(())).detach().cpu())
+            step_toric_probe_quant_bits += float(
+                out.get("toric_probe_quant_bits", torch.zeros(())).detach().cpu()
+            )
             step_qat_loss += float(qat_loss.detach().cpu())
             step_qat_weight += float(effective_qat_loss_weight)
             step_contrastive_loss += float(contrastive_loss.detach().cpu())
@@ -3133,6 +3238,13 @@ def main() -> None:
         step_analogy_step_filtration_inclusion_loss /= grad_accum
         step_analogy_step_boundary_residual /= grad_accum
         step_analogy_step_dirichlet_energy /= grad_accum
+        step_analogy_step_dec_conservation_loss /= grad_accum
+        step_analogy_step_dec_mass_residual /= grad_accum
+        step_analogy_step_dec_vorticity_drift /= grad_accum
+        step_analogy_step_dec_kinetic_energy /= grad_accum
+        step_analogy_step_dec_kinetic_energy_drift /= grad_accum
+        step_analogy_step_dec_hodge_balance /= grad_accum
+        step_analogy_step_dec_wedge_interior_residual /= grad_accum
         step_analogy_step_directed_topology_loss /= grad_accum
         step_analogy_step_directed_transitive_loss /= grad_accum
         step_analogy_step_directed_cycle_flux /= grad_accum
@@ -3168,6 +3280,22 @@ def main() -> None:
         step_smear_temperature /= grad_accum
         step_toric_memory_entropy /= grad_accum
         step_toric_entropy_loss /= grad_accum
+        step_toric_geometry_loss /= grad_accum
+        step_toric_fan_loss /= grad_accum
+        step_toric_active_face_ce /= grad_accum
+        step_toric_active_face_margin /= grad_accum
+        step_toric_active_face_entropy /= grad_accum
+        step_toric_bend_loss /= grad_accum
+        step_toric_bend_magnitude /= grad_accum
+        step_toric_binomial_loss /= grad_accum
+        step_toric_binomial_residual /= grad_accum
+        step_toric_moment_loss /= grad_accum
+        step_toric_coxeter_loss /= grad_accum
+        step_toric_affine_wall_distance /= grad_accum
+        step_toric_braid_loss /= grad_accum
+        step_toric_leaf_residual /= grad_accum
+        step_toric_probe_rank /= grad_accum
+        step_toric_probe_quant_bits /= grad_accum
         step_robust_micro_loss_guard_fraction /= grad_accum
         step_robust_micro_loss_guard_scale /= grad_accum
         step_robust_micro_loss_guard_cap /= grad_accum
@@ -3283,6 +3411,13 @@ def main() -> None:
                 "train/analogy_step_filtration_inclusion_loss": step_analogy_step_filtration_inclusion_loss,
                 "train/analogy_step_boundary_residual": step_analogy_step_boundary_residual,
                 "train/analogy_step_dirichlet_energy": step_analogy_step_dirichlet_energy,
+                "train/analogy_step_dec_conservation_loss": step_analogy_step_dec_conservation_loss,
+                "train/analogy_step_dec_mass_residual": step_analogy_step_dec_mass_residual,
+                "train/analogy_step_dec_vorticity_drift": step_analogy_step_dec_vorticity_drift,
+                "train/analogy_step_dec_kinetic_energy": step_analogy_step_dec_kinetic_energy,
+                "train/analogy_step_dec_kinetic_energy_drift": step_analogy_step_dec_kinetic_energy_drift,
+                "train/analogy_step_dec_hodge_balance": step_analogy_step_dec_hodge_balance,
+                "train/analogy_step_dec_wedge_interior_residual": step_analogy_step_dec_wedge_interior_residual,
                 "train/analogy_step_directed_topology_loss": step_analogy_step_directed_topology_loss,
                 "train/analogy_step_directed_transitive_loss": step_analogy_step_directed_transitive_loss,
                 "train/analogy_step_directed_cycle_flux": step_analogy_step_directed_cycle_flux,
@@ -3327,6 +3462,23 @@ def main() -> None:
                 "train/toric_entropy_floor": float(toric_entropy_floor),
                 "train/toric_entropy_loss": step_toric_entropy_loss,
                 "train/toric_entropy_loss_weight": float(effective_toric_entropy_loss_weight),
+                "train/toric_geometry_loss": step_toric_geometry_loss,
+                "train/toric_geometry_loss_weight": float(effective_toric_geometry_loss_weight),
+                "train/toric_fan_loss": step_toric_fan_loss,
+                "train/toric_active_face_ce": step_toric_active_face_ce,
+                "train/toric_active_face_margin": step_toric_active_face_margin,
+                "train/toric_active_face_entropy": step_toric_active_face_entropy,
+                "train/toric_bend_loss": step_toric_bend_loss,
+                "train/toric_bend_magnitude": step_toric_bend_magnitude,
+                "train/toric_binomial_loss": step_toric_binomial_loss,
+                "train/toric_binomial_residual": step_toric_binomial_residual,
+                "train/toric_moment_loss": step_toric_moment_loss,
+                "train/toric_coxeter_loss": step_toric_coxeter_loss,
+                "train/toric_affine_wall_distance": step_toric_affine_wall_distance,
+                "train/toric_braid_loss": step_toric_braid_loss,
+                "train/toric_leaf_residual": step_toric_leaf_residual,
+                "train/toric_probe_rank": step_toric_probe_rank,
+                "train/toric_probe_quant_bits": step_toric_probe_quant_bits,
                 "artifact/initial_bytes": report.bytes_total,
                 "artifact/estimated_tensor_bytes": estimated_tensor_bytes,
                 "artifact/deployment_parameters": report.deployment_parameters,

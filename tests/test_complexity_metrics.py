@@ -1,5 +1,6 @@
 import json
 import importlib.util
+import sys
 from pathlib import Path
 
 import torch
@@ -11,6 +12,9 @@ from toricgt.complexity import (
     graph_mdl_metrics,
     normalized_compression_distance,
     random_order_complexity_metrics,
+    relative_complexity,
+    relative_complexity_reward,
+    shortest_known_program_len,
 )
 from toricgt.random_order_lm import random_order_batch
 
@@ -20,6 +24,7 @@ _TRAINER_SPEC = importlib.util.spec_from_file_location(
 )
 assert _TRAINER_SPEC is not None and _TRAINER_SPEC.loader is not None
 _TRAINER = importlib.util.module_from_spec(_TRAINER_SPEC)
+sys.modules[_TRAINER_SPEC.name] = _TRAINER
 _TRAINER_SPEC.loader.exec_module(_TRAINER)
 checkpoint_publish_decision = _TRAINER.checkpoint_publish_decision
 publish_quality_score = _TRAINER.publish_quality_score
@@ -32,6 +37,10 @@ def test_compressor_and_conditional_complexity_are_finite():
     assert compress_len(payload, "lzma") > 0
     assert conditional_compress_len(context, payload, "zlib") >= 0
     assert normalized_compression_distance(payload, payload, "zlib") >= 0
+    known = shortest_known_program_len(payload, compressor="zlib", references=(context,))
+    assert known <= compress_len(payload, "zlib")
+    assert relative_complexity(known - 2, known) < 0
+    assert relative_complexity_reward(known - 2, known) == 2
 
 
 def test_canonical_graph_bytes_and_mdl_metrics_are_stable():
@@ -69,6 +78,16 @@ def test_random_order_complexity_metrics_include_bpb_adjacent_proxies():
     )
     assert metrics["complexity/train/samples"] == 2
     assert metrics["complexity/train/target_cond_k_zlib_mean"] >= 0
+    assert "complexity/train/target_relative_to_raw_k_zlib_mean" in metrics
+    assert "complexity/train/target_shortest_known_program_k_zlib_mean" in metrics
+    assert "complexity/train/target_helper_cond_k_zlib_mean" in metrics
+    assert "complexity/train/information_symmetry_gap_k_zlib_mean" in metrics
+    assert "complexity/train/prediction_relative_to_target_known_k_zlib_mean" in metrics
+    assert "complexity/train/prediction_relative_k_raw_reward_zlib_mean" in metrics
+    assert "complexity/train/prediction_relative_k_reward_zlib_mean" in metrics
+    assert "complexity/train/prediction_relative_k_correctness_gate_zlib_mean" in metrics
+    assert "complexity/train/analogical_transfer_relative_k_zlib_mean" in metrics
+    assert "complexity/train/analogical_transfer_reward_zlib_mean" in metrics
     assert metrics["complexity/train/order_program_k_lzma_mean"] > 0
     assert "complexity/train/gflownet_action_trace_k_zlib_mean" in metrics
 

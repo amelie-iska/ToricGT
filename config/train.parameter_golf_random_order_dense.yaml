@@ -32,6 +32,25 @@ model:
   use_toric_memory: true
   toric_memory_slots: 32
   toric_memory_weight: 0.08
+  # Low-rank toric-geometry probes provide compact auxiliary supervision for
+  # Newton active faces, fan margins, bend consistency, binomial relations,
+  # affine-Coxeter walls, braid relations, and noncommutative phase leaves.
+  # The probe is not part of the packed contest export.
+  use_toric_geometry_tasks: true
+  toric_geometry_num_exponents: 16
+  toric_geometry_exponent_dim: 4
+  toric_geometry_probe_rank: 12
+  toric_geometry_quant_bits: 6
+  toric_geometry_teacher_temperature: 0.55
+  toric_geometry_margin: 0.18
+  toric_geometry_fan_weight: 1.0
+  toric_geometry_bend_weight: 0.30
+  toric_geometry_binom_weight: 0.30
+  toric_geometry_moment_weight: 0.50
+  toric_geometry_coxeter_weight: 0.20
+  toric_geometry_braid_weight: 0.10
+  toric_geometry_leaf_weight: 0.25
+  toric_geometry_max_positions: 256
   # GraphCG-style training uses a tiny learned steerable frame for hidden-space
   # edits.  The added parameter count is negligible under the 16 MB budget, and
   # the model is trained to align embeddings to disentangled analogy axes.
@@ -219,6 +238,7 @@ training:
   gflownet_entropy_target: 2.00
   graphcg_loss_weight: 0.0002
   analogy_lattice_loss_weight: 0.0002
+  toric_geometry_loss_weight: 0.00015
   toric_entropy_floor: 0.20
   toric_entropy_loss_weight: 0.001
   mtp_loss_weight: 0.01
@@ -299,6 +319,7 @@ phase_curriculum:
       gflownet_entropy_weight: 0.0
       graphcg_loss_weight: 0.00005
       analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.0005
       mtp_loss_weight: 0.0
@@ -319,6 +340,7 @@ phase_curriculum:
       gflownet_entropy_weight: 0.0
       graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.00025
       mtp_loss_weight: 0.0
@@ -336,6 +358,7 @@ phase_curriculum:
       gflownet_entropy_weight: 0.0
       graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.00025
       mtp_loss_weight: 0.0
@@ -353,6 +376,7 @@ phase_curriculum:
       gflownet_entropy_weight: 0.0
       graphcg_loss_weight: 0.00005
       analogy_lattice_loss_weight: 0.00003
+      toric_geometry_loss_weight: 0.00002
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.0005
       mtp_loss_weight: 0.0
@@ -370,6 +394,7 @@ phase_curriculum:
       gflownet_entropy_target: 2.0
       graphcg_loss_weight: 0.0003
       analogy_lattice_loss_weight: 0.0002
+      toric_geometry_loss_weight: 0.00008
       trajectory_flow_loss_weight: 0.0001
       contrastive_loss_weight: 0.0015
       mtp_loss_weight: 0.015
@@ -384,6 +409,7 @@ phase_curriculum:
       gflownet_entropy_target: 2.0
       graphcg_loss_weight: 0.0004
       analogy_lattice_loss_weight: 0.0003
+      toric_geometry_loss_weight: 0.00012
       trajectory_flow_loss_weight: 0.00025
       contrastive_loss_weight: 0.002
       mtp_loss_weight: 0.02
@@ -398,6 +424,7 @@ phase_curriculum:
       gflownet_entropy_target: 2.0
       graphcg_loss_weight: 0.0005
       analogy_lattice_loss_weight: 0.0004
+      toric_geometry_loss_weight: 0.00015
       trajectory_flow_loss_weight: 0.0004
       contrastive_loss_weight: 0.003
       mtp_loss_weight: 0.03

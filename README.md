@@ -14,6 +14,8 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
   <a href="https://huggingface.co/blog/AmelieSchreiber/toricgt"><img src="https://img.shields.io/badge/HuggingFace-DE9B35.svg?style=for-the-badge&logo=HuggingFace" alt="HF"/></a>
 </p>
 
+*Note: consider PH disambiguation along decision boundaries or of words with multiple meaning*
+
 Current validated status:
 
 - CPU tests: `pytest -q tests` passes.
@@ -43,6 +45,7 @@ Local implementation:
 - `src/toricgt/polar_cache.py`: recursive polar encode/decode utilities for optional KV-cache compression experiments.
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
 - `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing.
+- `src/toricgt/toric_geometry_tasks.py`: training-only low-rank toric probes for Newton active-face, bend, binomial, affine-Coxeter, braid, and phase-foliation signals.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
 - `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.
@@ -583,16 +586,33 @@ unstable/outlier relation arrows contribute little. W&B reports
 `train/analogy_hdbscan_persistent_edge_density`,
 `train/analogy_hdbscan_outlier_score`, and
 `train/analogy_hdbscan_core_radius`.
+Following `assets/1508.01166v2.pdf` (Mohamed, Hirani, and Samtaney's DEC
+Navier-Stokes discretization), the step-local topology pass also audits
+conservative reasoning flow over the same directed simplicial windows. The
+directed adjacency is treated as a discrete 1-form; its skew flow gives a
+divergence/mass residual, node vorticity, kinetic energy, Hodge-balanced energy,
+and a wedge/interior-product consistency proxy for convective transport. These
+are not a fluid simulator. They are cheap DEC-style invariants that should make
+long graph-of-thought paths less noisy while leaving BPB primary. W&B reports
+`train/analogy_step_dec_conservation_loss`,
+`train/analogy_step_dec_mass_residual`,
+`train/analogy_step_dec_vorticity_drift`,
+`train/analogy_step_dec_kinetic_energy`,
+`train/analogy_step_dec_kinetic_energy_drift`,
+`train/analogy_step_dec_hodge_balance`, and
+`train/analogy_step_dec_wedge_interior_residual`.
 The periodic analysis suite also renders these objects under
 `outputs/post_resume_analysis/<run>/step-*/geometry/topology/`: per-branch
-filtration curves for edge density, triangle density, directed asymmetry, and
-noncommutative cycle flux, plus HDBSCAN stable-cluster and outlier curves.
+filtration curves for edge density, triangle density, directed asymmetry,
+noncommutative cycle flux, and DEC conservation/mass residuals, plus HDBSCAN
+stable-cluster and outlier curves.
 The heatmaps include normalized hidden-arrow distances, mutual-reachability
 distances, density-persistence adjacency, antisymmetric toric skew, and directed
 adjacency at several radii. The new `*_step_radius_hierarchy.png` panels show
-window-by-radius edge density, Betti-0, cycle-rank, analogical map residuals,
-and directed map residuals for the actual hidden reasoning states. The analysis
-suite also writes `*_toric_phase_simplicial_trajectory.png`, which projects the
+window-by-radius edge density, Betti-0, cycle-rank, DEC conservation/energy
+panels, analogical map residuals, and directed map residuals for the actual
+hidden reasoning states. The analysis suite also writes
+`*_toric_phase_simplicial_trajectory.png`, which projects the
 irrational rotation-algebra phase path onto a torus, overlays local
 Vietoris-Rips edges, and draws the soft analogical maps between reasoning
 windows. These plots sit next to the 3D graph-of-thought trajectories,
@@ -614,6 +634,26 @@ directed-edge validity. These values are written to
 `*_exact_persistence_morphisms.png`, `reasoning_geometry_summary.json`, and,
 when `--wandb` is passed, to the same W&B project under `analysis/*`.
 
+The `oai` branch also turns the toric-geometry next-iteration proposal into a
+training-only signal. A low-rank, 6-bit fake-quantized toric probe predicts
+Newton-polytope active faces from hidden states, aligns soft moment-map
+features to irrational phase teachers, regularizes Cartier-style bend
+magnitudes, checks toric binomial relations, enforces affine-Coxeter reflection
+and A2 braid consistency, and audits noncommutative phase-foliation leaves. The
+probe is excluded from Parameter-Golf artifact export, so it can shape training
+without increasing deploy bytes. W&B reports `train/toric_geometry_loss`,
+`train/toric_active_face_margin`, `train/toric_bend_magnitude`,
+`train/toric_binomial_residual`, `train/toric_coxeter_loss`,
+`train/toric_braid_loss`, and `train/toric_leaf_residual`. The geometry suite
+adds `*_toric_shadow_audit.png`, showing occupied fan cells, active-face
+margins, bend magnitudes, branch fan coverage, and phase-leaf residuals.
+
+Operational rule for the current `oai` experiments: training remains paused
+until the full analysis suite has completed and the generated plot classes have
+been reviewed. The requested "there be dragons" responding-onlooker ablation is
+currently an absence check: repository search finds no matching observer,
+prompt, or role path outside ignored outputs/checkpoints/data.
+
 Planning notes:
 [`planning/GRAPHCG-ANALOGY-TOPOLOGY-PLAN.md`](planning/GRAPHCG-ANALOGY-TOPOLOGY-PLAN.md)
 separates GraphCG basis learning from analogical functor structure and defines
@@ -622,15 +662,30 @@ the filtered topological map contract.
 defines the directed persistent-topology implementation contract, and
 [`planning/HoTT.md`](planning/HoTT.md) gives the homotopy-type-theory analogue
 with the HoTT book reference: <https://homotopytypetheory.org/book/>.
+[`planning/TORIC-GEOMETRY-TRAINING-SIGNAL.md`](planning/TORIC-GEOMETRY-TRAINING-SIGNAL.md)
+records the toric probe losses, metrics, resume policy, and analysis gate.
+[`planning/DEC-CONSERVATIVE-REASONING.md`](planning/DEC-CONSERVATIVE-REASONING.md)
+records the DEC/NSE comparison and the conservative reasoning-flow additions.
 
 Kolmogorov-style reasoning diagnostics are enabled by default on the `oai`
 branch without changing the BPB objective. The trainer periodically logs
 compressor-tagged proxies such as `complexity/train/target_cond_k_lzma_mean`,
 `complexity/train/order_program_k_zlib_mean`,
-`complexity/train/gflownet_action_trace_k_lzma_mean`, and validation analogues.
-These estimate conditional reasoning/program complexity, random-order program
-length, prediction-target NCD, and GFlowNet action-trace complexity. They are
-diagnostic unless an explicit future config gives them nonzero training weight.
+`complexity/train/gflownet_action_trace_k_lzma_mean`,
+`complexity/train/target_helper_cond_k_lzma_mean`,
+`complexity/train/information_symmetry_gap_k_lzma_mean`,
+`complexity/train/analogical_transfer_relative_k_lzma_mean`, and validation
+analogues. These estimate conditional reasoning/program complexity,
+random-order tree-program length, prediction-target NCD, GFlowNet action-trace
+complexity, and analogical transfer of `K(x|y)`. The helper side of the
+conditional program includes the strict random-order prefix, the public
+permutation/tree program, the original byte chunk, optional GFlowNet action
+traces, and optional serialized graph/tree helper payloads. Negative
+`analogical_transfer_relative_k_*` values mean a source analogy shortened the
+estimated program for the target relative to direct helpers alone. Prediction
+relative-K rewards are correctness-gated, so a short wrong prediction is not
+treated as an improvement. They are diagnostic unless an explicit future config
+gives them nonzero training weight.
 
 The local `AmelieSchreiber/toricgt-curated-splits` mirror is used as far as is
 competition-safe: supervised training streams `data/curated_hf_shards/train/*.parquet`,
@@ -772,6 +827,30 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --min-estimated-tokens 256 \
   --task-family-keywords math code graph got reasoning health physics biomed biochem \
   --output-dir outputs/reasoning_simplex/oai-large-technical
+```
+
+Run the full reasoning-geometry suite, including toric shadow audits,
+directed/persistence plots, 3D trajectories, triangles, and tetrahedra:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/evaluate_reasoning_geometry_suite.py \
+  --checkpoint checkpoints/parameter_golf_oai_dense/best.pt \
+  --data-glob 'data/curated_hf_shards/validation/*.parquet' \
+  --output-dir outputs/reasoning_geometry_suite/oai-best \
+  --records 2 \
+  --branches 3 \
+  --seq-len 384 \
+  --max-files 8 \
+  --scan-batches-per-file 2 \
+  --scan-batch-size 256 \
+  --max-pca-points 1024 \
+  --max-plot-points 128 \
+  --max-mst-nodes 64 \
+  --device cuda \
+  --precision bf16 \
+  --wandb \
+  --wandb-project toricgt-parameter-golf
 ```
 
 The primary triangle has vertices `reasoning budget`, `K(x)`, and `low BPB`.

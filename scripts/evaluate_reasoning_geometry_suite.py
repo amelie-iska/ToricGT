@@ -59,6 +59,7 @@ from toricgt.reasoning_geometry import (
     triangle_grid,
 )
 from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step_filtration_stats_np
+from toricgt.toric_geometry_tasks import empirical_toric_shadow_stats_np
 from train_parameter_golf_random_order import ParquetByteChunkDataset
 
 
@@ -505,6 +506,15 @@ def evaluate_branch(
         max_samples=1,
     )
     hidden = aux["hidden"].detach().float().cpu().numpy()[0]
+    toric_probe_metrics: dict[str, float] = {}
+    if getattr(model, "toric_geometry_probe", None) is not None:
+        with torch.no_grad():
+            probe_out = model.toric_geometry_probe(aux["hidden"], batch.target_positions, batch.target_tokens)
+        for key, value in probe_out.items():
+            if key == "toric_geometry_loss" or not torch.is_tensor(value):
+                continue
+            if value.ndim == 0:
+                toric_probe_metrics[f"toric_geometry/{key}"] = float(value.detach().cpu())
     target_positions_np = batch.target_positions.detach().cpu().numpy()[0]
     phase_u = (float(model.config.theta) * target_positions_np.astype(float)) % 1.0
     phase_v = (float(model.config.beta) * target_positions_np.astype(float)) % 1.0
@@ -573,9 +583,11 @@ def evaluate_branch(
         "toric_phase_recurrence": phase_recurrence,
         "graphcg_chart_axis": chart_axis,
         "graphcg_chart_margin": chart_margin.astype(np.float32),
+        "toric_shadow": empirical_toric_shadow_stats_np(hidden, max_points=int(args.max_plot_points)),
         "answer_steps": answer_steps,
         "action_ids": flat_actions,
     }
+    record.update(toric_probe_metrics)
     for key, value in complexity.items():
         if isinstance(value, (int, float)) and math.isfinite(float(value)):
             record[key] = float(value)
@@ -675,10 +687,10 @@ def plot_triangle(records: list[dict[str, Any]], spec: dict[str, Any], output_pa
             fontsize=6.5,
             ha="center",
         )
-    label_offsets = [(-0.08, -0.055), (0.08, -0.055), (0.0, 0.048)]
+    label_offsets = [(-0.08, -0.055), (0.08, -0.055), (0.0, -0.036)]
     for label, vertex, offset in zip(labels, vertices, label_offsets):
         ax.text(vertex[0] + offset[0], vertex[1] + offset[1], label, color="#e8fbff", fontsize=10, ha="center")
-    ax.set_title(spec["title"], color="white", fontsize=14, pad=16)
+    ax.set_title(spec["title"], color="white", fontsize=11, pad=14)
     ax.set_aspect("equal")
     ax.set_axis_off()
     cbar = fig.colorbar(contour, ax=ax, fraction=0.035, pad=0.02)
@@ -1149,6 +1161,143 @@ def plot_toric_phase_simplicial_trajectory(
     plt.close(fig)
 
 
+def plot_toric_shadow_audit(
+    record_meta: dict[str, Any],
+    branches: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    """Render empirical toric fan, bend, and phase-leaf diagnostics."""
+
+    if not branches:
+        return
+    best = min(branches, key=lambda item: float(item["bpb"]))
+    shadow = best.get("toric_shadow")
+    if not isinstance(shadow, dict):
+        return
+    active = np.asarray(shadow.get("active_faces", []), dtype=float)
+    margins = np.asarray(shadow.get("margins", []), dtype=float)
+    bends = np.asarray(shadow.get("bend_magnitudes", []), dtype=float)
+    if active.size < 2:
+        return
+    branch_ids = np.asarray([float(branch["branch_index"]) for branch in branches], dtype=float)
+    bpbs = np.asarray([float(branch["bpb"]) for branch in branches], dtype=float)
+    occupied = np.asarray(
+        [
+            float(branch.get("toric_shadow", {}).get("occupied_fan_cells", 0.0))
+            if isinstance(branch.get("toric_shadow"), dict)
+            else 0.0
+            for branch in branches
+        ],
+        dtype=float,
+    )
+    entropy = np.asarray(
+        [
+            float(branch.get("toric_shadow", {}).get("fan_cell_entropy", 0.0))
+            if isinstance(branch.get("toric_shadow"), dict)
+            else 0.0
+            for branch in branches
+        ],
+        dtype=float,
+    )
+    mean_margin = np.asarray(
+        [
+            float(branch.get("toric_shadow", {}).get("mean_margin", 0.0))
+            if isinstance(branch.get("toric_shadow"), dict)
+            else 0.0
+            for branch in branches
+        ],
+        dtype=float,
+    )
+    mean_bend = np.asarray(
+        [
+            float(branch.get("toric_shadow", {}).get("mean_bend", 0.0))
+            if isinstance(branch.get("toric_shadow"), dict)
+            else 0.0
+            for branch in branches
+        ],
+        dtype=float,
+    )
+    leaf_residual = np.asarray(
+        [float(branch.get("toric_geometry/toric_leaf_residual", np.nan)) for branch in branches],
+        dtype=float,
+    )
+
+    fig, axes = plt.subplots(2, 2, figsize=(13.4, 9.4), facecolor="#030712")
+    for ax in axes.reshape(-1):
+        ax.set_facecolor("#030712")
+        ax.tick_params(colors="#d7f7ff")
+        for spine in ax.spines.values():
+            spine.set_color("#164b63")
+
+    x_active = np.arange(active.size)
+    axes[0, 0].step(x_active, active, where="mid", color="#62f7ff", linewidth=1.5, alpha=0.9)
+    axes[0, 0].scatter(x_active, active, c=margins[: active.size], cmap="viridis", s=18, alpha=0.92)
+    axes[0, 0].set_title("Newton fan active cells along reasoning path", color="white", fontsize=11)
+    axes[0, 0].set_xlabel("subsampled reasoning step", color="#d7f7ff")
+    axes[0, 0].set_ylabel("active pseudo-face", color="#d7f7ff")
+
+    x_margin = np.arange(margins.size)
+    axes[0, 1].plot(x_margin, margins, color="#6df6ff", linewidth=1.3, label="active-face margin")
+    if bends.size:
+        bend_x = np.linspace(0, max(1, margins.size - 1), bends.size)
+        axes[0, 1].plot(bend_x, bends, color="#ff4fd8", linewidth=1.1, alpha=0.84, label="bend magnitude")
+    axes[0, 1].axhline(0.0, color="#ffffff", linewidth=0.5, alpha=0.25)
+    axes[0, 1].set_title("Tropical margins and toric bends", color="white", fontsize=11)
+    axes[0, 1].set_xlabel("subsampled reasoning step", color="#d7f7ff")
+    axes[0, 1].legend(facecolor="#07111f", edgecolor="#164b63", labelcolor="white", fontsize=8)
+
+    sc = axes[1, 0].scatter(
+        occupied,
+        mean_margin,
+        c=bpbs,
+        s=70 + 12 * np.maximum(0.0, entropy),
+        cmap="magma_r",
+        edgecolor="#e8fbff",
+        linewidth=0.35,
+        alpha=0.94,
+    )
+    for idx, branch_id in enumerate(branch_ids):
+        axes[1, 0].text(occupied[idx], mean_margin[idx], f"B{int(branch_id)}", color="#d7f7ff", fontsize=7)
+    axes[1, 0].set_title("Branch fan coverage vs. stability", color="white", fontsize=11)
+    axes[1, 0].set_xlabel("occupied fan cells", color="#d7f7ff")
+    axes[1, 0].set_ylabel("mean active-face margin", color="#d7f7ff")
+    cbar = fig.colorbar(sc, ax=axes[1, 0], fraction=0.04, pad=0.02)
+    cbar.set_label("BPB", color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.get_yticklabels(), color="white")
+
+    axes[1, 1].plot(branch_ids, entropy, color="#62f7ff", marker="o", linewidth=1.2, label="fan entropy")
+    axes[1, 1].plot(branch_ids, mean_bend, color="#ffd166", marker="s", linewidth=1.2, label="mean bend")
+    if np.isfinite(leaf_residual).any():
+        axes[1, 1].plot(
+            branch_ids,
+            np.nan_to_num(leaf_residual, nan=np.nanmean(leaf_residual)),
+            color="#ff4fd8",
+            marker="^",
+            linewidth=1.2,
+            label="phase-leaf residual",
+        )
+    axes[1, 1].set_title("Toric shadow summary by branch", color="white", fontsize=11)
+    axes[1, 1].set_xlabel("branch", color="#d7f7ff")
+    axes[1, 1].legend(facecolor="#07111f", edgecolor="#164b63", labelcolor="white", fontsize=8)
+
+    fig.suptitle(
+        f"Empirical toric shadow audit R{record_meta['record_index']} best B{best['branch_index']}",
+        color="white",
+        fontsize=14,
+    )
+    fig.text(
+        0.012,
+        0.015,
+        "fan cells: fitted active Newton faces | margins: tropical stability | bends: Cartier-style piecewise-linear curvature | leaf residual: noncommutative phase-foliation consistency",
+        color="#d7f7ff",
+        fontsize=8.4,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def sigmoid_np(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(x, -60.0, 60.0)))
 
@@ -1345,6 +1494,15 @@ def attach_topology_stats(branch: dict[str, Any], stats: dict[str, Any]) -> None
     branch["topology_inclusion_violation"] = float(np.mean(stats["inclusion_violation"]))
     branch["topology_boundary_residual"] = float(np.mean(stats.get("boundary_residual", [0.0])))
     branch["topology_dirichlet_energy"] = float(np.mean(stats.get("dirichlet_energy", [0.0])))
+    branch["topology_dec_conservation_loss"] = float(np.mean(stats.get("dec_conservation_loss", [0.0])))
+    branch["topology_dec_mass_residual"] = float(np.mean(stats.get("dec_mass_residual", [0.0])))
+    branch["topology_dec_vorticity_drift"] = float(np.mean(stats.get("dec_vorticity_drift", [0.0])))
+    branch["topology_dec_kinetic_energy"] = float(np.mean(stats.get("dec_kinetic_energy", [0.0])))
+    branch["topology_dec_kinetic_energy_drift"] = float(np.mean(stats.get("dec_kinetic_energy_drift", [0.0])))
+    branch["topology_dec_hodge_balance"] = float(np.mean(stats.get("dec_hodge_balance", [0.0])))
+    branch["topology_dec_wedge_interior_residual"] = float(
+        np.mean(stats.get("dec_wedge_interior_residual", [0.0]))
+    )
     branch["topology_analogical_map_loss"] = float(stats.get("analogical_map_loss", 0.0))
     branch["topology_directed_map_loss"] = float(stats.get("directed_map_loss", 0.0))
     branch["topology_transport_entropy"] = float(stats.get("transport_entropy", 0.0))
@@ -1377,7 +1535,7 @@ def attach_topology_stats(branch: dict[str, Any], stats: dict[str, Any]) -> None
 
 
 def plot_directed_filtration(record_meta: dict[str, Any], branches: list[dict[str, Any]], output_path: Path) -> None:
-    fig, axes = plt.subplots(5, 2, figsize=(11.5, 16.2), facecolor="#030712")
+    fig, axes = plt.subplots(6, 2, figsize=(12.5, 18.5), facecolor="#030712", constrained_layout=True)
     metrics = [
         ("edge_density", "symmetric edge density"),
         ("triangle_density", "soft triangle density"),
@@ -1387,6 +1545,8 @@ def plot_directed_filtration(record_meta: dict[str, Any], branches: list[dict[st
         ("boundary_residual", "oriented boundary residual"),
         ("analogical_map_by_radius", "soft analogical map residual"),
         ("directed_map_by_radius", "directed map residual"),
+        ("dec_conservation_loss", "DEC conservation residual"),
+        ("dec_mass_residual", "DEC mass / divergence residual"),
         ("directed_asymmetry", "directed asymmetry"),
         ("directed_cycle_flux", "noncommutative cycle flux"),
     ]
@@ -1409,15 +1569,15 @@ def plot_directed_filtration(record_meta: dict[str, Any], branches: list[dict[st
                 alpha=0.84,
                 label=f"B{branch['branch_index']} BPB={branch['bpb']:.2f}",
             )
-        ax.set_title(title, color="white", fontsize=11)
-        ax.set_xlabel("filtration radius", color="white")
-        ax.tick_params(colors="white")
+        ax.set_title(title, color="white", fontsize=8.5, pad=5)
+        ax.set_xlabel("filtration radius", color="white", fontsize=8)
+        ax.tick_params(colors="white", labelsize=7)
         ax.grid(color="#1f3b52", linewidth=0.5, alpha=0.6)
     axes[0, 0].legend(loc="best", fontsize=7, framealpha=0.18, facecolor="#07111e", labelcolor="white")
     fig.suptitle(
         f"Directed nested simplicial diagnostics R{record_meta['record_index']}",
         color="white",
-        fontsize=14,
+        fontsize=13,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
@@ -1476,10 +1636,13 @@ def plot_step_radius_heatmaps(record_meta: dict[str, Any], branches: list[dict[s
         ("edge_density", "step x radius edge density", "viridis"),
         ("cycle_rank", "step x radius cycle rank", "magma"),
         ("betti0", "step x radius Betti-0", "cividis"),
+        ("dec_conservation_loss", "DEC conservation residual", "inferno"),
+        ("dec_kinetic_energy", "DEC kinetic energy", "turbo"),
+        ("dec_wedge_interior_residual", "DEC wedge/interior residual", "plasma"),
         ("analogical_map_loss", "transition x radius map loss", "plasma"),
         ("directed_map_loss", "transition x radius directed map loss", "inferno"),
     ]
-    fig, axes = plt.subplots(1, len(panels), figsize=(18.5, 4.6), facecolor="#030712")
+    fig, axes = plt.subplots(2, 4, figsize=(18.5, 8.2), facecolor="#030712")
     for ax, (key, title, cmap_name) in zip(np.asarray(axes).reshape(-1), panels):
         ax.set_facecolor("#030712")
         matrix = np.asarray(heatmaps.get(key, np.zeros((1, len(stats.get("radii", [0.0]))))), dtype=float)
@@ -1661,6 +1824,7 @@ def main() -> None:
             branches,
             traj_dir / f"{record_slug}_toric_phase_simplicial_trajectory.png",
         )
+        plot_toric_shadow_audit(meta, branches, topology_dir / f"{record_slug}_toric_shadow_audit.png")
         plot_directed_filtration(meta, branches, topology_dir / f"{record_slug}_directed_filtration.png")
         plot_topology_heatmaps(meta, branches, topology_dir / f"{record_slug}_noncommutative_heatmaps.png")
         plot_step_radius_heatmaps(meta, branches, topology_dir / f"{record_slug}_step_radius_hierarchy.png")
@@ -1679,6 +1843,19 @@ def main() -> None:
     for name, spec in TETRAHEDRON_SPECS.items():
         plot_tetrahedron(branch_records, spec, tetra_dir / f"{name}.png")
         write_interactive_tetrahedron(branch_records, spec, tetra_dir / f"{name}.html")
+
+    def mean_record_key(key: str, default: float = 0.0) -> float:
+        values = [float(record.get(key, default)) for record in branch_records]
+        return float(np.mean(values)) if values else float(default)
+
+    def mean_shadow_key(key: str, default: float = 0.0) -> float:
+        values = [
+            float(record.get("toric_shadow", {}).get(key, default))
+            for record in branch_records
+            if isinstance(record.get("toric_shadow"), dict)
+        ]
+        return float(np.mean(values)) if values else float(default)
+
     summary = {
         "checkpoint": args.checkpoint,
         "records": len(records),
@@ -1697,6 +1874,27 @@ def main() -> None:
         "mean_topology_cycle_rank": float(np.mean([record["topology_cycle_rank"] for record in branch_records])),
         "mean_topology_boundary_residual": float(np.mean([record["topology_boundary_residual"] for record in branch_records])),
         "mean_topology_dirichlet_energy": float(np.mean([record["topology_dirichlet_energy"] for record in branch_records])),
+        "mean_topology_dec_conservation_loss": float(
+            np.mean([record["topology_dec_conservation_loss"] for record in branch_records])
+        ),
+        "mean_topology_dec_mass_residual": float(
+            np.mean([record["topology_dec_mass_residual"] for record in branch_records])
+        ),
+        "mean_topology_dec_vorticity_drift": float(
+            np.mean([record["topology_dec_vorticity_drift"] for record in branch_records])
+        ),
+        "mean_topology_dec_kinetic_energy": float(
+            np.mean([record["topology_dec_kinetic_energy"] for record in branch_records])
+        ),
+        "mean_topology_dec_kinetic_energy_drift": float(
+            np.mean([record["topology_dec_kinetic_energy_drift"] for record in branch_records])
+        ),
+        "mean_topology_dec_hodge_balance": float(
+            np.mean([record["topology_dec_hodge_balance"] for record in branch_records])
+        ),
+        "mean_topology_dec_wedge_interior_residual": float(
+            np.mean([record["topology_dec_wedge_interior_residual"] for record in branch_records])
+        ),
         "mean_topology_analogical_map_loss": float(np.mean([record["topology_analogical_map_loss"] for record in branch_records])),
         "mean_topology_directed_map_loss": float(np.mean([record["topology_directed_map_loss"] for record in branch_records])),
         "mean_topology_transport_entropy": float(np.mean([record["topology_transport_entropy"] for record in branch_records])),
@@ -1737,6 +1935,20 @@ def main() -> None:
         "mean_topology_hdbscan_stability": float(
             np.mean([record["topology_hdbscan_stability"] for record in branch_records])
         ),
+        "mean_toric_shadow_occupied_fan_cells": mean_shadow_key("occupied_fan_cells"),
+        "mean_toric_shadow_fan_cell_entropy": mean_shadow_key("fan_cell_entropy"),
+        "mean_toric_shadow_mean_margin": mean_shadow_key("mean_margin"),
+        "mean_toric_shadow_min_margin": mean_shadow_key("min_margin"),
+        "mean_toric_shadow_mean_bend": mean_shadow_key("mean_bend"),
+        "mean_toric_shadow_slope_residual": mean_shadow_key("slope_residual"),
+        "mean_toric_geometry_active_face_margin": mean_record_key("toric_geometry/toric_active_face_margin"),
+        "mean_toric_geometry_active_face_entropy": mean_record_key("toric_geometry/toric_active_face_entropy"),
+        "mean_toric_geometry_bend_magnitude": mean_record_key("toric_geometry/toric_bend_magnitude"),
+        "mean_toric_geometry_binomial_residual": mean_record_key("toric_geometry/toric_binomial_residual"),
+        "mean_toric_geometry_affine_wall_distance": mean_record_key("toric_geometry/toric_affine_wall_distance"),
+        "mean_toric_geometry_coxeter_loss": mean_record_key("toric_geometry/toric_coxeter_loss"),
+        "mean_toric_geometry_braid_loss": mean_record_key("toric_geometry/toric_braid_loss"),
+        "mean_toric_geometry_leaf_residual": mean_record_key("toric_geometry/toric_leaf_residual"),
         "outputs": {
             "records": str(output_dir / "reasoning_geometry_records.json"),
             "selected_records": str(output_dir / "selected_records.json"),
@@ -1766,6 +1978,7 @@ def main() -> None:
             "trajectories/*_trajectory_3d.png",
             "trajectories/*_toric_phase_simplicial_trajectory.png",
             "topology/*_directed_filtration.png",
+            "topology/*_toric_shadow_audit.png",
             "topology/*_step_radius_hierarchy.png",
             "topology/*_exact_persistence_morphisms.png",
             "triangles/*.png",

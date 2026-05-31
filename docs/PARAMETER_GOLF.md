@@ -31,6 +31,10 @@ changes.
 - GraphCG/analogy geometry: auto-sized hidden lattice basis, scale-normalized
   nested simplex-tree maps, directed flag-complex topology, and analogical
   functor diagnostics.
+- Toric geometry signal: training-only low-rank, fake-quantized probes for
+  Newton active faces, moment maps, Cartier-style bends, toric binomials,
+  affine-Coxeter reflections, braid consistency, and noncommutative
+  phase-foliation residuals.
 - Soft-MoE: off for the contest track; still default for the graph research
   encoder.
 - Export: bit-packed 6-bit row quantization with LZMA by default; auxiliary
@@ -151,13 +155,26 @@ complexity/train/target_cond_k_lzma_mean
 complexity/train/order_program_k_zlib_mean
 complexity/train/prediction_target_ncd_lzma_mean
 complexity/train/gflownet_action_trace_k_lzma_mean
+complexity/train/target_helper_cond_k_lzma_mean
+complexity/train/information_symmetry_gap_k_lzma_mean
+complexity/train/analogical_transfer_relative_k_lzma_mean
+complexity/train/prediction_relative_k_reward_lzma_mean
 complexity/val/target_cond_k_lzma_mean
 ```
 
-These metrics are diagnostic by default. They help detect whether BPB
-improvements come with more compact, robust reasoning programs or only local
-byte-pattern modeling. The BPB objective and causal scoring contract remain
-unchanged.
+The conditional helper for random-order autoregression is not just the previous
+byte row. It includes the strict score-before-update prefix, the public
+permutation encoded as a tree/order program, the original projected byte chunk,
+and GFlowNet action traces when the compact policy is active. Optional graph or
+tree helper payloads can be supplied by evaluation scripts. Analogical transfer
+is measured by comparing the best known program for a target under direct
+helpers with the best known program under direct helpers plus a source
+source-target helper pair. Negative `analogical_transfer_relative_k_*` means
+the analogy shortened the conditional description. Prediction rewards are
+correctness-gated, so short incorrect guesses do not look good. These metrics
+are diagnostic by default. They help detect whether BPB improvements come with
+more compact, robust reasoning programs or only local byte-pattern modeling.
+The BPB objective and causal scoring contract remain unchanged.
 
 ## GraphCG And Directed Topological Analogies
 
@@ -198,6 +215,24 @@ stability/noise, and the number of sampled windows. This is the preferred
 analogue of persistent homology for the contest adapter because it does not add
 a heavyweight dependency to the self-contained artifact.
 
+The same window hierarchy now includes DEC-style conservative flow diagnostics
+adapted from Mohamed, Hirani, and Samtaney's DEC discretization of
+incompressible Navier-Stokes equations (`assets/1508.01166v2.pdf`). The directed
+adjacency skew `A^-> - (A^->)^T` is treated as a discrete reasoning 1-form over
+the local complex. The trainer measures:
+
+- divergence/mass residual: the squared row-sum of the skew flow;
+- vorticity drift: scale-to-scale drift of node circulation;
+- kinetic-energy drift: change in edge-flow energy across filtration radii;
+- Hodge balance: consistency between ordinary and core-radius weighted edge
+  energy;
+- wedge/interior residual: a local convective consistency proxy.
+
+These are auxiliary diagnostics and a tiny part of the existing step-topology
+loss. They are not an exported solver and do not add parameters. W&B logs them
+as `train/analogy_step_dec_*`, and the geometry analysis adds DEC panels to
+`*_directed_filtration.png` and `*_step_radius_hierarchy.png`.
+
 The same point clouds now use a radius-parametrized HDBSCAN surrogate. For each
 relation group, the trainer computes core distances, mutual-reachability
 distances, and a radius sweep over the existing filtration grid. Only
@@ -212,17 +247,65 @@ damage from noisy early hidden states.
 The periodic geometry suite visualizes the same nested complexes. Each
 analysis checkpoint writes `geometry/topology/*_directed_filtration.png` with
 radius-indexed edge density, soft triangle density, Betti-0, cycle-rank,
-Dirichlet energy, boundary residual, directed asymmetry, noncommutative cycle
-flux, radius-HDBSCAN cluster count, and HDBSCAN outlier fraction, plus
+Dirichlet energy, boundary residual, DEC conservation/mass residual, directed
+asymmetry, noncommutative cycle flux, radius-HDBSCAN cluster count, and HDBSCAN
+outlier fraction, plus
 `*_noncommutative_heatmaps.png` for scale-normalized hidden-state distance,
 mutual-reachability distance, density-persistence adjacency, antisymmetric
 toric skew, and directed adjacency at low and middle filtration radii.
 `*_step_radius_hierarchy.png` records the window-by-radius simplex hierarchy,
-including analogical and directed map residual heatmaps.
+including DEC conservation/kinetic/wedge panels and analogical and directed map
+residual heatmaps.
 `*_toric_phase_simplicial_trajectory.png` projects the irrational
 rotation-algebra phase path onto a torus and overlays local simplex edges plus
 the window-to-window analogical maps. These plots are computed from model
 hidden states and branch losses, not hand-drawn diagrams.
+
+## Toric Geometry Training Signal
+
+The `oai` branch instantiates the toric-geometry next-iteration signal as a
+training-only probe in `src/toricgt/toric_geometry_tasks.py`.  The deployable
+Parameter-Golf artifact remains dense and compact: `toric_geometry_probe.*`
+parameters are excluded from artifact packing.
+
+The probe computes a deterministic small exponent table, treats hidden states
+as points in a Newton-fan chart, and optimizes a low-weight auxiliary objective:
+
+```text
+L = L_base
+  + lambda_toric * (
+      lambda_fan L_fan
+    + lambda_bend L_bend
+    + lambda_binom L_binom
+    + lambda_moment ||mu_hat - mu_star||^2
+    + lambda_coxeter L_coxeter
+    + lambda_braid L_braid
+    + lambda_leaf L_leaf
+    )
+```
+
+The terms have direct diagnostics:
+
+- `L_fan`: Newton-polytope active-face prediction plus top-two margin.
+- `L_bend`: second-difference bend consistency for a Cartier-divisor-style
+  piecewise-linear shadow.
+- `L_binom`: toric ideal relation checks among exponent logits.
+- `L_moment`: soft moment-map alignment to irrational toric phase teachers.
+- `L_coxeter`: consistency of affine wall reflections in the moment chart.
+- `L_braid`: A2 braid-path consistency from alternating simple reflections.
+- `L_leaf`: coherence of noncommutative phase-foliation increments.
+
+Training logs `train/toric_*` metrics to W&B.  The geometry suite also computes
+empirical toric shadows independent of probe weights, so old checkpoints can
+still be audited.  The main new plot is `*_toric_shadow_audit.png`, which shows
+active fan cells along the reasoning path, margins, bends, branch fan coverage,
+and phase-leaf residuals.
+
+Current operational guardrail: training should resume only after the full
+analysis suite finishes and all generated plot classes have been inspected.
+The requested "there be dragons" responding-onlooker ablation is an absence
+check in this codebase; no matching observer/prompt path exists outside ignored
+output/checkpoint/data directories.
 
 The paper update also ties the same toric coordinates to future affine
 Coxeter and braid tasks. A toric lattice becomes a Weyl-chamber coordinate

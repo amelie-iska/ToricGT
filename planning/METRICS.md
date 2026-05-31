@@ -1,5 +1,151 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-05-31 DEC/Toric/Relative-K Audit
+
+Training remained paused during this audit.  The checkpoint analyzed was:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00035250.pt
+```
+
+The updated analysis suite with DEC conservative reasoning diagnostics,
+toric-shadow probes, directed persistence-module morphisms, simplicial
+trajectory plots, and reasoning/K/BPB simplices was run at:
+
+```text
+outputs/reasoning_geometry_suite/oai-dec-toric-relativek-step35250/
+```
+
+W&B analysis run:
+
+```text
+https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/54ub7jk1
+```
+
+Contact sheets reviewed locally:
+
+```text
+outputs/reasoning_geometry_suite/oai-dec-toric-relativek-step35250/contact_triangles.png
+outputs/reasoning_geometry_suite/oai-dec-toric-relativek-step35250/contact_tetrahedra.png
+outputs/reasoning_geometry_suite/oai-dec-toric-relativek-step35250/contact_trajectories.png
+outputs/reasoning_geometry_suite/oai-dec-toric-relativek-step35250/contact_topology.png
+```
+
+The initial rerender exposed label crowding in the directed-filtration and
+simplex figures after adding DEC panels.  The plotting script was patched and
+the analysis rerun; the final local figures are readable enough for audit use.
+
+### Numeric Summary
+
+The two-record, six-branch validation geometry audit is small by design; it is
+used to verify diagnostic behavior before resuming training, not to estimate
+the final leaderboard BPB.
+
+| metric | value | category | interpretation |
+|---|---:|---|---|
+| mean BPB | `4.9232` | not competitive but expected for this checkpoint slice | The checkpoint is still far from the challenge target; this audit is about geometry and stability. |
+| best branch BPB | `4.5328` | as desired relative to branch sampling | GFlowNet/random-order branch selection provides meaningful variance. |
+| mean MST efficiency | `0.4099` | as desired but weak | Trajectories have some organization but are not yet tight. |
+| mean path smoothness | `0.1026` | as desired | Hidden paths are not exploding; smoothness remains bounded. |
+| directed asymmetry | `0.3850` | as desired | Noncommutative/directed topology is nontrivial rather than collapsing to an undirected complex. |
+| directed cycle flux | `4.5e-18` | not strong enough | The oriented cycle signal is almost zero; future training should increase useful directed circulation without increasing divergence. |
+| triangle density | `0.3033` | as desired | Step complexes contain higher-order simplices. |
+| mean Betti-0 | `2.7569` | as desired | Windows preserve multiple local components at lower radii and connect as radius grows. |
+| cycle-rank proxy | `0.0069` | not strong enough | Loops are rare; persistent 1D structure needs more signal if analogical topology is to dominate. |
+| boundary residual | `0.0` | as desired | The chain-map/boundary surrogate is numerically stable on this audit. |
+| Dirichlet energy | `0.5944` | acceptable | Relational map energy is moderate; no immediate instability. |
+| DEC conservation loss | `0.1287` | acceptable | Conservative-flow residual is finite and bounded. |
+| DEC mass residual | `0.1201` | acceptable but should decrease | Divergence is visible; training should reduce it without erasing directionality. |
+| DEC vorticity drift | `0.0180` | as desired | Vorticity is stable across radii. |
+| DEC kinetic drift | `0.0041` | as desired | Energy drift is small. |
+| DEC Hodge balance | `0.0099` | as desired | Hodge-weighted energy is consistent with the unweighted flow. |
+| DEC wedge/interior residual | `0.0619` | acceptable | Convective consistency is nonzero but not dominating. |
+| analogical map loss | `0.1433` | as desired but not strong enough | Soft maps exist and are bounded; they need stronger task coupling. |
+| directed map loss | `0.1736` | as desired but not strong enough | Directed maps are stable but still loose. |
+| transport entropy | `0.9794` | as desired | Transport is not collapsed. |
+| exact H0 map rank | `1.0833` | as desired | Persistence-module morphisms are computed and nontrivial. |
+| exact H1 map rank | `0.85` | promising but low sample | There is actual loop-level morphism structure, but not enough to judge strength. |
+| exact edge validity | `0.9688` | as desired | Most transported edges remain valid. |
+| exact triangle validity | `0.9255` | as desired | Most transported 2-simplices remain valid. |
+| HDBSCAN stability | `0.9410` | as desired | Radius-parametrized clusters are stable with low noise. |
+| HDBSCAN noise fraction | `0.0590` | as desired | Few trajectory points are discarded as outliers. |
+| toric fan cells | `10.8333` | as desired | Fan occupancy is nontrivial. |
+| toric mean margin | `0.0341` | not strong enough | Active-face decisions are too close to walls. |
+| toric min margin | `0.00025` | not as desired | Some decisions sit essentially on fan walls. |
+| toric active-face margin | `-1.5690` | not as desired | Probe active-face teacher is still poorly separated. |
+| toric binomial residual | `1.4622` | not as desired | Toric ideal relation checks are weak. |
+| toric leaf residual | `1.0018` | not as desired | Noncommutative phase leaves are not yet organizing trajectories strongly. |
+
+### Plot Review
+
+The triangle/simplex plots show that branches split primarily along reasoning
+time and K/BPB tradeoff axes.  This is useful: the diagnostic is sensitive to
+branch choices.  It is not yet ideal: the best BPB branches are not obviously
+at the high-reasoning/high-structure boundary, meaning inference-time scaling
+is not yet buying enough compression.
+
+The tetrahedra show branch clouds near interior edges rather than clean
+vertices.  That indicates multi-objective tradeoffs are real but not sharply
+controlled.  No degenerate all-points-one-corner failure was observed.
+
+The 3D embedding trajectories are nontrivial and branch-diverse.  R0 has a
+compact tangled branch cloud; R1 shows a clearer sweeping trajectory.  Energy
+landscapes have visible local basins, and Ramachandran-style phase plots show
+phase organization rather than a single point collapse.
+
+The toric phase/simplicial trajectory plots show dense local Vietoris--Rips
+structure over the phase torus, with visible soft analogical maps between
+windows.  This supports the intended toric/tropical/simplicial picture, but the
+toric leaf residual says the phase projection is still too loose to be used as
+a strong training target.
+
+The topology panels show nested edge and triangle densities increasing with
+radius, Betti-0 decreasing as expected, zero boundary residual, finite DEC
+conservation/mass residuals, and bounded directed asymmetry.  The weak point is
+1D cycle strength: cycle-rank and cycle flux are too small, so future updates
+should increase directed cycle signal carefully rather than driving all
+directed quantities to zero.
+
+### Relative-K Helper Audit
+
+A standalone complexity pass over 128 validation rows was written to:
+
+```text
+outputs/complexity/oai-relative-k-val-40250/complexity_summary.json
+```
+
+Important values:
+
+| metric | value | interpretation |
+|---|---:|---|
+| `graph_relative_to_text_helper_k_lzma_mean` | `-4133.66` | Text strongly helps describe graph projections under LZMA. |
+| `text_relative_to_graph_helper_k_lzma_mean` | `-4110.22` | Graph projections also strongly help describe text. |
+| `text_graph_information_symmetry_gap_k_lzma_mean` | `32.31` | LZMA helper symmetry is reasonably tight relative to payload sizes. |
+| `text_graph_information_symmetry_gap_k_zlib_mean` | `3409.13` | Zlib is much less symmetric on these long payloads; use with caution. |
+
+This supports the implementation choice: analogical helper transfer should use
+named helper families and report compressor-specific behavior rather than a
+single scalar "K".
+
+### Recommended Resume Policy
+
+Resume from step `35250` with the current low-weight DEC, toric, topology, and
+relative-K diagnostics enabled.  Do not increase their training weights yet.
+The immediate training objective should remain BPB-first while collecting the
+new W&B metrics:
+
+```text
+train/analogy_step_dec_*
+complexity/train/target_helper_cond_k_*
+complexity/train/information_symmetry_gap_k_*
+complexity/train/analogical_transfer_relative_k_*
+complexity/train/prediction_relative_k_reward_*
+```
+
+Next adjustment if the next interval stalls: increase toric entropy/fan-margin
+regularization slightly and add a mild directed-cycle floor, but only after
+checking that BPB and validation rechecks do not regress.
+
 Date: 2026-05-27 UTC.
 
 Training was paused from tmux session `toricgt_pg_oai`.  No training process is currently running.  The latest retained periodic checkpoint is

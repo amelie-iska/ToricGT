@@ -117,11 +117,39 @@ def test_analogy_hdbscan_surrogate_metrics_are_finite():
     assert out["analogy_hdbscan_core_radius"].isfinite()
     assert out["analogy_step_topology_loss"].isfinite()
     assert out["analogy_step_dirichlet_energy"].isfinite()
+    assert out["analogy_step_dec_conservation_loss"].isfinite()
+    assert out["analogy_step_dec_mass_residual"].isfinite()
+    assert out["analogy_step_dec_vorticity_drift"].isfinite()
+    assert out["analogy_step_dec_kinetic_energy"].isfinite()
+    assert out["analogy_step_dec_hodge_balance"].isfinite()
+    assert out["analogy_step_dec_wedge_interior_residual"].isfinite()
     assert out["analogy_step_hdbscan_stability"].isfinite()
     assert out["analogy_step_cycle_rank"].isfinite()
     assert out["analogy_step_analogical_map_loss"].isfinite()
     assert out["analogy_step_directed_map_loss"].isfinite()
     assert out["analogy_graphcg_chart_dim"].item() >= 1
+
+
+def test_toric_geometry_training_signals_are_finite():
+    cfg = tiny_config(
+        vocab_size=48,
+        use_toric_geometry_tasks=True,
+        toric_geometry_num_exponents=8,
+        toric_geometry_exponent_dim=4,
+        toric_geometry_probe_rank=6,
+        toric_geometry_max_positions=12,
+    )
+    model = DenseRandomOrderToricLM(cfg)
+    tokens = torch.randint(4, cfg.vocab_size, (2, 12))
+    out = model(tokens, sample_ids=torch.arange(2))
+    assert out["loss"].isfinite()
+    assert out["toric_geometry_loss"].isfinite()
+    assert out["toric_fan_loss"].isfinite()
+    assert out["toric_active_face_margin"].isfinite()
+    assert out["toric_bend_magnitude"].isfinite()
+    assert out["toric_binomial_residual"].isfinite()
+    assert out["toric_affine_wall_distance"].isfinite()
+    assert out["toric_leaf_residual"].isfinite()
 
 
 def test_reasoning_step_topology_builds_nested_directed_complexes():
@@ -146,11 +174,21 @@ def test_reasoning_step_topology_builds_nested_directed_complexes():
     assert losses["reasoning_step_directed_asymmetry"].item() > 0
     assert losses["reasoning_step_analogical_map_loss"].isfinite()
     assert losses["reasoning_step_directed_map_loss"].isfinite()
+    assert losses["reasoning_step_dec_conservation_loss"].isfinite()
+    assert losses["reasoning_step_dec_mass_residual"].isfinite()
+    assert losses["reasoning_step_dec_vorticity_drift"].isfinite()
+    assert losses["reasoning_step_dec_kinetic_energy"].isfinite()
+    assert losses["reasoning_step_dec_hodge_balance"].isfinite()
+    assert losses["reasoning_step_dec_wedge_interior_residual"].isfinite()
 
     stats = directed_step_filtration_stats_np(hidden.squeeze(0).numpy(), config=cfg)
     assert "simplex_tree_summary" in stats
     assert "analogical_map_loss" in stats
     assert "directed_map_loss" in stats
+    assert "dec_conservation_loss" in stats
+    assert torch.isfinite(torch.tensor(stats["dec_conservation_loss"])).all().item()
+    assert torch.isfinite(torch.tensor(stats["dec_mass_residual"])).all().item()
+    assert torch.isfinite(torch.tensor(stats["dec_kinetic_energy"])).all().item()
     assert len(stats["simplex_tree_summary"]) >= cfg.levels
     edge_density = stats["edge_density"]
     assert all(edge_density[i] <= edge_density[i + 1] + 1e-8 for i in range(len(edge_density) - 1))

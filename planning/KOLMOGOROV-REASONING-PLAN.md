@@ -113,6 +113,75 @@ Interpretation:
 - high `K(trace | input)` plus correct answer may be brute-force search;
 - high `K(trace | input)` plus wrong answer is pure waste.
 
+### 2b. Random-Order Helper Sets
+
+For the random-order Parameter-Golf model the helper object is structured, not
+just a left-to-right string prefix.  At random-order step `k`, the direct helper
+set is
+
+```text
+H_k = {
+  strict revealed prefix b_{pi_<k},
+  public permutation/tree program pi,
+  original projected byte chunk,
+  GFlowNet action trace a_{<k} when active,
+  optional serialized graph/tree helper payloads
+}
+```
+
+The diagnostic shortest-known program proxy is
+
+```text
+K_hat_c(y_k | H_k) = min_{h in H_k union {empty}} K_c(y_k | h).
+```
+
+This remains an estimator-tagged compressor proxy.  Adding helpers can only
+decrease the proxy, so every report must name the helper family and compressor.
+
+### 2c. Analogical Transfer of Conditional Complexity
+
+Analogical reasoning supplies helper strings, graphs, trees, or action traces.
+Given a source pair `(x_s, y_s)` and target pair `(x_t, y_t)`, define
+
+```text
+Delta_K^ana =
+  K_hat_c(y_t | H_t, x_s, y_s, graph_s, tree_s)
+  - K_hat_c(y_t | H_t).
+```
+
+Negative values mean the source analogy shortened the best known conditional
+program for the target.  Positive values mean the analogy was irrelevant or
+misleading.  The trainer logs this as
+`complexity/*/analogical_transfer_relative_k_*` and the sign-reversed clipped
+gain as `complexity/*/analogical_transfer_reward_*`.
+
+Prediction-side rewards must be correctness-gated:
+
+```text
+R_K(pred) =
+  1[pred approximately target] *
+  max(0, K_hat_c(y_t | H_t) - K_hat_c(pred | H_t)).
+```
+
+This prevents short but wrong predictions from being rewarded.  It also keeps
+the complexity layer compatible with score-before-update random-order
+autoregression: helpers may contain only public order information, strict
+prefix bytes, graph projections already present in the scored chunk, and action
+traces sampled before the target byte is read.
+
+### 2d. Symmetry-of-Information Audit
+
+For related strings or graph serializations `x` and `y`, track
+
+```text
+S_c(x,y) =
+  |(K_c(x) - K_c(x | y)) - (K_c(y) - K_c(y | x))|.
+```
+
+Large gaps can indicate estimator pathologies, bad separators, or asymmetry
+between text and graph projections.  The metric is not optimized directly; it
+is used to decide whether a compressor proxy is reliable enough for a domain.
+
 ### 3. Normalized Compression Distance
 
 For two traces `a,b`:

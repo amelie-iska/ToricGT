@@ -155,7 +155,17 @@ def load_model(args: argparse.Namespace) -> DenseRandomOrderToricLM:
         )
     model = DenseRandomOrderToricLM(cfg)
     if payload is not None:
-        model.load_state_dict(payload["model"])
+        incompatible = model.load_state_dict(payload["model"], strict=False)
+        bad_missing = [
+            key
+            for key in incompatible.missing_keys
+            if not key.startswith(("graphcg_", "toric_geometry_probe."))
+        ]
+        if bad_missing or incompatible.unexpected_keys:
+            raise RuntimeError(
+                "checkpoint/model mismatch: "
+                f"missing={bad_missing[:8]} unexpected={incompatible.unexpected_keys[:8]}"
+            )
     return model
 
 

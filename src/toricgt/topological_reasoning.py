@@ -8,6 +8,9 @@ full persistent-homology package at training time:
 * a radius sweep builds nested Vietoris--Rips/flag complexes up to dimension 2;
 * a time/skew biased directed adjacency tracks noncommutative trajectory flow;
 * a mutual-reachability sweep supplies an HDBSCAN-style stability gate.
+* DEC-inspired residuals audit conservative reasoning flow: divergence,
+  vorticity drift, kinetic-energy drift, Hodge balance, and wedge/interior
+  product consistency over the same directed simplicial windows.
 
 The PyTorch path returns differentiable losses and finite diagnostics.  The
 NumPy path mirrors the same definitions for periodic plots and audits.
@@ -50,6 +53,13 @@ def _zero_like(hidden: torch.Tensor) -> dict[str, torch.Tensor]:
         "reasoning_step_filtration_inclusion_loss",
         "reasoning_step_boundary_residual",
         "reasoning_step_dirichlet_energy",
+        "reasoning_step_dec_conservation_loss",
+        "reasoning_step_dec_mass_residual",
+        "reasoning_step_dec_vorticity_drift",
+        "reasoning_step_dec_kinetic_energy",
+        "reasoning_step_dec_kinetic_energy_drift",
+        "reasoning_step_dec_hodge_balance",
+        "reasoning_step_dec_wedge_interior_residual",
         "reasoning_step_directed_topology_loss",
         "reasoning_step_directed_transitive_loss",
         "reasoning_step_directed_cycle_flux",
@@ -141,6 +151,13 @@ def reasoning_step_topology_loss(
         "inclusion": [],
         "boundary": [],
         "dirichlet": [],
+        "dec_conservation": [],
+        "dec_mass": [],
+        "dec_vorticity_drift": [],
+        "dec_kinetic": [],
+        "dec_kinetic_drift": [],
+        "dec_hodge": [],
+        "dec_wedge": [],
         "directed": [],
         "directed_transitive": [],
         "directed_cycle": [],
@@ -201,6 +218,13 @@ def reasoning_step_topology_loss(
             level_inclusion = []
             level_boundary = []
             level_dirichlet = []
+            level_dec_conservation = []
+            level_dec_mass = []
+            level_dec_vorticity_drift = []
+            level_dec_kinetic = []
+            level_dec_kinetic_drift = []
+            level_dec_hodge = []
+            level_dec_wedge = []
             level_directed = []
             level_directed_transitive = []
             level_directed_cycle = []
@@ -212,6 +236,8 @@ def reasoning_step_topology_loss(
             level_betti0 = []
             sym_levels: list[torch.Tensor] = []
             directed_levels: list[torch.Tensor] = []
+            prev_vorticity = None
+            prev_kinetic = None
             nn_scale = masked_dist.topk(min(2, n - 1), dim=-1, largest=False).values[:, 0].mean()
             level_barcode.append(nn_scale)
             for radius in radii:
@@ -239,6 +265,45 @@ def reasoning_step_topology_loss(
                 weights = (sym + sym.transpose(0, 1)) * 0.5
                 weights = weights.detach()
                 dirichlet = (weights * dist.pow(2)).sum() / weights.sum().clamp_min(1e-8)
+                flow = directed - directed.transpose(0, 1)
+                divergence = flow.sum(dim=-1) / max(1, n - 1)
+                dec_mass = divergence.pow(2).mean()
+                degree_weight = sym.detach().sum(dim=-1).clamp_min(1e-6)
+                vorticity_node = (flow * sym.detach()).sum(dim=-1) / degree_weight
+                edge_mass = sym.detach().sum().clamp_min(1e-8)
+                dec_kinetic = (sym.detach() * flow.pow(2)).sum() / edge_mass
+                if prev_vorticity is None:
+                    dec_vorticity_drift = zero
+                    dec_kinetic_drift = zero
+                else:
+                    dec_vorticity_drift = (vorticity_node - prev_vorticity).pow(2).mean()
+                    dec_kinetic_drift = (dec_kinetic - prev_kinetic).pow(2)
+                hodge_edge = 1.0 / (core_radius[:, None] + core_radius[None, :] + 1e-6)
+                hodge_edge = hodge_edge * (1.0 - eye)
+                positive_hodge = hodge_edge[hodge_edge > 0]
+                hodge_mean = (
+                    positive_hodge.mean().clamp_min(1e-6)
+                    if positive_hodge.numel() > 0
+                    else hodge_edge.new_tensor(1.0)
+                )
+                hodge_edge = hodge_edge / hodge_mean
+                hodge_energy = (hodge_edge.detach() * sym.detach() * flow.pow(2)).sum() / (
+                    hodge_edge.detach() * sym.detach()
+                ).sum().clamp_min(1e-8)
+                dec_hodge = (hodge_energy / dec_kinetic.detach().abs().clamp_min(1e-8) - 1.0).pow(2)
+                avg_vorticity = 0.5 * (vorticity_node[:, None] + vorticity_node[None, :])
+                wedge_form = flow * avg_vorticity
+                interior_form = directed * vorticity_node[None, :] - directed.transpose(0, 1) * vorticity_node[:, None]
+                dec_wedge = (sym.detach() * (wedge_form - interior_form).pow(2)).sum() / edge_mass
+                dec_conservation = (
+                    dec_mass
+                    + 0.25 * dec_vorticity_drift
+                    + 0.10 * dec_kinetic_drift
+                    + 0.05 * dec_hodge
+                    + 0.05 * dec_wedge
+                )
+                prev_vorticity = vorticity_node.detach()
+                prev_kinetic = dec_kinetic.detach()
                 directed_two_step = directed @ directed / max(1, n - 2)
                 directed_transitive = (directed_two_step * (1.0 - directed)).mean()
                 cycle_forward = torch.einsum("ij,jk,ki->", directed, directed, directed)
@@ -270,6 +335,13 @@ def reasoning_step_topology_loss(
                 level_inclusion.append(inclusion + chain)
                 level_boundary.append(boundary)
                 level_dirichlet.append(dirichlet)
+                level_dec_conservation.append(dec_conservation)
+                level_dec_mass.append(dec_mass)
+                level_dec_vorticity_drift.append(dec_vorticity_drift)
+                level_dec_kinetic.append(dec_kinetic)
+                level_dec_kinetic_drift.append(dec_kinetic_drift)
+                level_dec_hodge.append(dec_hodge)
+                level_dec_wedge.append(dec_wedge)
                 level_directed.append(directed_transitive + float(cfg.skew_scale) * directed_cycle + directed_chain)
                 level_directed_transitive.append(directed_transitive)
                 level_directed_cycle.append(directed_cycle)
@@ -303,6 +375,13 @@ def reasoning_step_topology_loss(
             window_terms["inclusion"].append(torch.stack(level_inclusion).mean())
             window_terms["boundary"].append(torch.stack(level_boundary).mean())
             window_terms["dirichlet"].append(torch.stack(level_dirichlet).mean())
+            window_terms["dec_conservation"].append(torch.stack(level_dec_conservation).mean())
+            window_terms["dec_mass"].append(torch.stack(level_dec_mass).mean())
+            window_terms["dec_vorticity_drift"].append(torch.stack(level_dec_vorticity_drift).mean())
+            window_terms["dec_kinetic"].append(torch.stack(level_dec_kinetic).mean())
+            window_terms["dec_kinetic_drift"].append(torch.stack(level_dec_kinetic_drift).mean())
+            window_terms["dec_hodge"].append(torch.stack(level_dec_hodge).mean())
+            window_terms["dec_wedge"].append(torch.stack(level_dec_wedge).mean())
             window_terms["directed"].append(torch.stack(level_directed).mean())
             window_terms["directed_transitive"].append(torch.stack(level_directed_transitive).mean())
             window_terms["directed_cycle"].append(torch.stack(level_directed_cycle).mean())
@@ -360,6 +439,7 @@ def reasoning_step_topology_loss(
     inclusion_loss = mean_term("inclusion")
     boundary_residual = mean_term("boundary")
     dirichlet_energy = mean_term("dirichlet")
+    dec_conservation = mean_term("dec_conservation")
     directed_loss = mean_term("directed")
     analogical_map_loss = mean_term("analogical_map") if window_terms["analogical_map"] else zero
     directed_map_loss = mean_term("directed_map") if window_terms["directed_map"] else zero
@@ -371,6 +451,7 @@ def reasoning_step_topology_loss(
         + 0.15 * inclusion_loss
         + 0.15 * boundary_residual
         + 0.25 * dirichlet_energy
+        + 0.15 * dec_conservation
         + 0.35 * directed_loss
         + 0.15 * analogical_map_loss
         + 0.15 * directed_map_loss
@@ -383,6 +464,13 @@ def reasoning_step_topology_loss(
         "reasoning_step_filtration_inclusion_loss": inclusion_loss.detach(),
         "reasoning_step_boundary_residual": boundary_residual.detach(),
         "reasoning_step_dirichlet_energy": dirichlet_energy.detach(),
+        "reasoning_step_dec_conservation_loss": dec_conservation.detach(),
+        "reasoning_step_dec_mass_residual": mean_term("dec_mass").detach(),
+        "reasoning_step_dec_vorticity_drift": mean_term("dec_vorticity_drift").detach(),
+        "reasoning_step_dec_kinetic_energy": mean_term("dec_kinetic").detach(),
+        "reasoning_step_dec_kinetic_energy_drift": mean_term("dec_kinetic_drift").detach(),
+        "reasoning_step_dec_hodge_balance": mean_term("dec_hodge").detach(),
+        "reasoning_step_dec_wedge_interior_residual": mean_term("dec_wedge").detach(),
         "reasoning_step_directed_topology_loss": directed_loss.detach(),
         "reasoning_step_directed_transitive_loss": mean_term("directed_transitive").detach(),
         "reasoning_step_directed_cycle_flux": mean_term("directed_cycle").detach(),
@@ -749,6 +837,13 @@ def directed_step_filtration_stats_np(
             "inclusion_violation": zeros.tolist(),
             "boundary_residual": zeros.tolist(),
             "dirichlet_energy": zeros.tolist(),
+            "dec_conservation_loss": zeros.tolist(),
+            "dec_mass_residual": zeros.tolist(),
+            "dec_vorticity_drift": zeros.tolist(),
+            "dec_kinetic_energy": zeros.tolist(),
+            "dec_kinetic_energy_drift": zeros.tolist(),
+            "dec_hodge_balance": zeros.tolist(),
+            "dec_wedge_interior_residual": zeros.tolist(),
             "analogical_map_loss": 0.0,
             "directed_map_loss": 0.0,
             "transport_entropy": 0.0,
@@ -795,6 +890,13 @@ def directed_step_filtration_stats_np(
         "inclusion_violation",
         "boundary_residual",
         "dirichlet_energy",
+        "dec_conservation_loss",
+        "dec_mass_residual",
+        "dec_vorticity_drift",
+        "dec_kinetic_energy",
+        "dec_kinetic_energy_drift",
+        "dec_hodge_balance",
+        "dec_wedge_interior_residual",
         "betti0",
         "cycle_rank",
         "hdbscan_cluster_count",
@@ -846,6 +948,8 @@ def directed_step_filtration_stats_np(
         directed_adjacencies = []
         exact_levels = []
         per_window = {name: [] for name in aggregate}
+        prev_vorticity = None
+        prev_kinetic = None
         for radius in radii:
             sym = sigmoid_np((radius - dist) / max(float(cfg.temperature), 1e-6)) * (1.0 - eye)
             directed = sigmoid_np((radius - dist + skew + time_orientation) / max(float(cfg.temperature), 1e-6)) * (1.0 - eye)
@@ -882,6 +986,37 @@ def directed_step_filtration_stats_np(
             boundary = float(np.mean(np.maximum(0.0, np.einsum("ij,jk,ik->ijk", directed, directed, directed) - directed[:, :, None] - directed[:, None, :] - directed[None, :, :]) ** 2))
             weights = (sym + sym.T) * 0.5
             dirichlet = float((weights * dist**2).sum() / max(float(weights.sum()), 1e-8))
+            flow = directed - directed.T
+            divergence = flow.sum(axis=-1) / max(1, n - 1)
+            dec_mass = float(np.mean(divergence**2))
+            degree_weight = np.maximum(sym.sum(axis=-1), 1e-6)
+            vorticity_node = (flow * sym).sum(axis=-1) / degree_weight
+            edge_mass = max(float(sym.sum()), 1e-8)
+            dec_kinetic = float((sym * flow**2).sum() / edge_mass)
+            if prev_vorticity is None:
+                dec_vorticity_drift = 0.0
+                dec_kinetic_drift = 0.0
+            else:
+                dec_vorticity_drift = float(np.mean((vorticity_node - prev_vorticity) ** 2))
+                dec_kinetic_drift = float((dec_kinetic - prev_kinetic) ** 2)
+            hodge_edge = (1.0 / np.maximum(core_radius[:, None] + core_radius[None, :], 1e-6)) * (1.0 - eye)
+            positive_hodge = hodge_edge[hodge_edge > 0]
+            hodge_edge = hodge_edge / max(float(positive_hodge.mean()) if positive_hodge.size else 1.0, 1e-6)
+            hodge_energy = float((hodge_edge * sym * flow**2).sum() / max(float((hodge_edge * sym).sum()), 1e-8))
+            dec_hodge = float((hodge_energy / max(abs(dec_kinetic), 1e-8) - 1.0) ** 2)
+            avg_vorticity = 0.5 * (vorticity_node[:, None] + vorticity_node[None, :])
+            wedge_form = flow * avg_vorticity
+            interior_form = directed * vorticity_node[None, :] - directed.T * vorticity_node[:, None]
+            dec_wedge = float((sym * (wedge_form - interior_form) ** 2).sum() / edge_mass)
+            dec_conservation = (
+                dec_mass
+                + 0.25 * dec_vorticity_drift
+                + 0.10 * dec_kinetic_drift
+                + 0.05 * dec_hodge
+                + 0.05 * dec_wedge
+            )
+            prev_vorticity = vorticity_node.copy()
+            prev_kinetic = dec_kinetic
             per_window["edge_density"].append(float(sym.sum() / max(1, n * (n - 1))))
             per_window["triangle_density"].append(float(np.einsum("ij,jk,ik->", sym, sym, sym) / max(1, n * (n - 1) * (n - 2))))
             per_window["directed_edge_density"].append(float(directed.sum() / max(1, n * (n - 1))))
@@ -892,6 +1027,13 @@ def directed_step_filtration_stats_np(
             per_window["inclusion_violation"].append(inclusion)
             per_window["boundary_residual"].append(boundary)
             per_window["dirichlet_energy"].append(dirichlet)
+            per_window["dec_conservation_loss"].append(float(dec_conservation))
+            per_window["dec_mass_residual"].append(float(dec_mass))
+            per_window["dec_vorticity_drift"].append(float(dec_vorticity_drift))
+            per_window["dec_kinetic_energy"].append(float(dec_kinetic))
+            per_window["dec_kinetic_energy_drift"].append(float(dec_kinetic_drift))
+            per_window["dec_hodge_balance"].append(float(dec_hodge))
+            per_window["dec_wedge_interior_residual"].append(float(dec_wedge))
             per_window["betti0"].append(float(components))
             per_window["cycle_rank"].append(float(cycle_rank))
             per_window["hdbscan_cluster_count"].append(float(len(stable_components)))
@@ -988,6 +1130,13 @@ def directed_step_filtration_stats_np(
         "edge_density": np.asarray(heat_edge, dtype=float),
         "cycle_rank": np.asarray(heat_cycle, dtype=float),
         "betti0": np.asarray(heat_betti0, dtype=float),
+        "dec_conservation_loss": np.asarray(aggregate["dec_conservation_loss"], dtype=float),
+        "dec_mass_residual": np.asarray(aggregate["dec_mass_residual"], dtype=float),
+        "dec_vorticity_drift": np.asarray(aggregate["dec_vorticity_drift"], dtype=float),
+        "dec_kinetic_energy": np.asarray(aggregate["dec_kinetic_energy"], dtype=float),
+        "dec_kinetic_energy_drift": np.asarray(aggregate["dec_kinetic_energy_drift"], dtype=float),
+        "dec_hodge_balance": np.asarray(aggregate["dec_hodge_balance"], dtype=float),
+        "dec_wedge_interior_residual": np.asarray(aggregate["dec_wedge_interior_residual"], dtype=float),
         "analogical_map_loss": np.asarray(transition_map_heat, dtype=float),
         "directed_map_loss": np.asarray(transition_directed_map_heat, dtype=float),
         "exact_h0_dims": result["exact_h0_dims_by_window_radius"],

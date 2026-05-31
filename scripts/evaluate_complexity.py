@@ -22,6 +22,9 @@ from toricgt.complexity import (
     conditional_compress_len,
     graph_mdl_metrics,
     normalized_compression_distance,
+    relative_complexity,
+    relative_complexity_reward,
+    shortest_known_program_len,
 )
 
 
@@ -93,7 +96,22 @@ def aggregate(rows: list[dict[str, Any]], compressors: list[str]) -> dict[str, f
                 add(f"complexity/graph_k_{compressor}", graph_k)
                 add(f"complexity/graph_k_{compressor}_per_byte", graph_k / max(1, len(graph_bytes)))
             if text and graph_bytes:
-                add(f"complexity/graph_cond_k_{compressor}", conditional_compress_len(text, graph_bytes, compressor))
+                graph_cond = conditional_compress_len(text, graph_bytes, compressor)
+                text_cond = conditional_compress_len(graph_bytes, text, compressor)
+                graph_known = shortest_known_program_len(graph_bytes, compressor=compressor, references=(text,))
+                text_known = shortest_known_program_len(text, compressor=compressor, references=(graph_bytes,))
+                add(f"complexity/graph_cond_k_{compressor}", graph_cond)
+                add(f"complexity/text_cond_k_{compressor}", text_cond)
+                add(f"complexity/graph_relative_to_text_helper_k_{compressor}", relative_complexity(graph_cond, graph_k))
+                add(f"complexity/text_relative_to_graph_helper_k_{compressor}", relative_complexity(text_cond, text_k))
+                add(f"complexity/graph_shortest_known_program_k_{compressor}", graph_known)
+                add(f"complexity/text_shortest_known_program_k_{compressor}", text_known)
+                add(f"complexity/graph_relative_k_reward_{compressor}", relative_complexity_reward(graph_known, graph_k))
+                add(f"complexity/text_relative_k_reward_{compressor}", relative_complexity_reward(text_known, text_k))
+                add(
+                    f"complexity/text_graph_information_symmetry_gap_k_{compressor}",
+                    abs(float(text_k - text_cond) - float(graph_k - graph_cond)),
+                )
                 add(f"complexity/text_graph_ncd_{compressor}", normalized_compression_distance(text, graph_bytes, compressor))
         if graph_bytes and isinstance(graph_raw, str):
             for key, value in graph_mdl_metrics(graph_raw, prefix="complexity/graph_mdl", compressors=tuple(compressors)).items():

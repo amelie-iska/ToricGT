@@ -582,9 +582,9 @@ Write $M=\max_r\ell_r(h)$.  Terms with $r\notin A(h)$ are multiplied by $\exp(\b
 
 This gives a low-cost diagnostic for compact models.  Rather than storing large explanation traces, a Parameter-Golf-facing model can emit quantized moments $\mu_\beta(h)$, active-face ids, and top-two margins.  These are enough to audit whether the small model uses stable polyhedral decisions without increasing the artifact by a large expert bank.
 
-\subsection{Toric auxiliary losses for future training}
+\subsection{Toric auxiliary losses for training}
 
-The toric view suggests auxiliary losses that do not require changing the present architecture.  They can be attached to probes during future fine-tuning.  Let $\mathcal R$ be a set of integer relations among exponent vectors,
+The toric view suggests auxiliary losses that do not require changing the deployable architecture.  In the \texttt{oai} competition branch they are attached as training-only low-rank probes and excluded from the compressed artifact.  Let $\mathcal R$ be a set of integer relations among exponent vectors,
 \begin{equation}
   \sum_r \alpha_r a_r=\sum_r \beta_r a_r,
   \qquad \alpha_r,\beta_r\in\N.
@@ -614,6 +614,22 @@ For repeated graph situations expected to share the same bend, use
   \abs{\widehat B(\tau)-\widehat B(\tau')}^2,
 \end{equation}
 where $\mathcal P$ pairs walls that are equivalent under graph relabeling, algebraic normal form, or morphology-template symmetry.  These losses are pragmatic: they regularize the geometry of reasoning decisions rather than merely increasing parameter count.
+
+The implemented compact objective also adds affine-Coxeter, braid, and phase-leaf terms:
+\begin{equation}
+\begin{split}
+  \mathcal L_{\mathrm{toric}}
+  ={}&\mathcal L_{\mathrm{base}}
+  +\lambda_{\mathrm{fan}}\mathcal L_{\mathrm{fan}}
+  +\lambda_{\mathrm{bend}}\mathcal L_{\mathrm{bend}}
+  +\lambda_{\mathrm{binom}}\mathcal L_{\mathrm{binom}}
+  +\lambda_{\mathrm{moment}}\norm{\widehat\mu-\mu^\star}_2^2\\
+  &+\lambda_{\mathrm{cox}}\mathcal L_{\mathrm{cox}}
+  +\lambda_{\mathrm{br}}\mathcal L_{\mathrm{br}}
+  +\lambda_{\mathrm{leaf}}\mathcal L_{\mathrm{leaf}}.
+\end{split}
+\end{equation}
+Here $\mathcal L_{\mathrm{cox}}$ reflects predicted and teacher moments across simple affine walls and compares the reflected points, $\mathcal L_{\mathrm{br}}$ compares the two length-three braid paths $s_1s_2s_1$ and $s_2s_1s_2$, and $\mathcal L_{\mathrm{leaf}}$ compares successive projected phase increments with the irrational rotation increments determined by $(\theta,\beta)$.  The probe is low-rank and fake-quantized during training, so it tests whether the main hidden state contains a compact toric chart rather than adding a large explanation module.  The evaluation suite separately builds empirical toric shadows from hidden states alone: occupied fan cells, active-face margins, bend magnitudes, fitted-slope residuals, and branch-wise phase-leaf residuals.  Thus old checkpoints can be audited even when they were trained before the probe existed.
 
 \section{Rotation algebras, noncommutative tori, and spiral projections}
 
@@ -1446,6 +1462,45 @@ If $h_k$ is $\mathcal F_k$-measurable and $a_k$ is sampled from $p_\psi(\cdot\mi
 The sampled action is a randomized function of $h_k$ and independent sampler noise.  Since $h_k$ is $\mathcal F_k$-measurable, the pair $(h_k,a_k)$ is measurable with respect to $\mathcal F_k$ augmented by legal internal randomness.  The distribution $q_\theta(\cdot\mid\mathcal F_k,a_k)$ is therefore fixed before $b_{\pi_k}$ is read.  The update including $b_{\pi_k}$ occurs after recording the log score, so the score-before-update induction remains unchanged.
 \end{proof}
 
+\subsection{Relative Kolmogorov diagnostics and analogical helper transfer}
+
+The competition objective is BPB, but BPB alone does not reveal whether a small model has learned reusable reasoning programs.  ToricGT therefore reports compressor-tagged conditional-complexity proxies.  For a compressor $c$, define
+\begin{equation}
+  \widehat K_c(s)=|c(s)|,\qquad
+  \widehat K_c(y\mid x)=\max\{0,\widehat K_c(x\Vert y)-\widehat K_c(x)\}.
+\end{equation}
+This is not true Kolmogorov complexity, which is uncomputable; it is an auditable estimator whose compressor and helper context are always named.
+
+For random-order autoregression, the helper object is structured.  At random-order step $k$, the direct helper family is
+\begin{equation}
+  H_k=\{b_{\pi_{<k}},\pi,\operatorname{chunk}(b),a_{<k},G_k,T_k\},
+\end{equation}
+where $b_{\pi_{<k}}$ is the strict prefix, $\pi$ is the public permutation or tree-order program, $\operatorname{chunk}(b)$ is the original graph-projected byte chunk, $a_{<k}$ is the prefix-visible GFlowNet action trace when active, and $G_k,T_k$ are optional serialized graph and tree helper payloads.  The reported shortest-known program proxy is
+\begin{equation}
+  \widehat K_c(y_k\mid H_k)
+  =\min_{h\in H_k\cup\{\varnothing\}}\widehat K_c(y_k\mid h).
+\end{equation}
+This construction interacts correctly with random-order decoding: the public order program and strict prefix are available before scoring, while the target byte is not.
+
+Analogical reasoning supplies additional helper objects.  Given a source pair $(x_s,y_s)$ and target pair $(x_t,y_t)$, plus optional source graph/tree serializations $(G_s,T_s)$, define the transfer residual
+\begin{equation}
+  \Delta K_c^{\mathrm{ana}}
+  =
+  \widehat K_c(y_t\mid H_t,x_s,y_s,G_s,T_s)
+  -
+  \widehat K_c(y_t\mid H_t).
+\end{equation}
+Negative $\Delta K_c^{\mathrm{ana}}$ means the analogy shortened the estimated program for the target.  The implementation logs both this signed residual and the clipped gain $\max(0,-\Delta K_c^{\mathrm{ana}})$.  Prediction-side rewards are multiplied by a correctness gate, preventing a short but wrong prediction from receiving a positive complexity reward.
+
+Finally, the suite records a symmetry-of-information residual
+\begin{equation}
+  S_c(x,y)
+  =
+  \left|(\widehat K_c(x)-\widehat K_c(x\mid y))
+  -(\widehat K_c(y)-\widehat K_c(y\mid x))\right|.
+\end{equation}
+Large $S_c$ indicates that the chosen compressor/helper encoding may be asymmetric for the domain at hand.  In the current branch these quantities are diagnostics and checkpoint-selection aids, not replacements for the BPB objective.
+
 \subsection{GraphCG bases and directed topological analogies}
 
 The competition branch adds an auxiliary geometric training signal, but the two source ideas play different roles.  GraphCG learns steerable latent factors by contrasting edits along learned directions and suppressing cross-direction entanglement \cite{liu2024graphcg}.  ToricGT uses this as a compact concept chart for hidden states, not as a separate graph generator in the exported artifact.  The analogical-reasoning paper studies a different mechanism: relational structures align in embedding space, measured by decreasing Dirichlet energy, and Transformer layers apply a functor-like residual map from a source structure to a target structure \cite{minegishi2026analogy}.  ToricGT composes these mechanisms: GraphCG supplies the coordinates, while analogical maps act between filtered directed complexes built over those coordinates.  The signal is deliberately auxiliary.  It does not replace BPB, and its weights are phased in only after the early byte compressor has a stable negative slope.
@@ -1608,6 +1663,81 @@ soft triangle density $\sum_{ijk}A_{ij}A_{jk}A_{ik}$, directed transitive residu
   \max(0,\Omega_{ij})\max(0,\Omega_{jk})\max(0,\Omega_{ki}).
 \end{equation}
 
+\subsection{DEC conservative reasoning flow}
+
+The directed simplicial layer also admits a conservative-flow interpretation inspired by discrete exterior calculus (DEC) discretizations of incompressible Navier--Stokes equations on simplicial surface meshes \cite{mohamed2016dec}.  Mohamed, Hirani, and Samtaney rewrite the continuous equations using exterior derivative, Hodge star, wedge product, and interior product, then replace these operators by DEC analogues.  The central lesson for ToricGT is not to simulate a fluid, but to audit whether a discrete trajectory respects conservative algebraic identities beyond pointwise prediction loss.  In the DEC paper, mass and vorticity conservation and kinetic-energy behavior reveal physical fidelity of the discretization; in ToricGT, analogous quantities reveal whether graph-of-thought hidden flows are organized or merely oscillatory.
+
+For a local reasoning window at radius $\rho_\ell$, let $A_\ell^\rightarrow\in[0,1]^{n\times n}$ be the directed adjacency and set
+\begin{equation}
+  u_\ell=A_\ell^\rightarrow-(A_\ell^\rightarrow)\transpose .
+\end{equation}
+This antisymmetric matrix is treated as a discrete 1-form on the directed 1-skeleton.  Its divergence proxy is
+\begin{equation}
+  (\delta u_\ell)_i=\frac1{n-1}\sum_{j}u_\ell(i,j),
+  \qquad
+  \mathcal L_{\mathrm{mass}}(\ell)=\frac1n\sum_i(\delta u_\ell)_i^2.
+\end{equation}
+Low mass residual means that the local reasoning flow is not creating or destroying hidden-state mass at a vertex merely because the filtration radius changed.  Define a node circulation proxy
+\begin{equation}
+  \omega_{\ell,i}
+  =
+  \frac{\sum_j A_\ell(i,j)u_\ell(i,j)}
+       {\sum_j A_\ell(i,j)+\epsilon},
+\end{equation}
+where $A_\ell$ is the symmetric adjacency.  The vorticity drift across adjacent radii is
+\begin{equation}
+  \mathcal L_{\omega}(\ell)=\norm{\omega_\ell-\omega_{\ell-1}}_2^2/n.
+\end{equation}
+The edge-flow kinetic energy is
+\begin{equation}
+  E_\ell=\frac{\sum_{ij}A_\ell(i,j)u_\ell(i,j)^2}{\sum_{ij}A_\ell(i,j)+\epsilon},
+  \qquad
+  \mathcal L_E(\ell)=(E_\ell-E_{\ell-1})^2.
+\end{equation}
+To mimic the metric role of the Hodge star, the implementation uses the HDBSCAN core radii as a diagonal dual-volume proxy,
+\begin{equation}
+  H_{ij}=\frac{(c_i+c_j+\epsilon)^{-1}}
+              {\operatorname{mean}_{p\ne q}(c_p+c_q+\epsilon)^{-1}},
+  \qquad
+  E_\ell^\star=
+  \frac{\sum_{ij}H_{ij}A_\ell(i,j)u_\ell(i,j)^2}
+       {\sum_{ij}H_{ij}A_\ell(i,j)+\epsilon}.
+\end{equation}
+The Hodge-balance residual is
+\begin{equation}
+  \mathcal L_\star(\ell)=\left(E_\ell^\star/(|E_\ell|+\epsilon)-1\right)^2.
+\end{equation}
+Finally, the DEC convective term in the paper motivates a wedge/interior-product consistency check.  With average edge vorticity $\overline\omega_{ij}=(\omega_i+\omega_j)/2$, define
+\begin{align}
+  (u\wedge\omega)_{ij} &= u_{ij}\overline\omega_{ij},\\
+  (i_u\omega)_{ij} &= A^\rightarrow_{ij}\omega_j-A^\rightarrow_{ji}\omega_i,
+\end{align}
+and penalize
+\begin{equation}
+  \mathcal L_\wedge(\ell)
+  =
+  \frac{\sum_{ij}A_\ell(i,j)\left((u\wedge\omega)_{ij}-(i_u\omega)_{ij}\right)^2}
+       {\sum_{ij}A_\ell(i,j)+\epsilon}.
+\end{equation}
+The DEC conservative auxiliary is
+\begin{equation}
+  \mathcal L_{\mathrm{DEC}}
+  =
+  \mathcal L_{\mathrm{mass}}
+  +0.25\mathcal L_\omega
+  +0.10\mathcal L_E
+  +0.05\mathcal L_\star
+  +0.05\mathcal L_\wedge .
+\end{equation}
+It enters only as a small part of the step-topology loss.  The intended healthy regime is not zero directed flow: it is low divergence, bounded vorticity and kinetic drift, nonzero but stable directed cycle structure, and no domination of the BPB objective by a geometric auxiliary.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_dec_conservative_reasoning.pdf}
+  \caption{DEC-inspired conservative audits for graph-of-thought reasoning.  A directed local reasoning complex supplies a discrete 1-form; divergence, circulation, Hodge-weighted energy, and wedge/interior consistency become finite diagnostics and low-weight training signals.}
+  \label{fig:dec-conservative-reasoning}
+\end{figure}
+
 The latest training branch also adds a radius-parametrized HDBSCAN surrogate \cite{campello2013density,campello2015hierarchical,mcinnes2017hdbscan}.  For each relation class, let $c_i$ be the $k$th-nearest-neighbor core distance of $a_i$ and define the mutual-reachability distance
 \begin{equation}
   d_{\mathrm{mr}}(i,j)=\max\{c_i,c_j,d_{ij}\}.
@@ -1659,7 +1789,7 @@ is pseudo-periodic and equidistributed on the visualization torus in the finite-
   \label{fig:toric-phase-simplicial}
 \end{figure}
 
-Periodic analyses render these quantities directly.  For selected reasoning records the script writes directed filtration curves for edge density, triangle density, asymmetry, and cycle flux; heatmaps of normalized distances, mutual reachability, the antisymmetric toric skew matrix, and directed adjacencies; window-by-radius simplex hierarchy plots; exact $\mathbb F_2$ persistence-module morphism heatmaps for $H_0$ and $H_1$; and toric phase/simplicial trajectory plots.  Thus the noncommutative topology is both a training pressure and an auditable explanation object.
+Periodic analyses render these quantities directly.  For selected reasoning records the script writes directed filtration curves for edge density, triangle density, asymmetry, cycle flux, DEC conservation residuals, and mass residuals; heatmaps of normalized distances, mutual reachability, the antisymmetric toric skew matrix, and directed adjacencies; window-by-radius simplex hierarchy plots with DEC kinetic and wedge/interior panels; exact $\mathbb F_2$ persistence-module morphism heatmaps for $H_0$ and $H_1$; and toric phase/simplicial trajectory plots.  Thus the noncommutative topology is both a training pressure and an auditable explanation object.
 
 \begin{proposition}[Dense recurrent blocks are the byte-efficient default]
 Under a strict serialized-byte cap, replacing a dense feed-forward block of size $O(dd_{\mathrm{ff}})$ by $E$ full experts costs $O(Edd_{\mathrm{ff}})$ stored scalars, whereas applying the same dense block recurrently $r$ times costs no additional stored scalars.  Therefore the Parameter-Golf default should be dense recurrent ToricGT blocks, with Soft-MoE retained as a measured ablation or low-rank adapter variant.
@@ -2329,6 +2459,11 @@ David Cohen-Steiner, Herbert Edelsbrunner, and John Harer.
 Fr\'ed\'eric Chazal, Vin de Silva, Marc Glisse, and Steve Oudot.
 \newblock \emph{The Structure and Stability of Persistence Modules}.
 \newblock SpringerBriefs in Mathematics. Springer, 2016.
+
+\bibitem{mohamed2016dec}
+Mamdouh S. Mohamed, Anil N. Hirani, and Ravi Samtaney.
+\newblock Discrete exterior calculus discretization of incompressible Navier-Stokes equations over surface simplicial meshes.
+\newblock \emph{Journal of Computational Physics}, 312:175--191, 2016. arXiv:1508.01166.
 
 \bibitem{campello2013density}
 Ricardo J. G. B. Campello, Davoud Moulavi, and J\"org Sander.

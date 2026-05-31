@@ -164,6 +164,31 @@ Let $u_t=h_t-h_{t-1}$ and $\Delta u_t=u_t-u_{t-1}$.  The competition branch adds
 \end{align}
 This is not a fluid simulation.  It is a Navier--Stokes-inspired discrete dissipation prior: high-frequency trajectory oscillations are penalized, but smooth transport through embedding space remains cheap.  The regularizer improves the stability of long GFlowNet reasoning paths and provides kinetic-energy and viscous-dissipation diagnostics for the 3D trajectory and energy-landscape plots.
 
+\paragraph{DEC conservative reasoning flow.}
+The new local-topology layer adapts a sharper idea from conservative discrete exterior calculus for incompressible Navier--Stokes on simplicial meshes \cite{mohamed2016dec}.  In DEC, incidence matrices discretize $d$, diagonal Hodge stars discretize metric duality, and conservative schemes are audited by mass, vorticity, and kinetic-energy behavior.  ToricGT uses the same algebraic pattern on reasoning complexes rather than on physical meshes.  For a reasoning window and radius $\rho$, let $A_\rho^\rightarrow$ be the directed adjacency and define the skew 1-form
+\begin{equation}
+  u_\rho=A_\rho^\rightarrow-(A_\rho^\rightarrow)\transpose .
+\end{equation}
+The DEC audit residual is
+\begin{equation}
+\begin{split}
+  \mathcal L_{\mathrm{DEC}}={}&
+  \norm{\delta u_\rho}_2^2
+  +\lambda_\omega\norm{\omega_{\rho+}-\omega_\rho}_2^2
+  +\lambda_E(E_{\rho+}-E_\rho)^2\\
+  &+\lambda_\star\left(E_\rho^\star/E_\rho-1\right)^2
+  +\lambda_\wedge\norm{u_\rho\wedge\omega_\rho-i_{u_\rho}\omega_\rho}_F^2 .
+\end{split}
+\end{equation}
+Here $\delta$ is the row-sum divergence proxy, $\omega_\rho$ is node circulation, $E_\rho$ is edge-flow kinetic energy, $E_\rho^\star$ is the core-radius Hodge-weighted energy, and the final term is a local wedge/interior-product consistency check.  The term is small and auxiliary; its purpose is to keep long graph-of-thought trajectories conservative enough for inference-time scaling without suppressing useful directed cycle structure.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.98\linewidth]{fig_dec_conservative_reasoning.pdf}
+  \caption{DEC-inspired conservative audits over directed reasoning complexes.  The directed graph-of-thought adjacency is treated as a discrete 1-form; divergence, vorticity drift, Hodge balance, and wedge/interior consistency become lightweight diagnostics and low-weight training signals.}
+  \label{fig:dec-conservative-condensed}
+\end{figure}
+
 \section{Training And Evaluation}
 
 The supervised objective combines node, edge, and graph losses with equivariance, torus, tropical-margin, Hebrew morphology, Soft-MoE, cache, and distillation terms:
@@ -189,6 +214,7 @@ Metric & Failure mode exposed \\
 Equivariance error & absolute-position leakage and edge-order bugs \\
 Active-face margin & unstable dynamic-programming decisions \\
 Toric bend consistency & incoherent polyhedral reasoning changes \\
+DEC conservation residual & noisy or nonconservative hidden reasoning flow \\
 Soft-MoE expert mass & expert collapse or over-routing \\
 GFlowNet diversity & mode collapse and reward hacking \\
 Parameter-Golf BPB/bytes & compactness and scoring compliance \\
@@ -265,6 +291,26 @@ and for two trajectories
 \end{equation}
 These are not claims to compute true Kolmogorov complexity.  They are auditable lower-tech probes for whether successful graph-of-thought paths are compact conditional programs, whether random orders induce stable programs, and whether GFlowNet terminal diversity is genuine rather than cosmetic.  The implementation logs conditional target complexity, order-program complexity, prediction-target NCD, graph-MDL summaries, and GFlowNet action-trace complexity to W\&B.  All such metrics are diagnostic by default; the BPB objective remains unchanged unless a future ablation explicitly gives a complexity reward nonzero weight.
 
+The random-order model uses a structured helper set rather than a single string.  At step $k$, let
+\begin{equation}
+  H_k=\{b_{\pi_{<k}},\pi,\operatorname{chunk}(b),a_{<k},G_k,T_k\},
+\end{equation}
+where $b_{\pi_{<k}}$ is the strict prefix, $\pi$ is the public random-order tree program, $\operatorname{chunk}(b)$ is the graph-projected byte chunk, $a_{<k}$ are prefix-visible GFlowNet actions, and $G_k,T_k$ are optional serialized graph or tree helpers.  The implemented proxy is
+\begin{equation}
+  \widehat K_c(y_k\mid H_k)=\min_{h\in H_k\cup\{\varnothing\}}\widehat K_c(y_k\mid h).
+\end{equation}
+Analogical transfer is measured by adding a source source-target helper pair:
+\begin{equation}
+  \Delta K_c^{\mathrm{ana}}=
+  \widehat K_c(y_t\mid H_t,x_s,y_s,G_s,T_s)
+  -\widehat K_c(y_t\mid H_t).
+\end{equation}
+Negative $\Delta K_c^{\mathrm{ana}}$ means the analogy shortened the target program.  Prediction-side rewards are multiplied by a correctness gate, so a short wrong byte sequence does not count as a complexity improvement.  The suite also logs a symmetry-of-information residual
+\begin{equation}
+  \left|(\widehat K_c(x)-\widehat K_c(x\mid y))-(\widehat K_c(y)-\widehat K_c(y\mid x))\right|
+\end{equation}
+to catch unreliable compressor asymmetries.
+
 \paragraph{Reasoning simplex diagnostics.}
 For evaluation, ToricGT projects compute-quality tradeoffs into small simplices.  Let $r$ be a normalized reasoning-budget score from trajectory length, recurrent passes, GFlowNet samples, and wall time; let $k$ be a compressor-based complexity score; and let $p$ be a low-BPB score.  The triangle point is
 \begin{equation}
@@ -276,7 +322,7 @@ Sparse budget evaluations are interpolated inside the triangle by a radial basis
 
 \section{Next Iteration}
 
-The next ToricGT iteration should use toric geometry as a training signal.  First, freeze the trained checkpoint and build empirical toric shadows: occupied fan cells, fitted slopes, active-face margins, and bend magnitudes.  Second, add synthetic toric tasks: Newton-polytope active-face prediction, Cartier-divisor bend prediction, toric ideal relation checks, and ReLU fan realization tests.  Third, attach low-rank quantized toric probes and optimize
+The next ToricGT iteration uses toric geometry as a training signal while keeping the competition artifact dense and small.  First, freeze checkpoints and build empirical toric shadows: occupied fan cells, fitted slopes, active-face margins, and bend magnitudes.  Second, add synthetic toric tasks: Newton-polytope active-face prediction, Cartier-divisor bend prediction, toric ideal relation checks, and ReLU fan realization tests.  Third, attach training-only low-rank quantized toric probes and optimize
 \begin{equation}
   \mathcal L_{\mathrm{toric}}
   =
@@ -284,8 +330,12 @@ The next ToricGT iteration should use toric geometry as a training signal.  Firs
   +\lambda_{\mathrm{fan}}\mathcal L_{\mathrm{fan}}
   +\lambda_{\mathrm{bend}}\mathcal L_{\mathrm{bend}}
   +\lambda_{\mathrm{binom}}\mathcal L_{\mathrm{binom}}
-  +\lambda_{\mathrm{moment}}\norm{\widehat\mu-\mu^\star}_2^2.
+  +\lambda_{\mathrm{moment}}\norm{\widehat\mu-\mu^\star}_2^2
+  +\lambda_{\mathrm{cox}}\mathcal L_{\mathrm{cox}}
+  +\lambda_{\mathrm{br}}\mathcal L_{\mathrm{br}}
+  +\lambda_{\mathrm{leaf}}\mathcal L_{\mathrm{leaf}}.
 \end{equation}
+The current \texttt{oai} implementation instantiates these terms as a 6-bit fake-quantized probe that is excluded from artifact export.  Its metrics report active-face cross entropy, top-two margins, moment-map residuals, bend magnitude, toric binomial residual, affine-wall distance, Coxeter reflection loss, braid loss, and phase-leaf residual.  The analysis suite renders a toric-shadow audit in which branch fan coverage, margins, bends, and leaf residuals can be compared directly against BPB and graph-of-thought quality.
 
 \paragraph{Affine Coxeter and braid structure.}
 The toric route to affine Coxeter structure is through lattices and chambers.  A torus $T$ has character and cocharacter lattices $M=\operatorname{Hom}(T,\mathbb G_m)$ and $N=\operatorname{Hom}(\mathbb G_m,T)$.  Once a root datum is attached, as for a reductive group with maximal torus $T$, roots $\alpha\in M$ cut $N_\R$ by hyperplanes $\alpha(x)=0$; the reflections in these walls generate the Weyl group, and the translated walls $\alpha(x)=k$ generate the affine Weyl/Coxeter group $W_{\mathrm{aff}}=Q^\vee\rtimes W$ \cite{humphreys1990reflection}.  Thus toric fans and Newton normal fans give the polyhedral side of the same chamber geometry that appears in affine Coxeter systems.  Artin braid actions then arise as ordered wall-crossing or monodromy actions around the complexified hyperplane complement.  In the next iteration, braid/Coxeter graph tasks should therefore be tied to toric fan tasks: actions $\sigma_i^{\pm1}$ and affine reflections $s_{\alpha,k}$ become controlled graph-of-thought edits, while tropical active-face margins determine whether a wall crossing is stable or ambiguous.
@@ -384,6 +434,11 @@ Afra Zomorodian and Gunnar Carlsson.
 David Cohen-Steiner, Herbert Edelsbrunner, and John Harer.
 \newblock Stability of persistence diagrams.
 \newblock \emph{Discrete \& Computational Geometry}, 37:103--120, 2007.
+
+\bibitem{mohamed2016dec}
+Mamdouh S. Mohamed, Anil N. Hirani, and Ravi Samtaney.
+\newblock Discrete exterior calculus discretization of incompressible Navier-Stokes equations over surface simplicial meshes.
+\newblock \emph{Journal of Computational Physics}, 312:175--191, 2016. arXiv:1508.01166.
 
 \end{thebibliography}
 

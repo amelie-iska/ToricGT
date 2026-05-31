@@ -333,6 +333,67 @@ def toric_phase_simplicial_trajectory():
     save(fig, "fig_toric_phase_simplicial_trajectory.pdf")
 
 
+def dec_conservative_reasoning():
+    fig, ax = plt.subplots(figsize=(12, 6.4), facecolor="#05070d")
+    ax.set_axis_off()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_facecolor("#05070d")
+    title_color = "#7df9ff"
+    text_color = "#e9fbff"
+    muted = "#96a9bb"
+    ax.text(0.05, 0.92, "DEC-style conservative audits on directed reasoning complexes", color=title_color, fontsize=15, weight="bold")
+    ax.text(0.05, 0.86, "The Navier-Stokes DEC machinery becomes a lightweight consistency layer over graph-of-thought hidden flows.", color=text_color, fontsize=9.5)
+
+    # Local directed complex.
+    center = np.array([0.23, 0.53])
+    pts = np.array([
+        [-0.12, 0.02],
+        [-0.04, 0.13],
+        [0.07, 0.10],
+        [0.13, -0.03],
+        [0.02, -0.13],
+        [-0.10, -0.10],
+    ]) + center
+    tris = [(0, 1, 2), (0, 2, 5), (2, 3, 4)]
+    edges = [(0, 1), (1, 2), (2, 0), (0, 5), (5, 2), (2, 3), (3, 4), (4, 2), (1, 3), (5, 4)]
+    for tri in tris:
+        ax.add_patch(Polygon(pts[list(tri)], closed=True, facecolor="#1c7c91", edgecolor="none", alpha=0.24))
+    for i, j in edges:
+        start, end = pts[i], pts[j]
+        delta = end - start
+        ax.arrow(start[0], start[1], 0.73 * delta[0], 0.73 * delta[1], head_width=0.010, head_length=0.013, color="#50f5ff", alpha=0.78, length_includes_head=True, linewidth=0.8)
+    ax.scatter(pts[:, 0], pts[:, 1], s=38, color="#e9fbff", edgecolor="#030712", linewidth=0.5, zorder=4)
+    ax.text(0.09, 0.26, "directed flag complex\n$K_t(\\rho)$", color=text_color, fontsize=10)
+
+    # DEC operators.
+    op_x = 0.45
+    boxes = [
+        ("skew flow\n$u=A^\\to-(A^\\to)^T$", 0.71, "#102c46"),
+        ("exterior derivative\n$d u$ / divergence", 0.57, "#102c46"),
+        ("Hodge balance\n$*u$ via core radii", 0.43, "#102c46"),
+        ("wedge/interior\n$u\\wedge\\omega$ vs $i_u\\omega$", 0.29, "#102c46"),
+    ]
+    for label, y, fc in boxes:
+        patch = FancyBboxPatch((op_x, y - 0.045), 0.22, 0.09, boxstyle="round,pad=0.01,rounding_size=0.012", linewidth=1.0, facecolor=fc, edgecolor="#2bdff0")
+        ax.add_patch(patch)
+        ax.text(op_x + 0.11, y, label, color=text_color, fontsize=9.2, ha="center", va="center")
+    for y in [0.71, 0.57, 0.43, 0.29]:
+        ax.add_patch(FancyArrowPatch((0.34, 0.53), (op_x, y), arrowstyle="-|>", mutation_scale=12, color="#ffd166", lw=0.9, alpha=0.76, connectionstyle="arc3,rad=0.08"))
+
+    # Loss summary.
+    ax.add_patch(FancyBboxPatch((0.73, 0.32), 0.22, 0.34, boxstyle="round,pad=0.015,rounding_size=0.016", linewidth=1.0, facecolor="#111827", edgecolor="#ff4fd8"))
+    ax.text(0.84, 0.60, "$\\mathcal{L}_{\\mathrm{DEC}}$", color="#ffb6ea", fontsize=17, weight="bold", ha="center")
+    ax.text(0.84, 0.52, "$=\\|\\delta u\\|^2$", color=text_color, fontsize=11, ha="center")
+    ax.text(0.84, 0.46, "$+\\lambda_\\omega\\|\\omega_{\\rho+}-\\omega_\\rho\\|^2$", color=text_color, fontsize=9.5, ha="center")
+    ax.text(0.84, 0.40, "$+\\lambda_E|E_{\\rho+}-E_\\rho|^2$", color=text_color, fontsize=9.5, ha="center")
+    ax.text(0.84, 0.34, "$+\\lambda_*\\mathcal{R}_*+\\lambda_\\wedge\\mathcal{R}_\\wedge$", color=text_color, fontsize=9.5, ha="center")
+    ax.add_patch(FancyArrowPatch((0.67, 0.50), (0.73, 0.50), arrowstyle="-|>", mutation_scale=14, color="#ff4fd8", lw=1.2))
+
+    ax.text(0.05, 0.08, "Healthy behavior: low divergence, bounded vorticity/energy drift, nonzero directed cycle structure, and no collapse to a symmetric trivial complex.", color=muted, fontsize=9.2)
+    save(fig, "fig_dec_conservative_reasoning.pdf")
+
+
 def main():
     plt.rcParams.update(
         {
@@ -352,6 +413,7 @@ def main():
     parameter_golf_protocol()
     graphcg_topology_analogy_map()
     toric_phase_simplicial_trajectory()
+    dec_conservative_reasoning()
     print(f"wrote figures to {OUT}")
 
 
