@@ -161,24 +161,42 @@ unchanged.
 
 ## GraphCG And Directed Topological Analogies
 
-The `oai` branch includes a low-byte GraphCG-style hidden basis for analogical
-reasoning. `graphcg_num_directions: auto` chooses the largest configured
-multiple of eight under a small activation-memory budget with a ten percent
-safety margin; on the current 24GB RTX 4090 this resolves to 256 directions.
-Old checkpoints with no basis or a narrower basis can still resume: missing
-rows are initialized and stale optimizer moments are dropped only for changed
-parameters.
+The `oai` branch separates GraphCG basis learning from the analogical
+reasoning mechanism. `graphcg_num_directions: auto` chooses the largest
+configured multiple of eight under a small activation-memory budget with a ten
+percent safety margin; on the current 24GB RTX 4090 this resolves to 256
+directions. Old checkpoints with no basis or a narrower basis can still resume:
+missing rows are initialized and stale optimizer moments are dropped only for
+changed parameters.
 
 The analogy loss is not just vector arithmetic. For repeated coarse byte
-relations, normalized hidden arrows are grouped into small point clouds. Each
-group builds nested soft Vietoris-Rips complexes at several radii, giving
-scale-insensitive simplex-tree maps. The trainer logs inclusion penalties,
-chain-map commutators, 0D-persistence/MST-style barcode proxies, edge density,
-and triangle density. A directed noncommutative extension adds an antisymmetric
-form on relation vectors, so `i -> j` and `j -> i` can differ. The resulting
-directed flag complex logs transitive-closure pressure, directed cycle/holonomy
-balance, directed chain-map diagnostics, asymmetry, and skew magnitude. These
-metrics should improve reasoning geometry without replacing the BPB objective.
+relations, normalized hidden arrows are first projected into the GraphCG
+concept chart and grouped into small point clouds. Each group builds nested
+soft Vietoris-Rips complexes at several radii, giving scale-insensitive
+simplex-tree maps. The maps are functor-like, but they carry extra topology:
+they should preserve inclusion, approximately commute with boundary/chain
+maps, and induce low-residual morphisms of persistence modules. The trainer
+logs inclusion penalties, chain-map commutators, 0D-persistence/MST-style
+barcode proxies, edge density, triangle density, and analogical map residuals.
+A directed noncommutative extension adds an antisymmetric form on relation
+vectors, so `i -> j` and `j -> i` can differ. The resulting directed flag
+complex logs transitive-closure pressure, directed cycle/holonomy balance,
+directed chain-map diagnostics, asymmetry, and skew magnitude. These metrics
+should improve reasoning geometry without replacing the BPB objective.
+
+The step-local topology path applies the same persistent-homology analogue to
+actual reasoning states in the GraphCG chart. For sampled graph-of-thought
+windows `h_s, ..., h_{s+w}`, vertices are hidden states, radius levels form
+nested flag complexes, and directed edges combine distance, temporal
+orientation, and antisymmetric toric skew. Consecutive windows are connected by
+soft transports that push forward adjacency and directed adjacency, yielding
+metrics `train/analogy_step_analogical_map_loss`,
+`train/analogy_step_directed_map_loss`, and
+`train/analogy_step_transport_entropy`. The trainer also logs Betti-0, cycle
+rank, boundary residual, Dirichlet energy, directed chain commutator, HDBSCAN
+stability/noise, and the number of sampled windows. This is the preferred
+analogue of persistent homology for the contest adapter because it does not add
+a heavyweight dependency to the self-contained artifact.
 
 The same point clouds now use a radius-parametrized HDBSCAN surrogate. For each
 relation group, the trainer computes core distances, mutual-reachability
@@ -193,13 +211,32 @@ damage from noisy early hidden states.
 
 The periodic geometry suite visualizes the same nested complexes. Each
 analysis checkpoint writes `geometry/topology/*_directed_filtration.png` with
-radius-indexed edge density, soft triangle density, directed asymmetry, and
-noncommutative cycle flux, radius-HDBSCAN cluster count, and HDBSCAN outlier
-fraction, plus `*_noncommutative_heatmaps.png` for scale-normalized hidden-arrow
-distance, mutual-reachability distance, density-persistence adjacency,
-antisymmetric toric skew, and directed adjacency at low and middle filtration
-radii. These plots are computed from model hidden states and branch losses, not
-hand-drawn diagrams.
+radius-indexed edge density, soft triangle density, Betti-0, cycle-rank,
+Dirichlet energy, boundary residual, directed asymmetry, noncommutative cycle
+flux, radius-HDBSCAN cluster count, and HDBSCAN outlier fraction, plus
+`*_noncommutative_heatmaps.png` for scale-normalized hidden-state distance,
+mutual-reachability distance, density-persistence adjacency, antisymmetric
+toric skew, and directed adjacency at low and middle filtration radii.
+`*_step_radius_hierarchy.png` records the window-by-radius simplex hierarchy,
+including analogical and directed map residual heatmaps.
+`*_toric_phase_simplicial_trajectory.png` projects the irrational
+rotation-algebra phase path onto a torus and overlays local simplex edges plus
+the window-to-window analogical maps. These plots are computed from model
+hidden states and branch losses, not hand-drawn diagrams.
+
+The paper update also ties the same toric coordinates to future affine
+Coxeter and braid tasks. A toric lattice becomes a Weyl-chamber coordinate
+system once a root datum is attached; translated root hyperplanes define
+affine Weyl/Coxeter reflections, and ordered wall crossings give braid-group
+actions. The noncommutative torus projection is treated as a finite diagnostic
+shadow of irrational foliations on ordinary tori: phase paths should move
+coherently along projected Kronecker leaves except when a verified tropical,
+braid, or affine-Coxeter wall crossing occurs.
+
+See `planning/GRAPHCG-ANALOGY-TOPOLOGY-PLAN.md` for the corrected paper
+summary and implementation contract, `planning/TOPOLOGICAL-ANALOGY-IMPLEMENTATION.md`
+for the original directed-topology checklist, and `planning/HoTT.md` for the
+homotopy-type-theory analogue.
 
 ## Best Checkpoint Publishing
 

@@ -70,7 +70,7 @@ def arrow(ax, start, end, color=None, lw=1.5, rad=0.0):
 
 def save(fig, name):
     OUT.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT / name, bbox_inches="tight", format="pdf")
+    fig.savefig(OUT / name, bbox_inches="tight", format="pdf", facecolor=fig.get_facecolor())
     plt.close(fig)
 
 
@@ -232,6 +232,107 @@ def parameter_golf_protocol():
     save(fig, "fig_parameter_golf_protocol_clean.pdf")
 
 
+def graphcg_topology_analogy_map():
+    fig, ax = plt.subplots(figsize=(12, 6.2), facecolor="#05070d")
+    ax.set_axis_off()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_facecolor("#05070d")
+    title_color = "#7df9ff"
+    text_color = "#e9fbff"
+    dim_color = "#93a4b8"
+
+    ax.text(0.05, 0.92, "GraphCG chart -> directed persistent complexes -> analogical maps", color=title_color, fontsize=15, weight="bold")
+    ax.text(0.05, 0.86, "Disentangled basis directions act as concept coordinates; topology and analogy are computed in that chart.", color=text_color, fontsize=9.5)
+
+    # Basis chart.
+    origin = np.array([0.15, 0.49])
+    dirs = np.array([[0.18, 0.11], [0.02, 0.20], [-0.13, 0.08], [0.12, -0.12]])
+    for i, d in enumerate(dirs):
+        ax.arrow(origin[0], origin[1], d[0], d[1], width=0.004, head_width=0.018, head_length=0.018, color=["#50f5ff", "#ff4fd8", "#ffd166", "#8cff6a"][i], length_includes_head=True)
+        ax.text(origin[0] + d[0] * 1.10, origin[1] + d[1] * 1.10, f"$d_{i+1}$", color=text_color, fontsize=10)
+    ax.scatter([origin[0]], [origin[1]], s=36, color="#ffffff", zorder=5)
+    ax.text(0.06, 0.26, "GraphCG/NCE\nlearns steerable\nbasis $B=[d_i]$", color=text_color, fontsize=10, ha="left")
+
+    def draw_complex(cx: float, cy: float, phase: float, label: str) -> np.ndarray:
+        angles = np.linspace(0, 2 * np.pi, 7, endpoint=False) + phase
+        radii = np.array([0.09, 0.06, 0.10, 0.07, 0.085, 0.055, 0.095])
+        pts = np.stack([cx + radii * np.cos(angles), cy + radii * np.sin(angles)], axis=-1)
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0), (2, 4), (4, 5), (5, 2), (0, 6), (6, 3)]
+        tris = [(0, 1, 2), (2, 4, 5)]
+        for tri in tris:
+            ax.add_patch(Polygon(pts[list(tri)], closed=True, facecolor="#1c7c91", edgecolor="none", alpha=0.22))
+        for i, j in edges:
+            ax.plot([pts[i, 0], pts[j, 0]], [pts[i, 1], pts[j, 1]], color="#50f5ff", alpha=0.78, linewidth=1.2)
+        for i, j in [(0, 2), (2, 5), (5, 4), (3, 6)]:
+            ax.arrow(pts[i, 0], pts[i, 1], (pts[j, 0]-pts[i, 0])*0.72, (pts[j, 1]-pts[i, 1])*0.72, head_width=0.012, head_length=0.014, color="#ff4fd8", alpha=0.80, length_includes_head=True)
+        ax.scatter(pts[:, 0], pts[:, 1], s=30, color="#e9fbff", edgecolor="#030712", linewidth=0.5, zorder=4)
+        ax.text(cx - 0.11, cy - 0.16, label, color=text_color, fontsize=10)
+        return pts
+
+    pts_a = draw_complex(0.45, 0.56, 0.1, "$K_t(\\rho)$")
+    pts_b = draw_complex(0.74, 0.53, 0.55, "$K_{t+1}(\\rho)$")
+    for i in [0, 2, 4, 6]:
+        start = pts_a[i]
+        end = pts_b[(i + 1) % len(pts_b)]
+        ax.add_patch(FancyArrowPatch(start, end, arrowstyle="-|>", mutation_scale=13, lw=1.0, color="#ffd166", alpha=0.72, connectionstyle="arc3,rad=0.08"))
+    ax.text(0.56, 0.74, "$P_t: C_\\bullet(K_t) \\to C_\\bullet(K_{t+1})$", color="#ffd166", fontsize=12)
+    ax.text(0.39, 0.22, "nested radii\n$K(\\rho_1)\\subseteq K(\\rho_2)\\subseteq K(\\rho_3)$", color=dim_color, fontsize=9, ha="center")
+    ax.text(0.70, 0.22, "losses: Dirichlet energy,\nchain-map residual,\ndirected map residual", color=dim_color, fontsize=9, ha="center")
+    save(fig, "fig_graphcg_topology_analogy_map.pdf")
+
+
+def toric_phase_simplicial_trajectory():
+    fig = plt.figure(figsize=(10.8, 7.2), facecolor="#05070d")
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_facecolor("#05070d")
+    theta = (np.sqrt(5) - 1) / 2
+    beta = np.sqrt(2)
+    steps = 180
+    k = np.arange(steps)
+    u = 2 * np.pi * theta * k
+    v = 2 * np.pi * beta * k
+    R, r = 1.0, 0.32
+    x = (R + r * np.cos(v)) * np.cos(u)
+    y = (R + r * np.cos(v)) * np.sin(u)
+    z = r * np.sin(v)
+    energy = 0.58 + 0.22 * np.sin(0.09 * k + 0.7) + 0.18 * np.cos(theta * k)
+    uu, vv = np.meshgrid(np.linspace(0, 2*np.pi, 80), np.linspace(0, 2*np.pi, 28))
+    xx = (R + r * np.cos(vv)) * np.cos(uu)
+    yy = (R + r * np.cos(vv)) * np.sin(uu)
+    zz = r * np.sin(vv)
+    ax.plot_surface(xx, yy, zz, color="#0b2a36", alpha=0.16, linewidth=0)
+    ax.plot_wireframe(xx, yy, zz, rstride=4, cstride=8, color="#1ad7e8", alpha=0.09, linewidth=0.35)
+    points = np.stack([x, y, z], axis=-1)
+    for start in range(0, steps - 24, 24):
+        window = points[start:start+24]
+        dist = np.linalg.norm(window[:, None, :] - window[None, :, :], axis=-1)
+        threshold = np.quantile(dist[dist > 1e-8], 0.16)
+        for i in range(window.shape[0]):
+            for j in range(i + 1, window.shape[0]):
+                if dist[i, j] <= threshold:
+                    p, q = window[i], window[j]
+                    ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color="#6df6ff", alpha=0.12, linewidth=0.5)
+        if start + 48 < steps:
+            c0 = window.mean(axis=0)
+            c1 = points[start+24:start+48].mean(axis=0)
+            delta = c1 - c0
+            ax.quiver(c0[0], c0[1], c0[2], delta[0], delta[1], delta[2], color="#ff4fd8", linewidth=0.9, arrow_length_ratio=0.22)
+    ax.plot(x, y, z, color="#50f5ff", linewidth=1.6, alpha=0.9)
+    sc = ax.scatter(x, y, z, c=energy, cmap="magma", s=18, edgecolor="#06111f", linewidth=0.2)
+    ax.scatter(x[0], y[0], z[0], s=80, color="#6df6ff", edgecolor="white")
+    ax.scatter(x[-1], y[-1], z[-1], s=110, marker="*", color="#ffd166", edgecolor="white")
+    ax.set_title("Irrational toric phase winding with local simplicial reasoning structure", color="white", fontsize=12)
+    ax.text2D(0.02, 0.02, "cyan path = projected rotation-algebra phase; faint edges = local VR 1-skeleton; magenta arrows = analogical maps", transform=ax.transAxes, color="#e9fbff", fontsize=8.5)
+    ax.set_axis_off()
+    ax.view_init(elev=27, azim=40)
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.68, pad=0.02)
+    cbar.set_label("local tropical energy proxy", color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.get_yticklabels(), color="white")
+    save(fig, "fig_toric_phase_simplicial_trajectory.pdf")
+
+
 def main():
     plt.rcParams.update(
         {
@@ -249,6 +350,8 @@ def main():
     polar_ring_cache()
     soft_moe_toricgt()
     parameter_golf_protocol()
+    graphcg_topology_analogy_map()
+    toric_phase_simplicial_trajectory()
     print(f"wrote figures to {OUT}")
 
 

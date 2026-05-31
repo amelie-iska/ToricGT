@@ -211,7 +211,7 @@ BPB is computed prequentially: predict a normalized next-byte distribution, scor
 
 The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.  The local mirror of \texttt{AmelieSchreiber/toricgt-curated-splits} is used in the competition-safe split: train shards feed supervised BPB optimization, validation shards feed score-first validation, and test shards are reserved for held-out GFlowNet test-time scaling.  The byte loader packs multiple source rows into one chunk; after warmup the training iterator switches to larger technical records, and a 2048-byte packed-context config can resume from a 1024-byte checkpoint by resizing only the learned position table.  This exploits the tropical-ring upper layers for longer composite reasoning trajectories while preserving the strict prequential scoring contract.
 
-The \texttt{oai} branch also adds GraphCG-style analogical geometry without changing the exported byte model.  Let $h_t$ be a prefix-visible hidden state and let $a_t=(h_{t+s}-h_t)/(\|h_{t+s}-h_t\|+\epsilon)$ be a normalized relation arrow.  Repeated coarse byte-relation classes are encouraged to share a lattice basis $B\in\mathbb R^{d\times r}$ and to satisfy parallelogram closures.  For scale robustness, each relation class builds a nested soft Vietoris--Rips filtration
+The \texttt{oai} branch separates two ingredients.  GraphCG learns steerable latent directions by contrasting edits along learned factors \cite{liu2024graphcg}; ToricGT uses the same idea to learn a small concept chart $B=[d_1,\ldots,d_r]$.  The analogical-reasoning paper argues that analogy emerges when relational structures align in embedding space and a functor-like map is applied by the Transformer \cite{minegishi2026analogy}.  ToricGT composes these ideas: relation arrows and graph-of-thought states are first expressed in the GraphCG chart, while analogies are modeled as filtered topological functors.  Let $h_t$ be a prefix-visible hidden state, $\xi_t=B^\top h_t$, and let $a_t=(\xi_{t+s}-\xi_t)/(\|\xi_{t+s}-\xi_t\|+\epsilon)$ be a normalized chart relation arrow.  Repeated coarse byte-relation classes are encouraged to share the same chart directions and to satisfy parallelogram closures.  For scale robustness, each relation class builds a nested soft Vietoris--Rips filtration
 \begin{equation}
   A_\rho(i,j)=\sigma((\rho-\|a_i-a_j\|/\operatorname{med}\|a_p-a_q\|)/\tau),
   \qquad \rho_1<\cdots<\rho_m,
@@ -228,7 +228,26 @@ so $i\to j$ and $j\to i$ may differ.  In the hard-threshold limit these adjacenc
   \qquad
   H_p(K_{\rho_1})\to\cdots\to H_p(K_{\rho_m}),
 \end{equation}
-so the intended object is a small persistence module over hidden-state analogy arrows \cite{edelsbrunner2002topological,zomorodian2005computing,cohensteiner2007stability}.  The implementation uses differentiable persistence surrogates rather than exact barcode backpropagation.  A radius-parametrized HDBSCAN gate further computes core distances $c_i$, mutual reachability $d_{\rm mr}(i,j)=\max\{c_i,c_j,d_{ij}\}$, and persistent density affinities across the same radii.  Only high-stability neighbors receive pullback weight; outlier arrows mostly stop contributing.  Periodic analyses render these noncommutative nested-complexes and HDBSCAN density sweeps as directed filtration curves and heatmaps next to 3D graph-of-thought trajectories, Ramachandran-style phase plots, energy landscapes, and reasoning/K/BPB simplices.
+so the intended object is a small persistence module over hidden-state analogy arrows \cite{edelsbrunner2002topological,zomorodian2005computing,cohensteiner2007stability}.  Consecutive reasoning windows also carry soft transports $P_s$ that push source complexes to target complexes:
+\begin{equation}
+  \widehat A_{\rho}^{s+1}=P_s^\top A_{\rho}^{s}P_s,\qquad
+  \widehat A_{\rho}^{\rightarrow,s+1}=P_s^\top A_{\rho}^{\rightarrow,s}P_s .
+\end{equation}
+Thus the maps are functor-like, but with additional topological structure: they should preserve filtration inclusions, approximately commute with chain and boundary maps, and induce low-residual morphisms of persistence modules.  The implementation uses differentiable persistence surrogates rather than exact barcode backpropagation.  A radius-parametrized HDBSCAN gate further computes core distances $c_i$, mutual reachability $d_{\rm mr}(i,j)=\max\{c_i,c_j,d_{ij}\}$, and persistent density affinities across the same radii.  Only high-stability neighbors receive pullback weight; outlier arrows mostly stop contributing.  The finite noncommutative toric memory supplies pseudo-periodic phase coordinates $(e^{2\pi i\theta t},e^{2\pi i\beta t})$ and a quadratic cocycle surrogate; projected to a torus, these phases make recurrence, equidistribution, and directed skew visible along reasoning trajectories.  Periodic analyses render the toric phase path, local simplicial edges, and soft analogical maps in 3D, together with directed filtration curves, HDBSCAN heatmaps, Ramachandran-style phase plots, energy landscapes, and reasoning/K/BPB simplices.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.98\linewidth]{fig_graphcg_topology_analogy_map.pdf}
+  \caption{GraphCG supplies a steerable concept chart; ToricGT builds directed persistent complexes in that chart and learns soft functor-like maps that also preserve filtered topological structure.}
+  \label{fig:graphcg-topology-condensed}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.86\linewidth]{fig_toric_phase_simplicial_trajectory.pdf}
+  \caption{Irrational toric phase projection of a reasoning trajectory.  The torus path shows pseudo-periodic phase coverage; faint local edges are Vietoris--Rips 1-simplices; magenta arrows represent window-to-window analogical maps.}
+  \label{fig:toric-phase-simplicial-condensed}
+\end{figure}
 
 Operationally, the first serious BPB target is $1.20$--$1.22$, a strong run is $1.16$--$1.19$, an excellent run is $1.13$--$1.15$, and $\le1.12$ is exceptional under OpenAI's public recap.  Claims below $1.10$ BPB should trigger strict leakage, tokenizer, and score-before-update audits.
 
@@ -267,7 +286,18 @@ The next ToricGT iteration should use toric geometry as a training signal.  Firs
   +\lambda_{\mathrm{binom}}\mathcal L_{\mathrm{binom}}
   +\lambda_{\mathrm{moment}}\norm{\widehat\mu-\mu^\star}_2^2.
 \end{equation}
-Finally, make inference-time scaling geometric: continuous GFlowNets can move inside normal cones, along walls, and across moment polytopes while discrete actions edit graph-of-thought states.  Continuous GFlowNet theory supplies the density-correct trajectory-balance objective for these hybrid paths \cite{lahlou2023continuous}.  This keeps the architecture small while giving search a structured latent space.
+
+\paragraph{Affine Coxeter and braid structure.}
+The toric route to affine Coxeter structure is through lattices and chambers.  A torus $T$ has character and cocharacter lattices $M=\operatorname{Hom}(T,\mathbb G_m)$ and $N=\operatorname{Hom}(\mathbb G_m,T)$.  Once a root datum is attached, as for a reductive group with maximal torus $T$, roots $\alpha\in M$ cut $N_\R$ by hyperplanes $\alpha(x)=0$; the reflections in these walls generate the Weyl group, and the translated walls $\alpha(x)=k$ generate the affine Weyl/Coxeter group $W_{\mathrm{aff}}=Q^\vee\rtimes W$ \cite{humphreys1990reflection}.  Thus toric fans and Newton normal fans give the polyhedral side of the same chamber geometry that appears in affine Coxeter systems.  Artin braid actions then arise as ordered wall-crossing or monodromy actions around the complexified hyperplane complement.  In the next iteration, braid/Coxeter graph tasks should therefore be tied to toric fan tasks: actions $\sigma_i^{\pm1}$ and affine reflections $s_{\alpha,k}$ become controlled graph-of-thought edits, while tropical active-face margins determine whether a wall crossing is stable or ambiguous.
+
+\paragraph{Noncommutative phase foliations.}
+The rotation algebra relation $VU=e^{2\pi i\theta}UV$ supplies a projective phase over the ordinary torus shadow.  Forgetting operator order maps a word to its commutative degree $(a,b)\in\mathbb Z^2$, while retaining the cocycle exponent records the extra phase accumulated by crossings.  The audit projection
+\begin{equation}
+  k\longmapsto \left(e^{2\pi i k\theta},e^{2\pi i k\beta}\right)\in\mathbb T^2
+\end{equation}
+with irrationally related $\theta,\beta$ gives a Kronecker foliation of the commutative torus by dense phase leaves; rational approximants give closed leaves.  ToricGT should use these leaves as phase-consistency diagnostics for reasoning trajectories: hidden graph-of-thought paths should move smoothly along projected leaves unless a verified algebraic or tropical wall crossing occurs.  This is only a finite audit shadow of the rotation $C^*$-algebra, not a faithful finite representation, but it gives a concrete way to test whether noncommutative toric memory is organizing latent search rather than adding decorative sinusoidal features \cite{rieffel1981rotation}.
+
+Finally, make inference-time scaling geometric: continuous GFlowNets can move inside normal cones, along walls, across moment polytopes, and along projected toric leaves while discrete actions edit graph-of-thought states, apply braid generators, or apply affine Coxeter reflections.  Continuous GFlowNet theory supplies the density-correct trajectory-balance objective for these hybrid paths \cite{lahlou2023continuous}.  This keeps the architecture small while giving search a structured latent space.
 
 \section{Conclusion}
 
@@ -284,6 +314,16 @@ Yaoying Fu.
 Liwen Zhang, Gregory Naitzat, and Lek-Heng Lim.
 \newblock Tropical geometry of deep neural networks.
 \newblock In \emph{ICML}, PMLR 80:5824--5832, 2018.
+
+\bibitem{liu2024graphcg}
+Shengchao Liu, Chengpeng Wang, Jiarui Lu, Weili Nie, Hanchen Wang, Zhuoxinran Li, Bolei Zhou, and Jian Tang.
+\newblock Unsupervised discovery of steerable factors when graph deep generative models are entangled.
+\newblock \emph{TMLR}, 2024. arXiv:2401.17123.
+
+\bibitem{minegishi2026analogy}
+Gouki Minegishi, Jingyuan Feng, Hiroki Furuta, Takeshi Kojima, Yusuke Iwasawa, and Yutaka Matsuo.
+\newblock Emergent analogical reasoning in Transformers.
+\newblock arXiv:2602.01992, 2026.
 
 \bibitem{kim2022tokengt}
 Jinwoo Kim, Tien Dat Nguyen, Seonwoo Min, Sungjun Cho, Moontae Lee, Honglak Lee, and Seunghoon Hong.
@@ -309,6 +349,16 @@ Yoshua Bengio, Salem Lahlou, Tristan Deleu, Edward J. Hu, Mo Tiwari, and Emmanue
 Salem Lahlou, Tristan Deleu, Pablo Lemos, Dinghuai Zhang, Alexandra Volokhova, Alex Hern\'andez-Garc\'ia, Lena Nehale Ezzine, Yoshua Bengio, and Nikolay Malkin.
 \newblock A theory of continuous generative flow networks.
 \newblock In \emph{ICML}, PMLR 202:18269--18300, 2023.
+
+\bibitem{rieffel1981rotation}
+Marc A. Rieffel.
+\newblock $C^*$-algebras associated with irrational rotations.
+\newblock \emph{Pacific Journal of Mathematics}, 93(2):415--429, 1981.
+
+\bibitem{humphreys1990reflection}
+James E. Humphreys.
+\newblock \emph{Reflection Groups and Coxeter Groups}.
+\newblock Cambridge University Press, 1990.
 
 \bibitem{han2025polarquant}
 Insu Han, Praneeth Kacham, Amin Karbasi, Vahab Mirrokni, and Amir Zandieh.

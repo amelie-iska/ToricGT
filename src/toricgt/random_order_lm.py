@@ -22,6 +22,7 @@ from torch.nn import functional as F
 
 from .config import AttentionKind
 from .tropical_attention import TransformerBlock
+from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,12 @@ class RandomOrderLMConfig:
     analogy_hdbscan_min_cluster_size: int = 4
     analogy_hdbscan_min_samples: int = 4
     analogy_hdbscan_stability_threshold: float = 0.18
+    analogy_step_topology_weight: float = 0.25
+    analogy_step_topology_max_points: int = 24
+    analogy_step_topology_max_windows: int = 6
+    analogy_step_topology_window_size: int = 32
+    analogy_step_topology_step_stride: int = 8
+    analogy_step_topology_time_bias: float = 0.18
     aux_mtp_offsets: int = 2
     contrastive_temperature: float = 0.2
     trajectory_flow_viscosity: float = 0.05
@@ -615,21 +622,60 @@ class DenseRandomOrderToricLM(nn.Module):
                 "analogy_hdbscan_core_radius": zero.detach(),
                 "analogy_filtration_edge_density": zero.detach(),
                 "analogy_filtration_triangle_density": zero.detach(),
+                "analogy_step_topology_loss": zero.detach(),
+                "analogy_step_barcode_loss": zero.detach(),
+                "analogy_step_simplex_closure_loss": zero.detach(),
+                "analogy_step_filtration_inclusion_loss": zero.detach(),
+                "analogy_step_boundary_residual": zero.detach(),
+                "analogy_step_dirichlet_energy": zero.detach(),
+                "analogy_step_directed_topology_loss": zero.detach(),
+                "analogy_step_directed_transitive_loss": zero.detach(),
+                "analogy_step_directed_cycle_flux": zero.detach(),
+                "analogy_step_directed_chain_commutator": zero.detach(),
+                "analogy_step_directed_asymmetry": zero.detach(),
+                "analogy_step_analogical_map_loss": zero.detach(),
+                "analogy_step_directed_map_loss": zero.detach(),
+                "analogy_step_transport_entropy": zero.detach(),
+                "analogy_step_hdbscan_loss": zero.detach(),
+                "analogy_step_hdbscan_stability": zero.detach(),
+                "analogy_step_hdbscan_noise_fraction": zero.detach(),
+                "analogy_step_hdbscan_persistent_edge_density": zero.detach(),
+                "analogy_step_hdbscan_core_radius": zero.detach(),
+                "analogy_step_edge_density": zero.detach(),
+                "analogy_step_triangle_density": zero.detach(),
+                "analogy_step_cycle_rank": zero.detach(),
+                "analogy_step_betti0": zero.detach(),
+                "analogy_step_windows": zero.detach(),
                 "analogy_basis_loss": zero.detach(),
                 "analogy_axis_entropy": zero.detach(),
                 "analogy_lattice_margin": zero.detach(),
                 "analogy_relation_groups": zero.detach(),
                 "analogy_topology_groups": zero.detach(),
+                "analogy_graphcg_chart_dim": zero.detach(),
+                "analogy_graphcg_chart_energy": zero.detach(),
             }
 
         relation = hidden[:, stride:, :].float() - hidden[:, :-stride, :].float()
         relation = F.normalize(relation.reshape(-1, relation.shape[-1]), dim=-1)
+        topology_relation = relation
+        chart_directions = None
+        graphcg_chart_dim = zero
+        graphcg_chart_energy = zero
+        if self.graphcg_direction_basis is not None:
+            chart_directions = F.normalize(self.graphcg_direction_basis.float(), dim=-1)
+            topology_relation = F.normalize(relation @ chart_directions.transpose(0, 1), dim=-1)
+            hidden_chart = hidden.float() @ chart_directions.transpose(0, 1)
+            graphcg_chart_dim = relation.new_tensor(float(chart_directions.shape[0]))
+            graphcg_chart_energy = hidden_chart.pow(2).mean()
+        else:
+            hidden_chart = hidden.float()
         classes = self._byte_class_ids(target_tokens)
         keys = (classes[:, :-stride] * 16 + classes[:, stride:]).reshape(-1)
         max_pairs = max(2, int(self.config.analogy_lattice_max_pairs))
         if relation.shape[0] > max_pairs:
             index = torch.linspace(0, relation.shape[0] - 1, steps=max_pairs, device=relation.device).long()
             relation = relation.index_select(0, index)
+            topology_relation = topology_relation.index_select(0, index)
             keys = keys.index_select(0, index)
 
         unique, inverse, counts = torch.unique(keys, return_inverse=True, return_counts=True)
@@ -683,7 +729,7 @@ class DenseRandomOrderToricLM(nn.Module):
         repeated_group_ids = unique[counts >= 4][:max_topology_groups]
         eye_cache: dict[int, torch.Tensor] = {}
         for group_id in repeated_group_ids:
-            group = relation[keys == group_id]
+            group = topology_relation[keys == group_id]
             if group.shape[0] > max_group_points:
                 index = torch.linspace(0, group.shape[0] - 1, steps=max_group_points, device=group.device).long()
                 group = group.index_select(0, index)
@@ -898,6 +944,28 @@ class DenseRandomOrderToricLM(nn.Module):
             filtration_edge_density = zero
             filtration_triangle_density = zero
 
+        step_topology = reasoning_step_topology_loss(
+            hidden_chart,
+            config=ReasoningTopologyConfig(
+                max_points=int(self.config.analogy_step_topology_max_points),
+                max_windows=int(self.config.analogy_step_topology_max_windows),
+                window_size=int(self.config.analogy_step_topology_window_size),
+                step_stride=int(self.config.analogy_step_topology_step_stride),
+                levels=int(self.config.analogy_topology_filtration_levels),
+                radius_min=float(self.config.analogy_topology_radius_min),
+                radius_max=float(self.config.analogy_topology_radius_max),
+                temperature=float(self.config.analogy_lattice_temperature),
+                skew_scale=float(self.config.analogy_topology_skew_scale),
+                time_bias=float(self.config.analogy_step_topology_time_bias),
+                hdbscan_min_cluster_size=int(self.config.analogy_hdbscan_min_cluster_size),
+                hdbscan_min_samples=int(self.config.analogy_hdbscan_min_samples),
+                hdbscan_stability_threshold=float(self.config.analogy_hdbscan_stability_threshold),
+            ),
+        )
+        topology_loss = topology_loss + float(self.config.analogy_step_topology_weight) * step_topology[
+            "reasoning_step_topology_loss"
+        ]
+
         if hidden.shape[1] > 2 * stride:
             rel_left = hidden[:, stride:-stride, :].float() - hidden[:, :-2 * stride, :].float()
             rel_right = hidden[:, 2 * stride :, :].float() - hidden[:, stride:-stride, :].float()
@@ -962,11 +1030,47 @@ class DenseRandomOrderToricLM(nn.Module):
             "analogy_hdbscan_core_radius": hdbscan_core_radius.detach(),
             "analogy_filtration_edge_density": filtration_edge_density.detach(),
             "analogy_filtration_triangle_density": filtration_triangle_density.detach(),
+            "analogy_step_topology_loss": step_topology["reasoning_step_topology_loss"].detach(),
+            "analogy_step_barcode_loss": step_topology["reasoning_step_barcode_loss"].detach(),
+            "analogy_step_simplex_closure_loss": step_topology["reasoning_step_simplex_closure_loss"].detach(),
+            "analogy_step_filtration_inclusion_loss": step_topology[
+                "reasoning_step_filtration_inclusion_loss"
+            ].detach(),
+            "analogy_step_boundary_residual": step_topology["reasoning_step_boundary_residual"].detach(),
+            "analogy_step_dirichlet_energy": step_topology["reasoning_step_dirichlet_energy"].detach(),
+            "analogy_step_directed_topology_loss": step_topology["reasoning_step_directed_topology_loss"].detach(),
+            "analogy_step_directed_transitive_loss": step_topology[
+                "reasoning_step_directed_transitive_loss"
+            ].detach(),
+            "analogy_step_directed_cycle_flux": step_topology["reasoning_step_directed_cycle_flux"].detach(),
+            "analogy_step_directed_chain_commutator": step_topology[
+                "reasoning_step_directed_chain_commutator"
+            ].detach(),
+            "analogy_step_directed_asymmetry": step_topology["reasoning_step_directed_asymmetry"].detach(),
+            "analogy_step_analogical_map_loss": step_topology["reasoning_step_analogical_map_loss"].detach(),
+            "analogy_step_directed_map_loss": step_topology["reasoning_step_directed_map_loss"].detach(),
+            "analogy_step_transport_entropy": step_topology["reasoning_step_transport_entropy"].detach(),
+            "analogy_step_hdbscan_loss": step_topology["reasoning_step_hdbscan_loss"].detach(),
+            "analogy_step_hdbscan_stability": step_topology["reasoning_step_hdbscan_stability"].detach(),
+            "analogy_step_hdbscan_noise_fraction": step_topology[
+                "reasoning_step_hdbscan_noise_fraction"
+            ].detach(),
+            "analogy_step_hdbscan_persistent_edge_density": step_topology[
+                "reasoning_step_hdbscan_persistent_edge_density"
+            ].detach(),
+            "analogy_step_hdbscan_core_radius": step_topology["reasoning_step_hdbscan_core_radius"].detach(),
+            "analogy_step_edge_density": step_topology["reasoning_step_edge_density"].detach(),
+            "analogy_step_triangle_density": step_topology["reasoning_step_triangle_density"].detach(),
+            "analogy_step_cycle_rank": step_topology["reasoning_step_cycle_rank"].detach(),
+            "analogy_step_betti0": step_topology["reasoning_step_betti0"].detach(),
+            "analogy_step_windows": step_topology["reasoning_step_windows"].detach(),
             "analogy_basis_loss": basis_loss.detach(),
             "analogy_axis_entropy": axis_entropy.detach(),
             "analogy_lattice_margin": lattice_margin.detach(),
             "analogy_relation_groups": relation_groups.detach(),
             "analogy_topology_groups": topology_groups.detach(),
+            "analogy_graphcg_chart_dim": graphcg_chart_dim.detach(),
+            "analogy_graphcg_chart_energy": graphcg_chart_energy.detach(),
         }
 
     def forward_from_previous(

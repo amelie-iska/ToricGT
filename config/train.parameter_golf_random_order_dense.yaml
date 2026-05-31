@@ -78,6 +78,15 @@ model:
   analogy_hdbscan_min_cluster_size: 4
   analogy_hdbscan_min_samples: 4
   analogy_hdbscan_stability_threshold: 0.18
+  # Per-reasoning-step topology uses hidden states themselves, not only
+  # relation arrows.  Local windows become radius-parametrized directed flag
+  # complexes with HDBSCAN mutual-reachability gates and time-oriented skew.
+  analogy_step_topology_weight: 0.25
+  analogy_step_topology_max_points: 24
+  analogy_step_topology_max_windows: 6
+  analogy_step_topology_window_size: 32
+  analogy_step_topology_step_stride: 8
+  analogy_step_topology_time_bias: 0.18
   contrastive_temperature: 0.2
   trajectory_flow_viscosity: 0.05
   aux_mtp_offsets: 2
@@ -107,7 +116,7 @@ data:
   # high-entropy shelf.  Keep zero burn-in, but rotate the resume seed again so
   # the next step-1500 restart does not replay either analyzed 1500--2000 row
   # segment.  This preserves random-order AR decoding and optimizer state.
-  stream_origin_step: 2500
+  stream_origin_step: 3500
   stream_burnin_steps: 0
   document_separator: "\n\n"
   # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
@@ -121,8 +130,8 @@ data:
   # short but higher-entropy.  Medium/hard streams still provide explicit
   # stratified reasoning exposure after the capture window.
   easy_max_estimated_tokens: 0
-  medium_start_step: 1650
-  medium_mix_ratio: 0.0
+  medium_start_step: 2500
+  medium_mix_ratio: 0.05
   medium_min_estimated_tokens: 129
   medium_max_estimated_tokens: 384
   medium_include_graph_projection: false
@@ -168,9 +177,9 @@ training:
   # BPB began bouncing once the warmup pushed effective LR above roughly
   # 2.3e-5.  Restart from the aligned step-1500 checkpoint with Adam moments
   # intact and keep the next 500-step window below that observed bounce band.
-  lr: 0.000042
+  lr: 0.000038
   weight_decay: 0.03
-  warmup_steps: 2500
+  warmup_steps: 3500
   grad_clip_norm: 1.0
   # Step-2000 shock-guard analysis reproduced the same sharp BPB impulse:
   # local minimum at ~1690, then a large positive first/second difference at
@@ -191,10 +200,10 @@ training:
   # dominating the optimizer step.
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 1500
-  robust_micro_loss_guard_end_step: 2600
-  robust_micro_loss_guard_ratio: 1.04
-  robust_micro_loss_guard_delta: 0.10
-  robust_micro_loss_guard_min_scale: 0.10
+  robust_micro_loss_guard_end_step: 1850
+  robust_micro_loss_guard_ratio: 1.14
+  robust_micro_loss_guard_delta: 0.22
+  robust_micro_loss_guard_min_scale: 0.45
   precision: bf16
   device: cuda
   seed: 17
@@ -301,7 +310,7 @@ phase_curriculum:
       # Step-2000 shock-guard review: the local BPB floor still broke at the
       # deterministic easy-stream impulse around step 1710.  Keep this retry
       # gentler and leave auxiliary geometry terms diagnostic-only in capture.
-      lr_multiplier: 0.50
+      lr_multiplier: 0.58
       grad_clip_norm: 0.45
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.0
@@ -318,14 +327,14 @@ phase_curriculum:
     - name: bpb_sprint_2000_3000
       start_step: 2000
       end_step: 3000
-      lr_multiplier: 0.54
+      lr_multiplier: 0.60
       grad_clip_norm: 0.55
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.0
+      medium_mix_ratio: 0.05
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.00001
+      graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.00025
@@ -338,12 +347,12 @@ phase_curriculum:
       lr_multiplier: 0.72
       grad_clip_norm: 0.90
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.35
+      medium_mix_ratio: 0.18
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.0002
-      analogy_lattice_loss_weight: 0.0001
+      graphcg_loss_weight: 0.00005
+      analogy_lattice_loss_weight: 0.00003
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.0005
       mtp_loss_weight: 0.0

@@ -1855,6 +1855,12 @@ def main() -> None:
             "analogy_hdbscan_stability_threshold",
             0.18,
         ),
+        analogy_step_topology_weight=config_get(file_config, "model", "analogy_step_topology_weight", 0.25),
+        analogy_step_topology_max_points=config_get(file_config, "model", "analogy_step_topology_max_points", 24),
+        analogy_step_topology_max_windows=config_get(file_config, "model", "analogy_step_topology_max_windows", 6),
+        analogy_step_topology_window_size=config_get(file_config, "model", "analogy_step_topology_window_size", 32),
+        analogy_step_topology_step_stride=config_get(file_config, "model", "analogy_step_topology_step_stride", 8),
+        analogy_step_topology_time_bias=config_get(file_config, "model", "analogy_step_topology_time_bias", 0.18),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
         aux_mtp_offsets=args.aux_mtp_offsets
@@ -2764,11 +2770,37 @@ def main() -> None:
         step_analogy_hdbscan_core_radius = 0.0
         step_analogy_filtration_edge_density = 0.0
         step_analogy_filtration_triangle_density = 0.0
+        step_analogy_step_topology_loss = 0.0
+        step_analogy_step_barcode_loss = 0.0
+        step_analogy_step_simplex_closure_loss = 0.0
+        step_analogy_step_filtration_inclusion_loss = 0.0
+        step_analogy_step_boundary_residual = 0.0
+        step_analogy_step_dirichlet_energy = 0.0
+        step_analogy_step_directed_topology_loss = 0.0
+        step_analogy_step_directed_transitive_loss = 0.0
+        step_analogy_step_directed_cycle_flux = 0.0
+        step_analogy_step_directed_chain_commutator = 0.0
+        step_analogy_step_directed_asymmetry = 0.0
+        step_analogy_step_analogical_map_loss = 0.0
+        step_analogy_step_directed_map_loss = 0.0
+        step_analogy_step_transport_entropy = 0.0
+        step_analogy_step_hdbscan_loss = 0.0
+        step_analogy_step_hdbscan_stability = 0.0
+        step_analogy_step_hdbscan_noise_fraction = 0.0
+        step_analogy_step_hdbscan_persistent_edge_density = 0.0
+        step_analogy_step_hdbscan_core_radius = 0.0
+        step_analogy_step_edge_density = 0.0
+        step_analogy_step_triangle_density = 0.0
+        step_analogy_step_cycle_rank = 0.0
+        step_analogy_step_betti0 = 0.0
+        step_analogy_step_windows = 0.0
         step_analogy_basis_loss = 0.0
         step_analogy_axis_entropy = 0.0
         step_analogy_lattice_margin = 0.0
         step_analogy_relation_groups = 0.0
         step_analogy_topology_groups = 0.0
+        step_analogy_graphcg_chart_dim = 0.0
+        step_analogy_graphcg_chart_energy = 0.0
         step_medium_microbatches = 0.0
         step_complex_microbatches = 0.0
         last_train_batch: dict[str, torch.Tensor] | None = None
@@ -2981,11 +3013,75 @@ def main() -> None:
             step_analogy_filtration_triangle_density += float(
                 out.get("analogy_filtration_triangle_density", torch.zeros(())).detach().cpu()
             )
+            step_analogy_step_topology_loss += float(out.get("analogy_step_topology_loss", torch.zeros(())).detach().cpu())
+            step_analogy_step_barcode_loss += float(out.get("analogy_step_barcode_loss", torch.zeros(())).detach().cpu())
+            step_analogy_step_simplex_closure_loss += float(
+                out.get("analogy_step_simplex_closure_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_filtration_inclusion_loss += float(
+                out.get("analogy_step_filtration_inclusion_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_boundary_residual += float(
+                out.get("analogy_step_boundary_residual", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_dirichlet_energy += float(
+                out.get("analogy_step_dirichlet_energy", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_directed_topology_loss += float(
+                out.get("analogy_step_directed_topology_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_directed_transitive_loss += float(
+                out.get("analogy_step_directed_transitive_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_directed_cycle_flux += float(
+                out.get("analogy_step_directed_cycle_flux", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_directed_chain_commutator += float(
+                out.get("analogy_step_directed_chain_commutator", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_directed_asymmetry += float(
+                out.get("analogy_step_directed_asymmetry", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_analogical_map_loss += float(
+                out.get("analogy_step_analogical_map_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_directed_map_loss += float(
+                out.get("analogy_step_directed_map_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_transport_entropy += float(
+                out.get("analogy_step_transport_entropy", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_hdbscan_loss += float(out.get("analogy_step_hdbscan_loss", torch.zeros(())).detach().cpu())
+            step_analogy_step_hdbscan_stability += float(
+                out.get("analogy_step_hdbscan_stability", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_hdbscan_noise_fraction += float(
+                out.get("analogy_step_hdbscan_noise_fraction", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_hdbscan_persistent_edge_density += float(
+                out.get("analogy_step_hdbscan_persistent_edge_density", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_hdbscan_core_radius += float(
+                out.get("analogy_step_hdbscan_core_radius", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_edge_density += float(
+                out.get("analogy_step_edge_density", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_triangle_density += float(
+                out.get("analogy_step_triangle_density", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_cycle_rank += float(out.get("analogy_step_cycle_rank", torch.zeros(())).detach().cpu())
+            step_analogy_step_betti0 += float(out.get("analogy_step_betti0", torch.zeros(())).detach().cpu())
+            step_analogy_step_windows += float(out.get("analogy_step_windows", torch.zeros(())).detach().cpu())
             step_analogy_basis_loss += float(out.get("analogy_basis_loss", torch.zeros(())).detach().cpu())
             step_analogy_axis_entropy += float(out.get("analogy_axis_entropy", torch.zeros(())).detach().cpu())
             step_analogy_lattice_margin += float(out.get("analogy_lattice_margin", torch.zeros(())).detach().cpu())
             step_analogy_relation_groups += float(out.get("analogy_relation_groups", torch.zeros(())).detach().cpu())
             step_analogy_topology_groups += float(out.get("analogy_topology_groups", torch.zeros(())).detach().cpu())
+            step_analogy_graphcg_chart_dim += float(out.get("analogy_graphcg_chart_dim", torch.zeros(())).detach().cpu())
+            step_analogy_graphcg_chart_energy += float(
+                out.get("analogy_graphcg_chart_energy", torch.zeros(())).detach().cpu()
+            )
             step_qat_loss += float(qat_loss.detach().cpu())
             step_qat_weight += float(effective_qat_loss_weight)
             step_contrastive_loss += float(contrastive_loss.detach().cpu())
@@ -3031,11 +3127,37 @@ def main() -> None:
         step_analogy_hdbscan_core_radius /= grad_accum
         step_analogy_filtration_edge_density /= grad_accum
         step_analogy_filtration_triangle_density /= grad_accum
+        step_analogy_step_topology_loss /= grad_accum
+        step_analogy_step_barcode_loss /= grad_accum
+        step_analogy_step_simplex_closure_loss /= grad_accum
+        step_analogy_step_filtration_inclusion_loss /= grad_accum
+        step_analogy_step_boundary_residual /= grad_accum
+        step_analogy_step_dirichlet_energy /= grad_accum
+        step_analogy_step_directed_topology_loss /= grad_accum
+        step_analogy_step_directed_transitive_loss /= grad_accum
+        step_analogy_step_directed_cycle_flux /= grad_accum
+        step_analogy_step_directed_chain_commutator /= grad_accum
+        step_analogy_step_directed_asymmetry /= grad_accum
+        step_analogy_step_analogical_map_loss /= grad_accum
+        step_analogy_step_directed_map_loss /= grad_accum
+        step_analogy_step_transport_entropy /= grad_accum
+        step_analogy_step_hdbscan_loss /= grad_accum
+        step_analogy_step_hdbscan_stability /= grad_accum
+        step_analogy_step_hdbscan_noise_fraction /= grad_accum
+        step_analogy_step_hdbscan_persistent_edge_density /= grad_accum
+        step_analogy_step_hdbscan_core_radius /= grad_accum
+        step_analogy_step_edge_density /= grad_accum
+        step_analogy_step_triangle_density /= grad_accum
+        step_analogy_step_cycle_rank /= grad_accum
+        step_analogy_step_betti0 /= grad_accum
+        step_analogy_step_windows /= grad_accum
         step_analogy_basis_loss /= grad_accum
         step_analogy_axis_entropy /= grad_accum
         step_analogy_lattice_margin /= grad_accum
         step_analogy_relation_groups /= grad_accum
         step_analogy_topology_groups /= grad_accum
+        step_analogy_graphcg_chart_dim /= grad_accum
+        step_analogy_graphcg_chart_energy /= grad_accum
         step_qat_loss /= grad_accum
         step_qat_weight /= grad_accum
         step_contrastive_loss /= grad_accum
@@ -3155,11 +3277,37 @@ def main() -> None:
                 "train/analogy_hdbscan_core_radius": step_analogy_hdbscan_core_radius,
                 "train/analogy_filtration_edge_density": step_analogy_filtration_edge_density,
                 "train/analogy_filtration_triangle_density": step_analogy_filtration_triangle_density,
+                "train/analogy_step_topology_loss": step_analogy_step_topology_loss,
+                "train/analogy_step_barcode_loss": step_analogy_step_barcode_loss,
+                "train/analogy_step_simplex_closure_loss": step_analogy_step_simplex_closure_loss,
+                "train/analogy_step_filtration_inclusion_loss": step_analogy_step_filtration_inclusion_loss,
+                "train/analogy_step_boundary_residual": step_analogy_step_boundary_residual,
+                "train/analogy_step_dirichlet_energy": step_analogy_step_dirichlet_energy,
+                "train/analogy_step_directed_topology_loss": step_analogy_step_directed_topology_loss,
+                "train/analogy_step_directed_transitive_loss": step_analogy_step_directed_transitive_loss,
+                "train/analogy_step_directed_cycle_flux": step_analogy_step_directed_cycle_flux,
+                "train/analogy_step_directed_chain_commutator": step_analogy_step_directed_chain_commutator,
+                "train/analogy_step_directed_asymmetry": step_analogy_step_directed_asymmetry,
+                "train/analogy_step_analogical_map_loss": step_analogy_step_analogical_map_loss,
+                "train/analogy_step_directed_map_loss": step_analogy_step_directed_map_loss,
+                "train/analogy_step_transport_entropy": step_analogy_step_transport_entropy,
+                "train/analogy_step_hdbscan_loss": step_analogy_step_hdbscan_loss,
+                "train/analogy_step_hdbscan_stability": step_analogy_step_hdbscan_stability,
+                "train/analogy_step_hdbscan_noise_fraction": step_analogy_step_hdbscan_noise_fraction,
+                "train/analogy_step_hdbscan_persistent_edge_density": step_analogy_step_hdbscan_persistent_edge_density,
+                "train/analogy_step_hdbscan_core_radius": step_analogy_step_hdbscan_core_radius,
+                "train/analogy_step_edge_density": step_analogy_step_edge_density,
+                "train/analogy_step_triangle_density": step_analogy_step_triangle_density,
+                "train/analogy_step_cycle_rank": step_analogy_step_cycle_rank,
+                "train/analogy_step_betti0": step_analogy_step_betti0,
+                "train/analogy_step_windows": step_analogy_step_windows,
                 "train/analogy_basis_loss": step_analogy_basis_loss,
                 "train/analogy_axis_entropy": step_analogy_axis_entropy,
                 "train/analogy_lattice_margin": step_analogy_lattice_margin,
                 "train/analogy_relation_groups": step_analogy_relation_groups,
                 "train/analogy_topology_groups": step_analogy_topology_groups,
+                "train/analogy_graphcg_chart_dim": step_analogy_graphcg_chart_dim,
+                "train/analogy_graphcg_chart_energy": step_analogy_graphcg_chart_energy,
                 "train/analogy_lattice_loss_weight": effective_analogy_lattice_loss_weight,
                 "train/qat_loss": step_qat_loss,
                 "train/qat_loss_weight": effective_qat_base_weight,

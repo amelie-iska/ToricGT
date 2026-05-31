@@ -8,6 +8,11 @@ from toricgt.random_order_lm import (
     random_order_batch,
     random_order_permutation,
 )
+from toricgt.topological_reasoning import (
+    ReasoningTopologyConfig,
+    directed_step_filtration_stats_np,
+    reasoning_step_topology_loss,
+)
 
 
 def tiny_config(**overrides):
@@ -110,6 +115,45 @@ def test_analogy_hdbscan_surrogate_metrics_are_finite():
     assert out["analogy_hdbscan_persistent_edge_density"].isfinite()
     assert out["analogy_hdbscan_outlier_score"].isfinite()
     assert out["analogy_hdbscan_core_radius"].isfinite()
+    assert out["analogy_step_topology_loss"].isfinite()
+    assert out["analogy_step_dirichlet_energy"].isfinite()
+    assert out["analogy_step_hdbscan_stability"].isfinite()
+    assert out["analogy_step_cycle_rank"].isfinite()
+    assert out["analogy_step_analogical_map_loss"].isfinite()
+    assert out["analogy_step_directed_map_loss"].isfinite()
+    assert out["analogy_graphcg_chart_dim"].item() >= 1
+
+
+def test_reasoning_step_topology_builds_nested_directed_complexes():
+    t = torch.linspace(0.0, 1.0, steps=18)
+    hidden = torch.stack(
+        [
+            torch.cos(2 * torch.pi * t),
+            torch.sin(2 * torch.pi * t),
+            t,
+            t.square(),
+            torch.cos(4 * torch.pi * t),
+            torch.sin(4 * torch.pi * t),
+            1.0 - t,
+            torch.ones_like(t),
+        ],
+        dim=-1,
+    ).unsqueeze(0)
+    cfg = ReasoningTopologyConfig(max_points=12, max_windows=3, window_size=10, levels=4)
+    losses = reasoning_step_topology_loss(hidden, config=cfg)
+    assert losses["reasoning_step_topology_loss"].isfinite()
+    assert losses["reasoning_step_windows"].item() >= 1
+    assert losses["reasoning_step_directed_asymmetry"].item() > 0
+    assert losses["reasoning_step_analogical_map_loss"].isfinite()
+    assert losses["reasoning_step_directed_map_loss"].isfinite()
+
+    stats = directed_step_filtration_stats_np(hidden.squeeze(0).numpy(), config=cfg)
+    assert "simplex_tree_summary" in stats
+    assert "analogical_map_loss" in stats
+    assert "directed_map_loss" in stats
+    assert len(stats["simplex_tree_summary"]) >= cfg.levels
+    edge_density = stats["edge_density"]
+    assert all(edge_density[i] <= edge_density[i + 1] + 1e-8 for i in range(len(edge_density) - 1))
 
 
 def test_gflownet_adapter_preserves_score_before_update():

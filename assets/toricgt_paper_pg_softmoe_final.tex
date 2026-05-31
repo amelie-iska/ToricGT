@@ -1448,23 +1448,29 @@ The sampled action is a randomized function of $h_k$ and independent sampler noi
 
 \subsection{GraphCG bases and directed topological analogies}
 
-The competition branch adds an auxiliary training signal inspired by graph contrastive geometry: hidden transitions should form reusable analogical arrows rather than unrelated local displacements.  This signal is deliberately auxiliary.  It does not replace BPB, and its weights are phased in only after the early byte compressor has a stable negative slope.
+The competition branch adds an auxiliary geometric training signal, but the two source ideas play different roles.  GraphCG learns steerable latent factors by contrasting edits along learned directions and suppressing cross-direction entanglement \cite{liu2024graphcg}.  ToricGT uses this as a compact concept chart for hidden states, not as a separate graph generator in the exported artifact.  The analogical-reasoning paper studies a different mechanism: relational structures align in embedding space, measured by decreasing Dirichlet energy, and Transformer layers apply a functor-like residual map from a source structure to a target structure \cite{minegishi2026analogy}.  ToricGT composes these mechanisms: GraphCG supplies the coordinates, while analogical maps act between filtered directed complexes built over those coordinates.  The signal is deliberately auxiliary.  It does not replace BPB, and its weights are phased in only after the early byte compressor has a stable negative slope.
 
-Let $h_t\in\R^d$ be a prefix-visible hidden state and choose a short stride $s$.  Define a normalized relation arrow
+Let $B=[d_1,\ldots,d_r]\in\R^{d\times r}$ be the learned GraphCG chart with approximately orthonormal columns.  For a prefix-visible hidden state $h_t\in\R^d$, define chart coordinates $\xi_t=B\transpose h_t$.  For a short stride $s$, define a normalized chart relation arrow
 \begin{equation}
-  a_t=\frac{h_{t+s}-h_t}{\norm{h_{t+s}-h_t}_2+\epsilon}.
+  a_t=\frac{\xi_{t+s}-\xi_t}{\norm{\xi_{t+s}-\xi_t}_2+\epsilon}.
 \end{equation}
-Coarse byte-relation classes are obtained from source and target byte classes: for example digit-to-digit, lowercase-to-punctuation, or Hebrew-byte-to-Hebrew-byte.  If two arrows belong to the same class, they should represent the same abstract operation up to local context.  The GraphCG-style basis $B\in\R^{d\times r}$ supplies a compact lattice chart:
+Coarse byte-relation classes are obtained from source and target byte classes: for example digit-to-digit, lowercase-to-punctuation, or Hebrew-byte-to-Hebrew-byte.  If two arrows belong to the same class, they should represent the same abstract operation up to local context.  The GraphCG-style contrastive loss edits hidden states along chart axes and asks the edited direction to remain identifiable:
 \begin{equation}
-  c_t=\softmax(B\transpose a_t/\tau),\qquad
-  \widehat a_t=Bc_t.
+  \mathcal L_{\mathrm{GCG}}
+  =
+  \operatorname{CE}\left(
+  \frac{\ip{\operatorname{norm}(h+\alpha d_i)}
+           {\operatorname{norm}(h+2\alpha d_j)}}{T},
+  i\right)
+  +\lambda_{\perp}\norm{B\transpose B-I}_F^2
+  +\lambda_{\mathrm{cov}}\norm{\operatorname{Corr}(H B)-I}_F^2.
 \end{equation}
-The basis loss combines reconstruction, entropy control, and margin terms.  An analogical functor loss reduces within-class variance of $a_t$, while a parallelogram loss penalizes failures of local closure:
+This gives an identifiable basis for concept-like coordinates.  An analogical functor loss reduces within-class variance of $a_t$, while a parallelogram loss penalizes failures of local closure:
 \begin{equation}
   \mathcal L_{\mathrm{para}}
-  =\Eop\norm{(h_{t+s}-h_t)+(h_{u+s}-h_u)-(h_{v+s}-h_v)}_2^2
+  =\Eop\norm{(\xi_{t+s}-\xi_t)+(\xi_{u+s}-\xi_u)-(\xi_{v+s}-\xi_v)}_2^2
 \end{equation}
-over adjacent relation triples that share the same coarse arrow label.  These terms encourage byte-level reasoning moves to become reusable lattice vectors.
+over adjacent relation triples that share the same coarse arrow label.  These terms encourage byte-level reasoning moves to become reusable lattice vectors in the GraphCG chart.
 
 \begin{definition}[Directed filtered analogy complex]
 Fix a relation class with arrows $a_1,\ldots,a_m$.  Let
@@ -1508,6 +1514,70 @@ and the directed chain complexes induce directed persistence modules
 \end{equation}
 When the antisymmetric form $\Omega$ is nonzero, reversing an arrow can change the simplex set; this is the topology-level analogue of noncommutative toric memory.
 \end{definition}
+
+\begin{definition}[Filtered topological analogical map]
+Let $K_s(\rho_\ell)$ and $K_{s+1}(\rho_\ell)$ be two consecutive reasoning-window complexes in the GraphCG chart.  A soft analogical transport is
+\begin{equation}
+  P_s(i,j)=
+  \frac{\exp(-\norm{\xi_i^{(s)}-\xi_j^{(s+1)}}_2/\tau)}
+       {\sum_k\exp(-\norm{\xi_i^{(s)}-\xi_k^{(s+1)}}_2/\tau)}.
+\end{equation}
+It pushes the source adjacency and directed adjacency to the target window by
+\begin{equation}
+  \widehat A_{\ell}^{(s+1)}=P_s\transpose A_\ell^{(s)}P_s,\qquad
+  \widehat A_{\ell}^{\rightarrow,(s+1)}
+  =P_s\transpose A_\ell^{\rightarrow,(s)}P_s.
+\end{equation}
+The differentiable map residual is
+\begin{equation}
+  \mathcal L_{\mathrm{map}}
+  =
+  \frac1L\sum_{\ell=1}^L
+  \norm{\widehat A_{\ell}^{(s+1)}-A_\ell^{(s+1)}}_F^2
+  +\norm{\widehat A_{\ell}^{\rightarrow,(s+1)}
+       -A_\ell^{\rightarrow,(s+1)}}_F^2.
+\end{equation}
+The map is functor-like, but its intended structure is stronger than a bare functor: it should also respect the filtration order, approximately commute with boundary and chain maps, and induce low-residual morphisms between persistence modules.
+\end{definition}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{fig_graphcg_topology_analogy_map.pdf}
+  \caption{GraphCG supplies a steerable concept chart; ToricGT builds directed persistent complexes in that chart and learns soft analogical maps between local reasoning complexes.  The maps are functor-like, but they also carry filtered simplicial, chain-map, and persistence-module structure.}
+  \label{fig:graphcg-topology-analogy}
+\end{figure}
+
+\begin{definition}[Exact small persistence-module morphism audit]
+For sampled analysis windows, replace the soft adjacencies by hard thresholded flag complexes over $\mathbb F_2$ up to dimension $2$.  Let $C_p(K_s(\rho_\ell))$ be the $p$-chain group and $\partial_p$ the boundary.  A nearest-neighbor vertex map induced by $P_s$ is accepted at target radius $\rho_{\ell'}$ if every source edge and triangle maps either to a collapsed simplex or to an edge or triangle in $K_{s+1}(\rho_{\ell'})$.  It then induces chain maps $F_{p,\ell,\ell'}$ and homology maps
+\begin{equation}
+  (F_{p,\ell,\ell'})_*:
+  H_p(K_s(\rho_\ell);\mathbb F_2)
+  \longrightarrow
+  H_p(K_{s+1}(\rho_{\ell'});\mathbb F_2).
+\end{equation}
+The audit reports $\dim H_0$, $\dim H_1$, the ranks of $(F_0)_*$ and $(F_1)_*$, the minimal radius shift $\ell'-\ell$ required for a simplicial map, edge and triangle validity, directed-edge validity, and whether the complex was truncated for tractability.
+\end{definition}
+
+\begin{proposition}[Chain-map validity implies a homology map]
+If $F_{p,\ell,\ell'}$ satisfies
+\begin{equation}
+  \partial_{p}^{s+1}F_{p,\ell,\ell'}=
+  F_{p-1,\ell,\ell'}\partial_p^s,
+\end{equation}
+then it induces a well-defined linear map on $H_p$ over $\mathbb F_2$.
+\end{proposition}
+
+\begin{proof}
+If $z\in C_p(K_s)$ is a cycle, then $\partial_p^s z=0$.  The chain-map identity gives
+\begin{equation}
+  \partial_p^{s+1}F_pz=F_{p-1}\partial_p^s z=0,
+\end{equation}
+so cycles map to cycles.  If $z$ and $z'$ differ by a boundary, $z-z'=\partial_{p+1}^s w$, then
+\begin{equation}
+  F_pz-F_pz'=F_p\partial_{p+1}^s w=\partial_{p+1}^{s+1}F_{p+1}w,
+\end{equation}
+so their images differ by a boundary.  Therefore the map depends only on homology classes.
+\end{proof}
 
 \begin{proposition}[Persistence stability for analogy filtrations]
 Let $d$ and $\widehat d$ be two symmetric distance matrices on the same relation arrows, and let $\operatorname{Dgm}_p(d)$ and $\operatorname{Dgm}_p(\widehat d)$ be the degree-$p$ persistence diagrams of their Vietoris--Rips filtrations.  Then the bottleneck distance obeys
@@ -1566,7 +1636,30 @@ If all hidden arrows in one relation class are multiplied by a common scalar $\l
 The numerator $\norm{\lambda a_i-\lambda a_j}_2$ and the median denominator are both multiplied by $\lambda$, so their ratio is unchanged.  Therefore each logit $(\rho_\ell-d_{ij})/\tau$ is unchanged, and so is $A_\ell$.  The inclusion, chain-map, barcode-proxy, and triangle diagnostics are deterministic functions of these adjacencies.  For the directed case, normalized channel blocks satisfy $\lambda a_i^{(r)}/\norm{\lambda a_i^{(r)}}=a_i^{(r)}/\norm{a_i^{(r)}}$ for $\lambda>0$, so $\Omega_{ij}$ is unchanged.  Hence $A_\ell^\rightarrow$ and the directed diagnostics are unchanged as well.
 \end{proof}
 
-Periodic analyses render these quantities directly.  For selected reasoning records the script writes directed filtration curves for edge density, triangle density, asymmetry, and cycle flux, plus heatmaps of normalized distances, the antisymmetric toric skew matrix, and directed adjacencies at representative radii.  Thus the noncommutative topology is both a training pressure and an auditable explanation object.
+The noncommutative toric memory shapes the same trajectories through irrational phase probes.  In the compact Parameter-Golf adapter, target positions receive phase features
+\begin{equation}
+  (\sin 2\pi\theta t,\cos 2\pi\theta t,\sin 2\pi\beta t,\cos 2\pi\beta t),
+\end{equation}
+and memory slots carry a finite cocycle-like phase
+\begin{equation}
+  \chi_s=\exp\bigl(2\pi i(\theta s^2+\beta s)\bigr).
+\end{equation}
+When $1,\theta,\beta$ are rationally independent, the projected path
+\begin{equation}
+  \Pi(t)=((R+r\cos 2\pi\beta t)\cos 2\pi\theta t,\,
+  (R+r\cos 2\pi\beta t)\sin 2\pi\theta t,\,
+  r\sin 2\pi\beta t)
+\end{equation}
+is pseudo-periodic and equidistributed on the visualization torus in the finite-prefix sense.  This does not by itself solve reasoning; it supplies a nonrepeating phase scaffold that helps separate random-order positions, exposes recurrence, and contributes an antisymmetric skew term to directed topology diagnostics.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\textwidth]{fig_toric_phase_simplicial_trajectory.pdf}
+  \caption{Irrational toric phase projection of a reasoning trajectory.  The torus path visualizes pseudo-periodic phase coverage; local Vietoris--Rips edges reveal step-level simplicial structure; magenta arrows indicate soft analogical maps between consecutive windows.}
+  \label{fig:toric-phase-simplicial}
+\end{figure}
+
+Periodic analyses render these quantities directly.  For selected reasoning records the script writes directed filtration curves for edge density, triangle density, asymmetry, and cycle flux; heatmaps of normalized distances, mutual reachability, the antisymmetric toric skew matrix, and directed adjacencies; window-by-radius simplex hierarchy plots; exact $\mathbb F_2$ persistence-module morphism heatmaps for $H_0$ and $H_1$; and toric phase/simplicial trajectory plots.  Thus the noncommutative topology is both a training pressure and an auditable explanation object.
 
 \begin{proposition}[Dense recurrent blocks are the byte-efficient default]
 Under a strict serialized-byte cap, replacing a dense feed-forward block of size $O(dd_{\mathrm{ff}})$ by $E$ full experts costs $O(Edd_{\mathrm{ff}})$ stored scalars, whereas applying the same dense block recurrently $r$ times costs no additional stored scalars.  Therefore the Parameter-Golf default should be dense recurrent ToricGT blocks, with Soft-MoE retained as a measured ablation or low-rank adapter variant.
@@ -1981,6 +2074,55 @@ The next data pass should add explicit toric-geometric tasks alongside the exist
 \end{enumerate}
 These tasks should be held out by fan combinatorial type, number of rays, Newton-polytope dimension, relation-rank, and wall-equivalence class.  Random example-level splits are especially weak here because adjacent points in a normal fan can share almost all combinatorial data.
 
+\subsection{Affine Coxeter, braid, and toric phase foliations}
+
+The next iteration should also make explicit the Lie-theoretic structure that sits naturally next to the toric layer.  A toric variety by itself is controlled by a lattice and a fan; a reductive Lie group with maximal torus $T$ adds a root datum.  This extra root datum is the precise bridge from toric geometry to Weyl chambers, affine Coxeter systems, and braid actions.  Let
+\begin{equation}
+  M=\operatorname{Hom}(T,\mathbb G_m),\qquad
+  N=\operatorname{Hom}(\mathbb G_m,T)
+\end{equation}
+be the character and cocharacter lattices, and let $\Phi\subset M$ be a finite root system.  Each root $\alpha\in\Phi$ defines a wall in $N_\R$,
+\begin{equation}
+  H_\alpha=\{x\in N_\R:\ip{\alpha}{x}=0\}.
+\end{equation}
+Reflections across these walls generate the Weyl group $W$.  Translating the walls by integer levels gives the affine arrangement
+\begin{equation}
+  H_{\alpha,k}=\{x\in N_\R:\ip{\alpha}{x}=k\},\qquad \alpha\in\Phi,\;k\in\Z,
+\end{equation}
+and the corresponding affine Weyl group
+\begin{equation}
+  W_{\mathrm{aff}}=Q^\vee\rtimes W,
+\end{equation}
+where $Q^\vee$ is the coroot lattice \cite{humphreys1990reflection}.  In ToricGT terms, Newton normal fans and tropical active-face decompositions give the polyhedral chamber geometry; root hyperplanes add labeled reflection walls; and affine translations give a principled way to extend finite Coxeter tasks to unbounded but still structured reasoning families.  This is the rigorous sense in which toric geometry leads to affine Coxeter structure: not every toric fan carries a root system, but once the relevant character lattice and root datum are specified, the fan/chamber machinery becomes the natural coordinate system for affine reflections and their walls.
+
+Braid groups enter through ordered wall crossings.  The Artin braid generator $\sigma_i$ can be treated as a graph-of-thought edit that crosses or winds around a specified adjacent wall while preserving the appropriate Coxeter projection.  A useful synthetic task is therefore not merely to reduce braid words, but to predict the chamber path:
+\begin{equation}
+  C_0 \xrightarrow{\sigma_{i_1}^{\epsilon_1}} C_1
+  \xrightarrow{\sigma_{i_2}^{\epsilon_2}}\cdots
+  \xrightarrow{\sigma_{i_T}^{\epsilon_T}} C_T,
+\end{equation}
+along with the associated tropical margin at each crossing and the induced affine reflection when the path projects to the Coxeter group.  The held-out families should include braid length, affine rank, wall multiplicity, and chamber distance.  The model already has the right primitive actions: braid generators, affine Coxeter reflections, tropical active-face selection, and toric clock/shift operations.  The next iteration should bind them together in a single typed graph schema with chamber, wall, root, coroot, generator, and braid-path nodes.
+
+The noncommutative torus adds a complementary phase-foliation view.  For the rotation algebra $\A_\theta$,
+\begin{equation}
+  VU=e^{2\pi i\theta}UV,
+\end{equation}
+ordinary commutative projection forgets operator order and keeps only the degree $(a,b)\in\Z^2$ of a word $U^aV^b$.  The projective cocycle keeps the missing information: a word reduction also accumulates a phase exponent $c$,
+\begin{equation}
+  W\mapsto e^{2\pi i c\theta}U^aV^b.
+\end{equation}
+Projecting this phase memory to an ordinary torus produces finite diagnostic leaves.  For irrationally related $\theta$ and $\beta$, define
+\begin{equation}
+  \gamma(k)=\left(e^{2\pi i k\theta},e^{2\pi i k\beta}\right)\in\mathbb T^2.
+\end{equation}
+By Kronecker density, $\gamma(\Z)$ is dense in the commutative torus when $1,\theta,\beta$ are rationally independent.  Geometrically, the projected phase path is a leaf of an irrational linear foliation of $\mathbb T^2$; rational Weyl-pair approximants $p/q$ close the leaf into a finite periodic orbit.  Thus noncommutative toric memory can be audited by asking whether reasoning trajectories follow smooth projected phase leaves between justified wall crossings:
+\begin{equation}
+  E_{\mathrm{leaf}}=\sum_t
+  \dist_{\mathbb T^2}\!\left(\Pi_\theta(h_{t+1}),
+  R_{\Delta_t}\Pi_\theta(h_t)\right)^2,
+\end{equation}
+where $\Pi_\theta$ is the learned toric phase projection and $R_{\Delta_t}$ is the expected rotation increment from the graph action at step $t$.  A small $E_{\mathrm{leaf}}$ means the phase channel behaves like a coherent projective memory; a large value means the model is using the sinusoidal channel incoherently.  This remains an audit shadow, not a claim that a finite neural network represents the full irrational rotation algebra faithfully.
+
 \subsection{Fine-tuning objective}
 
 Let $\mathcal L_{\mathrm{base}}$ be the existing supervised and GFlowNet objective.  A toric fine-tuning phase can use
@@ -2153,6 +2295,16 @@ David A. Cox, John B. Little, and Henry K. Schenck.
 \newblock \emph{Toric Varieties}.
 \newblock Graduate Studies in Mathematics 124. American Mathematical Society, 2011.
 
+\bibitem{liu2024graphcg}
+Shengchao Liu, Chengpeng Wang, Jiarui Lu, Weili Nie, Hanchen Wang, Zhuoxinran Li, Bolei Zhou, and Jian Tang.
+\newblock Unsupervised discovery of steerable factors when graph deep generative models are entangled.
+\newblock \emph{Transactions on Machine Learning Research}, 2024. arXiv:2401.17123.
+
+\bibitem{minegishi2026analogy}
+Gouki Minegishi, Jingyuan Feng, Hiroki Furuta, Takeshi Kojima, Yusuke Iwasawa, and Yutaka Matsuo.
+\newblock Emergent analogical reasoning in Transformers.
+\newblock arXiv:2602.01992, 2026.
+
 \bibitem{edelsbrunner2002topological}
 Herbert Edelsbrunner, David Letscher, and Afra Zomorodian.
 \newblock Topological persistence and simplification.
@@ -2227,6 +2379,11 @@ Marc A. Rieffel.
 Marc A. Rieffel.
 \newblock Projective modules over higher-dimensional non-commutative tori.
 \newblock \emph{Canadian Journal of Mathematics}, 40(2):257--338, 1988.
+
+\bibitem{humphreys1990reflection}
+James E. Humphreys.
+\newblock \emph{Reflection Groups and Coxeter Groups}.
+\newblock Cambridge University Press, 1990.
 
 \bibitem{pimsner1980embedding}
 Mihai Pimsner and Dan Voiculescu.

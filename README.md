@@ -553,20 +553,33 @@ Hebrew, biomedicine, biochemistry, biophysics, and toric tasks, and bit-packed
 6-bit row quantized LZMA exports. JEPA is deliberately excluded from this branch per the current
 experiment scope.
 
-The same branch now adds GraphCG-style lattice-basis training and an explicit
-analogical topology objective. With CUDA memory available,
-`graphcg_num_directions: auto` expands the learned hidden-space basis under a
-10% safety margin; on the local 24GB RTX 4090 this resolves to 256 directions.
-Analogical maps are not only parallelogram vector losses: repeated hidden
-relation classes build normalized nested Vietoris-Rips/simplex-tree filtrations,
-including directed flag-complex edges from an antisymmetric noncommutative
-form. W&B logs `train/analogy_*` metrics for functor loss, filtration
-inclusions, chain-map commutators, directed transitive closure, directed
-cycle/holonomy balance, edge/triangle densities, and basis alignment. The
-training objective also includes a radius-parametrized HDBSCAN surrogate over
-mutual-reachability distances: persistent high-stability relation neighbors are
-pulled together, while unstable/outlier relation arrows contribute little. W&B
-reports `train/analogy_hdbscan_loss`, `train/analogy_hdbscan_stability`,
+The same branch now separates GraphCG-style lattice-basis training from the
+analogical-reasoning mechanism. With CUDA memory available,
+`graphcg_num_directions: auto` expands the learned hidden-space concept chart
+under a 10% safety margin; on the local 24GB RTX 4090 this resolves to 256
+directions. Analogical maps are functor-like, but they are not only
+parallelogram vector losses: they are filtered simplicial/chain maps between
+collections of related thought vectors. Repeated hidden relation classes are
+first expressed in the GraphCG chart, then build normalized nested
+Vietoris-Rips/simplex-tree filtrations, including directed flag-complex edges
+from an antisymmetric noncommutative form. W&B logs `train/analogy_*` metrics
+for functor loss, filtration inclusions, chain-map commutators, directed
+transitive closure, directed cycle/holonomy balance, edge/triangle densities,
+and basis alignment. The step-local topology pass now constructs the
+corresponding filtered complexes on the reasoning states themselves, in the
+same GraphCG concept chart. Each sampled graph-of-thought window becomes a
+radius-parametrized simplex-tree hierarchy with time-oriented directed edges,
+Betti-0 and cycle-rank proxies, boundary residuals, Dirichlet energy, directed
+chain commutators, and HDBSCAN stability/noise diagnostics. Consecutive windows
+are joined by soft transport maps that induce approximate morphisms of
+persistence modules; W&B reports `train/analogy_step_analogical_map_loss`,
+`train/analogy_step_directed_map_loss`, and
+`train/analogy_step_transport_entropy` along with the rest of
+`train/analogy_step_*`. The training objective also includes a
+radius-parametrized HDBSCAN surrogate over mutual-reachability distances:
+persistent high-stability relation neighbors are pulled together, while
+unstable/outlier relation arrows contribute little. W&B reports
+`train/analogy_hdbscan_loss`, `train/analogy_hdbscan_stability`,
 `train/analogy_hdbscan_persistent_edge_density`,
 `train/analogy_hdbscan_outlier_score`, and
 `train/analogy_hdbscan_core_radius`.
@@ -576,9 +589,39 @@ filtration curves for edge density, triangle density, directed asymmetry, and
 noncommutative cycle flux, plus HDBSCAN stable-cluster and outlier curves.
 The heatmaps include normalized hidden-arrow distances, mutual-reachability
 distances, density-persistence adjacency, antisymmetric toric skew, and directed
-adjacency at several radii. These plots sit next to the 3D graph-of-thought
-trajectories, Ramachandran-style phase plots, energy landscapes, reasoning/K/BPB
-triangles, and tetrahedral simplex diagnostics.
+adjacency at several radii. The new `*_step_radius_hierarchy.png` panels show
+window-by-radius edge density, Betti-0, cycle-rank, analogical map residuals,
+and directed map residuals for the actual hidden reasoning states. The analysis
+suite also writes `*_toric_phase_simplicial_trajectory.png`, which projects the
+irrational rotation-algebra phase path onto a torus, overlays local
+Vietoris-Rips edges, and draws the soft analogical maps between reasoning
+windows. These plots sit next to the 3D graph-of-thought trajectories,
+Ramachandran-style phase plots, energy landscapes, reasoning/K/BPB triangles,
+and tetrahedral simplex diagnostics.
+The condensed and full papers now make the next-iteration algebra explicit:
+toric character/cocharacter lattices become Weyl-chamber coordinates once a
+root datum is attached, translated root hyperplanes give affine
+Weyl/Coxeter actions, and ordered wall crossings give Artin braid actions.
+The same section describes noncommutative-torus phase projections as finite
+audit shadows of irrational Kronecker foliations on ordinary tori: smooth
+projected phase leaves are expected between verified tropical or algebraic
+wall crossings, while high leaf residual indicates incoherent toric memory.
+For computationally tractable sampled windows, the analysis pass also computes
+exact F2 homology up to degree 1 and nearest-neighbor induced maps between
+consecutive windows. It reports exact H0/H1 dimensions, induced map ranks,
+minimal radius shifts needed for a simplicial map, edge/triangle validity, and
+directed-edge validity. These values are written to
+`*_exact_persistence_morphisms.png`, `reasoning_geometry_summary.json`, and,
+when `--wandb` is passed, to the same W&B project under `analysis/*`.
+
+Planning notes:
+[`planning/GRAPHCG-ANALOGY-TOPOLOGY-PLAN.md`](planning/GRAPHCG-ANALOGY-TOPOLOGY-PLAN.md)
+separates GraphCG basis learning from analogical functor structure and defines
+the filtered topological map contract.
+[`planning/TOPOLOGICAL-ANALOGY-IMPLEMENTATION.md`](planning/TOPOLOGICAL-ANALOGY-IMPLEMENTATION.md)
+defines the directed persistent-topology implementation contract, and
+[`planning/HoTT.md`](planning/HoTT.md) gives the homotopy-type-theory analogue
+with the HoTT book reference: <https://homotopytypetheory.org/book/>.
 
 Kolmogorov-style reasoning diagnostics are enabled by default on the `oai`
 branch without changing the BPB objective. The trainer periodically logs
@@ -600,12 +643,13 @@ after the current byte has been scored.
 The loader already packs multiple source rows into one byte chunk with a
 separator, so short problems are combined into a single random-order training
 instance. The default `oai` config keeps the initial BPB capture stream
-text-first, introduces medium-length rows after step `1650`, and delays the
+text-first, introduces medium-length rows after step `2500`, and delays the
 larger technical graph-projection stream until step `6000` with
 math/code/graph/reasoning/health/physics/biomed/biochem task-family filters.
-The current restart is from the aligned step `1,500` checkpoint with a lower
-`1500-1800` LR multiplier (`0.90`) to stay below the observed bounce band while
-the new topology metrics are introduced at very small weight. A bounded
+The current restart is from the aligned step `1,250` checkpoint with a lower
+`1500-2000` LR multiplier and zero medium/hard mixture in that capture window
+to stay below the observed bounce band while the new topology metrics are
+diagnostic-only. A bounded
 checkpoint-level adaptive controller remains enabled for GFlowNet entropy
 target, GFlowNet loss weight, and hard-row mix; it writes
 `checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_capture_schneller.json`

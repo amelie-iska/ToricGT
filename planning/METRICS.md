@@ -3055,3 +3055,144 @@ Acceptance criteria for the robust-guard review:
    promotion target.
 5. Toric entropy, radius-HDBSCAN stability, directed asymmetry, and inclusion
    violation should remain in their current healthy bands.
+
+## Step 2,000 Robust-Microguard Review
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-restart-01500-robust-microguard/step-00002000/
+```
+
+Reviewed at `2026-05-30 04:20 UTC`.
+
+The robust microbatch guard fixed the catastrophic local train-BPB ricochet but
+created a validation/generalization mismatch.  The checkpoint at step `2000`
+has `train_bpb=3.920708` and `train_loss=2.717628`, beating the two previous
+failed step-2000 checkpoints (`4.2347`, `4.2808`) but still failing promotion.
+The live W&B validation gate reported `controller/val_bpb=5.873126`,
+`complexity/val/bpb=5.274160`, and `complexity/val/loss=3.655769`.  The local
+training window had a real trough at step `1700` with `train/bpb=3.508630`, but
+the last-10 mean by step `1990` had rebounded to `3.706021`.  The checkpoint
+aggregate (`3.920708`) was written after a harder microbatch than the last live
+logged point (`3.692979`).
+
+Manual categorization:
+
+| group | category | reason |
+|---|---|---|
+| raw `train/bpb`, `train/loss` | desired but too weak | The violent shelf was removed, but the last half-window is mostly flat/oscillatory rather than sharply descending. |
+| `train/loss_ema` | desired but too weak | EMA improved early and then flattened around `2.56--2.58`; the negative first derivative lost magnitude after the step-1700 trough. |
+| `controller/val_bpb`, `complexity/val/bpb` | undesirable | Validation BPB worsened to `5.873126`/`5.274160`, so the robust guard biased learning away from validation-like hard rows. |
+| robust microbatch guard | desired but too strong | It avoided the train ricochet, but mean last-10 guard fraction was `0.275` with a max of `0.625`; persistent selective downweighting changes the stochastic gradient distribution. |
+| gradient norm | desired | Mean last-10 grad norm was `0.3997`, with no explosive spike; curvature control is now adequate. |
+| Hessian probe | desired but monitor | Dominant curvature was about `1.41e-4` and trace-per-parameter `1.50e-4`: finite, but higher than the stream-rotate probe, consistent with a broader validation mismatch rather than a single sharp cliff. |
+| GFlowNet entropy/diversity | desired but too weak | Entropy stayed near `2.74` and action diversity near `0.99`, but simplex budgets did not lower BPB. |
+| toric memory entropy | desired but too weak | Entropy stayed live around `0.258`, above the floor but drifting downward from the best `0.274`. |
+| GraphCG / analogy topology losses | mixed | Chain/functor/contrastive losses improved, but barcode, HDBSCAN, topology, lattice, and trajectory-flow losses drifted upward, indicating geometric pressure is not yet aligned with likelihood. |
+| directed nested topology | desired | Mean inclusion violation was `0.0`, directed asymmetry `0.4381`, cycle flux `0.00668`, HDBSCAN stability `0.9276`, and noise `0.0724`. |
+
+Plot inspection:
+
+- `metrics/core_metric_timeseries.png`: BPB and loss no longer explode, but
+  they oscillate around a shallow basin after step `1700`.  GFlowNet
+  entropy/diversity are healthy and noncollapsed.  Grad norm decays into a
+  stable band.
+- `metrics/recent_metric_slopes.png`: the statistically active slopes are
+  mostly complexity-compression terms; train BPB lacks a strong recent negative
+  slope.
+- `geometry/triangles/reasoning_k_bpb.png`: points remain mostly central.
+  Lower BPB is not yet a boundary face of reasoning time or \(K(x)\), so extra
+  graph-of-thought compute is not translating into likelihood compression.
+- `geometry/tetrahedra/reasoning_k_bpb_mst.png`: MST efficiency is useful but
+  the low-BPB points are not cleanly separated by MST efficiency.
+- `geometry/triangles/toric_memory_control.png` and
+  `geometry/tetrahedra/toric_gfn_bpb.png`: toric memory remains active, but
+  low-BPB points lean toward toric/order robustness more than GFlowNet
+  diversity.
+- `geometry/trajectories/*_trajectory_3d.png`: branches are readable and
+  terminate in compact answer basins, but many longer excursions carry no BPB
+  payoff.
+- `geometry/trajectories/*_energy_landscape.png`: the landscape has a broad
+  basin plus a high-energy sheet, matching the validation gap.
+- `geometry/trajectories/*_phase_energy.png`: phase occupancy is noncollapsed;
+  toric channels should stay enabled.
+- `geometry/topology/*_directed_filtration.png`: radius filtrations are
+  well-ordered, HDBSCAN noise collapses at moderate radius, asymmetry remains
+  nonzero, and cycle flux stays low.
+
+Mathematical explanation:
+
+Let \(z_{t,m}\) be microbatch \(m\) at optimizer step \(t\).  The robust guard
+changes the estimator from
+
+\[
+  g_t=\frac{1}{M}\sum_m \nabla_\theta \ell(\theta_t;z_{t,m})
+\]
+
+to
+
+\[
+  \widehat g_t=\frac{1}{M}\sum_m
+  w_{t,m}\nabla_\theta \ell(\theta_t;z_{t,m}),\qquad
+  w_{t,m}=\min\left(1,\frac{c_t}{\ell(\theta_t;z_{t,m})}\right),
+\]
+
+with a floor on \(w_{t,m}\).  This bounded-influence estimator is correct for
+removing rare destructive shocks, but if \(P(w_{t,m}<1)\) is persistent, then
+\(\mathbb E[\widehat g_t]\neq\nabla_\theta\mathbb E[\ell]\).  The observed
+guard fraction near `0.275` means the estimator stopped being a shock guard and
+became a curriculum reweighting.  Train BPB improved because the high-loss rows
+lost influence; validation BPB worsened because those rows encode part of the
+held-out distribution.
+
+The geometry diagnostics argue against changing the architecture.  Directed
+filtration inclusion is exact, cycle flux is small, and toric phases are
+noncollapsed; the problem is scalar control of the early stochastic estimator
+and stream mix.  The fix should shorten and soften the robust guard, rotate the
+resume stream again, and add a small medium-difficulty validation-like mix so
+the model sees hard-enough bytes without letting them dominate the step.
+
+### Decision
+
+Do not continue from step `2000`.  Restart again from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt
+```
+
+Implemented minimal controls:
+
+| control | old | new | reason |
+|---|---:|---:|---|
+| `data.stream_origin_step` | `2500` | `3500` | Avoid replaying either analyzed 1500--2000 stream segment. |
+| `data.medium_start_step` | `1650` | `1500` | Make validation-like rows visible immediately after rollback. |
+| `data.medium_mix_ratio` | `0.0` | `0.08` | Add a small medium-difficulty component without flooding hard graph rows. |
+| `training.lr` | `4.2e-5` | `3.8e-5` | Slightly reduce the warmup-band update size without freezing descent. |
+| `training.warmup_steps` | `2500` | `3500` | Keep the step-1500--2000 window below the previous bounce band. |
+| `robust_micro_loss_guard_end_step` | `2600` | `1900` | Stop the guard before it becomes a long-lived bias. |
+| `robust_micro_loss_guard_ratio` | `1.04` | `1.10` | Trigger only on larger relative outliers. |
+| `robust_micro_loss_guard_delta` | `0.10` | `0.18` | Trigger only on larger absolute outliers. |
+| `robust_micro_loss_guard_min_scale` | `0.10` | `0.35` | Keep hard rows materially represented in the gradient. |
+| `phase bpb_sprint_1500_2000.medium_mix_ratio` | `0.0` | `0.08` | Ensure the phase override does not erase the new medium mix. |
+| `phase bpb_sprint_2000_3000.medium_mix_ratio` | `0.0` | `0.12` | Continue validation-like exposure if step 2000 is promotable. |
+
+The architecture remains unchanged: dense Parameter-Golf weights, random-order
+autoregressive graph decoding, hybrid tropical ring attention, toric memory,
+embedding-space GFlowNet graph-of-thought diagnostics, GraphCG, directed
+simplex/persistence diagnostics, and Kolmogorov-complexity monitors all remain
+active.
+
+Acceptance criteria for the next step-2000 review:
+
+1. `train/bpb` should remain below `3.85` for the last-10 mean and avoid any
+   single-step shelf above `4.4`.
+2. `controller/val_bpb` should recover below `5.30`; below `5.10` is
+   promotable for continuing beyond step `2000`.
+3. `complexity/val/bpb` should improve from `5.274160`; below `5.00` is the
+   near-term gate.
+4. Robust guard fraction should stay below `0.20` in the last 100 steps; values
+   above that mean the guard is still biasing too much data.
+5. Toric entropy should remain above `0.25`, directed topology inclusion
+   violation should stay `0.0`, HDBSCAN stability should stay above `0.75`, and
+   cycle flux should remain below `0.02`.

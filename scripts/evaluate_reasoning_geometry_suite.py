@@ -40,6 +40,10 @@ import numpy as np
 import pyarrow.parquet as pq
 import torch
 from torch.nn import functional as F
+try:
+    import wandb
+except ImportError:  # pragma: no cover - optional analysis dependency
+    wandb = None
 
 from evaluate_reasoning_simplex import blue_colormap, load_model
 from toricgt.complexity import random_order_complexity_metrics
@@ -54,6 +58,7 @@ from toricgt.reasoning_geometry import (
     simplex_record,
     triangle_grid,
 )
+from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step_filtration_stats_np
 from train_parameter_golf_random_order import ParquetByteChunkDataset
 
 
@@ -198,6 +203,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--precision", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--random-init", action="store_true")
+    parser.add_argument("--wandb", action="store_true", help="Log analysis summaries and images to Weights & Biases")
+    parser.add_argument("--wandb-project", default="toricgt-parameter-golf")
+    parser.add_argument("--wandb-run-name", default="")
     return parser.parse_args()
 
 
@@ -497,6 +505,39 @@ def evaluate_branch(
         max_samples=1,
     )
     hidden = aux["hidden"].detach().float().cpu().numpy()[0]
+    target_positions_np = batch.target_positions.detach().cpu().numpy()[0]
+    phase_u = (float(model.config.theta) * target_positions_np.astype(float)) % 1.0
+    phase_v = (float(model.config.beta) * target_positions_np.astype(float)) % 1.0
+    phase_cocycle = (
+        float(model.config.theta) * target_positions_np.astype(float) ** 2
+        + float(model.config.beta) * target_positions_np.astype(float)
+    ) % 1.0
+    torus_r = 0.32
+    torus_R = 1.08
+    toric_torus_path = np.stack(
+        [
+            (torus_R + torus_r * np.cos(2 * np.pi * phase_v)) * np.cos(2 * np.pi * phase_u),
+            (torus_R + torus_r * np.cos(2 * np.pi * phase_v)) * np.sin(2 * np.pi * phase_u),
+            torus_r * np.sin(2 * np.pi * phase_v),
+        ],
+        axis=-1,
+    ).astype(np.float32)
+    phase_points = np.stack([phase_u, phase_v], axis=-1)
+    phase_delta = phase_points[:, None, :] - phase_points[None, :, :]
+    phase_delta = np.minimum(np.abs(phase_delta), 1.0 - np.abs(phase_delta))
+    phase_dist = np.linalg.norm(phase_delta, axis=-1)
+    phase_recurrence = float(np.mean(np.partition(phase_dist + np.eye(phase_dist.shape[0]) * 1.0e6, kth=1, axis=1)[:, 1]))
+    if getattr(model, "graphcg_direction_basis", None) is not None:
+        basis = model.graphcg_direction_basis.detach().float().cpu().numpy()
+        basis = basis / np.maximum(np.linalg.norm(basis, axis=-1, keepdims=True), 1e-8)
+        chart = hidden @ basis.T
+        chart_abs = np.abs(chart)
+        chart_axis = np.argmax(chart_abs, axis=-1).astype(np.int32)
+        sorted_abs = np.sort(chart_abs, axis=-1)
+        chart_margin = (sorted_abs[:, -1] - sorted_abs[:, -2]) if chart_abs.shape[1] > 1 else sorted_abs[:, -1]
+    else:
+        chart_axis = np.zeros(hidden.shape[0], dtype=np.int32)
+        chart_margin = np.zeros(hidden.shape[0], dtype=np.float32)
     hidden_for_mst = hidden
     if hidden_for_mst.shape[0] > args.max_mst_nodes:
         idx = np.linspace(0, hidden_for_mst.shape[0] - 1, num=args.max_mst_nodes).round().astype(int)
@@ -524,7 +565,14 @@ def evaluate_branch(
         "trajectory_tokens": float(tokens.shape[1] * max(1, model.config.recurrent_passes)),
         "hidden": hidden,
         "per_token_nll": per_token_nll.detach().float().cpu().numpy()[0],
-        "target_positions": batch.target_positions.detach().cpu().numpy()[0],
+        "target_positions": target_positions_np,
+        "toric_torus_path": toric_torus_path,
+        "toric_phase_u": phase_u.astype(np.float32),
+        "toric_phase_v": phase_v.astype(np.float32),
+        "toric_phase_cocycle": phase_cocycle.astype(np.float32),
+        "toric_phase_recurrence": phase_recurrence,
+        "graphcg_chart_axis": chart_axis,
+        "graphcg_chart_margin": chart_margin.astype(np.float32),
         "answer_steps": answer_steps,
         "action_ids": flat_actions,
     }
@@ -972,6 +1020,135 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
     plt.close(fig)
 
 
+def plot_toric_phase_simplicial_trajectory(
+    record_meta: dict[str, Any],
+    branches: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    """Render toric phase winding with local simplex edges and analogy maps."""
+
+    if not branches:
+        return
+    best = min(branches, key=lambda item: float(item["bpb"]))
+    torus = np.asarray(best.get("toric_torus_path", np.zeros((0, 3))), dtype=float)
+    energy = np.asarray(best.get("per_token_nll", np.zeros((torus.shape[0],))), dtype=float)
+    chart_axis = np.asarray(best.get("graphcg_chart_axis", np.zeros((torus.shape[0],))), dtype=float)
+    chart_margin = np.asarray(best.get("graphcg_chart_margin", np.zeros((torus.shape[0],))), dtype=float)
+    if torus.shape[0] < 4:
+        return
+    idx = subsample_indices(torus.shape[0], int(best.get("max_plot_points", 180)))
+    plotted = torus[idx]
+    plotted_energy = energy[idx]
+    plotted_axis = chart_axis[idx]
+    plotted_margin = chart_margin[idx]
+
+    fig = plt.figure(figsize=(12.8, 9.2), facecolor="#030712")
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_facecolor("#030712")
+    u = np.linspace(0, 2 * np.pi, 72)
+    v = np.linspace(0, 2 * np.pi, 24)
+    uu, vv = np.meshgrid(u, v)
+    R, r = 1.08, 0.32
+    xx = (R + r * np.cos(vv)) * np.cos(uu)
+    yy = (R + r * np.cos(vv)) * np.sin(uu)
+    zz = r * np.sin(vv)
+    ax.plot_surface(xx, yy, zz, color="#0a2635", alpha=0.16, linewidth=0, shade=True)
+    ax.plot_wireframe(xx, yy, zz, rstride=4, cstride=8, color="#1ad7e8", alpha=0.08, linewidth=0.35)
+
+    diffs = plotted[:, None, :] - plotted[None, :, :]
+    chord = np.linalg.norm(diffs, axis=-1)
+    local_edges: list[tuple[int, int]] = []
+    window = min(18, max(6, plotted.shape[0] // 8))
+    for start in range(0, plotted.shape[0], max(4, window // 2)):
+        stop = min(plotted.shape[0], start + window)
+        sub = chord[start:stop, start:stop]
+        if sub.shape[0] < 4:
+            continue
+        threshold = float(np.quantile(sub[sub > 1e-8], 0.18)) if np.any(sub > 1e-8) else 0.0
+        for i in range(start, stop):
+            for j in range(i + 1, stop):
+                if chord[i, j] <= threshold and len(local_edges) < 260:
+                    local_edges.append((i, j))
+    for i, j in local_edges:
+        ax.plot(
+            [plotted[i, 0], plotted[j, 0]],
+            [plotted[i, 1], plotted[j, 1]],
+            [plotted[i, 2], plotted[j, 2]],
+            color="#6df6ff",
+            alpha=0.14,
+            linewidth=0.55,
+        )
+
+    for start in range(0, plotted.shape[0] - window, max(6, window)):
+        source = plotted[start : start + window]
+        target = plotted[start + window : start + 2 * window]
+        if source.shape[0] < 3 or target.shape[0] < 3:
+            continue
+        c0 = source.mean(axis=0)
+        c1 = target.mean(axis=0)
+        delta = c1 - c0
+        ax.quiver(
+            c0[0],
+            c0[1],
+            c0[2],
+            delta[0],
+            delta[1],
+            delta[2],
+            color="#ff4fd8",
+            linewidth=1.0,
+            arrow_length_ratio=0.22,
+            alpha=0.72,
+        )
+
+    line_color = "#50f5ff"
+    ax.plot(plotted[:, 0], plotted[:, 1], plotted[:, 2], color=line_color, linewidth=1.7, alpha=0.86)
+    size = 18.0 + 44.0 * (plotted_margin - np.nanmin(plotted_margin)) / max(
+        1e-8,
+        float(np.nanmax(plotted_margin) - np.nanmin(plotted_margin)),
+    )
+    sc = ax.scatter(
+        plotted[:, 0],
+        plotted[:, 1],
+        plotted[:, 2],
+        c=plotted_energy,
+        s=size,
+        cmap="magma",
+        alpha=0.92,
+        edgecolor="#06111f",
+        linewidth=0.25,
+    )
+    for axis_id in np.unique(plotted_axis.astype(int))[:8]:
+        mask = plotted_axis.astype(int) == int(axis_id)
+        if np.count_nonzero(mask) < 3:
+            continue
+        points = plotted[mask]
+        ax.scatter(points[:, 0], points[:, 1], points[:, 2], s=8, alpha=0.30, label=f"basis axis {axis_id}")
+    ax.scatter(plotted[0, 0], plotted[0, 1], plotted[0, 2], s=85, color="#6df6ff", edgecolor="white", linewidth=0.8)
+    ax.scatter(plotted[-1, 0], plotted[-1, 1], plotted[-1, 2], s=120, marker="*", color="#ffd166", edgecolor="white", linewidth=0.8)
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.72, pad=0.02)
+    cbar.set_label("local NLL / tropical energy proxy", color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.get_yticklabels(), color="white")
+    ax.set_title(
+        f"Toric irrational-phase simplicial trajectory R{record_meta['record_index']} B{best['branch_index']}",
+        color="white",
+        fontsize=13,
+    )
+    ax.text2D(
+        0.02,
+        0.025,
+        "cyan line: phase-wound reasoning path | faint edges: local VR 1-skeleton | magenta arrows: soft analogy maps between windows | marker size: GraphCG chart margin",
+        transform=ax.transAxes,
+        color="#e8fbff",
+        fontsize=8.5,
+    )
+    ax.set_axis_off()
+    ax.view_init(elev=28, azim=38)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def sigmoid_np(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(x, -60.0, 60.0)))
 
@@ -988,13 +1165,27 @@ def directed_filtration_stats(
 ) -> dict[str, Any]:
     """Compute scale-normalized directed filtered-complex diagnostics.
 
-    The vertices are relation arrows between consecutive hidden states.  The
-    symmetric distance builds a small soft Vietoris-Rips filtration, while an
-    antisymmetric bilinear form biases edges into a directed noncommutative
-    filtration.  These quantities are diagnostics, not persistent-homology
-    replacements: they are cheap enough to run during periodic training
-    analyses and stable under global hidden-state rescalings.
+    The vertices are local hidden states in reasoning-step windows.  Each
+    window builds a radius-parametrized Vietoris--Rips/flag hierarchy, and a
+    separate time/skew directed hierarchy records noncommutative flow.  The
+    result keeps the historical keys used by downstream plots while adding
+    Betti/cycle-rank, boundary, Dirichlet, simplex-tree, and HDBSCAN summaries.
     """
+
+    return directed_step_filtration_stats_np(
+        hidden,
+        config=ReasoningTopologyConfig(
+            max_points=max_points,
+            max_windows=6,
+            window_size=max(8, min(32, int(hidden.shape[0]) if hidden.ndim else 8)),
+            step_stride=max(1, max_points // 8),
+            levels=levels,
+            radius_min=radius_min,
+            radius_max=radius_max,
+            skew_scale=skew_scale,
+            temperature=temperature,
+        ),
+    )
 
     if hidden.shape[0] < 4:
         zeros = np.zeros(max(1, levels), dtype=float)
@@ -1152,6 +1343,31 @@ def attach_topology_stats(branch: dict[str, Any], stats: dict[str, Any]) -> None
     branch["topology_directed_transitive_loss"] = float(np.mean(stats["directed_transitive_loss"]))
     branch["topology_directed_chain_commutator"] = float(np.mean(stats["directed_chain_commutator"]))
     branch["topology_inclusion_violation"] = float(np.mean(stats["inclusion_violation"]))
+    branch["topology_boundary_residual"] = float(np.mean(stats.get("boundary_residual", [0.0])))
+    branch["topology_dirichlet_energy"] = float(np.mean(stats.get("dirichlet_energy", [0.0])))
+    branch["topology_analogical_map_loss"] = float(stats.get("analogical_map_loss", 0.0))
+    branch["topology_directed_map_loss"] = float(stats.get("directed_map_loss", 0.0))
+    branch["topology_transport_entropy"] = float(stats.get("transport_entropy", 0.0))
+    branch["topology_exact_h0_dim_mean"] = float(stats.get("exact_h0_dim_mean", 0.0))
+    branch["topology_exact_h1_dim_mean"] = float(stats.get("exact_h1_dim_mean", 0.0))
+    branch["topology_exact_h0_map_rank_mean"] = float(stats.get("exact_h0_map_rank_mean", 0.0))
+    branch["topology_exact_h1_map_rank_mean"] = float(stats.get("exact_h1_map_rank_mean", 0.0))
+    branch["topology_exact_morphism_radius_shift_mean"] = float(stats.get("exact_morphism_radius_shift_mean", 0.0))
+    branch["topology_exact_morphism_edge_validity_mean"] = float(
+        stats.get("exact_morphism_edge_validity_mean", 0.0)
+    )
+    branch["topology_exact_morphism_triangle_validity_mean"] = float(
+        stats.get("exact_morphism_triangle_validity_mean", 0.0)
+    )
+    branch["topology_exact_directed_edge_validity_mean"] = float(
+        stats.get("exact_directed_edge_validity_mean", 0.0)
+    )
+    branch["topology_exact_morphism_computed"] = float(stats.get("exact_morphism_computed", 0.0))
+    branch["topology_exact_morphism_truncated_complexes"] = float(
+        stats.get("exact_morphism_truncated_complexes", 0.0)
+    )
+    branch["topology_betti0"] = float(np.mean(stats.get("betti0", [0.0])))
+    branch["topology_cycle_rank"] = float(np.mean(stats.get("cycle_rank", [0.0])))
     branch["topology_hdbscan_cluster_count"] = float(np.mean(stats["hdbscan_cluster_count"]))
     branch["topology_hdbscan_noise_fraction"] = float(np.mean(stats["hdbscan_noise_fraction"]))
     branch["topology_hdbscan_stability"] = float(np.mean(stats["hdbscan_stability"]))
@@ -1161,14 +1377,18 @@ def attach_topology_stats(branch: dict[str, Any], stats: dict[str, Any]) -> None
 
 
 def plot_directed_filtration(record_meta: dict[str, Any], branches: list[dict[str, Any]], output_path: Path) -> None:
-    fig, axes = plt.subplots(3, 2, figsize=(11, 10.8), facecolor="#030712")
+    fig, axes = plt.subplots(5, 2, figsize=(11.5, 16.2), facecolor="#030712")
     metrics = [
         ("edge_density", "symmetric edge density"),
         ("triangle_density", "soft triangle density"),
+        ("betti0", "0D components"),
+        ("cycle_rank", "1D cycle-rank proxy"),
+        ("dirichlet_energy", "Dirichlet energy"),
+        ("boundary_residual", "oriented boundary residual"),
+        ("analogical_map_by_radius", "soft analogical map residual"),
+        ("directed_map_by_radius", "directed map residual"),
         ("directed_asymmetry", "directed asymmetry"),
         ("directed_cycle_flux", "noncommutative cycle flux"),
-        ("hdbscan_cluster_count", "radius-HDBSCAN stable clusters"),
-        ("hdbscan_noise_fraction", "radius-HDBSCAN outlier fraction"),
     ]
     bpbs = np.array([float(branch["bpb"]) for branch in branches], dtype=float)
     lo, hi = float(bpbs.min()), float(bpbs.max())
@@ -1242,8 +1462,107 @@ def plot_topology_heatmaps(record_meta: dict[str, Any], branches: list[dict[str,
     plt.close(fig)
 
 
+def plot_step_radius_heatmaps(record_meta: dict[str, Any], branches: list[dict[str, Any]], output_path: Path) -> None:
+    if not branches:
+        return
+    best = min(branches, key=lambda item: float(item["bpb"]))
+    stats = best.get("topology_stats")
+    if not isinstance(stats, dict):
+        return
+    heatmaps = stats.get("step_radius_heatmaps", {})
+    if not isinstance(heatmaps, dict) or not heatmaps:
+        return
+    panels = [
+        ("edge_density", "step x radius edge density", "viridis"),
+        ("cycle_rank", "step x radius cycle rank", "magma"),
+        ("betti0", "step x radius Betti-0", "cividis"),
+        ("analogical_map_loss", "transition x radius map loss", "plasma"),
+        ("directed_map_loss", "transition x radius directed map loss", "inferno"),
+    ]
+    fig, axes = plt.subplots(1, len(panels), figsize=(18.5, 4.6), facecolor="#030712")
+    for ax, (key, title, cmap_name) in zip(np.asarray(axes).reshape(-1), panels):
+        ax.set_facecolor("#030712")
+        matrix = np.asarray(heatmaps.get(key, np.zeros((1, len(stats.get("radii", [0.0]))))), dtype=float)
+        if matrix.size == 0:
+            matrix = np.zeros((1, len(stats.get("radii", [0.0]))), dtype=float)
+        im = ax.imshow(matrix, cmap=cmap_name, aspect="auto", interpolation="nearest")
+        ax.set_title(title, color="white", fontsize=10)
+        ax.set_xlabel("radius level", color="white")
+        ax.set_ylabel("reasoning window", color="white")
+        ax.tick_params(colors="white", labelsize=7)
+        cbar = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02)
+        cbar.ax.yaxis.set_tick_params(color="white")
+        plt.setp(cbar.ax.get_yticklabels(), color="white", fontsize=7)
+    fig.suptitle(
+        f"Step-local nested simplex hierarchy R{record_meta['record_index']} B{best['branch_index']}",
+        color="white",
+        fontsize=13,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
+def plot_exact_persistence_morphism_heatmaps(
+    record_meta: dict[str, Any],
+    branches: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    if not branches:
+        return
+    best = min(branches, key=lambda item: float(item["bpb"]))
+    stats = best.get("topology_stats")
+    if not isinstance(stats, dict):
+        return
+    heatmaps = stats.get("step_radius_heatmaps", {})
+    panels = [
+        ("exact_h0_dims", "exact $\\dim H_0(K_s(\\rho))$", "cividis"),
+        ("exact_h1_dims", "exact $\\dim H_1(K_s(\\rho))$", "magma"),
+        ("exact_h0_map_rank", "rank $H_0(P_s)$", "viridis"),
+        ("exact_h1_map_rank", "rank $H_1(P_s)$", "plasma"),
+        ("exact_radius_shift", "minimal radius shift", "inferno"),
+        ("exact_edge_validity", "simplicial edge validity", "Greens"),
+        ("exact_triangle_validity", "2-simplex validity", "Blues"),
+        ("exact_directed_edge_validity", "directed edge validity", "Purples"),
+    ]
+    fig, axes = plt.subplots(2, 4, figsize=(18.0, 8.2), facecolor="#030712")
+    for ax, (key, title, cmap_name) in zip(axes.reshape(-1), panels):
+        ax.set_facecolor("#030712")
+        matrix = np.asarray(heatmaps.get(key, np.zeros((1, len(stats.get("radii", [0.0]))))), dtype=float)
+        if matrix.size == 0:
+            matrix = np.zeros((1, len(stats.get("radii", [0.0]))), dtype=float)
+        im = ax.imshow(matrix, cmap=cmap_name, aspect="auto", interpolation="nearest")
+        ax.set_title(title, color="white", fontsize=10)
+        ax.set_xlabel("radius level", color="white")
+        ax.set_ylabel("window / transition", color="white")
+        ax.tick_params(colors="white", labelsize=7)
+        cbar = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02)
+        cbar.ax.yaxis.set_tick_params(color="white")
+        plt.setp(cbar.ax.get_yticklabels(), color="white", fontsize=7)
+    fig.suptitle(
+        f"Exact F2 persistence-module morphism audit R{record_meta['record_index']} B{best['branch_index']}",
+        color="white",
+        fontsize=13,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def serializable_record(record: dict[str, Any]) -> dict[str, Any]:
-    skip = {"hidden", "per_token_nll", "projected_path", "target_positions", "topology_stats"}
+    skip = {
+        "hidden",
+        "per_token_nll",
+        "projected_path",
+        "target_positions",
+        "topology_stats",
+        "toric_torus_path",
+        "toric_phase_u",
+        "toric_phase_v",
+        "toric_phase_cocycle",
+        "graphcg_chart_axis",
+        "graphcg_chart_margin",
+    }
     out: dict[str, Any] = {}
     for key, value in record.items():
         if key in skip:
@@ -1337,8 +1656,19 @@ def main() -> None:
         write_interactive_trajectory(meta, branches, traj_dir / f"{record_slug}_trajectory_3d.html")
         plot_phase_energy(meta, branches, traj_dir / f"{record_slug}_phase_energy.png")
         plot_energy_landscape(meta, branches, traj_dir / f"{record_slug}_energy_landscape.png")
+        plot_toric_phase_simplicial_trajectory(
+            meta,
+            branches,
+            traj_dir / f"{record_slug}_toric_phase_simplicial_trajectory.png",
+        )
         plot_directed_filtration(meta, branches, topology_dir / f"{record_slug}_directed_filtration.png")
         plot_topology_heatmaps(meta, branches, topology_dir / f"{record_slug}_noncommutative_heatmaps.png")
+        plot_step_radius_heatmaps(meta, branches, topology_dir / f"{record_slug}_step_radius_hierarchy.png")
+        plot_exact_persistence_morphism_heatmaps(
+            meta,
+            branches,
+            topology_dir / f"{record_slug}_exact_persistence_morphisms.png",
+        )
     enrich_branch_scores(branch_records)
     write_branch_records(branch_records, output_dir)
     (output_dir / "selected_records.json").write_text(json.dumps(record_manifest, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1363,6 +1693,40 @@ def main() -> None:
         "mean_topology_directed_asymmetry": float(np.mean([record["topology_directed_asymmetry"] for record in branch_records])),
         "mean_topology_directed_cycle_flux": float(np.mean([record["topology_directed_cycle_flux"] for record in branch_records])),
         "mean_topology_triangle_density": float(np.mean([record["topology_triangle_density"] for record in branch_records])),
+        "mean_topology_betti0": float(np.mean([record["topology_betti0"] for record in branch_records])),
+        "mean_topology_cycle_rank": float(np.mean([record["topology_cycle_rank"] for record in branch_records])),
+        "mean_topology_boundary_residual": float(np.mean([record["topology_boundary_residual"] for record in branch_records])),
+        "mean_topology_dirichlet_energy": float(np.mean([record["topology_dirichlet_energy"] for record in branch_records])),
+        "mean_topology_analogical_map_loss": float(np.mean([record["topology_analogical_map_loss"] for record in branch_records])),
+        "mean_topology_directed_map_loss": float(np.mean([record["topology_directed_map_loss"] for record in branch_records])),
+        "mean_topology_transport_entropy": float(np.mean([record["topology_transport_entropy"] for record in branch_records])),
+        "mean_topology_exact_h0_dim": float(np.mean([record["topology_exact_h0_dim_mean"] for record in branch_records])),
+        "mean_topology_exact_h1_dim": float(np.mean([record["topology_exact_h1_dim_mean"] for record in branch_records])),
+        "mean_topology_exact_h0_map_rank": float(
+            np.mean([record["topology_exact_h0_map_rank_mean"] for record in branch_records])
+        ),
+        "mean_topology_exact_h1_map_rank": float(
+            np.mean([record["topology_exact_h1_map_rank_mean"] for record in branch_records])
+        ),
+        "mean_topology_exact_radius_shift": float(
+            np.mean([record["topology_exact_morphism_radius_shift_mean"] for record in branch_records])
+        ),
+        "mean_topology_exact_edge_validity": float(
+            np.mean([record["topology_exact_morphism_edge_validity_mean"] for record in branch_records])
+        ),
+        "mean_topology_exact_triangle_validity": float(
+            np.mean([record["topology_exact_morphism_triangle_validity_mean"] for record in branch_records])
+        ),
+        "mean_topology_exact_directed_edge_validity": float(
+            np.mean([record["topology_exact_directed_edge_validity_mean"] for record in branch_records])
+        ),
+        "mean_topology_exact_morphisms_computed": float(
+            np.mean([record["topology_exact_morphism_computed"] for record in branch_records])
+        ),
+        "mean_topology_exact_truncated_complexes": float(
+            np.mean([record["topology_exact_morphism_truncated_complexes"] for record in branch_records])
+        ),
+        "mean_toric_phase_recurrence": float(np.mean([record["toric_phase_recurrence"] for record in branch_records])),
         "mean_topology_inclusion_violation": float(np.mean([record["topology_inclusion_violation"] for record in branch_records])),
         "mean_topology_hdbscan_cluster_count": float(
             np.mean([record["topology_hdbscan_cluster_count"] for record in branch_records])
@@ -1383,6 +1747,35 @@ def main() -> None:
         },
     }
     (output_dir / "reasoning_geometry_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    if args.wandb:
+        if wandb is None:
+            raise RuntimeError("wandb logging requested but wandb is not installed")
+        run = wandb.init(
+            project=args.wandb_project,
+            name=args.wandb_run_name or f"reasoning-geometry-{Path(args.checkpoint).stem}",
+            config=vars(args),
+            job_type="reasoning_geometry_analysis",
+        )
+        log_payload = {
+            f"analysis/{key}": value
+            for key, value in summary.items()
+            if isinstance(value, (int, float)) and math.isfinite(float(value))
+        }
+        image_paths = []
+        for pattern in (
+            "trajectories/*_trajectory_3d.png",
+            "trajectories/*_toric_phase_simplicial_trajectory.png",
+            "topology/*_directed_filtration.png",
+            "topology/*_step_radius_hierarchy.png",
+            "topology/*_exact_persistence_morphisms.png",
+            "triangles/*.png",
+            "tetrahedra/*.png",
+        ):
+            image_paths.extend(sorted(output_dir.glob(pattern))[:8])
+        for image_path in image_paths[:48]:
+            log_payload[f"analysis/images/{image_path.stem}"] = wandb.Image(str(image_path))
+        wandb.log(log_payload)
+        run.finish()
     print(json.dumps(summary, indent=2))
 
 
