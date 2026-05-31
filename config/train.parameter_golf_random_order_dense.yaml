@@ -283,13 +283,13 @@ complexity:
 
 adaptive_training:
   enabled: true
-  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_capture_schneller.json
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_36750_bpb_recovery.json
   # Checkpoint-level controller only: updates after eval windows, never per
   # microbatch.  It keeps the architecture and optimizer state fixed while
   # gently tuning the three controls identified by the 23.25k rollback analysis.
   entropy_target_min: 2.00
   entropy_target_tau_steps: 8000
-  gflownet_loss_min: 0.001
+  gflownet_loss_min: 0.0
   gflownet_loss_max: 0.006
   gflownet_gap_step: 0.00025
   gflownet_relax_step: 0.0005
@@ -300,7 +300,7 @@ adaptive_training:
   train_bpb_ema_beta: 0.70
   train_drift_threshold: 0.01
   val_improvement_delta: 0.002
-  warmup_updates: 2
+  warmup_updates: 0
   reset_on_start_step_mismatch: true
   gflownet_increase_drift_guard: 0.00
   recovery_mode_enabled: true
@@ -310,7 +310,7 @@ adaptive_training:
   recovery_exit_val_improvements: 3
 
 hessian:
-  enabled: true
+  enabled: false
   # Diagnostic-only stochastic HVP probes on a cropped batch.  These estimate
   # local sharpness and average curvature around rollback checkpoints without
   # attempting a full Hessian or adding an optimizer-side second-order method.
@@ -434,6 +434,30 @@ phase_curriculum:
       contrastive_loss_weight: 0.002
       mtp_loss_weight: 0.02
       toric_entropy_loss_weight: 0.0005
+      qat_loss_weight: 0.0
+    - name: bpb_recovery_36750_38500
+      start_step: 36000
+      end_step: 38500
+      # Live step-36750 analysis found validation BPB still improving, but
+      # recent train BPB had a positive local slope and Hessian probes were
+      # NaN.  This phase makes the next window likelihood-first: keep the
+      # ToricGT modules present for diagnostics, but stop using auxiliary
+      # geometry/GFlowNet/QAT losses until the byte objective descends again.
+      lr_multiplier: 1.05
+      grad_clip_norm: 0.65
+      medium_mix_ratio: 0.20
+      hard_mix_ratio: 0.0
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.00002
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.00025
+      mtp_loss_weight: 0.004
+      toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
     - name: compression_and_scaling
       start_step: 25000

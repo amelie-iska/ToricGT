@@ -3342,3 +3342,93 @@ Acceptance criteria for the next step-2000 review:
 5. Toric entropy should remain above `0.25`, directed topology inclusion
    violation should stay `0.0`, HDBSCAN stability should stay above `0.75`, and
    cycle flux should remain below `0.02`.
+
+## Live Recovery Intervention: Step 36,750
+
+Run analyzed: `oai-slepian-koszul-resume-20260531T192540Z`
+
+Checkpoint analyzed:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00036750.pt
+```
+
+Analysis directory:
+
+```text
+outputs/reasoning_geometry_suite/oai-live-step36750-detailed-20260531T213114Z
+```
+
+### Metric Read
+
+Validation still moved in the correct direction, but only marginally:
+
+| metric | recent values | category |
+|---|---:|---|
+| `val/bpb` | `4.9318708 -> 4.9309084 -> 4.9305737` | desired but too slow |
+| `complexity/val/bpb` | `4.8146830 -> 4.8127899 -> 4.8126030` | desired but too slow |
+| `complexity/val/loss` | `3.3372841 -> 3.3359718 -> 3.3358421` | desired but too slow |
+| recent train BPB slope, last 500 steps | about `+0.37 BPB / 1k steps` | undesirable |
+| Hessian probe values | `NaN` trace/curvature/grad norm | undesirable as a decision signal |
+
+The controller did not enter recovery because its checkpoint-level
+`controller/train_bpb_drift` was still negative at the eval point, even though
+the shorter-window train BPB slope had turned positive.  This is a timescale
+mismatch: the EMA is too coarse for the observed local ricochet.
+
+### Geometry Read
+
+The architecture is producing meaningful structure:
+
+| diagnostic | value | category |
+|---|---:|---|
+| exact persistence morphisms computed | `20` | desired |
+| inclusion violation | `0.0` | desired |
+| exact edge validity | `0.9895` | desired |
+| exact triangle validity | `0.9618` | desired |
+| HDBSCAN stability | `0.9386` | desired |
+| Slepian concentration/leakage | `1.0 / 0.0` | desired |
+| analogical/directed map losses | `0.1266 / 0.1648` | desired but too weak |
+| empirical toric shadow margin | mean `0.0297`, min `0.00015` | desired but too weak |
+| toric active-face margin | `-0.9375` | undesirable |
+| phase-leaf residual | `1.0295` | undesirable |
+
+The plots show real branching and coherent directed topology, but the toric
+decision boundaries are too low-margin to justify stronger toric supervision
+while BPB is locally worsening.
+
+### Implemented Recovery Controls
+
+The current intervention is deliberately scalar-only.  The architecture,
+optimizer state, random-order autoregressive graph decoding, tropical/hybrid
+attention, toric memory, GraphCG frame, and topology diagnostics remain intact.
+
+Implemented config changes:
+
+| control | new value | reason |
+|---|---:|---|
+| `phase bpb_recovery_36750_38500` | active from `36000` to `38500` | force a likelihood-first recovery window |
+| `gflownet_loss_weight` in recovery | `0.0` | keep GFlowNet diagnostic, remove auxiliary pressure |
+| `toric_geometry_loss_weight` in recovery | `0.0` | do not optimize low-margin toric probes during BPB recovery |
+| `koszul_persistence_loss_weight` in recovery | `0.0` | keep topology for diagnostics only |
+| `trajectory_flow_loss_weight` in recovery | `0.0` | remove non-BPB trajectory pressure |
+| `qat_loss_weight` in recovery | `0.0` | avoid quantization pull during likelihood recovery |
+| `mtp_loss_weight` in recovery | `0.004` | retain a small next-token stabilizer without dominating BPB |
+| `medium_mix_ratio` in recovery | `0.20` | retain moderate validation-like rows |
+| `hard/complex_mix_ratio` in recovery | `0.0` | remove hard graph rows until descent resumes |
+| `lr_multiplier` in recovery | `1.05` | slightly raise the very low late-cosine LR without returning to the bounce band |
+| `grad_clip_norm` in recovery | `0.65` | cap sharp updates while keeping real descent |
+| Hessian probes | disabled | NaN probes must not steer restarts |
+| adaptive controller `gflownet_loss_min` | `0.0` | allow true recovery to zero auxiliary GFlowNet weight |
+| adaptive controller `warmup_updates` | `0` | let the controller react immediately after restart |
+
+### Acceptance Criteria
+
+For the next review near `37250`--`37500`:
+
+1. last-100 train BPB slope should be negative;
+2. last-100 train BPB mean should fall below the pre-restart `4.88` band;
+3. validation BPB should improve by at least `0.002`;
+4. `complexity/val/bpb` should continue descending;
+5. toric/topology metrics may be diagnostic-only, but inclusion violation must
+   remain `0.0` and HDBSCAN stability should remain above `0.85`.
