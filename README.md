@@ -46,7 +46,8 @@ Local implementation:
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
 - `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing.
 - `src/toricgt/toric_geometry_tasks.py`: training-only low-rank toric probes for Newton active-face, bend, binomial, affine-Coxeter, braid, and phase-foliation signals.
-- `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, and Soft-MoE-style routing.
+- `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves.
+- `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, Slepian envelopes, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
 - `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.
 - `assets/toricgt_torus_reasoning_dark.gif`: README animation for toric phase, tropical active-face, Soft-MoE, and GFlowNet flow intuition.
@@ -647,6 +648,16 @@ without increasing deploy bytes. W&B reports `train/toric_geometry_loss`,
 `train/toric_braid_loss`, and `train/toric_leaf_residual`. The geometry suite
 adds `*_toric_shadow_audit.png`, showing occupied fan cells, active-face
 margins, bend magnitudes, branch fan coverage, and phase-leaf residuals.
+It also writes `*_toric_slepian_audit.png`, a finite PSWF/Slepian diagnostic
+on the projected noncommutative-torus leaf. The plot reports DPSS eigenvalues,
+phase-signal coefficients, reconstruction against local NLL energy, and branch
+BPB versus phase concentration. W&B receives
+`analysis/mean_toric_slepian_concentration`,
+`analysis/mean_toric_slepian_leakage`,
+`analysis/mean_toric_slepian_mode_entropy`, and the generated image panels.
+This is an audit signal, not a new deploy parameter block: it checks whether
+the toric phase path has coherent time-band-limited structure or diffuse
+spectral leakage.
 
 Operational rule for the current `oai` experiments: training remains paused
 until the full analysis suite has completed and the generated plot classes have
@@ -839,7 +850,8 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --output-dir outputs/reasoning_simplex/oai-large-technical
 ```
 
-Run the full reasoning-geometry suite, including toric shadow audits,
+Run the full reasoning-geometry suite, including toric shadow and Slepian
+phase-concentration audits,
 directed/persistence plots, 3D trajectories, triangles, and tetrahedra:
 
 ```bash
@@ -904,7 +916,7 @@ whose low-energy basins represent high-quality terminal reasoning states.
 
 Generate and play an original dark analog-synth WAV driven by irrational torus
 orbits, tropical active-face selection, noncommutative-torus cocycle bias, and
-four-expert Soft-MoE-style routing:
+finite Slepian/DPSS phase-concentration envelopes:
 
 ```bash
 ./scripts/music_gen.sh
@@ -914,6 +926,12 @@ For a headless render without playback:
 
 ```bash
 ./scripts/music_gen.sh --no-play --output outputs/music/toricgt_torus_music.wav
+```
+
+Slepian dynamics are enabled by default. To adjust the finite PSWF analogue:
+
+```bash
+./scripts/music_gen.sh --no-play --slepian-bandwidth 0.06 --slepian-modes 8
 ```
 
 ## Paper

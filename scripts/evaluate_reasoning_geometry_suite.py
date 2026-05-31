@@ -59,6 +59,7 @@ from toricgt.reasoning_geometry import (
     triangle_grid,
 )
 from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step_filtration_stats_np
+from toricgt.slepian_torus import ToricSlepianConfig, toric_slepian_audit
 from toricgt.toric_geometry_tasks import empirical_toric_shadow_stats_np
 from train_parameter_golf_random_order import ParquetByteChunkDataset
 
@@ -578,6 +579,18 @@ def evaluate_branch(
     phase_delta = np.minimum(np.abs(phase_delta), 1.0 - np.abs(phase_delta))
     phase_dist = np.linalg.norm(phase_delta, axis=-1)
     phase_recurrence = float(np.mean(np.partition(phase_dist + np.eye(phase_dist.shape[0]) * 1.0e6, kth=1, axis=1)[:, 1]))
+    nll_np = per_token_nll.detach().float().cpu().numpy()[0]
+    slepian_audit = toric_slepian_audit(
+        phase_u.astype(np.float64),
+        phase_v.astype(np.float64),
+        energy=nll_np.astype(np.float64),
+        config=ToricSlepianConfig(
+            half_bandwidth=0.075,
+            modes=6,
+            theta=float(model.config.theta),
+            beta=float(model.config.beta),
+        ),
+    )
     if getattr(model, "graphcg_direction_basis", None) is not None:
         basis = model.graphcg_direction_basis.detach().float().cpu().numpy()
         basis = basis / np.maximum(np.linalg.norm(basis, axis=-1, keepdims=True), 1e-8)
@@ -615,13 +628,22 @@ def evaluate_branch(
         "smear_temperature": float(aux.get("smear_temperature", torch.zeros(())).detach().cpu()),
         "trajectory_tokens": float(tokens.shape[1] * max(1, model.config.recurrent_passes)),
         "hidden": hidden,
-        "per_token_nll": per_token_nll.detach().float().cpu().numpy()[0],
+        "per_token_nll": nll_np,
         "target_positions": target_positions_np,
         "toric_torus_path": toric_torus_path,
         "toric_phase_u": phase_u.astype(np.float32),
         "toric_phase_v": phase_v.astype(np.float32),
         "toric_phase_cocycle": phase_cocycle.astype(np.float32),
         "toric_phase_recurrence": phase_recurrence,
+        "toric_slepian_eigenvalues": np.asarray(slepian_audit["slepian_eigenvalues"], dtype=np.float32),
+        "toric_slepian_coefficients": np.asarray(slepian_audit["slepian_coefficients"], dtype=np.float32),
+        "toric_slepian_reconstruction": np.asarray(slepian_audit["slepian_reconstruction"], dtype=np.float32),
+        "toric_slepian_envelope": np.asarray(slepian_audit["slepian_envelope"], dtype=np.float32),
+        "toric_slepian_concentration": float(slepian_audit["slepian_concentration"]),
+        "toric_slepian_leakage": float(slepian_audit["slepian_leakage"]),
+        "toric_slepian_mode_entropy": float(slepian_audit["slepian_mode_entropy"]),
+        "toric_slepian_effective_modes": float(slepian_audit["slepian_effective_modes"]),
+        "toric_slepian_bandwidth": float(slepian_audit["slepian_bandwidth"]),
         "graphcg_chart_axis": chart_axis,
         "graphcg_chart_margin": chart_margin.astype(np.float32),
         "toric_shadow": empirical_toric_shadow_stats_np(hidden, max_points=int(args.max_plot_points)),
@@ -1344,6 +1366,108 @@ def plot_toric_shadow_audit(
     plt.close(fig)
 
 
+def plot_toric_slepian_audit(
+    record_meta: dict[str, Any],
+    branches: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    """Render DPSS/Slepian concentration of the noncommutative torus phase path."""
+
+    if not branches:
+        return
+    best = min(branches, key=lambda item: float(item["bpb"]))
+    eig = np.asarray(best.get("toric_slepian_eigenvalues", []), dtype=float)
+    coeff = np.asarray(best.get("toric_slepian_coefficients", []), dtype=float)
+    recon = np.asarray(best.get("toric_slepian_reconstruction", []), dtype=float)
+    envelope = np.asarray(best.get("toric_slepian_envelope", []), dtype=float)
+    energy = np.asarray(best.get("per_token_nll", []), dtype=float)
+    phase_u = np.asarray(best.get("toric_phase_u", []), dtype=float)
+    phase_v = np.asarray(best.get("toric_phase_v", []), dtype=float)
+    if eig.size == 0 or phase_u.size < 4:
+        return
+
+    concentration = float(best.get("toric_slepian_concentration", 0.0))
+    leakage = float(best.get("toric_slepian_leakage", 1.0))
+    entropy = float(best.get("toric_slepian_mode_entropy", 0.0))
+    branch_ids = np.asarray([float(branch["branch_index"]) for branch in branches], dtype=float)
+    branch_conc = np.asarray([float(branch.get("toric_slepian_concentration", 0.0)) for branch in branches], dtype=float)
+    branch_bpb = np.asarray([float(branch.get("bpb", 0.0)) for branch in branches], dtype=float)
+
+    fig, axes = plt.subplots(2, 2, figsize=(13.4, 9.4), facecolor="#030712")
+    for ax in axes.reshape(-1):
+        ax.set_facecolor("#030712")
+        ax.tick_params(colors="#d7f7ff")
+        for spine in ax.spines.values():
+            spine.set_color("#164b63")
+
+    modes = np.arange(eig.size)
+    axes[0, 0].bar(modes, eig, color="#62f7ff", alpha=0.78, edgecolor="#e8fbff", linewidth=0.35)
+    axes[0, 0].plot(modes, np.abs(coeff[: eig.size]), color="#ff4fd8", marker="o", linewidth=1.2, label="|coeff|")
+    axes[0, 0].set_title("Toric Slepian concentration spectrum", color="white", fontsize=11)
+    axes[0, 0].set_xlabel("DPSS mode", color="#d7f7ff")
+    axes[0, 0].set_ylabel("eigenvalue / coefficient", color="#d7f7ff")
+    axes[0, 0].legend(facecolor="#07111f", edgecolor="#164b63", labelcolor="white", fontsize=8)
+
+    if energy.size:
+        e = energy - float(np.nanmin(energy))
+        axes[0, 1].plot(np.arange(energy.size), e / max(float(np.nanmax(e)), 1e-8), color="#ffd166", linewidth=1.0, label="NLL energy")
+    if recon.size:
+        r = recon - float(np.nanmin(recon))
+        axes[0, 1].plot(np.arange(recon.size), r / max(float(np.nanmax(r)), 1e-8), color="#62f7ff", linewidth=1.3, label="Slepian reconstruction")
+    if envelope.size:
+        axes[0, 1].plot(np.arange(envelope.size), envelope, color="#ff4fd8", linewidth=1.2, alpha=0.84, label="phase envelope")
+    axes[0, 1].set_title("Time-limited phase signal vs. energy", color="white", fontsize=11)
+    axes[0, 1].set_xlabel("random-order reasoning step", color="#d7f7ff")
+    axes[0, 1].legend(facecolor="#07111f", edgecolor="#164b63", labelcolor="white", fontsize=8)
+
+    color = envelope if envelope.size == phase_u.size else energy[: phase_u.size] if energy.size >= phase_u.size else phase_u
+    sc = axes[1, 0].scatter(
+        phase_u,
+        phase_v,
+        c=color,
+        cmap="viridis",
+        s=16,
+        alpha=0.90,
+        edgecolor="#06111f",
+        linewidth=0.12,
+    )
+    axes[1, 0].set_title("Projected Kronecker leaf colored by DPSS envelope", color="white", fontsize=11)
+    axes[1, 0].set_xlabel(r"$e^{2\pi i k\theta}$ phase", color="#d7f7ff")
+    axes[1, 0].set_ylabel(r"$e^{2\pi i k\beta}$ phase", color="#d7f7ff")
+    cbar = fig.colorbar(sc, ax=axes[1, 0], fraction=0.04, pad=0.02)
+    cbar.set_label("envelope", color="white", fontsize=8)
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.get_yticklabels(), color="white")
+
+    axes[1, 1].scatter(branch_bpb, branch_conc, c=branch_ids, cmap="magma", s=80, edgecolor="#e8fbff", linewidth=0.35)
+    for idx, branch_id in enumerate(branch_ids):
+        axes[1, 1].text(branch_bpb[idx], branch_conc[idx], f"B{int(branch_id)}", color="#d7f7ff", fontsize=7)
+    axes[1, 1].set_title("Branch BPB vs. toric phase concentration", color="white", fontsize=11)
+    axes[1, 1].set_xlabel("BPB", color="#d7f7ff")
+    axes[1, 1].set_ylabel("concentration", color="#d7f7ff")
+    axes[1, 1].axhline(np.nanmean(branch_conc), color="#6df6ff", linewidth=0.8, alpha=0.45)
+
+    fig.suptitle(
+        (
+            f"Toric Slepian/PSWF audit R{record_meta['record_index']} B{best['branch_index']} "
+            f"C={concentration:.3f}, leakage={leakage:.3f}, entropy={entropy:.3f}"
+        ),
+        color="white",
+        fontsize=14,
+    )
+    fig.text(
+        0.012,
+        0.015,
+        "DPSS modes are finite prolate-spheroidal analogues: high concentration means the projected noncommutative torus phase path has coherent band-limited structure; leakage flags diffuse or unstable reasoning-phase drift.",
+        color="#d7f7ff",
+        fontsize=8.4,
+    )
+    fig.subplots_adjust(left=0.07, right=0.97, bottom=0.12, top=0.89, wspace=0.26, hspace=0.36)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def sigmoid_np(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(x, -60.0, 60.0)))
 
@@ -1824,6 +1948,8 @@ def serializable_record(record: dict[str, Any]) -> dict[str, Any]:
         "toric_phase_u",
         "toric_phase_v",
         "toric_phase_cocycle",
+        "toric_slepian_reconstruction",
+        "toric_slepian_envelope",
         "graphcg_chart_axis",
         "graphcg_chart_margin",
     }
@@ -1926,6 +2052,7 @@ def main() -> None:
             traj_dir / f"{record_slug}_toric_phase_simplicial_trajectory.png",
         )
         plot_toric_shadow_audit(meta, branches, topology_dir / f"{record_slug}_toric_shadow_audit.png")
+        plot_toric_slepian_audit(meta, branches, topology_dir / f"{record_slug}_toric_slepian_audit.png")
         plot_directed_filtration(meta, branches, topology_dir / f"{record_slug}_directed_filtration.png")
         plot_topology_heatmaps(meta, branches, topology_dir / f"{record_slug}_noncommutative_heatmaps.png")
         plot_step_radius_heatmaps(meta, branches, topology_dir / f"{record_slug}_step_radius_hierarchy.png")
@@ -2046,6 +2173,10 @@ def main() -> None:
             np.mean([record["topology_exact_morphism_truncated_complexes"] for record in branch_records])
         ),
         "mean_toric_phase_recurrence": float(np.mean([record["toric_phase_recurrence"] for record in branch_records])),
+        "mean_toric_slepian_concentration": mean_record_key("toric_slepian_concentration"),
+        "mean_toric_slepian_leakage": mean_record_key("toric_slepian_leakage"),
+        "mean_toric_slepian_mode_entropy": mean_record_key("toric_slepian_mode_entropy"),
+        "mean_toric_slepian_effective_modes": mean_record_key("toric_slepian_effective_modes"),
         "mean_topology_inclusion_violation": float(np.mean([record["topology_inclusion_violation"] for record in branch_records])),
         "mean_topology_hdbscan_cluster_count": float(
             np.mean([record["topology_hdbscan_cluster_count"] for record in branch_records])
@@ -2100,6 +2231,7 @@ def main() -> None:
             "trajectories/*_toric_phase_simplicial_trajectory.png",
             "topology/*_directed_filtration.png",
             "topology/*_toric_shadow_audit.png",
+            "topology/*_toric_slepian_audit.png",
             "topology/*_step_radius_hierarchy.png",
             "topology/*_exact_persistence_morphisms.png",
             "topology/*_commutative_algebra_audit.png",

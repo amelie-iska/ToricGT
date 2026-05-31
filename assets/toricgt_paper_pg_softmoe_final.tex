@@ -2327,6 +2327,39 @@ By Kronecker density, $\gamma(\Z)$ is dense in the commutative torus when $1,\th
 \end{equation}
 where $\Pi_\theta$ is the learned toric phase projection and $R_{\Delta_t}$ is the expected rotation increment from the graph action at step $t$.  A small $E_{\mathrm{leaf}}$ means the phase channel behaves like a coherent projective memory; a large value means the model is using the sinusoidal channel incoherently.  This remains an audit shadow, not a claim that a finite neural network represents the full irrational rotation algebra faithfully.
 
+\subsection{Slepian concentration on toric leaves}
+
+The phase-foliation audit can be sharpened by asking whether the finite projected leaf is time-band concentrated.  Classical prolate spheroidal wave functions solve an extremal concentration problem: among bandlimited functions, they maximize energy inside a time window.  The discrete version is the Slepian or DPSS basis \cite{slepian1978prolate}.  For a finite trajectory of length $N$ and normalized half-bandwidth $W\in(0,1/2)$, define the time-band limiting matrix
+\begin{equation}
+  K_W[m,n]=
+  \begin{cases}
+    2W, & m=n,\\[0.35em]
+    \dfrac{\sin(2\pi W(m-n))}{\pi(m-n)}, & m\ne n.
+  \end{cases}
+\end{equation}
+Its leading eigenvectors $q_1,\ldots,q_J$ are the discrete prolate spheroidal sequences and its eigenvalues $\lambda_j\in[0,1]$ measure spectral concentration in the prescribed band.  Given a projected noncommutative-torus phase path
+\begin{equation}
+  z_k=\left(e^{2\pi i u_k},e^{2\pi i v_k}\right)\in\mathbb T^2
+\end{equation}
+we form a real probe signal from low-order characters and cocycle-like differences, for example
+\begin{equation}
+  s_k=\cos(2\pi u_k)+\frac34\sin(2\pi v_k)+\frac45\cos(2\pi(u_k-v_k)),
+\end{equation}
+optionally weighted by local reasoning energy such as per-token negative log likelihood.  With coefficients $c_j=\ip{s}{q_j}$, the finite Slepian concentration score is
+\begin{equation}
+  C_{\mathrm{sl}}(s)=
+  \frac{\sum_{j=1}^J\lambda_j |c_j|^2}{\sum_{j=1}^J |c_j|^2+\epsilon},
+  \qquad
+  L_{\mathrm{sl}}(s)=1-C_{\mathrm{sl}}(s).
+\end{equation}
+The companion mode entropy
+\begin{equation}
+  H_{\mathrm{sl}}(s)=
+  -\frac{1}{\log J}\sum_{j=1}^J p_j\log(p_j+\epsilon),
+  \qquad p_j=\frac{|c_j|^2}{\sum_r |c_r|^2+\epsilon},
+\end{equation}
+separates a coherent low-dimensional phase leaf from a diffuse phase pattern.  In the current implementation this is an audit and visualization metric rather than a training loss.  It appears in the geometry suite as a toric Slepian panel: concentration spectrum, phase-signal reconstruction, local NLL energy, torus-leaf scatter, and branch-level BPB versus concentration.  This is also the mathematically controlled version of the musical analogy: a toric phase path with high Slepian concentration has stable, localized oscillatory content; rendering it as an audio envelope is an intelligible sonification of phase coherence, not evidence by itself.
+
 \subsection{Fine-tuning objective}
 
 Let $\mathcal L_{\mathrm{base}}$ be the existing supervised and GFlowNet objective.  A toric fine-tuning phase can use
@@ -2588,6 +2621,11 @@ Baran Hashemi, Kurt Pasque, Chris Teska, and Ruriko Yoshida.
 Marc A. Rieffel.
 \newblock $C^*$-algebras associated with irrational rotations.
 \newblock \emph{Pacific Journal of Mathematics}, 93(2):415--429, 1981.
+
+\bibitem{slepian1978prolate}
+David Slepian.
+\newblock Prolate spheroidal wave functions, Fourier analysis, and uncertainty V: The discrete case.
+\newblock \emph{Bell System Technical Journal}, 57(5):1371--1430, 1978.
 
 \bibitem{rieffel1988projective}
 Marc A. Rieffel.

@@ -360,6 +360,16 @@ The rotation algebra relation $VU=e^{2\pi i\theta}UV$ supplies a projective phas
 \end{equation}
 with irrationally related $\theta,\beta$ gives a Kronecker foliation of the commutative torus by dense phase leaves; rational approximants give closed leaves.  ToricGT should use these leaves as phase-consistency diagnostics for reasoning trajectories: hidden graph-of-thought paths should move smoothly along projected leaves unless a verified algebraic or tropical wall crossing occurs.  This is only a finite audit shadow of the rotation $C^*$-algebra, not a faithful finite representation, but it gives a concrete way to test whether noncommutative toric memory is organizing latent search rather than adding decorative sinusoidal features \cite{rieffel1981rotation}.
 
+The same finite phase path admits a Slepian audit.  For a window of length $N$ and normalized half-bandwidth $W$, the discrete time-band limiting operator
+\begin{equation}
+  K_W[m,n]=
+  \begin{cases}
+    2W,&m=n,\\
+    \dfrac{\sin(2\pi W(m-n))}{\pi(m-n)},&m\ne n
+  \end{cases}
+\end{equation}
+has discrete prolate spheroidal eigenvectors.  Projecting a toric phase signal $s_k=s(e^{2\pi i k\theta},e^{2\pi i k\beta})$ onto its leading eigenvectors gives concentration, leakage, and mode-entropy diagnostics.  High concentration means the projected noncommutative phase memory is coherent and time-band localized; high leakage means the hidden trajectory has diffuse phase drift.  The implementation logs these metrics and renders a toric Slepian panel, but keeps them audit-only until ablations show that optimizing them improves BPB or reasoning robustness.
+
 Finally, make inference-time scaling geometric: continuous GFlowNets can move inside normal cones, along walls, across moment polytopes, and along projected toric leaves while discrete actions edit graph-of-thought states, apply braid generators, or apply affine Coxeter reflections.  Continuous GFlowNet theory supplies the density-correct trajectory-balance objective for these hybrid paths \cite{lahlou2023continuous}.  This keeps the architecture small while giving search a structured latent space.
 
 \section{Conclusion}
@@ -417,6 +427,11 @@ Salem Lahlou, Tristan Deleu, Pablo Lemos, Dinghuai Zhang, Alexandra Volokhova, A
 Marc A. Rieffel.
 \newblock $C^*$-algebras associated with irrational rotations.
 \newblock \emph{Pacific Journal of Mathematics}, 93(2):415--429, 1981.
+
+\bibitem{slepian1978prolate}
+David Slepian.
+\newblock Prolate spheroidal wave functions, Fourier analysis, and uncertainty V: The discrete case.
+\newblock \emph{Bell System Technical Journal}, 57(5):1371--1430, 1978.
 
 \bibitem{humphreys1990reflection}
 James E. Humphreys.

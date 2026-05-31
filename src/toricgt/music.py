@@ -23,6 +23,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
+from .slepian_torus import ToricSlepianConfig, toric_slepian_audit, toric_slepian_envelope
+
 
 GOLDEN_ROTATION = (math.sqrt(5.0) - 1.0) / 2.0
 SILVER_ROTATION = math.sqrt(2.0) - 1.0
@@ -43,6 +45,9 @@ class TorusMusicConfig:
     swing: float = 0.0
     pad_every: int = 8
     mood: str = "dark_analog"
+    use_slepian: bool = True
+    slepian_bandwidth: float = 0.075
+    slepian_modes: int = 6
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,7 @@ class TorusNoteEvent:
     torus_y: int
     phase_u: float
     phase_v: float
+    slepian_weight: float
     role: str
 
 
@@ -115,6 +121,15 @@ def compose_torus_music(config: TorusMusicConfig) -> list[TorusNoteEvent]:
     n_steps = max(1, int(config.seconds / step))
     previous_midi = 60
     events: list[TorusNoteEvent] = []
+    slepian_envelope = (
+        toric_slepian_envelope(
+            n_steps,
+            half_bandwidth=config.slepian_bandwidth,
+            modes=config.slepian_modes,
+        )
+        if config.use_slepian
+        else [1.0] * n_steps
+    )
 
     # The path is a finite shadow of an irrational rotation on T^2.
     u = _wrap01(rng.random() * 0.17 + config.theta)
@@ -124,6 +139,7 @@ def compose_torus_music(config: TorusMusicConfig) -> list[TorusNoteEvent]:
     for t in range(n_steps):
         u = _wrap01(u + config.theta + 0.015 * math.sin(2.0 * math.pi * v))
         v = _wrap01(v + config.beta + 0.012 * math.sin(2.0 * math.pi * u))
+        slepian_weight = float(slepian_envelope[t])
         expert, weights = _router_expert(u, v)
 
         x = int(math.floor(12 * u)) % 12
@@ -161,8 +177,8 @@ def compose_torus_music(config: TorusMusicConfig) -> list[TorusNoteEvent]:
         previous_xy = (active_x, active_y)
 
         swing_offset = config.swing * step if t % 2 else 0.0
-        duration = step * (0.92 if config.mood == "dark_analog" else 1.35)
-        velocity = 0.26 + 0.26 * weights[expert] + 0.04 * math.sin(2.0 * math.pi * u)
+        duration = step * (0.82 + 0.20 * slepian_weight if config.mood == "dark_analog" else 1.15 + 0.25 * slepian_weight)
+        velocity = (0.23 + 0.08 * slepian_weight) + 0.25 * weights[expert] + 0.04 * math.sin(2.0 * math.pi * u)
         pan = max(-0.85, min(0.85, 2.0 * u - 1.0))
         events.append(
             TorusNoteEvent(
@@ -177,6 +193,7 @@ def compose_torus_music(config: TorusMusicConfig) -> list[TorusNoteEvent]:
                 torus_y=active_y,
                 phase_u=u,
                 phase_v=v,
+                slepian_weight=slepian_weight,
                 role="lead",
             )
         )
@@ -200,6 +217,7 @@ def compose_torus_music(config: TorusMusicConfig) -> list[TorusNoteEvent]:
                     torus_y=active_y,
                     phase_u=u,
                     phase_v=v,
+                    slepian_weight=slepian_weight,
                     role="pulse_bass",
                 )
             )
@@ -227,6 +245,7 @@ def compose_torus_music(config: TorusMusicConfig) -> list[TorusNoteEvent]:
                         torus_y=active_y,
                         phase_u=u,
                         phase_v=v,
+                        slepian_weight=slepian_weight,
                         role="torus_pad",
                     )
                 )
@@ -287,7 +306,7 @@ def render_torus_music(config: TorusMusicConfig, events: Iterable[TorusNoteEvent
                 saw = 2.0 * ((frequency * local_t + event.phase_u) % 1.0) - 1.0
                 saw_detuned = 2.0 * ((frequency * detune * local_t + event.phase_v) % 1.0) - 1.0
                 sub = math.sin(0.5 * phase)
-                gate = 0.74 + 0.26 * math.sin(two_pi * 2.0 * local_t)
+                gate = 0.68 + 0.18 * event.slepian_weight + 0.20 * math.sin(two_pi * 2.0 * local_t)
                 harmonic = 0.50 * saw + 0.35 * saw_detuned + 0.45 * sub
                 sample = event.velocity * env * gate * harmonic / 1.30
             elif event.role == "torus_pad":
@@ -297,9 +316,9 @@ def render_torus_music(config: TorusMusicConfig, events: Iterable[TorusNoteEvent
                     + 0.42 * math.sin(phase * 1.003 + 0.8 + slow * 0.12)
                     + 0.18 * math.sin(2.0 * phase + timbre)
                 )
-                sample = event.velocity * env * harmonic / 1.55
+                sample = event.velocity * env * (0.82 + 0.18 * event.slepian_weight) * harmonic / 1.55
             else:
-                pulse = 0.78 + 0.22 * math.sin(two_pi * 4.0 * local_t + two_pi * event.phase_v)
+                pulse = 0.70 + 0.12 * event.slepian_weight + 0.18 * math.sin(two_pi * 4.0 * local_t + two_pi * event.phase_v)
                 harmonic = (
                     0.72 * math.sin(phase + fm)
                     + 0.34 * math.sin(2.0 * phase + timbre)
@@ -349,6 +368,26 @@ def write_wav(path: Path, config: TorusMusicConfig, samples: Iterable[tuple[floa
         wav.writeframes(frames)
 
 
+def _jsonable_slepian_audit(config: TorusMusicConfig, events: list[TorusNoteEvent]) -> dict[str, object]:
+    """Return JSON-safe Slepian/DPSS metadata for the toric phase path."""
+
+    audit = toric_slepian_audit(
+        [event.phase_u for event in events],
+        [event.phase_v for event in events],
+        energy=[1.0 - event.slepian_weight for event in events],
+        config=ToricSlepianConfig(
+            half_bandwidth=config.slepian_bandwidth,
+            modes=config.slepian_modes,
+            theta=config.theta,
+            beta=config.beta,
+        ),
+    )
+    out: dict[str, object] = {}
+    for key, value in audit.items():
+        out[key] = value.tolist() if hasattr(value, "tolist") else value
+    return out
+
+
 def write_metadata(path: Path, config: TorusMusicConfig, events: list[TorusNoteEvent]) -> None:
     """Write JSON provenance for the rendered music."""
 
@@ -356,9 +395,11 @@ def write_metadata(path: Path, config: TorusMusicConfig, events: list[TorusNoteE
         "model": "ToricGT torus-constrained algorithmic music",
         "description": (
             "Irrational T^2 orbit with tropical active-face selection, "
-            "noncommutative-torus cocycle bias, and four-expert Soft-MoE-style routing."
+            "noncommutative-torus cocycle bias, four-expert Soft-MoE-style routing, "
+            "and Slepian/DPSS phase-concentration dynamics."
         ),
         "config": asdict(config),
+        "slepian_audit": _jsonable_slepian_audit(config, events),
         "events": [asdict(event) for event in events],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -408,6 +449,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root-midi", type=int, default=36)
     parser.add_argument("--amplitude", type=float, default=0.78)
     parser.add_argument("--mood", choices=["dark_analog", "toric"], default="dark_analog")
+    parser.add_argument("--slepian", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--slepian-bandwidth", type=float, default=0.075)
+    parser.add_argument("--slepian-modes", type=int, default=6)
     parser.add_argument("--play", action=argparse.BooleanOptionalAction, default=False)
     return parser.parse_args()
 
@@ -424,6 +468,9 @@ def main() -> None:
         root_midi=args.root_midi,
         amplitude=args.amplitude,
         mood=args.mood,
+        use_slepian=args.slepian,
+        slepian_bandwidth=args.slepian_bandwidth,
+        slepian_modes=args.slepian_modes,
     )
     output, metadata, events = generate_wav(args.output, config)
     print(f"Wrote {output}")

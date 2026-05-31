@@ -305,6 +305,16 @@ varieties-of-complexes equations `d1 d2 = 0`, Fitting/minor rank strata,
 Buchsbaum-Eisenbud rank residuals, complementary-minor multiplier residuals,
 and multigraded Betti-mass proxies.
 
+The analysis suite also computes a finite prolate-spheroidal/Slepian audit on
+the projected noncommutative torus leaf. `src/toricgt/slepian_torus.py` builds
+the DPSS time-band limiting kernel
+`K[m,n] = sin(2*pi*W*(m-n))/(pi*(m-n))` with diagonal `2W`, projects the
+reasoning phase signal into its leading modes, and reports concentration,
+leakage, mode entropy, and effective mode count. `*_toric_slepian_audit.png`
+compares the DPSS spectrum, reconstructed phase signal, local NLL energy, and
+branch BPB. This gives an evaluation-only answer to whether toric phase memory
+is coherent and localized, rather than merely a decorative sinusoidal feature.
+
 Current operational guardrail: training should resume only after the full
 analysis suite finishes and all generated plot classes have been inspected.
 The skeptic guardrail is metric-first: every advanced geometric object needs a
