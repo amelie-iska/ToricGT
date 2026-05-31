@@ -21,6 +21,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .config import AttentionKind
+from .koszul_persistence import KoszulPersistenceConfig, koszul_persistence_loss
 from .tropical_attention import TransformerBlock
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
 from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
@@ -114,6 +115,15 @@ class RandomOrderLMConfig:
     analogy_step_topology_window_size: int = 32
     analogy_step_topology_step_stride: int = 8
     analogy_step_topology_time_bias: float = 0.18
+    use_koszul_persistence: bool = True
+    koszul_max_points: int = 24
+    koszul_max_windows: int = 4
+    koszul_window_size: int = 32
+    koszul_step_stride: int = 8
+    koszul_num_parameters: int = 3
+    koszul_temperature: float = 0.12
+    koszul_chart_exponents: int = 12
+    koszul_rank_temperature: float = 0.05
     aux_mtp_offsets: int = 2
     contrastive_temperature: float = 0.2
     trajectory_flow_viscosity: float = 0.05
@@ -1213,6 +1223,25 @@ class DenseRandomOrderToricLM(nn.Module):
             out.update(self._analogy_lattice_losses(hidden, target_tokens))
             if self.toric_geometry_probe is not None and target_positions is not None:
                 out.update(self.toric_geometry_probe(hidden, target_positions, target_tokens))
+            if bool(self.config.use_koszul_persistence):
+                out.update(
+                    koszul_persistence_loss(
+                        hidden,
+                        target_positions,
+                        config=KoszulPersistenceConfig(
+                            max_points=int(self.config.koszul_max_points),
+                            max_windows=int(self.config.koszul_max_windows),
+                            window_size=int(self.config.koszul_window_size),
+                            step_stride=int(self.config.koszul_step_stride),
+                            num_parameters=int(self.config.koszul_num_parameters),
+                            temperature=float(self.config.koszul_temperature),
+                            chart_exponents=int(self.config.koszul_chart_exponents),
+                            theta=float(self.config.theta),
+                            beta=float(self.config.beta),
+                            rank_temperature=float(self.config.koszul_rank_temperature),
+                        ),
+                    )
+                )
         if hidden is not None and hidden.shape[0] > 1:
             pooled = F.normalize(hidden.mean(dim=1).float(), dim=-1)
             sim = pooled @ pooled.transpose(0, 1) / max(float(self.config.contrastive_temperature), 1e-4)

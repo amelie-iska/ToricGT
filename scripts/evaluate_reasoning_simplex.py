@@ -48,9 +48,9 @@ from train_parameter_golf_random_order import build_loader, config_get, read_yam
 
 TRIANGLE_SPECS = {
     "reasoning_k_bpb": {
-        "labels": ["reasoning budget", "K(x)", "low BPB"],
-        "scores": ["score/reasoning", "score/k", "score/bpb_quality"],
-        "title": "Reasoning/K/BPB simplex",
+        "labels": ["reasoning budget", "low K(x|helpers)", "low BPB"],
+        "scores": ["score/reasoning", "score/relative_k", "score/bpb_quality"],
+        "title": "Reasoning/K(x|helpers)/BPB simplex",
     },
     "robustness": {
         "labels": ["low loss", "order robustness", "GFlowNet diversity"],
@@ -58,22 +58,22 @@ TRIANGLE_SPECS = {
         "title": "Robustness simplex",
     },
     "efficiency": {
-        "labels": ["low BPB", "MST efficiency", "K(x)"],
-        "scores": ["score/bpb_quality", "score/mst_efficiency", "score/k"],
+        "labels": ["low BPB", "MST efficiency", "low K(x|helpers)"],
+        "scores": ["score/bpb_quality", "score/mst_efficiency", "score/relative_k"],
         "title": "Compression-efficiency simplex",
     },
 }
 
 TETRAHEDRON_SPECS = {
     "reasoning_k_bpb_mst": {
-        "labels": ["reasoning budget", "K(x)", "low BPB", "MST efficiency"],
-        "scores": ["score/reasoning", "score/k", "score/bpb_quality", "score/mst_efficiency"],
-        "title": "Reasoning/K/BPB/MST tetrahedron",
+        "labels": ["reasoning budget", "low K(x|helpers)", "low BPB", "MST efficiency"],
+        "scores": ["score/reasoning", "score/relative_k", "score/bpb_quality", "score/mst_efficiency"],
+        "title": "Reasoning/K(x|helpers)/BPB/MST tetrahedron",
     },
     "reasoning_k_bpb_diversity": {
-        "labels": ["reasoning budget", "K(x)", "low BPB", "GFlowNet diversity"],
-        "scores": ["score/reasoning", "score/k", "score/bpb_quality", "score/gflownet_diversity"],
-        "title": "Reasoning/K/BPB/GFlowNet tetrahedron",
+        "labels": ["reasoning budget", "low K(x|helpers)", "low BPB", "GFlowNet diversity"],
+        "scores": ["score/reasoning", "score/relative_k", "score/bpb_quality", "score/gflownet_diversity"],
+        "title": "Reasoning/K(x|helpers)/BPB/GFlowNet tetrahedron",
     },
 }
 
@@ -275,14 +275,23 @@ def evaluate_budget(
         aggregate["bpb_std"] = float(np.std(bpb_values))
     else:
         aggregate["bpb_std"] = 0.0
-    aggregate["k_proxy"] = float(
-        aggregate.get("complexity/target_cond_k_lzma_mean", aggregate.get("complexity/target_cond_k_zlib_mean", 0.0))
-        + 0.25
-        * aggregate.get(
-            "complexity/gflownet_action_trace_k_lzma_mean",
-            aggregate.get("complexity/order_program_k_lzma_mean", 0.0),
+    helper_k = float(
+        aggregate.get(
+            "complexity/target_helper_cond_k_lzma_mean",
+            aggregate.get(
+                "complexity/target_cond_k_lzma_mean",
+                aggregate.get(
+                    "complexity/target_helper_cond_k_zlib_mean",
+                    aggregate.get("complexity/target_cond_k_zlib_mean", 0.0),
+                ),
+            ),
         )
     )
+    aggregate["helper_cond_k_proxy"] = helper_k
+    aggregate["helper_cond_k_per_byte"] = helper_k / max(1.0, float(aggregate.get("tokens", aggregate.get("trajectory_tokens", 1.0))))
+    # Backward-compatible field name used by older JSON consumers.  It now
+    # means helper-conditioned K(x|helpers), not absolute K(x).
+    aggregate["k_proxy"] = helper_k
     aggregate["reasoning_budget"] = float(
         math.log1p(aggregate["trajectory_tokens"]) + 0.001 * aggregate["wall_ms"]
     )
@@ -295,7 +304,8 @@ def enrich_scores(records: list[dict[str, float]]) -> list[dict[str, float]]:
         records,
         {
             "score/reasoning": ("reasoning_budget", True),
-            "score/k": ("k_proxy", True),
+            "score/k": ("helper_cond_k_per_byte", False),
+            "score/relative_k": ("helper_cond_k_per_byte", False),
             "score/bpb_quality": ("bpb", False),
             "score/loss_quality": ("loss", False),
             "score/robustness": ("bpb_std", False),
@@ -349,10 +359,10 @@ def plot_triangle(records: list[dict[str, float]], spec: dict[str, Any], output_
     )
     for record, (x, y) in zip(records, points):
         ax.text(x, y + 0.025, f"B{int(record['budget'])}", color="white", fontsize=8, ha="center")
-    label_offsets = [(-0.06, -0.055), (0.06, -0.055), (0.0, 0.045)]
+    label_offsets = [(-0.06, -0.055), (0.06, -0.055), (0.0, -0.065)]
     for label, vertex, offset in zip(labels, vertices, label_offsets):
         ax.text(vertex[0] + offset[0], vertex[1] + offset[1], label, color="#e8fbff", fontsize=10, ha="center")
-    ax.set_title(spec["title"], color="white", fontsize=14)
+    ax.set_title(spec["title"], color="white", fontsize=14, pad=22)
     ax.set_aspect("equal")
     ax.set_axis_off()
     cbar = fig.colorbar(contour, ax=ax, fraction=0.035, pad=0.02)
@@ -425,7 +435,7 @@ def write_interactive_tetrahedron(records: list[dict[str, float]], spec: dict[st
         coords.append(barycentric_to_cartesian(simplex["weights"], vertices))
         hover.append(
             f"budget={int(record['budget'])}<br>BPB={record['bpb']:.4f}<br>"
-            f"K proxy={record['k_proxy']:.2f}<br>MST efficiency={record['mst_efficiency']:.4f}"
+            f"K_hat(x|helpers)={record['k_proxy']:.2f}<br>MST efficiency={record['mst_efficiency']:.4f}"
         )
     payload = {
         "title": spec["title"],

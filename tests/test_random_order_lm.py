@@ -1,5 +1,6 @@
 import torch
 
+from toricgt.koszul_persistence import KoszulPersistenceConfig, koszul_persistence_loss
 from toricgt.random_order_lm import (
     DenseRandomOrderToricLM,
     RandomOrderLMConfig,
@@ -73,6 +74,9 @@ def test_dense_random_order_lm_loss_and_generation_shapes():
     assert out["contrastive_loss"].isfinite()
     assert out["trajectory_flow_loss"].isfinite()
     assert out["trajectory_kinetic_energy"].isfinite()
+    assert out["koszul_persistence_loss"].isfinite()
+    assert out["koszul_exactness_residual"].isfinite()
+    assert out["koszul_buchsbaum_eisenbud_multiplier_residual"].isfinite()
     assert out["permutation"].shape == tokens.shape
     generated = model.eval().sample_random_order(length=10, seed=99, sample_id=0, top_k=8)
     assert generated.shape == (10,)
@@ -186,12 +190,34 @@ def test_reasoning_step_topology_builds_nested_directed_complexes():
     assert "analogical_map_loss" in stats
     assert "directed_map_loss" in stats
     assert "dec_conservation_loss" in stats
+    assert "variety_complex_residual_mean" in stats
+    assert "fitting_minor_rank_residual_mean" in stats
+    assert "buchsbaum_eisenbud_multiplier_residual_mean" in stats
+    assert "multigraded_betti_mass_mean" in stats
     assert torch.isfinite(torch.tensor(stats["dec_conservation_loss"])).all().item()
     assert torch.isfinite(torch.tensor(stats["dec_mass_residual"])).all().item()
     assert torch.isfinite(torch.tensor(stats["dec_kinetic_energy"])).all().item()
     assert len(stats["simplex_tree_summary"]) >= cfg.levels
     edge_density = stats["edge_density"]
     assert all(edge_density[i] <= edge_density[i + 1] + 1e-8 for i in range(len(edge_density) - 1))
+
+
+def test_koszul_persistence_loss_reports_affine_audit_metrics():
+    hidden = torch.randn(2, 24, 16)
+    positions = torch.arange(24).expand(2, 24)
+    out = koszul_persistence_loss(
+        hidden,
+        positions,
+        config=KoszulPersistenceConfig(max_points=8, max_windows=2, window_size=12),
+    )
+    assert out["koszul_persistence_loss"].isfinite()
+    assert out["koszul_exactness_residual"].isfinite()
+    assert out["koszul_syzygy_residual"].isfinite()
+    assert out["koszul_fitting_rank_residual"].isfinite()
+    assert out["koszul_buchsbaum_eisenbud_rank_residual"].isfinite()
+    assert out["koszul_buchsbaum_eisenbud_multiplier_residual"].isfinite()
+    assert out["koszul_multigraded_betti_mass"].isfinite()
+    assert out["koszul_windows"].item() >= 1
 
 
 def test_gflownet_adapter_preserves_score_before_update():

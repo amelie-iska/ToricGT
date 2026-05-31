@@ -650,9 +650,11 @@ margins, bend magnitudes, branch fan coverage, and phase-leaf residuals.
 
 Operational rule for the current `oai` experiments: training remains paused
 until the full analysis suite has completed and the generated plot classes have
-been reviewed. The requested "there be dragons" responding-onlooker ablation is
-currently an absence check: repository search finds no matching observer,
-prompt, or role path outside ignored outputs/checkpoints/data.
+been reviewed. The skeptical-onlooker guardrail is now explicit: advanced
+geometry can influence training only after it has a metric, an ablation, and a
+plot path. The requested "there be dragons" responding-onlooker ablation is an
+absence check in executable paths: repository search finds no matching
+observer, prompt, or role path outside ignored outputs/checkpoints/data.
 
 Planning notes:
 [`planning/GRAPHCG-ANALOGY-TOPOLOGY-PLAN.md`](planning/GRAPHCG-ANALOGY-TOPOLOGY-PLAN.md)
@@ -666,6 +668,14 @@ with the HoTT book reference: <https://homotopytypetheory.org/book/>.
 records the toric probe losses, metrics, resume policy, and analysis gate.
 [`planning/DEC-CONSERVATIVE-REASONING.md`](planning/DEC-CONSERVATIVE-REASONING.md)
 records the DEC/NSE comparison and the conservative reasoning-flow additions.
+[`planning/TORIC-AFFINE-KOSZUL-PERSISTENCE.md`](planning/TORIC-AFFINE-KOSZUL-PERSISTENCE.md)
+connects toric fan cells to affine toric schemes, semigroup coordinate rings,
+multigraded persistence modules, and Koszul/free-resolution diagnostics. The
+chain is `fan cell -> Spec k[sigma^vee cap M] -> graded module -> Koszul
+homology/Tor/Betti residuals`, with Fitting-minor ranks, varieties-of-complexes
+residuals, and Buchsbaum-Eisenbud complementary-minor multiplier checks logged
+as small-window audits. It is gated as an audit-first training signal so the
+Parameter-Golf BPB objective is not disrupted by unvalidated geometry.
 
 Kolmogorov-style reasoning diagnostics are enabled by default on the `oai`
 branch without changing the BPB objective. The trainer periodically logs

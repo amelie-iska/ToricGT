@@ -102,9 +102,9 @@ DEFAULT_DOMAIN_KEYWORDS = (
 
 TRIANGLE_SPECS = {
     "reasoning_k_bpb": {
-        "labels": ["reasoning time", "K(x)", "low BPB"],
-        "scores": ["score/reasoning", "score/k", "score/bpb_quality"],
-        "title": "Reasoning/K/BPB simplex",
+        "labels": ["reasoning time", "low K(x|helpers)", "low BPB"],
+        "scores": ["score/reasoning", "score/relative_k", "score/bpb_quality"],
+        "title": "Reasoning/K(x|helpers)/BPB simplex",
         "intensity": "score/reasoning",
     },
     "solution_basin": {
@@ -126,9 +126,9 @@ TRIANGLE_SPECS = {
         "intensity": "score/action_diversity",
     },
     "compression_reasoning": {
-        "labels": ["K(x)", "compression efficiency", "answer likelihood"],
-        "scores": ["score/k", "score/compression_efficiency", "score/answer_quality"],
-        "title": "Compression/reasoning simplex",
+        "labels": ["low K(x|helpers)", "helper gain", "answer likelihood"],
+        "scores": ["score/relative_k", "score/relative_k_gain", "score/answer_quality"],
+        "title": "Conditional-compression/reasoning simplex",
         "intensity": "score/compression_efficiency",
     },
     "robustness_generalization": {
@@ -153,9 +153,9 @@ TRIANGLE_SPECS = {
 
 TETRAHEDRON_SPECS = {
     "reasoning_k_bpb_mst": {
-        "labels": ["reasoning time", "K(x)", "low BPB", "MST efficiency"],
-        "scores": ["score/reasoning", "score/k", "score/bpb_quality", "score/mst_efficiency"],
-        "title": "Reasoning/K/BPB/MST tetrahedron",
+        "labels": ["reasoning time", "low K(x|helpers)", "low BPB", "MST efficiency"],
+        "scores": ["score/reasoning", "score/relative_k", "score/bpb_quality", "score/mst_efficiency"],
+        "title": "Reasoning/K(x|helpers)/BPB/MST tetrahedron",
     },
     "solution_bpb_smooth_diversity": {
         "labels": ["answer likelihood", "low BPB", "smooth flow", "GFlowNet diversity"],
@@ -163,9 +163,9 @@ TETRAHEDRON_SPECS = {
         "title": "Solution/BPB/flow/diversity tetrahedron",
     },
     "complexity_geometry_solution": {
-        "labels": ["K(x)", "trajectory depth", "MST efficiency", "answer likelihood"],
-        "scores": ["score/k", "score/trajectory_depth", "score/mst_efficiency", "score/answer_quality"],
-        "title": "Complexity/geometry/solution tetrahedron",
+        "labels": ["low K(x|helpers)", "trajectory depth", "MST efficiency", "answer likelihood"],
+        "scores": ["score/relative_k", "score/trajectory_depth", "score/mst_efficiency", "score/answer_quality"],
+        "title": "Conditional-complexity/geometry/solution tetrahedron",
     },
     "energy_control": {
         "labels": ["low energy", "terminal confidence", "smooth flow", "low BPB"],
@@ -447,6 +447,47 @@ def path_stats(points: np.ndarray) -> dict[str, float]:
     }
 
 
+def helper_conditional_k(record: dict[str, Any], compressor: str = "lzma") -> float:
+    """Return the helper-conditioned K(x|y) proxy for simplex plots.
+
+    This deliberately avoids plotting an absolute K(x) estimate.  The primary
+    value is the shortest-known conditional target code under the random-order
+    helper family: strict prefix, public order/tree program, graph-projected
+    byte chunk, GFlowNet action trace, and optional graph/tree payloads.
+    """
+
+    candidates = [
+        record.get(f"complexity/target_helper_cond_k_{compressor}_mean"),
+        record.get(f"complexity/target_cond_k_{compressor}_mean"),
+        record.get("complexity/target_helper_cond_k_zlib_mean"),
+        record.get("complexity/target_cond_k_zlib_mean"),
+    ]
+    for value in candidates:
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            return float(value)
+    return 0.0
+
+
+def analogical_helper_gain(record: dict[str, Any], compressor: str = "lzma") -> float:
+    """Return positive gain when analogy helpers reduce K(x|helpers)."""
+
+    gain_candidates = [
+        record.get(f"complexity/analogical_transfer_gain_k_{compressor}_mean"),
+        record.get("complexity/analogical_transfer_gain_k_zlib_mean"),
+    ]
+    for value in gain_candidates:
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            return max(0.0, float(value))
+    relative_candidates = [
+        record.get(f"complexity/analogical_transfer_relative_k_{compressor}_mean"),
+        record.get("complexity/analogical_transfer_relative_k_zlib_mean"),
+    ]
+    for value in relative_candidates:
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            return max(0.0, -float(value))
+    return 0.0
+
+
 @torch.no_grad()
 def evaluate_branch(
     model: DenseRandomOrderToricLM,
@@ -593,14 +634,13 @@ def evaluate_branch(
             record[key] = float(value)
     for key, value in mst.items():
         record[f"mst/{key}"] = float(value)
-    record["k_proxy"] = float(
-        record.get("complexity/target_cond_k_lzma_mean", record.get("complexity/target_cond_k_zlib_mean", 0.0))
-        + 0.25
-        * record.get(
-            "complexity/gflownet_action_trace_k_lzma_mean",
-            record.get("complexity/order_program_k_lzma_mean", 0.0),
-        )
-    )
+    helper_k = helper_conditional_k(record)
+    record["helper_cond_k_proxy"] = float(helper_k)
+    record["helper_cond_k_per_byte"] = float(helper_k / max(1, int(tokens.shape[1])))
+    record["analogical_k_gain_proxy"] = float(analogical_helper_gain(record))
+    # Backward-compatible field name used by older JSON consumers.  It now
+    # means helper-conditioned K(x|helpers), not absolute K(x).
+    record["k_proxy"] = record["helper_cond_k_proxy"]
     return record
 
 
@@ -625,12 +665,18 @@ def enrich_branch_scores(records: list[dict[str, Any]]) -> None:
         record["energy"] = float(record.get("loss", 0.0))
         record["trajectory_depth"] = float(math.log1p(record.get("trajectory_tokens", 0.0)) + 0.02 * record["path_length"])
         record["path_smoothness_raw"] = float(1.0 / (1.0 + max(0.0, record["curvature"])))
-        record["compression_efficiency_raw"] = float(record["k_proxy"] / max(record["bpb"], 1e-6))
+        record["relative_k_proxy"] = float(record.get("helper_cond_k_per_byte", record.get("k_proxy", 0.0)))
+        record["compression_efficiency_raw"] = float(
+            (1.0 + record.get("analogical_k_gain_proxy", 0.0))
+            / (1.0 + max(0.0, record["relative_k_proxy"]) + max(record["bpb"], 1e-6))
+        )
     attach_normalized_scores(
         records,
         {
             "score/reasoning": ("trajectory_depth", True),
-            "score/k": ("k_proxy", True),
+            "score/k": ("relative_k_proxy", False),
+            "score/relative_k": ("relative_k_proxy", False),
+            "score/relative_k_gain": ("analogical_k_gain_proxy", True),
             "score/bpb_quality": ("bpb", False),
             "score/loss_quality": ("loss", False),
             "score/answer_quality": ("answer_bpb", False),
@@ -769,7 +815,7 @@ def write_interactive_tetrahedron(records: list[dict[str, Any]], spec: dict[str,
             (
                 f"record=R{record['record_index']} branch={record['branch_index']}<br>"
                 f"dataset={html.escape(str(record.get('dataset', '')))}<br>"
-                f"BPB={record['bpb']:.4f}<br>K={record['k_proxy']:.2f}<br>"
+                f"BPB={record['bpb']:.4f}<br>K_hat(x|helpers)={record['k_proxy']:.2f}<br>"
                 f"answer BPB={record['answer_bpb']:.4f}<br>MST={record['mst_efficiency']:.4f}"
             )
             for record in records
@@ -915,7 +961,7 @@ def write_interactive_trajectory(record_meta: dict[str, Any], branches: list[dic
                 "name": f"terminal {branch['branch_index']}",
                 "hovertext": (
                     f"branch={branch['branch_index']}<br>BPB={branch['bpb']:.4f}<br>"
-                    f"answer BPB={branch['answer_bpb']:.4f}<br>K={branch['k_proxy']:.2f}"
+                    f"answer BPB={branch['answer_bpb']:.4f}<br>K_hat(x|helpers)={branch['k_proxy']:.2f}"
                 ),
                 "hoverinfo": "text",
             }
@@ -1508,6 +1554,17 @@ def attach_topology_stats(branch: dict[str, Any], stats: dict[str, Any]) -> None
     branch["topology_transport_entropy"] = float(stats.get("transport_entropy", 0.0))
     branch["topology_exact_h0_dim_mean"] = float(stats.get("exact_h0_dim_mean", 0.0))
     branch["topology_exact_h1_dim_mean"] = float(stats.get("exact_h1_dim_mean", 0.0))
+    branch["topology_variety_complex_residual_mean"] = float(stats.get("variety_complex_residual_mean", 0.0))
+    branch["topology_fitting_minor_rank_residual_mean"] = float(
+        stats.get("fitting_minor_rank_residual_mean", 0.0)
+    )
+    branch["topology_buchsbaum_eisenbud_rank_residual_mean"] = float(
+        stats.get("buchsbaum_eisenbud_rank_residual_mean", 0.0)
+    )
+    branch["topology_buchsbaum_eisenbud_multiplier_residual_mean"] = float(
+        stats.get("buchsbaum_eisenbud_multiplier_residual_mean", 0.0)
+    )
+    branch["topology_multigraded_betti_mass_mean"] = float(stats.get("multigraded_betti_mass_mean", 0.0))
     branch["topology_exact_h0_map_rank_mean"] = float(stats.get("exact_h0_map_rank_mean", 0.0))
     branch["topology_exact_h1_map_rank_mean"] = float(stats.get("exact_h1_map_rank_mean", 0.0))
     branch["topology_exact_morphism_radius_shift_mean"] = float(stats.get("exact_morphism_radius_shift_mean", 0.0))
@@ -1712,6 +1769,50 @@ def plot_exact_persistence_morphism_heatmaps(
     plt.close(fig)
 
 
+def plot_commutative_algebra_audit(
+    record_meta: dict[str, Any],
+    branches: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    if not branches:
+        return
+    best = min(branches, key=lambda item: float(item["bpb"]))
+    stats = best.get("topology_stats")
+    if not isinstance(stats, dict):
+        return
+    heatmaps = stats.get("step_radius_heatmaps", {})
+    panels = [
+        ("variety_complex_residual", "variety of complexes residual $d_1d_2$", "inferno"),
+        ("fitting_minor_rank_residual", "Fitting/minor rank residual", "magma"),
+        ("buchsbaum_eisenbud_rank_residual", "Buchsbaum-Eisenbud rank residual", "plasma"),
+        ("buchsbaum_eisenbud_multiplier_residual", "BE complementary-minor residual", "coolwarm"),
+        ("multigraded_betti_mass", "multigraded Betti mass proxy", "cividis"),
+        ("exact_h1_dims", "exact $\\dim H_1$ obstruction", "viridis"),
+    ]
+    fig, axes = plt.subplots(2, 3, figsize=(15.2, 8.4), facecolor="#030712", constrained_layout=True)
+    for ax, (key, title, cmap_name) in zip(axes.reshape(-1), panels):
+        ax.set_facecolor("#030712")
+        matrix = np.asarray(heatmaps.get(key, np.zeros((1, len(stats.get("radii", [0.0]))))), dtype=float)
+        if matrix.size == 0:
+            matrix = np.zeros((1, len(stats.get("radii", [0.0]))), dtype=float)
+        im = ax.imshow(matrix, cmap=cmap_name, aspect="auto", interpolation="nearest")
+        ax.set_title(title, color="white", fontsize=10)
+        ax.set_xlabel("radius level", color="white", fontsize=8)
+        ax.set_ylabel("window", color="white", fontsize=8)
+        ax.tick_params(colors="white", labelsize=7)
+        cbar = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02)
+        cbar.ax.yaxis.set_tick_params(color="white")
+        plt.setp(cbar.ax.get_yticklabels(), color="white", fontsize=7)
+    fig.suptitle(
+        f"Affine/Koszul commutative-algebra audit R{record_meta['record_index']} B{best['branch_index']}",
+        color="white",
+        fontsize=13,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def serializable_record(record: dict[str, Any]) -> dict[str, Any]:
     skip = {
         "hidden",
@@ -1833,6 +1934,11 @@ def main() -> None:
             branches,
             topology_dir / f"{record_slug}_exact_persistence_morphisms.png",
         )
+        plot_commutative_algebra_audit(
+            meta,
+            branches,
+            topology_dir / f"{record_slug}_commutative_algebra_audit.png",
+        )
     enrich_branch_scores(branch_records)
     write_branch_records(branch_records, output_dir)
     (output_dir / "selected_records.json").write_text(json.dumps(record_manifest, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1900,6 +2006,21 @@ def main() -> None:
         "mean_topology_transport_entropy": float(np.mean([record["topology_transport_entropy"] for record in branch_records])),
         "mean_topology_exact_h0_dim": float(np.mean([record["topology_exact_h0_dim_mean"] for record in branch_records])),
         "mean_topology_exact_h1_dim": float(np.mean([record["topology_exact_h1_dim_mean"] for record in branch_records])),
+        "mean_topology_variety_complex_residual": float(
+            np.mean([record["topology_variety_complex_residual_mean"] for record in branch_records])
+        ),
+        "mean_topology_fitting_minor_rank_residual": float(
+            np.mean([record["topology_fitting_minor_rank_residual_mean"] for record in branch_records])
+        ),
+        "mean_topology_buchsbaum_eisenbud_rank_residual": float(
+            np.mean([record["topology_buchsbaum_eisenbud_rank_residual_mean"] for record in branch_records])
+        ),
+        "mean_topology_buchsbaum_eisenbud_multiplier_residual": float(
+            np.mean([record["topology_buchsbaum_eisenbud_multiplier_residual_mean"] for record in branch_records])
+        ),
+        "mean_topology_multigraded_betti_mass": float(
+            np.mean([record["topology_multigraded_betti_mass_mean"] for record in branch_records])
+        ),
         "mean_topology_exact_h0_map_rank": float(
             np.mean([record["topology_exact_h0_map_rank_mean"] for record in branch_records])
         ),
@@ -1981,6 +2102,7 @@ def main() -> None:
             "topology/*_toric_shadow_audit.png",
             "topology/*_step_radius_hierarchy.png",
             "topology/*_exact_persistence_morphisms.png",
+            "topology/*_commutative_algebra_audit.png",
             "triangles/*.png",
             "tetrahedra/*.png",
         ):

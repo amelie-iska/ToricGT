@@ -106,6 +106,19 @@ model:
   analogy_step_topology_window_size: 32
   analogy_step_topology_step_stride: 8
   analogy_step_topology_time_bias: 0.18
+  # Affine-toric/Koszul persistence audit.  Local reasoning windows define
+  # small chart actions; training receives a tiny residual for Koszul exactness
+  # while analysis computes exact F2 chain-complex, Fitting, and
+  # Buchsbaum-Eisenbud complementary-minor checks.
+  use_koszul_persistence: true
+  koszul_max_points: 24
+  koszul_max_windows: 4
+  koszul_window_size: 32
+  koszul_step_stride: 8
+  koszul_num_parameters: 3
+  koszul_temperature: 0.12
+  koszul_chart_exponents: 12
+  koszul_rank_temperature: 0.05
   contrastive_temperature: 0.2
   trajectory_flow_viscosity: 0.05
   aux_mtp_offsets: 2
@@ -239,6 +252,7 @@ training:
   graphcg_loss_weight: 0.0002
   analogy_lattice_loss_weight: 0.0002
   toric_geometry_loss_weight: 0.00015
+  koszul_persistence_loss_weight: 0.00002
   toric_entropy_floor: 0.20
   toric_entropy_loss_weight: 0.001
   mtp_loss_weight: 0.01
@@ -320,6 +334,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00005
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.0005
       mtp_loss_weight: 0.0
@@ -341,6 +356,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.00025
       mtp_loss_weight: 0.0
@@ -359,6 +375,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.00025
       mtp_loss_weight: 0.0
@@ -377,6 +394,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00005
       analogy_lattice_loss_weight: 0.00003
       toric_geometry_loss_weight: 0.00002
+      koszul_persistence_loss_weight: 0.000005
       trajectory_flow_loss_weight: 0.0
       contrastive_loss_weight: 0.0005
       mtp_loss_weight: 0.0
@@ -395,6 +413,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0003
       analogy_lattice_loss_weight: 0.0002
       toric_geometry_loss_weight: 0.00008
+      koszul_persistence_loss_weight: 0.00001
       trajectory_flow_loss_weight: 0.0001
       contrastive_loss_weight: 0.0015
       mtp_loss_weight: 0.015
@@ -410,6 +429,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0004
       analogy_lattice_loss_weight: 0.0003
       toric_geometry_loss_weight: 0.00012
+      koszul_persistence_loss_weight: 0.00002
       trajectory_flow_loss_weight: 0.00025
       contrastive_loss_weight: 0.002
       mtp_loss_weight: 0.02
@@ -425,6 +445,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0005
       analogy_lattice_loss_weight: 0.0004
       toric_geometry_loss_weight: 0.00015
+      koszul_persistence_loss_weight: 0.00002
       trajectory_flow_loss_weight: 0.0004
       contrastive_loss_weight: 0.003
       mtp_loss_weight: 0.03

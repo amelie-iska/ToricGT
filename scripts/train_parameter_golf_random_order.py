@@ -508,6 +508,7 @@ PHASE_CONTROL_KEYS = {
     "gflownet_entropy_target",
     "graphcg_loss_weight",
     "analogy_lattice_loss_weight",
+    "koszul_persistence_loss_weight",
     "trajectory_flow_loss_weight",
     "contrastive_loss_weight",
     "mtp_loss_weight",
@@ -1883,6 +1884,15 @@ def main() -> None:
         analogy_step_topology_window_size=config_get(file_config, "model", "analogy_step_topology_window_size", 32),
         analogy_step_topology_step_stride=config_get(file_config, "model", "analogy_step_topology_step_stride", 8),
         analogy_step_topology_time_bias=config_get(file_config, "model", "analogy_step_topology_time_bias", 0.18),
+        use_koszul_persistence=config_get(file_config, "model", "use_koszul_persistence", True),
+        koszul_max_points=config_get(file_config, "model", "koszul_max_points", 24),
+        koszul_max_windows=config_get(file_config, "model", "koszul_max_windows", 4),
+        koszul_window_size=config_get(file_config, "model", "koszul_window_size", 32),
+        koszul_step_stride=config_get(file_config, "model", "koszul_step_stride", 8),
+        koszul_num_parameters=config_get(file_config, "model", "koszul_num_parameters", 3),
+        koszul_temperature=config_get(file_config, "model", "koszul_temperature", 0.12),
+        koszul_chart_exponents=config_get(file_config, "model", "koszul_chart_exponents", 12),
+        koszul_rank_temperature=config_get(file_config, "model", "koszul_rank_temperature", 0.05),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
         aux_mtp_offsets=args.aux_mtp_offsets
@@ -1976,6 +1986,7 @@ def main() -> None:
         if args.toric_geometry_loss_weight is not None
         else config_get(file_config, "training", "toric_geometry_loss_weight", 0.0)
     )
+    koszul_persistence_loss_weight = config_get(file_config, "training", "koszul_persistence_loss_weight", 0.0)
     toric_entropy_floor = (
         args.toric_entropy_floor
         if args.toric_entropy_floor is not None
@@ -2510,6 +2521,7 @@ def main() -> None:
                     "graphcg_loss_weight": graphcg_loss_weight,
                     "analogy_lattice_loss_weight": analogy_lattice_loss_weight,
                     "toric_geometry_loss_weight": toric_geometry_loss_weight,
+                    "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
                     "toric_entropy_floor": toric_entropy_floor,
                     "toric_entropy_loss_weight": toric_entropy_loss_weight,
                     "mtp_loss_weight": mtp_loss_weight,
@@ -2674,6 +2686,7 @@ def main() -> None:
             "toric_entropy_floor": toric_entropy_floor,
             "toric_entropy_loss_weight": toric_entropy_loss_weight,
             "toric_geometry_loss_weight": toric_geometry_loss_weight,
+            "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
             "trajectory_flow_target": trajectory_flow_target,
             "qat_start_step": qat_start_step,
             "qat_warmup_steps": qat_warmup_steps,
@@ -2784,6 +2797,17 @@ def main() -> None:
         step_toric_leaf_residual = 0.0
         step_toric_probe_rank = 0.0
         step_toric_probe_quant_bits = 0.0
+        step_koszul_persistence_loss = 0.0
+        step_koszul_exactness_residual = 0.0
+        step_koszul_syzygy_residual = 0.0
+        step_koszul_fitting_rank_residual = 0.0
+        step_koszul_be_rank_residual = 0.0
+        step_koszul_be_multiplier_residual = 0.0
+        step_koszul_multigraded_betti_mass = 0.0
+        step_koszul_chart_entropy = 0.0
+        step_koszul_chart_coverage = 0.0
+        step_koszul_chart_transition_shift = 0.0
+        step_koszul_windows = 0.0
         step_robust_micro_loss_guard_fraction = 0.0
         step_robust_micro_loss_guard_scale = 0.0
         step_robust_micro_loss_guard_cap = 0.0
@@ -2888,6 +2912,10 @@ def main() -> None:
             0.0,
             control_float(phase_controls, "toric_geometry_loss_weight", toric_geometry_loss_weight),
         )
+        effective_koszul_persistence_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "koszul_persistence_loss_weight", koszul_persistence_loss_weight),
+        )
         effective_mtp_loss_weight = max(0.0, control_float(phase_controls, "mtp_loss_weight", mtp_loss_weight))
         effective_contrastive_loss_weight = max(
             0.0,
@@ -2956,6 +2984,7 @@ def main() -> None:
                 graphcg_loss = out.get("graphcg_loss", torch.zeros((), device=device))
                 analogy_lattice_loss = out.get("analogy_lattice_loss", torch.zeros((), device=device))
                 toric_geometry_loss = out.get("toric_geometry_loss", torch.zeros((), device=device))
+                koszul_persistence_loss = out.get("koszul_persistence_loss", torch.zeros((), device=device))
                 qat_loss = (
                     quantization_grid_loss(qat_named_params, bits=qat_bits)
                     if effective_qat_loss_weight > 0 and qat_named_params
@@ -2981,6 +3010,7 @@ def main() -> None:
                     + effective_graphcg_loss_weight * graphcg_loss
                     + effective_analogy_lattice_loss_weight * analogy_lattice_loss
                     + effective_toric_geometry_loss_weight * toric_geometry_loss
+                    + effective_koszul_persistence_loss_weight * koszul_persistence_loss
                     + effective_qat_loss_weight * qat_loss
                     + effective_contrastive_loss_weight * contrastive_loss
                     + effective_trajectory_flow_loss_weight * trajectory_flow_penalty
@@ -3187,6 +3217,35 @@ def main() -> None:
             step_toric_probe_quant_bits += float(
                 out.get("toric_probe_quant_bits", torch.zeros(())).detach().cpu()
             )
+            step_koszul_persistence_loss += float(koszul_persistence_loss.detach().cpu())
+            step_koszul_exactness_residual += float(
+                out.get("koszul_exactness_residual", torch.zeros(())).detach().cpu()
+            )
+            step_koszul_syzygy_residual += float(
+                out.get("koszul_syzygy_residual", torch.zeros(())).detach().cpu()
+            )
+            step_koszul_fitting_rank_residual += float(
+                out.get("koszul_fitting_rank_residual", torch.zeros(())).detach().cpu()
+            )
+            step_koszul_be_rank_residual += float(
+                out.get("koszul_buchsbaum_eisenbud_rank_residual", torch.zeros(())).detach().cpu()
+            )
+            step_koszul_be_multiplier_residual += float(
+                out.get("koszul_buchsbaum_eisenbud_multiplier_residual", torch.zeros(())).detach().cpu()
+            )
+            step_koszul_multigraded_betti_mass += float(
+                out.get("koszul_multigraded_betti_mass", torch.zeros(())).detach().cpu()
+            )
+            step_koszul_chart_entropy += float(
+                out.get("koszul_toric_affine_chart_entropy", torch.zeros(())).detach().cpu()
+            )
+            step_koszul_chart_coverage += float(
+                out.get("koszul_toric_affine_chart_coverage", torch.zeros(())).detach().cpu()
+            )
+            step_koszul_chart_transition_shift += float(
+                out.get("koszul_chart_transition_resolution_shift", torch.zeros(())).detach().cpu()
+            )
+            step_koszul_windows += float(out.get("koszul_windows", torch.zeros(())).detach().cpu())
             step_qat_loss += float(qat_loss.detach().cpu())
             step_qat_weight += float(effective_qat_loss_weight)
             step_contrastive_loss += float(contrastive_loss.detach().cpu())
@@ -3296,6 +3355,17 @@ def main() -> None:
         step_toric_leaf_residual /= grad_accum
         step_toric_probe_rank /= grad_accum
         step_toric_probe_quant_bits /= grad_accum
+        step_koszul_persistence_loss /= grad_accum
+        step_koszul_exactness_residual /= grad_accum
+        step_koszul_syzygy_residual /= grad_accum
+        step_koszul_fitting_rank_residual /= grad_accum
+        step_koszul_be_rank_residual /= grad_accum
+        step_koszul_be_multiplier_residual /= grad_accum
+        step_koszul_multigraded_betti_mass /= grad_accum
+        step_koszul_chart_entropy /= grad_accum
+        step_koszul_chart_coverage /= grad_accum
+        step_koszul_chart_transition_shift /= grad_accum
+        step_koszul_windows /= grad_accum
         step_robust_micro_loss_guard_fraction /= grad_accum
         step_robust_micro_loss_guard_scale /= grad_accum
         step_robust_micro_loss_guard_cap /= grad_accum
@@ -3479,6 +3549,18 @@ def main() -> None:
                 "train/toric_leaf_residual": step_toric_leaf_residual,
                 "train/toric_probe_rank": step_toric_probe_rank,
                 "train/toric_probe_quant_bits": step_toric_probe_quant_bits,
+                "train/koszul_persistence_loss": step_koszul_persistence_loss,
+                "train/koszul_persistence_loss_weight": float(effective_koszul_persistence_loss_weight),
+                "train/koszul_exactness_residual": step_koszul_exactness_residual,
+                "train/koszul_syzygy_residual": step_koszul_syzygy_residual,
+                "train/koszul_fitting_rank_residual": step_koszul_fitting_rank_residual,
+                "train/koszul_buchsbaum_eisenbud_rank_residual": step_koszul_be_rank_residual,
+                "train/koszul_buchsbaum_eisenbud_multiplier_residual": step_koszul_be_multiplier_residual,
+                "train/koszul_multigraded_betti_mass": step_koszul_multigraded_betti_mass,
+                "train/koszul_toric_affine_chart_entropy": step_koszul_chart_entropy,
+                "train/koszul_toric_affine_chart_coverage": step_koszul_chart_coverage,
+                "train/koszul_chart_transition_resolution_shift": step_koszul_chart_transition_shift,
+                "train/koszul_windows": step_koszul_windows,
                 "artifact/initial_bytes": report.bytes_total,
                 "artifact/estimated_tensor_bytes": estimated_tensor_bytes,
                 "artifact/deployment_parameters": report.deployment_parameters,

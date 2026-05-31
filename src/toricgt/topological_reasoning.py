@@ -583,6 +583,55 @@ def _f2_nullspace(matrix: np.ndarray) -> np.ndarray:
     return basis
 
 
+def _rank_fraction(matrix: np.ndarray) -> float:
+    if matrix.size == 0:
+        return 0.0
+    return float(_f2_rank(matrix) / max(1, min(matrix.shape)))
+
+
+def _be_complementary_minor_audit(d1: np.ndarray, d2: np.ndarray, *, max_samples: int = 32) -> dict[str, float]:
+    """Buchsbaum-Eisenbud-style complementary-minor audit over F2.
+
+    For a two-step free complex C2 -> C1 -> C0, exactness at C1 implies the
+    rank condition rank(d1)+rank(d2)=dim(C1).  Buchsbaum-Eisenbud multipliers
+    express compatibility among complementary maximal minors.  We use a
+    tractable sampled version: choose disjoint edge-index sets S and C of sizes
+    rank(d1) and rank(d2), test whether the corresponding maximal minors can be
+    nonzero, and count complementary mismatches.
+    """
+
+    edge_count = int(d1.shape[1])
+    rank_d1 = _f2_rank(d1)
+    rank_d2 = _f2_rank(d2)
+    rank_residual = abs(rank_d1 + rank_d2 - edge_count) / max(1, edge_count)
+    if edge_count == 0 or rank_d1 == 0 or rank_d2 == 0 or rank_d1 + rank_d2 > edge_count:
+        return {
+            "buchsbaum_eisenbud_rank_residual": float(rank_residual),
+            "buchsbaum_eisenbud_multiplier_residual": float(rank_residual),
+            "buchsbaum_eisenbud_multiplier_samples": 0.0,
+        }
+    samples = min(max_samples, max(1, edge_count))
+    rng = np.random.default_rng(1729 + 17 * edge_count + 31 * rank_d1 + 43 * rank_d2)
+    mismatches = 0
+    used = 0
+    for _ in range(samples):
+        perm = rng.permutation(edge_count)
+        s_cols = np.sort(perm[:rank_d1])
+        c_rows = np.sort(perm[rank_d1 : rank_d1 + rank_d2])
+        d1_minor_possible = _f2_rank(d1[:, s_cols]) == rank_d1
+        d2_minor_possible = _f2_rank(d2[c_rows, :]) == rank_d2
+        mismatches += int(bool(d1_minor_possible) != bool(d2_minor_possible))
+        used += 1
+    multiplier_residual = mismatches / max(1, used)
+    # Exactness/rank failure should not be hidden by accidental minor agreement.
+    multiplier_residual = max(float(multiplier_residual), float(rank_residual))
+    return {
+        "buchsbaum_eisenbud_rank_residual": float(rank_residual),
+        "buchsbaum_eisenbud_multiplier_residual": float(multiplier_residual),
+        "buchsbaum_eisenbud_multiplier_samples": float(used),
+    }
+
+
 def _build_flag_complex_f2(adjacency: np.ndarray, *, max_edges: int = 512, max_triangles: int = 1500) -> dict[str, Any]:
     """Build a small flag complex and F2 boundary matrices up to dimension 2."""
 
@@ -624,8 +673,19 @@ def _build_flag_complex_f2(adjacency: np.ndarray, *, max_edges: int = 512, max_t
                 d2[row, col] = 1
     rank_d1 = _f2_rank(d1)
     rank_d2 = _f2_rank(d2)
+    complex_product = (d1 @ d2) & 1 if d1.size and d2.size else np.zeros((d1.shape[0], d2.shape[1]), dtype=np.uint8)
+    variety_complex_residual = float(complex_product.sum() / max(1, complex_product.size))
     h0 = n - rank_d1
     h1 = max(0, len(edges) - rank_d1 - rank_d2)
+    be_audit = _be_complementary_minor_audit(d1, d2)
+    fitting_rank_residual = (
+        (min(d1.shape) - rank_d1) / max(1, min(d1.shape))
+        if min(d1.shape) > 0
+        else 0.0
+    )
+    if min(d2.shape) > 0:
+        fitting_rank_residual += (min(d2.shape) - rank_d2) / max(1, min(d2.shape))
+    fitting_rank_residual *= 0.5
     return {
         "n": n,
         "edges": edges,
@@ -634,8 +694,18 @@ def _build_flag_complex_f2(adjacency: np.ndarray, *, max_edges: int = 512, max_t
         "triangle_set": set(triangles),
         "d1": d1,
         "d2": d2,
+        "rank_d1": int(rank_d1),
+        "rank_d2": int(rank_d2),
         "h0": int(h0),
         "h1": int(h1),
+        "variety_complex_residual": float(variety_complex_residual),
+        "fitting_d1_rank_fraction": _rank_fraction(d1),
+        "fitting_d2_rank_fraction": _rank_fraction(d2),
+        "fitting_minor_rank_residual": float(fitting_rank_residual),
+        "buchsbaum_eisenbud_rank_residual": float(be_audit["buchsbaum_eisenbud_rank_residual"]),
+        "buchsbaum_eisenbud_multiplier_residual": float(be_audit["buchsbaum_eisenbud_multiplier_residual"]),
+        "buchsbaum_eisenbud_multiplier_samples": float(be_audit["buchsbaum_eisenbud_multiplier_samples"]),
+        "multigraded_betti_mass": float(h0 + h1),
         "truncated": bool(truncated),
     }
 
@@ -714,17 +784,37 @@ def _exact_persistence_morphism_audit(
 
     h0_dims: list[list[float]] = []
     h1_dims: list[list[float]] = []
+    variety_residuals: list[list[float]] = []
+    fitting_residuals: list[list[float]] = []
+    be_rank_residuals: list[list[float]] = []
+    be_multiplier_residuals: list[list[float]] = []
+    betti_masses: list[list[float]] = []
     truncated_count = 0
     for snapshot in snapshots:
         level_h0 = []
         level_h1 = []
+        level_variety = []
+        level_fitting = []
+        level_be_rank = []
+        level_be_multiplier = []
+        level_betti_mass = []
         for complex_obj in snapshot.get("exact_levels", []):
             level_h0.append(float(complex_obj["h0"]))
             level_h1.append(float(complex_obj["h1"]))
+            level_variety.append(float(complex_obj.get("variety_complex_residual", 0.0)))
+            level_fitting.append(float(complex_obj.get("fitting_minor_rank_residual", 0.0)))
+            level_be_rank.append(float(complex_obj.get("buchsbaum_eisenbud_rank_residual", 0.0)))
+            level_be_multiplier.append(float(complex_obj.get("buchsbaum_eisenbud_multiplier_residual", 0.0)))
+            level_betti_mass.append(float(complex_obj.get("multigraded_betti_mass", 0.0)))
             truncated_count += int(bool(complex_obj.get("truncated", False)))
         if level_h0:
             h0_dims.append(level_h0)
             h1_dims.append(level_h1)
+            variety_residuals.append(level_variety)
+            fitting_residuals.append(level_fitting)
+            be_rank_residuals.append(level_be_rank)
+            be_multiplier_residuals.append(level_be_multiplier)
+            betti_masses.append(level_betti_mass)
 
     h0_map_ranks: list[list[float]] = []
     h1_map_ranks: list[list[float]] = []
@@ -794,6 +884,11 @@ def _exact_persistence_morphism_audit(
     return {
         "exact_h0_dims_by_window_radius": np.asarray(h0_dims, dtype=float),
         "exact_h1_dims_by_window_radius": np.asarray(h1_dims, dtype=float),
+        "variety_complex_residual_by_window_radius": np.asarray(variety_residuals, dtype=float),
+        "fitting_minor_rank_residual_by_window_radius": np.asarray(fitting_residuals, dtype=float),
+        "buchsbaum_eisenbud_rank_residual_by_window_radius": np.asarray(be_rank_residuals, dtype=float),
+        "buchsbaum_eisenbud_multiplier_residual_by_window_radius": np.asarray(be_multiplier_residuals, dtype=float),
+        "multigraded_betti_mass_by_window_radius": np.asarray(betti_masses, dtype=float),
         "exact_h0_map_rank_by_transition_radius": np.asarray(h0_map_ranks, dtype=float),
         "exact_h1_map_rank_by_transition_radius": np.asarray(h1_map_ranks, dtype=float),
         "exact_morphism_radius_shift_by_transition": np.asarray(shifts, dtype=float),
@@ -802,6 +897,11 @@ def _exact_persistence_morphism_audit(
         "exact_directed_edge_validity_by_transition": np.asarray(directed_edge_validities, dtype=float),
         "exact_h0_dim_mean": mean_or_zero(h0_dims),
         "exact_h1_dim_mean": mean_or_zero(h1_dims),
+        "variety_complex_residual_mean": mean_or_zero(variety_residuals),
+        "fitting_minor_rank_residual_mean": mean_or_zero(fitting_residuals),
+        "buchsbaum_eisenbud_rank_residual_mean": mean_or_zero(be_rank_residuals),
+        "buchsbaum_eisenbud_multiplier_residual_mean": mean_or_zero(be_multiplier_residuals),
+        "multigraded_betti_mass_mean": mean_or_zero(betti_masses),
         "exact_h0_map_rank_mean": mean_or_zero(h0_map_ranks),
         "exact_h1_map_rank_mean": mean_or_zero(h1_map_ranks),
         "exact_morphism_radius_shift_mean": mean_or_zero(shifts),
@@ -853,6 +953,11 @@ def directed_step_filtration_stats_np(
             "exact_h1_dim_mean": 0.0,
             "exact_h0_map_rank_mean": 0.0,
             "exact_h1_map_rank_mean": 0.0,
+            "variety_complex_residual_mean": 0.0,
+            "fitting_minor_rank_residual_mean": 0.0,
+            "buchsbaum_eisenbud_rank_residual_mean": 0.0,
+            "buchsbaum_eisenbud_multiplier_residual_mean": 0.0,
+            "multigraded_betti_mass_mean": 0.0,
             "exact_morphism_radius_shift_mean": 0.0,
             "exact_morphism_edge_validity_mean": 0.0,
             "exact_morphism_triangle_validity_mean": 0.0,
@@ -1141,6 +1246,13 @@ def directed_step_filtration_stats_np(
         "directed_map_loss": np.asarray(transition_directed_map_heat, dtype=float),
         "exact_h0_dims": result["exact_h0_dims_by_window_radius"],
         "exact_h1_dims": result["exact_h1_dims_by_window_radius"],
+        "variety_complex_residual": result["variety_complex_residual_by_window_radius"],
+        "fitting_minor_rank_residual": result["fitting_minor_rank_residual_by_window_radius"],
+        "buchsbaum_eisenbud_rank_residual": result["buchsbaum_eisenbud_rank_residual_by_window_radius"],
+        "buchsbaum_eisenbud_multiplier_residual": result[
+            "buchsbaum_eisenbud_multiplier_residual_by_window_radius"
+        ],
+        "multigraded_betti_mass": result["multigraded_betti_mass_by_window_radius"],
         "exact_h0_map_rank": result["exact_h0_map_rank_by_transition_radius"],
         "exact_h1_map_rank": result["exact_h1_map_rank_by_transition_radius"],
         "exact_radius_shift": result["exact_morphism_radius_shift_by_transition"],

@@ -337,6 +337,19 @@ The next ToricGT iteration uses toric geometry as a training signal while keepin
 \end{equation}
 The current \texttt{oai} implementation instantiates these terms as a 6-bit fake-quantized probe that is excluded from artifact export.  Its metrics report active-face cross entropy, top-two margins, moment-map residuals, bend magnitude, toric binomial residual, affine-wall distance, Coxeter reflection loss, braid loss, and phase-leaf residual.  The analysis suite renders a toric-shadow audit in which branch fan coverage, margins, bends, and leaf residuals can be compared directly against BPB and graph-of-thought quality.
 
+\paragraph{Affine toric charts and Koszul persistence.}
+The next diagnostic step is to turn each active fan cell into a small affine scheme.  If $\sigma\subset N_\R$ is a rational cone selected by a tropical active face, then the local toric chart is
+\begin{equation}
+  U_\sigma=\operatorname{Spec} k[\sigma^\vee\cap M],
+  \qquad R_\sigma=k[\sigma^\vee\cap M].
+\end{equation}
+Reasoning trajectories filtered by time, radius, density, margin, and phase are then finite multigraded modules over $k[x_1,\ldots,x_n]$, or over the chart ring $R_\sigma$ when toric structure is active.  This matches the commutative-algebra view of multiparameter persistence as finitely generated graded modules \cite{schreiber2022multiparameter}.  Given local parameters $a_1,\ldots,a_r$, attach the Koszul complex
+\begin{equation}
+  K_q(a;M)=M\otimes \bigwedge^q k^r,\qquad
+  H_q(K(a;M))\cong \operatorname{Tor}^{R}_q(R/(a),M).
+\end{equation}
+Nonzero higher homology, large Fitting-minor residuals, failed varieties-of-complexes equations $d_id_{i+1}=0$, unstable multigraded Betti mass, or Buchsbaum--Eisenbud complementary-minor multiplier mismatches indicate that the model's claimed toric/persistence coordinates are not coherent local parameters for the observed reasoning module.  These quantities are audit-first: they must pass exact small-window checks and ablations before becoming training losses.
+
 \paragraph{Affine Coxeter and braid structure.}
 The toric route to affine Coxeter structure is through lattices and chambers.  A torus $T$ has character and cocharacter lattices $M=\operatorname{Hom}(T,\mathbb G_m)$ and $N=\operatorname{Hom}(\mathbb G_m,T)$.  Once a root datum is attached, as for a reductive group with maximal torus $T$, roots $\alpha\in M$ cut $N_\R$ by hyperplanes $\alpha(x)=0$; the reflections in these walls generate the Weyl group, and the translated walls $\alpha(x)=k$ generate the affine Weyl/Coxeter group $W_{\mathrm{aff}}=Q^\vee\rtimes W$ \cite{humphreys1990reflection}.  Thus toric fans and Newton normal fans give the polyhedral side of the same chamber geometry that appears in affine Coxeter systems.  Artin braid actions then arise as ordered wall-crossing or monodromy actions around the complexified hyperplane complement.  In the next iteration, braid/Coxeter graph tasks should therefore be tied to toric fan tasks: actions $\sigma_i^{\pm1}$ and affine reflections $s_{\alpha,k}$ become controlled graph-of-thought edits, while tropical active-face margins determine whether a wall crossing is stable or ambiguous.
 
@@ -351,7 +364,7 @@ Finally, make inference-time scaling geometric: continuous GFlowNets can move in
 
 \section{Conclusion}
 
-ToricGT is a finite, auditable model family.  Its exact claims are graph-token equivariance, ring-schedule exactness, max-plus semiring simulation on bounded domains, projective toric phase consistency, random-order score validity for byte modeling, and perturbation bounds for compressed caches.  Its practical claim is that reasoning models should expose the geometry of their decisions.  Tropical active faces, Newton polytopes, toric bends, artifact bytes, BPB, expert utilization, and GFlowNet reward landscapes make small-model reasoning easier to test, compress, and improve.
+ToricGT is a finite, auditable model family.  Its exact claims are graph-token equivariance, ring-schedule exactness, max-plus semiring simulation on bounded domains, projective toric phase consistency, random-order score validity for byte modeling, and perturbation bounds for compressed caches.  Its practical claim is that reasoning models should expose the geometry of their decisions.  Tropical active faces, Newton polytopes, toric bends, Koszul residuals, artifact bytes, BPB, expert utilization, and GFlowNet reward landscapes make small-model reasoning easier to test, compress, and improve.  The guardrail for skeptical readers is simple: no advanced geometric diagnostic changes training unless it has a logged metric, an ablation, and a plot.
 
 \begin{thebibliography}{99}
 
@@ -434,6 +447,11 @@ Afra Zomorodian and Gunnar Carlsson.
 David Cohen-Steiner, Herbert Edelsbrunner, and John Harer.
 \newblock Stability of persistence diagrams.
 \newblock \emph{Discrete \& Computational Geometry}, 37:103--120, 2007.
+
+\bibitem{schreiber2022multiparameter}
+Amelie Schreiber.
+\newblock Multiparameter persistent homology: Generic structures and quantum computing.
+\newblock arXiv:2210.11433, 2022.
 
 \bibitem{mohamed2016dec}
 Mamdouh S. Mohamed, Anil N. Hirani, and Ravi Samtaney.

@@ -299,13 +299,19 @@ Training logs `train/toric_*` metrics to W&B.  The geometry suite also computes
 empirical toric shadows independent of probe weights, so old checkpoints can
 still be audited.  The main new plot is `*_toric_shadow_audit.png`, which shows
 active fan cells along the reasoning path, margins, bends, branch fan coverage,
-and phase-leaf residuals.
+and phase-leaf residuals. The affine/Koszul extension adds
+`*_commutative_algebra_audit.png`: exact small-window F2 checks for
+varieties-of-complexes equations `d1 d2 = 0`, Fitting/minor rank strata,
+Buchsbaum-Eisenbud rank residuals, complementary-minor multiplier residuals,
+and multigraded Betti-mass proxies.
 
 Current operational guardrail: training should resume only after the full
 analysis suite finishes and all generated plot classes have been inspected.
-The requested "there be dragons" responding-onlooker ablation is an absence
-check in this codebase; no matching observer/prompt path exists outside ignored
-output/checkpoint/data directories.
+The skeptic guardrail is metric-first: every advanced geometric object needs a
+reported scalar, an ablation, and a generated plot before it can affect
+optimization. The requested "there be dragons" responding-onlooker ablation is
+an absence check in executable paths; no matching observer/prompt path exists
+outside ignored output/checkpoint/data directories.
 
 The paper update also ties the same toric coordinates to future affine
 Coxeter and braid tasks. A toric lattice becomes a Weyl-chamber coordinate
