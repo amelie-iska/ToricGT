@@ -549,7 +549,10 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
 This replay uses the same dense ToricGT Parameter-Golf architecture, but starts
 the valmix35 BPB-recovery controls at step `1000`: medium-row mix `0.35`,
 hard/complex graph rows off, GFlowNet/topology/toric/QAT losses diagnostic-only,
-contrastive weight `1e-4`, LR multiplier `0.24`, and clip norm `0.50`.
+contrastive weight `1e-4`, LR multiplier `0.24`, and clip norm `0.50`. The
+step-1500 analysis gate then switches to a curvature-damped phase through step
+`2000`: medium mix `0.18`, LR multiplier `0.18`, contrastive weight `5e-5`,
+and the same diagnostic-only auxiliary geometry policy.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a

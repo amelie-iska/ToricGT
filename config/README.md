@@ -17,7 +17,9 @@ step-1000 recovery replay. It resumes from
 the data stream from step 1000, and places the validation-mixed BPB recovery
 phase first in the phase list so the `medium_mix_ratio: 0.35`, damped
 `lr_multiplier: 0.24`, and likelihood-first auxiliary-loss shutoff are active
-immediately.
+immediately. After the step-1500 gate it switches to the curvature-damped
+`bpb_curvature_damped_1500_2000` phase with `medium_mix_ratio: 0.18` and
+`lr_multiplier: 0.18`.
 
 | Component | Default |
 | --- | --- |

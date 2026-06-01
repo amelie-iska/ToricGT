@@ -220,10 +220,10 @@ training:
   shock_guard_enabled: true
   shock_guard_start_step: 1000
   shock_guard_end_step: 40750
-  shock_guard_loss_ratio: 1.03
-  shock_guard_loss_delta: 0.07
-  shock_guard_grad_norm: 0.45
-  shock_guard_update_scale: 0.08
+  shock_guard_loss_ratio: 1.025
+  shock_guard_loss_delta: 0.06
+  shock_guard_grad_norm: 0.42
+  shock_guard_update_scale: 0.06
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
@@ -232,9 +232,9 @@ training:
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 1000
   robust_micro_loss_guard_end_step: 40750
-  robust_micro_loss_guard_ratio: 1.12
-  robust_micro_loss_guard_delta: 0.20
-  robust_micro_loss_guard_min_scale: 0.50
+  robust_micro_loss_guard_ratio: 1.10
+  robust_micro_loss_guard_delta: 0.16
+  robust_micro_loss_guard_min_scale: 0.45
   precision: bf16
   device: cuda
   seed: 17
@@ -323,9 +323,9 @@ hessian:
 phase_curriculum:
   enabled: true
   phases:
-    - name: bpb_valmix35_recovery_01000_40750
+    - name: bpb_valmix35_recovery_01000_1500
       start_step: 1000
-      end_step: 40750
+      end_step: 1500
       # Step-1000 replay of the validation-mixed recovery controls.  Because
       # phase selection uses the first active phase, this block must remain
       # above the historical early curriculum phases.
@@ -361,16 +361,18 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_sprint_1500_2000
+    - name: bpb_curvature_damped_1500_2000
       start_step: 1500
       end_step: 2000
-      # Step-2000 shock-guard review: the local BPB floor still broke at the
-      # deterministic easy-stream impulse around step 1710.  Keep this retry
-      # gentler and leave auxiliary geometry terms diagnostic-only in capture.
-      lr_multiplier: 0.58
+      # Step-1500 review: train BPB fell hard, but the local quadratic fit had
+      # positive curvature and the only deterministic validation point was
+      # weak.  Resume from 1500 with a lower update scale and less medium mix;
+      # keep graph/GFlowNet/topology/toric losses diagnostic-only until the
+      # next validation gate confirms likelihood descent.
+      lr_multiplier: 0.18
       grad_clip_norm: 0.45
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.0
+      medium_mix_ratio: 0.18
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
@@ -379,7 +381,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.00025
+      contrastive_loss_weight: 0.00005
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

@@ -5650,3 +5650,188 @@ Acceptance criteria:
 5. mean branch BPB below `4.745`;
 6. inclusion violation `0.0`, HDBSCAN stability above `0.90`, Slepian leakage
    `0.0`.
+
+## Step 1500 Review: Early Step-1000 Valmix Replay
+
+Date: 2026-06-01 UTC.
+
+Run:
+
+```text
+amelie-iska-math/toricgt-parameter-golf/oai01000valmix3520260601T190357Z
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt
+```
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-valmix35-01000-20260601T190357Z/step-00001500
+```
+
+### Metric Categories
+
+The automatic category pass reported:
+
+| category | count | interpretation |
+|---|---:|---|
+| as desired | 184 | primary train likelihood and many topology proxies move in the right direction |
+| as desired but too weak/slow | 86 | useful geometry/search structure exists, but does not yet dominate BPB |
+| not as desired | 122 | validation BPB, toric active-face margin, binomial/leaf residuals, and some complexity symmetry terms remain weak |
+
+### As Desired
+
+| metric | value / behavior | explanation |
+|---|---:|---|
+| checkpoint train BPB | `5.2174 -> 3.5454` from step 1000 to 1500 | likelihood descent is real, not only logging noise |
+| W&B train BPB median | `4.5279 -> 3.6060`, `-20.36%` | recovery controls sharply improve byte likelihood |
+| W&B train loss median | `3.1385 -> 2.4995`, `-20.36%` | loss and BPB agree, so this is not a unit conversion artifact |
+| GFlowNet diagnostic loss | `4.0121 -> 2.7193`, `-32.22%` | policy head remains compatible even with zero GFlowNet training weight |
+| topology inclusion residual | `0.0` | nested complexes preserve filtration inclusions |
+| exact directed-edge validity | `0.9364` | directed topology is mostly coherent |
+| HDBSCAN stability | `0.8896` | relation neighborhoods are stable enough for diagnostics |
+| Slepian concentration / leakage | `1.0 / 0.0` | toric spectral windowing is numerically clean |
+
+Mathematically, the first 250 steps approximate a steep descent in
+\(\mathbb E_{P_\alpha}[-\log p_\theta(x)]\) for the mixed stream
+\(P_\alpha=(1-\alpha)P_{\rm easy}+\alpha P_{\rm medium}\) with
+\(\alpha=0.35\).  The fact that BPB and NLL move together shows the descent is
+in the actual prequential likelihood objective, not only in an auxiliary
+regularizer.
+
+### As Desired But Too Weak Or Slow
+
+| metric | value / behavior | issue |
+|---|---:|---|
+| best branch BPB | `4.0452` | search finds branches better than mean, but not enough for promotion |
+| mean branch BPB | `4.9275` | still far above target and close to validation weakness |
+| best answer BPB | `3.5865` | local answer spans can improve, but full-context byte modeling is weak |
+| MST efficiency | `0.7065` | hidden trajectories are organized, but not yet predictive enough |
+| path smoothness | `0.0552` | smooth trajectories exist; low energy does not yet imply low BPB |
+| GFlowNet entropy | `2.767 -> 2.758` | high but drifting downward; acceptable while GFlowNet weight is zero |
+| toric memory entropy | `0.284 -> 0.288` | slightly healthier, but still low |
+| simplex/tetrahedron plots | clustered in interior | reasoning geometry is alive but not landing on low-BPB boundary |
+
+The simplex plots show a geometric gap: increasing reasoning budget moves
+points outward in the reasoning/K/BPB triangle, but the low-BPB coordinate is
+not the dominant attractor.  The GFlowNet branches therefore provide
+test-time-scaling diversity, not yet a reliable likelihood improvement.
+
+### Not As Desired
+
+| metric | value / behavior | issue |
+|---|---:|---|
+| validation BPB | `5.3285` at step 1250 | worse than the inherited checkpoint gate `4.6961`; do not promote |
+| score-first BPB | `5.3094` | score-first bias adaptation does not repair validation weakness |
+| complexity validation BPB | `5.0305` | complexity probe agrees validation is weak |
+| train BPB quadratic terminal slope | positive in all windows | descent is flattening and starting to bend upward |
+| train BPB second derivative | positive over 1000-1500 | local curvature predicts another floor-bounce if unchanged |
+| toric active-face margin | `-1.7017` geometry mean, `-1.3691` train last | tropical face confidence remains inverted |
+| toric binomial residual | `1.7119` geometry mean; train binomial loss rose | toric relation probes are not ready to train against |
+| toric leaf residual | `0.9988` | noncommutative phase leaf consistency remains poor |
+| information symmetry gap | train LZMA gap rises in median | forward compression is improving faster than reverse explanation |
+
+Finite-difference summary:
+
+| metric/window | terminal slope per 1k | second derivative sign |
+|---|---:|---|
+| train BPB, 1000-1250 | `+5.07` | positive |
+| train BPB, 1250-1500 | `+0.94` | positive |
+| loss EMA, 1250-1500 | `-0.41` | slightly negative |
+| complexity train BPB, 1250-1500 | `-2.50` | negative |
+
+The raw BPB series fell sharply but then entered a curved basin.  The EMA and
+complexity probe are less pessimistic, so this is not a hard failure; it is a
+step-size/mix problem.  In Hessian language, we do not need a new architecture:
+we need a smaller step in the locally sharp mixed-data direction, with enough
+medium data to keep the validation derivative visible.
+
+### Plot Review
+
+Reviewed:
+
+```text
+plots_review_contact_sheet.png
+metrics/core_metric_timeseries.png
+metrics/recent_metric_slopes.png
+simplex/reasoning_k_bpb_triangle.png
+simplex/reasoning_k_bpb_*_tetrahedron.png
+geometry/triangles/*.png
+geometry/tetrahedra/*.png
+geometry/trajectories/*trajectory_3d.png
+geometry/trajectories/*toric_phase_winding_collection.png
+geometry/trajectories/*energy_landscape.png
+geometry/trajectories/*phase_energy.png
+geometry/topology/*step_radius_hierarchy.png
+geometry/topology/*exact_persistence_morphisms.png
+geometry/topology/*noncommutative_heatmaps.png
+geometry/topology/*toric_shadow_audit.png
+```
+
+Visual conclusions:
+
+1. Core metric curves show a strong initial drop, a bounce near the validation
+   point, then a shallow plateau.
+2. The reasoning/K/BPB simplex places some branches near useful reasoning and
+   compression directions, but low-BPB concentration is absent.
+3. The 3D graph-of-thought trajectories branch coherently; solution-span
+   markers are reachable, but terminal likelihood basins remain broad.
+4. The toric phase winding collection now renders both the flat \(T^2\) winding
+   and the embedded torus with local simplicial edges; the plot is functioning.
+5. Ramachandran-style phase plots show structured pseudo-periodic bands rather
+   than collapse.
+6. Nested simplex hierarchy, exact persistence morphism, and noncommutative
+   heatmap plots are coherent; topology is diagnostically useful.
+7. Toric shadow plots show many occupied fan cells but thin margins and weak
+   active-face stability.
+
+### Decision
+
+Do not continue the exact 1000-1500 controls.  Resume from the analyzed
+step-1500 checkpoint with only scalar changes:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt
+```
+
+Implemented changes in:
+
+```text
+config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml
+```
+
+| control | 1000-1500 | 1500-2000 |
+|---|---:|---:|
+| phase name | `bpb_valmix35_recovery_01000_1500` | `bpb_curvature_damped_1500_2000` |
+| LR multiplier | `0.24` | `0.18` |
+| medium mix | `0.35` | `0.18` |
+| hard mix | `0.0` | `0.0` |
+| complex mix | `0.0` | `0.0` |
+| GFlowNet/topology/toric/QAT loss weights | `0.0` | `0.0` |
+| contrastive weight | `1e-4` | `5e-5` |
+| shock guard ratio/delta | `1.03 / 0.07` | `1.025 / 0.06` |
+| shock guard update scale | `0.08` | `0.06` |
+| robust micro guard ratio/delta | `1.12 / 0.20` | `1.10 / 0.16` |
+| robust micro guard min scale | `0.50` | `0.45` |
+
+This is the smallest high-impact intervention consistent with the evidence:
+reduce curvature and validation mismatch without touching the dense contest
+model, random-order graph decoding, tropical/hybrid attention, toric memory,
+GFlowNet policy, Kolmogorov diagnostics, persistence audits, or export path.
+
+Next review target: `2000`.
+
+Acceptance criteria:
+
+1. `val/bpb < 5.3285`, preferably below `5.0`;
+2. `complexity/val/bpb < 5.0305`;
+3. train BPB terminal quadratic slope non-positive or materially smaller;
+4. no shock-guard cascade after step 1500;
+5. mean branch BPB below `4.90` and best branch BPB below `4.04`;
+6. HDBSCAN stability above `0.88`, inclusion violation `0.0`, and Slepian
+   leakage `0.0`;
+7. toric active-face margin no worse than this checkpoint.
