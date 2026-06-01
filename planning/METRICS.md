@@ -4506,3 +4506,180 @@ Acceptance criteria:
 6. best branch BPB beats `4.0204` or mean branch BPB moves below `4.7432`;
 7. inclusion violation remains `0.0`, HDBSCAN stability remains above `0.90`,
    and Slepian leakage remains `0.0`.
+
+## Step 39,500 Retry Review
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-retry-39000-20260601T082148Z/step-00039500
+```
+
+This review is not a simple rollback case.  The raw checkpoint train BPB is
+bad, but deterministic validation improved.  Therefore the 39,500 checkpoint is
+usable as a continuation point if the next 500-step window remains
+likelihood-only and removes row-difficulty confounds.
+
+### Metric Categories
+
+| group | count | read |
+|---|---:|---|
+| desired | `323` | topology, complexity-train, GFlowNet-loss, and several validation diagnostics remain coherent |
+| desired but too weak or slow | `111` | validation improves only slightly and graph-of-thought branch BPB remains weak |
+| not desired | `182` | raw train BPB/loss and toric memory entropy are not acceptable |
+
+### Checkpoint Finite Differences
+
+| step | train BPB | train loss | first difference |
+|---:|---:|---:|---:|
+| 39,000 | `3.592368` | `2.490040` | n/a |
+| 39,250 | `4.156423` | `2.881013` | `+0.564055` |
+| 39,500 | `5.000765` | `3.466266` | `+0.844342` |
+
+The training log shows the same pattern at microbatch scale:
+
+| step band | median raw BPB | read |
+|---:|---:|---|
+| 39,000--39,099 | `3.5780` | healthy |
+| 39,100--39,199 | `4.1915` | hard shelf begins |
+| 39,200--39,299 | `4.1595` | still hard |
+| 39,300--39,399 | `4.3265` | worsening |
+| 39,400--39,499 | `4.8245` | severe raw-data shelf |
+
+The derivative and second-derivative signal says not to promote raw train BPB.
+However, raw train BPB here is confounded by row difficulty: validation moved
+in the right direction.
+
+### Desired Behavior
+
+| metric | value / trend | read |
+|---|---:|---|
+| `val/bpb` | `4.935401 -> 4.933111` from 39,250 to 39,500 | desired |
+| `complexity/val/bpb` | `4.826620 -> 4.822091` | desired |
+| `complexity/val/prediction_target_ncd_lzma_mean` | last `0.917515` in W&B summary window | desired |
+| `complexity/train/bpb` | median `4.165032 -> 3.481313` | desired |
+| `train/gflownet_loss` | median `3.494279 -> 2.415694` | desired as diagnostic |
+| HDBSCAN stability | `0.9365` | desired |
+| inclusion violation | `0.0` | desired |
+| Slepian leakage | `0.0` | desired |
+| exact persistence morphisms | `20.0` | desired |
+
+The validation movement is the reason to continue from 39,500 instead of
+rolling back to 39,000 again.  The controller saw two consecutive validation
+improvements, and complexity validation improved with it.  This is the correct
+promotion signal for the Parameter-Golf objective, whereas the raw train BPB is
+the loss of the current row group.
+
+### Desired But Too Weak Or Slow
+
+| diagnostic | value | read |
+|---|---:|---|
+| mean branch BPB | `4.745292` | weak |
+| best branch BPB | `4.021306` | weak; not better than 39k |
+| mean answer BPB | `4.624957` | small improvement |
+| best answer BPB | `3.611019` | useful but not enough |
+| MST efficiency | `0.502619` | modest |
+| path smoothness | `0.086438` | modest |
+| topology analogical map loss | `0.094604` | modest |
+| directed map loss | `0.145575` | modest |
+
+The simplex/tetrahedron plots show live branch diversity and valid topology,
+but not enough movement toward the low-BPB vertices.  Geometry is healthy as an
+audit, not yet a strong inference-time scaling gain.
+
+### Undesirable
+
+| metric | behavior |
+|---|---|
+| `train/bpb` | median `3.857518 -> 4.128221`, recent slope `+0.658454 / 1k` |
+| `train/loss` | median `2.673828 -> 2.861465`, recent slope `+0.456406 / 1k` |
+| `train/loss_ema` | median `2.673666 -> 2.843844` |
+| `train/grad_norm` | still categorized not desired |
+| `train/toric_memory_entropy` | median `0.354629 -> 0.296443` |
+| toric active-face margin | `-1.0252` |
+| toric binomial residual | `0.5086`, worse than the prior retry |
+| toric shadow min margin | `1.78e-4` |
+
+Mathematically, the raw train curve is a mixture distribution effect.  Let
+\(L_t=\mathbb{E}_{x\sim P_t}[-\log p_\theta(x)]\).  Across 39.1k--39.5k,
+the sampling distribution \(P_t\) is changing toward higher-entropy medium
+rows, while \(\theta\) still improves on the fixed validation distribution.
+The observed increase in \(L_t\) is therefore not pure optimizer deterioration.
+It is a row-group covariate shift inside the recovery window.
+
+This explains the apparent contradiction:
+
+\[
+  \Delta L_{\mathrm{train}}>0,\qquad
+  \Delta L_{\mathrm{val}}<0.
+\]
+
+The correct intervention is not an architecture change and not a rollback to
+an earlier model.  It is to hold the recovery distribution fixed for one more
+gate so that the next derivative estimates model progress rather than
+curriculum difficulty.
+
+### Plot Review
+
+Reviewed the generated summaries and a six-sheet contact review covering all
+70 PNG artifacts, including:
+
+```text
+metrics/core_metric_timeseries.png
+metrics/recent_metric_slopes.png
+metrics/selected_metric_correlations.png
+simplex/reasoning_k_bpb_triangle.png
+simplex/reasoning_k_bpb_mst_tetrahedron.png
+geometry/triangles/*.png
+geometry/tetrahedra/*.png
+geometry/trajectories/*trajectory_3d.png
+geometry/trajectories/*phase_energy.png
+geometry/trajectories/*energy_landscape.png
+geometry/trajectories/*toric_phase_winding_collection.png
+geometry/topology/*exact_persistence_morphisms.png
+geometry/topology/*noncommutative_heatmaps.png
+geometry/topology/*toric_shadow_audit.png
+geometry/topology/*toric_slepian_audit.png
+```
+
+The energy landscapes remain rugged, with branch trajectories contacting
+solution spans but not settling into one low-BPB basin.  The toric phase
+winding plots are structurally correct: flat irrational winding, embedded torus
+projection, local simplicial edges, and cocycle traces are present.  The
+persistence-module morphism plots remain nested and mostly valid.  None of
+these plots justify an architectural change during the BPB recovery window.
+
+### Decision
+
+Continue from
+`checkpoints/parameter_golf_oai_dense/random_order_step_00039500.pt`, not from
+39,000.  The decisive reason is validation: `val/bpb` and `complexity/val/bpb`
+both improved at 39,500 despite bad raw train BPB.
+
+Implemented the smallest scalar correction:
+
+| control | old | new | reason |
+|---|---:|---:|---|
+| recovery phase end | `39750` | `40250` | keep the next gate likelihood-only |
+| shock guard end | `39750` | `40250` | preserve bounded updates |
+| robust micro guard end | `39750` | `40250` | preserve bounded updates |
+| recovery `medium_mix_ratio` | `0.10` | `0.0` | remove row-difficulty confound |
+| recovery `hard_mix_ratio` | `0.0` | `0.0` | unchanged |
+| recovery `complex_mix_ratio` | `0.0` | `0.0` | unchanged |
+
+Architecture stays fixed.  Random-order autoregressive graph decoding,
+tropical ring/hybrid attention, toric memory, dense contest weights,
+embedding-space GFlowNet graph-of-thought diagnostics, conditional Kolmogorov
+monitors, and persistence/Koszul diagnostics all remain active.
+
+Next review target: `40000`.
+
+Acceptance criteria:
+
+1. `val/bpb < 4.933111`;
+2. `complexity/val/bpb < 4.822091`;
+3. raw train BPB median for 39.5k--40k below `4.0` after medium mix is removed;
+4. no checkpoint BPB above `4.5`;
+5. best branch BPB below `4.021306` or mean answer BPB below `4.624957`;
+6. inclusion violation remains `0.0`, HDBSCAN stability above `0.90`,
+   Slepian leakage `0.0`.

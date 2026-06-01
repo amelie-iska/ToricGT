@@ -222,7 +222,7 @@ training:
   # not skip examples or change the objective.
   shock_guard_enabled: true
   shock_guard_start_step: 37500
-  shock_guard_end_step: 39750
+  shock_guard_end_step: 40250
   shock_guard_loss_ratio: 1.03
   shock_guard_loss_delta: 0.07
   shock_guard_grad_norm: 0.45
@@ -234,7 +234,7 @@ training:
   # dominating the optimizer step.
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 37500
-  robust_micro_loss_guard_end_step: 39750
+  robust_micro_loss_guard_end_step: 40250
   robust_micro_loss_guard_ratio: 1.12
   robust_micro_loss_guard_delta: 0.20
   robust_micro_loss_guard_min_scale: 0.50
@@ -437,9 +437,9 @@ phase_curriculum:
       mtp_loss_weight: 0.02
       toric_entropy_loss_weight: 0.0005
       qat_loss_weight: 0.0
-    - name: bpb_recovery_37500_39750
+    - name: bpb_recovery_37500_40250
       start_step: 37500
-      end_step: 39750
+      end_step: 40250
       # Step-37750 handoff review: checkpoint finite differences improved from
       # 37250->37500, then reversed from 37500->37750.  Restart at 37500 with a
       # narrower likelihood-first window, rotate the stream, and keep the
@@ -448,9 +448,15 @@ phase_curriculum:
       # validation/complexity BPB and branch BPB drifted upward.  Extend the
       # likelihood-first window and lower only the scalar LR multiplier to
       # damp the observed 250-step floor-bounce without changing architecture.
+      # Step-39500 retry review: raw train BPB rose because medium/harder row
+      # groups entered the stream, but deterministic validation BPB and
+      # complexity validation BPB improved.  Continue from 39500, extend the
+      # likelihood-only window, and set medium/hard/complex mix to zero so the
+      # next gate measures byte-distribution improvement instead of curriculum
+      # row difficulty.
       lr_multiplier: 0.88
       grad_clip_norm: 0.50
-      medium_mix_ratio: 0.10
+      medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
