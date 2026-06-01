@@ -1,5 +1,174 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-01 Automated Review: Step 40,000 Medium-Mix 8% Retry
+
+Training was paused by the watcher at a fresh step-`40000` checkpoint from
+`toricgt_oai_bpb_valmix8_39500_20260601T143436Z`.  The training tmux was no
+longer active and the GPU was idle at review time, so this review makes a new
+restart decision from the checkpoint and analysis evidence.
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00040000.pt
+```
+
+Analysis outputs:
+
+```text
+outputs/post_resume_analysis/oai-bpb-valmix8-39500-20260601T143436Z/step-00040000/
+```
+
+### Metric Categorization
+
+Automatic categories were unchanged at the aggregate level:
+
+| category | count |
+|---|---:|
+| as desired | `304` |
+| as desired but too weak or slow | `114` |
+| not as desired | `201` |
+
+Fresh local train BPB stayed in the acceptable recovery band:
+
+| step band | median BPB | mean BPB | max BPB |
+|---:|---:|---:|---:|
+| `39500` | `3.6330` | `3.6699` | `4.301` |
+| `39550` | `3.6570` | `3.7092` | `4.313` |
+| `39600` | `3.6195` | `3.6590` | `4.320` |
+| `39650` | `3.6285` | `3.6671` | `4.294` |
+| `39700` | `3.6465` | `3.7205` | `4.340` |
+| `39750` | `3.6345` | `3.6587` | `4.292` |
+| `39800` | `3.5590` | `3.6193` | `4.354` |
+| `39850` | `3.6855` | `3.7288` | `4.382` |
+| `39900` | `3.6205` | `3.6582` | `4.393` |
+| `39950` | `3.5830` | `3.6747` | `4.478` |
+
+Validation:
+
+| step | primary val BPB | complexity val BPB | controller train BPB EMA |
+|---:|---:|---:|---:|
+| `39500` | `4.933094` | previous gate | `3.663048` before restart |
+| `39750` | `4.937515` | `4.824397` | n/a |
+| `40000` | `4.939186` | `4.825921` | `3.644690` |
+
+The medium-mix sweep is monotone in the useful direction but too weak:
+
+| retry | controls | primary val BPB | complexity val BPB |
+|---|---|---:|---:|
+| easy-only | `lr=0.88`, medium `0.00` | `4.946108` | `4.832355` |
+| 3% medium | `lr=0.52`, medium `0.03` | `4.941543` | `4.827858` |
+| 8% medium | `lr=0.36`, medium `0.08` | `4.939186` | `4.825921` |
+
+The derivative is still positive relative to the 39.5k gate, but the sequence
+shows the direction correction is real.
+
+### Desired Behavior
+
+The train-stream BPB shelf is under control, and topology/toric diagnostics
+remain valid:
+
+| diagnostic | value |
+|---|---:|
+| checkpoint train BPB | `3.626682` |
+| checkpoint train loss | `2.513824` |
+| exact persistence morphisms | `20.0` |
+| topology boundary residual | `0.0` |
+| topology inclusion violation | `0.0` |
+| exact edge validity | `0.979229` |
+| directed edge validity | `0.949034` |
+| HDBSCAN stability | `0.938070` |
+| directed cycle flux | `~4.65e-18` |
+| Slepian concentration | `1.0` |
+| Slepian leakage | `0.0` |
+| occupied fan cells | `12.25` |
+
+Contact sheets were generated and reviewed under:
+
+```text
+outputs/post_resume_analysis/oai-bpb-valmix8-39500-20260601T143436Z/step-00040000/plot_contact_sheets/
+```
+
+The plot review shows coherent noncommutative heatmaps, radius filtrations,
+exact persistence morphisms, toric winding, Slepian/PSWF phase plots,
+Ramachandran-style phase clouds, 3D GoT branches, and energy landscapes.
+Nothing points to a failed geometry module.
+
+### Desired But Too Weak Or Slow
+
+| diagnostic | value | trend |
+|---|---:|---|
+| mean branch BPB | `4.750429` | slightly better than 3% retry |
+| best branch BPB | `4.029984` | still weak |
+| mean answer BPB | `4.630563` | slight improvement |
+| best answer BPB | `3.615508` | not a new best |
+| MST efficiency | `0.498475` | flat |
+| path smoothness | `0.086943` | better than 3% retry |
+| active-face entropy | `0.838499` | active |
+| active-face margin | `-0.972900` | still negative |
+| toric binomial residual | `0.506851` | undesirable |
+| toric leaf residual | `0.998823` | undesirable |
+
+The simplex plots still place most branch points away from low-BPB vertices.
+The model is preserving exploration geometry but has not turned it into lower
+deterministic validation BPB.
+
+### Mathematical Explanation
+
+Let
+\[
+  g_\alpha=(1-\alpha)g_e+\alpha g_m
+\]
+be the mixed recovery gradient.  The observed sequence is consistent with
+\[
+  \langle \nabla L_v,g_{0.08}\rangle
+  <
+  \langle \nabla L_v,g_{0.03}\rangle
+  <
+  \langle \nabla L_v,g_{0}\rangle
+\]
+in the bad direction, but still not crossing zero.  Increasing the medium
+component is therefore justified, while lowering the learning-rate multiplier
+slightly keeps the high-BPB row impulses from dominating the optimizer state.
+
+The second key point is that geometry metrics are approximately invariant under
+these scalar changes: HDBSCAN stability, exact morphisms, Slepian leakage, and
+cycle flux remain stable.  This means the scalar curriculum can be adjusted
+without disrupting the ToricGT-specific structure.
+
+### Decision
+
+Do not continue from `40000`.  Restart from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00039500.pt
+```
+
+Implemented scalar-only changes:
+
+| control | old | new | reason |
+|---|---:|---:|---|
+| `phase/lr_multiplier` | `0.36` | `0.30` | keep update bounded while increasing medium exposure |
+| `phase/medium_mix_ratio` | `0.08` | `0.18` | test whether validation derivative can cross zero |
+| `phase/hard_mix_ratio` | `0.00` | `0.00` | unchanged |
+| `phase/complex_mix_ratio` | `0.00` | `0.00` | unchanged |
+
+Architecture remains unchanged.  No JEPA.  Keep random-order autoregressive
+decoding, tropical ring/hybrid attention, toric memory, dense contest weights,
+GFlowNet graph-of-thought, Kolmogorov diagnostics, directed persistence,
+GraphCG axes, Koszul audits, and toric probes.
+
+Next target: fresh `40000`.
+
+Acceptance criteria:
+
+1. `val/bpb <= 4.933094`;
+2. if primary val only approaches the gate, require `complexity/val/bpb <
+   4.825921` and lower branch BPB;
+3. train median BPB below `3.85` and no repeated impulse above `4.5`;
+4. topology inclusion violation `0.0`, HDBSCAN stability above `0.90`, Slepian
+   leakage `0.0`.
+
 ## 2026-06-01 Automated Review: Step 40,000 Low-LR Medium-Mix Retry
 
 Training was paused by the watcher at a fresh step-`40000` checkpoint from the

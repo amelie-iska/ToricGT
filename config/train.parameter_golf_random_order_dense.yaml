@@ -466,9 +466,14 @@ phase_curriculum:
       # step size again and increase only the medium component so the next
       # 500-step gate estimates a validation-aligned directional derivative,
       # while hard/complex graph rows remain off.
-      lr_multiplier: 0.36
+      # Step-40000 valmix8 review: 8% medium mix improved primary validation
+      # again (4.9415 -> 4.9392) and complexity validation (4.8279 -> 4.8259),
+      # but still missed the 39.5k gate.  The derivative is improving but
+      # remains positive, so increase the medium component enough to test the
+      # validation-aligned gradient while keeping hard/complex rows off.
+      lr_multiplier: 0.30
       grad_clip_norm: 0.50
-      medium_mix_ratio: 0.08
+      medium_mix_ratio: 0.18
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
