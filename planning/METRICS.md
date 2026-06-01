@@ -1,5 +1,214 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-01 Automated Review: Step 40,000 Seed-Rotate Retry
+
+Training was paused by the watcher before this review.  The requested training
+session `toricgt_oai_bpb_seedrotate_39500_20260601T114442Z` was no longer
+active and the GPU was idle, so the review made an explicit restart decision
+from the checkpoint evidence rather than letting a stale tmux state stand.
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00040000.pt
+```
+
+W&B run:
+
+```text
+https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/oai37500r2-20260601T024939Z
+```
+
+Analysis outputs:
+
+```text
+outputs/post_resume_analysis/oai-bpb-seedrotate-39500-20260601T114442Z/step-00040000/
+```
+
+The W&B export in the analysis folder still contains stale pre-resume history
+around step `39990`; the fresh segment is therefore read from
+`logs/training/oai-bpb-seedrotate-39500-20260601T114442Z.log` and from the
+checkpoint-local analysis summaries.
+
+### Metric Categorization
+
+The automatic audit reported:
+
+| category | count |
+|---|---:|
+| as desired | `304` |
+| as desired but too weak or slow | `114` |
+| not as desired | `201` |
+
+Fresh local train BPB medians were stable and much healthier than the previous
+high-BPB shelf:
+
+| step band | median train BPB |
+|---:|---:|
+| `39500` | `3.6305` |
+| `39550` | `3.6295` |
+| `39600` | `3.6240` |
+| `39650` | `3.6170` |
+| `39700` | `3.6370` |
+| `39750` | `3.6120` |
+| `39800` | `3.5695` |
+| `39850` | `3.6585` |
+| `39900` | `3.5590` |
+| `39950` | `3.6225` |
+
+Checkpoint-local finite differences show fast train-stream recovery followed
+by deceleration:
+
+| checkpoint | train BPB |
+|---:|---:|
+| `39500` | `5.000765` |
+| `39750` | `3.606788` |
+| `40000` | `3.560902` |
+
+For equal 250-step spacing, the first difference changes from about `-1.394`
+to `-0.0459`.  The second difference is strongly positive, so the model is
+already approaching a local train-stream floor by the end of the retry.
+
+The decisive problem is validation:
+
+| step | primary val BPB | complexity val BPB | controller train BPB EMA |
+|---:|---:|---:|---:|
+| `39500` | `4.933094` | checkpoint gate | n/a |
+| `39750` | `4.942227` | `4.831072` | n/a |
+| `40000` | `4.946108` | `4.832355` | `3.682681` |
+
+Thus the seed rotation fixed the raw training shelf, but easy-only recovery
+moved the validation distribution in the wrong direction.
+
+### Desired Behavior
+
+The branch/topology machinery remains coherent and should be preserved:
+
+| diagnostic | value | read |
+|---|---:|---|
+| train-stream BPB band | `~3.56--3.66` | good recovery |
+| GFlowNet loss trend | decreasing in W&B export | desired |
+| exact persistence morphisms | `20.0` | desired |
+| topology boundary residual | `0.0` | desired |
+| topology inclusion violation | `0.0` | desired |
+| exact edge validity | `0.980684` | desired |
+| directed edge validity | `0.951687` | desired |
+| HDBSCAN stability | `0.938531` | desired |
+| Slepian leakage | `0.0` | desired |
+| directed cycle flux | `~6.5e-18` | desired |
+| occupied fan cells | `11.75` | active |
+
+The contact sheets confirm that the 3D graph-of-thought trajectories,
+Ramachandran-style phase plots, energy landscapes, irrational toric winding
+collections, noncommutative simplex heatmaps, radius filtrations, exact
+persistence-module morphism plots, and toric/Slepian audits render and carry
+nontrivial structure.  There is no evidence that JEPA-like or architecture
+level changes are needed here.
+
+### Desired But Too Weak Or Slow
+
+| diagnostic | value | read |
+|---|---:|---|
+| mean branch BPB | `4.754877` | weak; worse than prior 40k audit |
+| best branch BPB | `4.029133` | weak; worse than prior 40k audit |
+| mean answer BPB | `4.632791` | weak |
+| best answer BPB | `3.612397` | usable but not improving |
+| MST efficiency | `0.500401` | modest |
+| path smoothness | `0.092219` | worse than prior 40k audit |
+| toric active-face entropy | `0.840383` | active but not decisive |
+| toric active-face margin | `-0.959147` | improved but still negative |
+
+The simplex/tetrahedron plots place most branches away from the low-BPB vertex.
+The model is exploring richly, but inference-time geometry is not yet pulling
+branches into reliably better terminal basins.
+
+### Undesirable
+
+| metric | behavior |
+|---|---|
+| primary `val/bpb` | worsened `4.933094 -> 4.942227 -> 4.946108` |
+| `complexity/val/bpb` | worsened to `4.832355` |
+| toric memory entropy | still decaying in W&B export |
+| toric binomial residual | `0.493601`, not improving |
+| toric phase leaf residual | `1.000005`, still effectively uncorrected |
+| train second difference | positive; train-stream descent already decelerating |
+
+The mathematical explanation is a distribution-gradient mismatch.  Let
+\(P_e\) be the easy stream and \(P_v\) the validation stream.  The retry took
+steps approximately in direction
+\[
+  g_e=\nabla_\theta \mathbb{E}_{x\sim P_e}[-\log p_\theta(x)].
+\]
+The training loss decreased, so \(\langle \nabla L_e,g_e\rangle>0\) in the
+descent convention.  Validation worsened, which implies the same update has
+positive first-order validation drift:
+\[
+  \Delta L_v \approx -\eta\langle \nabla L_v,g_e\rangle > 0.
+\]
+The second-difference deceleration then says increasing step count alone is
+unlikely to fix the drift; the update direction needs a small component from a
+validation-like row distribution, and the step size should be reduced so the
+auxiliary geometry already present is not overwritten by easy-stream fitting.
+
+### Plot Review
+
+Reviewed all nine contact sheets:
+
+```text
+outputs/post_resume_analysis/oai-bpb-seedrotate-39500-20260601T114442Z/step-00040000/plot_contact_sheets/contact_sheet_01.png
+...
+outputs/post_resume_analysis/oai-bpb-seedrotate-39500-20260601T114442Z/step-00040000/plot_contact_sheets/contact_sheet_09.png
+```
+
+Specific reads:
+
+| plot family | behavior |
+|---|---|
+| simplex/tetrahedra | points stay interior/right; not pulled to low-BPB vertex |
+| 3D trajectories | diverse and nonblank, with terminal contacts but no stable low-energy basin |
+| Ramachandran phase plots | phase activity present, broad rather than collapsed |
+| energy landscapes | rugged; no consistent descent valley |
+| toric winding collections | irrational winding and embedded torus projections present |
+| noncommutative heatmaps | directed adjacency and skew structure visible |
+| persistence morphisms | exact maps and inclusion checks numerically sane |
+| Slepian/PSWF audits | concentration `1.0`, leakage `0.0` |
+
+### Decision
+
+Do not continue from step `40000`.  Restart from the last checkpoint that still
+owned the primary validation gate:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00039500.pt
+```
+
+Implemented the smallest scalar correction:
+
+| control | old | new | reason |
+|---|---:|---:|---|
+| `phase/lr_multiplier` | `0.88` | `0.52` | reduce validation drift and train-floor bounce |
+| `phase/medium_mix_ratio` | `0.00` | `0.03` | add a small validation-like component without reintroducing the hard shelf |
+| `phase/hard_mix_ratio` | `0.00` | `0.00` | unchanged |
+| `phase/complex_mix_ratio` | `0.00` | `0.00` | unchanged |
+
+No architecture change is made.  Random-order autoregressive graph decoding,
+tropical ring/hybrid attention, toric memory, dense contest weights,
+embedding-space GFlowNet graph-of-thought, Kolmogorov diagnostics,
+GraphCG-style directions, directed persistence, Koszul audits, and toric
+geometry probes all remain active or diagnostic as before.
+
+Next review target: `40000`.
+
+Acceptance criteria for the next 500-step gate:
+
+1. `val/bpb <= 4.933094`, or at minimum no worse than `4.936` with clear
+   complexity improvement;
+2. `complexity/val/bpb <= 4.832355` and preferably below `4.824`;
+3. train-stream BPB median stays below `3.8`;
+4. mean branch BPB below `4.754877` or best branch BPB below `4.029133`;
+5. topology inclusion violation remains `0.0`, HDBSCAN stability above `0.90`,
+   and Slepian leakage `0.0`.
+
 ## 2026-06-01 Automated Review: Step 40,000
 
 Training was paused by the watcher before this review.  No active training tmux

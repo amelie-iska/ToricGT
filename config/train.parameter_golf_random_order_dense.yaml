@@ -454,13 +454,16 @@ phase_curriculum:
       # likelihood-only window, and set medium/hard/complex mix to zero so the
       # next gate measures byte-distribution improvement instead of curriculum
       # row difficulty.
-      # Step-40000 review: 40k improved complexity validation and geometry, but
-      # did not beat the 39.5k primary validation BPB gate and replayed a
-      # high-BPB stream shelf.  Keep the likelihood-only recovery controls and
-      # extend the guard window while stream_burnin_steps skips the shelf.
-      lr_multiplier: 0.88
+      # Step-40000 seed-rotate review: rotating the 39.5k stream seed fixed the
+      # raw train BPB shelf, but easy-only recovery moved primary validation BPB
+      # from 4.9331 to 4.9461 and slightly weakened branch geometry.  Resume
+      # from the 39.5k validation gate with a smaller update scale and a tiny
+      # medium-row mixture so the gradient remains byte-likelihood-first while
+      # retaining enough validation-like reasoning exposure to avoid overfitting
+      # the easy stream.
+      lr_multiplier: 0.52
       grad_clip_norm: 0.50
-      medium_mix_ratio: 0.0
+      medium_mix_ratio: 0.03
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
