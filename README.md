@@ -555,7 +555,11 @@ train BPB, worsened the known validation gate, and weakened branch geometry.
 The active replay therefore rolls back to step `1500` and uses
 `bpb_valmix_curvature_damped_1500_2000`: medium mix `0.35`, LR multiplier
 `0.12`, contrastive weight `3e-5`, clip norm `0.40`, and the same
-diagnostic-only auxiliary geometry policy.
+diagnostic-only auxiliary geometry policy.  The follow-up step-2000 handoff was
+marginally better but still bounced, so the old 2000-3000 sprint is replaced
+by `bpb_postbounce_valmix_hold_2000_2500`: medium mix `0.35`, LR multiplier
+`0.10`, contrastive weight `2e-5`, clip norm `0.36`, and auxiliary geometry
+losses still off.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a

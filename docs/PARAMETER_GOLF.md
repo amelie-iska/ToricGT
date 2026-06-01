@@ -382,7 +382,12 @@ handoff rejected the lower-medium `0.18/0.18` retry because train BPB flattened,
 the known validation gate worsened, and branch geometry weakened. The active
 rollback resumes from step `1500` and hands off to a lower-update but
 validation-mixed phase through step `2000` with medium mix `0.35`, LR
-multiplier `0.12`, clip norm `0.40`, and contrastive weight `3e-5`.
+multiplier `0.12`, clip norm `0.40`, and contrastive weight `3e-5`.  The next
+step-2000 gate improved only marginally and still showed the 1700-1800
+floor-bounce, so the current continuation uses
+`bpb_postbounce_valmix_hold_2000_2500`: medium mix `0.35`, LR multiplier
+`0.10`, clip norm `0.36`, contrastive weight `2e-5`, and diagnostic-only
+auxiliary geometry losses.
 
 Probe the long-context packed curriculum from an existing checkpoint:
 

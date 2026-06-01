@@ -22,7 +22,11 @@ entered a shallow floor-bounce basin. The active rollback resumes from the
 step-1500 checkpoint and switches to
 `bpb_valmix_curvature_damped_1500_2000` with `medium_mix_ratio: 0.35`,
 `lr_multiplier: 0.12`, `grad_clip_norm: 0.40`, and diagnostic-only auxiliary
-geometry losses.
+geometry losses. The follow-up step-2000 gate was marginally better but still
+showed the same derivative bounce, so the active config continues from the
+fresh step-2000 checkpoint through `bpb_postbounce_valmix_hold_2000_2500` with
+`medium_mix_ratio: 0.35`, `lr_multiplier: 0.10`, `grad_clip_norm: 0.36`, and
+auxiliary geometry losses still off.
 
 | Component | Default |
 | --- | --- |

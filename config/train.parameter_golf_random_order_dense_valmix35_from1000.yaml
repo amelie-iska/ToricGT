@@ -386,13 +386,19 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_sprint_2000_3000
+    - name: bpb_postbounce_valmix_hold_2000_2500
       start_step: 2000
-      end_step: 3000
-      lr_multiplier: 0.60
-      grad_clip_norm: 0.55
+      end_step: 2500
+      # Step-2000 valmix35-r2 review: the rollback was marginally better than
+      # the prior 2000 checkpoint, but the 1700-1800 derivative bounce remains
+      # and the deterministic validation gate is still weak.  Continue from
+      # the fresh step-2000 checkpoint only after replacing the old sprint with
+      # a post-bounce hold phase; do not activate auxiliary geometry losses
+      # until validation and branch BPB move together.
+      lr_multiplier: 0.10
+      grad_clip_norm: 0.36
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.05
+      medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
@@ -401,7 +407,26 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.00025
+      contrastive_loss_weight: 0.00002
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_sprint_2500_3000
+      start_step: 2500
+      end_step: 3000
+      lr_multiplier: 0.24
+      grad_clip_norm: 0.50
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.35
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.0
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.00005
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

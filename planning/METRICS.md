@@ -1,5 +1,141 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-01 Automated Review: Step 2,000 Valmix35-r2 Replay
+
+The watcher paused training at a fresh step-`2000` checkpoint from:
+
+```text
+toricgt_oai_bpb_valmix35r2_01500_20260601T220127Z
+```
+
+Analysis outputs:
+
+```text
+outputs/post_resume_analysis/oai-bpb-valmix35r2-01500-20260601T220127Z/step-00002000/
+```
+
+### Metric Categorization
+
+| category | count | read |
+|---|---:|---|
+| as desired | `199` | topology, toric audits, GFlowNet diversity, and most train likelihood terms remain coherent |
+| as desired but too weak/slow | `87` | r2 improved a few gates by tiny amounts, but not enough to promote |
+| not as desired | `106` | the same 1700-1800 positive finite-difference bounce remains |
+
+Checkpoint and validation comparison:
+
+| run / gate | train BPB | val BPB at 1750 | complexity val BPB | mean branch BPB | mean answer BPB |
+|---|---:|---:|---:|---:|---:|
+| previous step-2000 retry | `3.5362` | `5.4281` | `5.1358` | `4.9338` | `4.8148` |
+| valmix35-r2 step-2000 | `3.5388` | `5.4245` | `5.1340` | `4.9313` | `4.8125` |
+
+This is a real but tiny improvement in validation and branch diagnostics.  It
+does not justify the old post-2000 sprint, but it also does not justify another
+rollback to 1500: the repeated r2 replay reproduced the same impulse almost
+exactly, which suggests the bad mode is tied to data-order curvature around
+that interval rather than a random optimizer accident.
+
+Finite-difference summary:
+
+| window | train BPB slope / 1k | second derivative / 1k^2 | interpretation |
+|---|---:|---:|---|
+| `1501-1700` | `-2.562` | `+13.564` | strong descent but convex upward |
+| `1700-1800` | `+3.696` | `-130.653` | same sharp bounce |
+| `1800-1990` | `-0.034` | `+2.094` | flat post-bounce shelf |
+| `1501-1990` | `-0.374` | `+4.544` | net descent too shallow |
+
+### Plot Review
+
+Reviewed the generated sheets:
+
+```text
+plots_review_contact_sheet.png
+plots_review_contact_sheet_all_geometry.png
+```
+
+Visual conclusions:
+
+1. Core BPB/loss curves still show the same bounce around `1740-1790`.
+2. Reasoning/K/BPB simplices and tetrahedra keep branch points near the
+   interior rather than pulling them to the low-BPB boundary.
+3. 3D graph-of-thought trajectories remain coherent and branching.
+4. Ramachandran-style phase plots remain diverse; no phase collapse is visible.
+5. Toric phase-winding and embedded torus/simplicial plots render correctly.
+6. Exact persistence morphisms, directed filtrations, and noncommutative
+   heatmaps remain coherent.
+
+### Desired
+
+| diagnostic | value |
+|---|---:|
+| exact persistence morphisms | `20.0` |
+| topology boundary residual | `0.0` |
+| topology inclusion violation | `0.0` |
+| directed cycle flux | `~6.63e-18` |
+| exact edge validity | `0.974342` |
+| directed edge validity | `0.938115` |
+| Slepian concentration / leakage | `1.0 / 0.0` |
+| GFlowNet action diversity | `0.9943` at end |
+
+### Too Weak Or Slow
+
+| diagnostic | value | issue |
+|---|---:|---|
+| best branch BPB | `4.0415` | no meaningful improvement |
+| mean branch BPB | `4.9313` | still worse than the step-1500 branch audit |
+| mean answer BPB | `4.8125` | slight improvement but weak |
+| MST efficiency | `0.7024` | stable but not improving |
+| HDBSCAN stability | `0.8835` | acceptable but not stronger |
+| toric fan entropy | `0.6803` | active but below the previous retry |
+
+### Undesirable
+
+| diagnostic | value / trend | read |
+|---|---|---|
+| validation BPB | `5.4245` | still far worse than the inherited `4.6961` gate |
+| train BPB finite differences | positive bounce `1700-1800` | curvature/impulse persists |
+| active-face margin | `-1.7222` | still inverted/low-confidence |
+| toric binomial residual | `1.6292` | worse than the previous retry |
+| toric leaf residual | `0.9987` | audit-only; not ready for loss pressure |
+| exact triangle validity | `0.6878` | worse than desired; keep topology losses off |
+
+### Decision
+
+Continue from the fresh step-`2000` checkpoint, but do not use the historical
+`bpb_sprint_2000_3000` phase.  The r2 replay reproduced the same bounce, so a
+third rollback to 1500 is unlikely to change the local data-order curvature.
+The safer experiment is to carry the slightly improved r2 checkpoint forward
+with a low-update hold phase and measure the next validation gate.
+
+Implemented scalar-only changes:
+
+| phase | old | new |
+|---|---|---|
+| `2000-2500` | `bpb_sprint_2000_3000` | `bpb_postbounce_valmix_hold_2000_2500` |
+| `lr_multiplier` | `0.60` | `0.10` |
+| `grad_clip_norm` | `0.55` | `0.36` |
+| `medium_mix_ratio` | `0.05` | `0.35` |
+| `contrastive_loss_weight` | `2.5e-4` | `2e-5` |
+| auxiliary geometry losses | off | off |
+
+No architecture changes.  No JEPA.  Random-order autoregressive graph decoding,
+tropical ring/hybrid attention, toric memory, dense contest weights,
+embedding-space GFlowNet graph-of-thought, relative Kolmogorov diagnostics,
+GraphCG axes, directed persistence, Koszul audits, and toric probes remain
+unchanged.
+
+Next target: fresh step `2500`.
+
+Acceptance criteria:
+
+1. `val/bpb < 5.4245`, preferably below `5.3285`;
+2. `complexity/val/bpb < 5.1340`, preferably below `5.0305`;
+3. train BPB slope over `2000-2500` materially negative;
+4. mean branch BPB below `4.9275`;
+5. no new shock cascade;
+6. inclusion violation `0.0`, HDBSCAN stability above `0.88`, Slepian leakage
+   `0.0`.
+
 ## 2026-06-01 Automated Review: Step 2,000 Damped Early Replay
 
 Training was already paused by the watcher.  No active trainer remained in the
