@@ -1229,6 +1229,211 @@ def plot_toric_phase_simplicial_trajectory(
     plt.close(fig)
 
 
+def _plot_wrapped_torus_square_path(
+    ax: Any,
+    phase_u: np.ndarray,
+    phase_v: np.ndarray,
+    *,
+    color: str,
+    alpha: float,
+    linewidth: float,
+    label: str | None = None,
+) -> None:
+    """Plot a path on [0,1)^2 without drawing false chords across wrap cuts."""
+
+    if phase_u.size < 2 or phase_v.size < 2:
+        return
+    x: list[float] = [float(phase_u[0])]
+    y: list[float] = [float(phase_v[0])]
+    for i in range(1, phase_u.size):
+        du = abs(float(phase_u[i]) - float(phase_u[i - 1]))
+        dv = abs(float(phase_v[i]) - float(phase_v[i - 1]))
+        if du > 0.5 or dv > 0.5:
+            x.append(float("nan"))
+            y.append(float("nan"))
+        x.append(float(phase_u[i]))
+        y.append(float(phase_v[i]))
+    ax.plot(x, y, color=color, alpha=alpha, linewidth=linewidth, label=label)
+
+
+def plot_toric_phase_winding_collection(
+    record_meta: dict[str, Any],
+    branches: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    """Render flat irrational phase winding and the embedded torus version together."""
+
+    usable = [
+        branch
+        for branch in branches
+        if np.asarray(branch.get("toric_phase_u", [])).size >= 4
+        and np.asarray(branch.get("toric_phase_v", [])).size >= 4
+        and np.asarray(branch.get("toric_torus_path", [])).ndim == 2
+    ]
+    if not usable:
+        return
+    ranked = sorted(usable, key=lambda item: float(item["bpb"]))
+    best = ranked[0]
+    phase_u = np.asarray(best["toric_phase_u"], dtype=float)
+    phase_v = np.asarray(best["toric_phase_v"], dtype=float)
+    cocycle = np.asarray(best.get("toric_phase_cocycle", np.zeros_like(phase_u)), dtype=float)
+    torus = np.asarray(best["toric_torus_path"], dtype=float)
+    energy = np.asarray(best.get("per_token_nll", np.zeros((phase_u.shape[0],))), dtype=float)
+    chart_margin = np.asarray(best.get("graphcg_chart_margin", np.zeros((phase_u.shape[0],))), dtype=float)
+    idx = subsample_indices(phase_u.shape[0], int(best.get("max_plot_points", 180)))
+    u_best = phase_u[idx]
+    v_best = phase_v[idx]
+    cocycle_best = cocycle[idx]
+    torus_best = torus[idx]
+    energy_best = energy[idx] if energy.shape[0] >= phase_u.shape[0] else np.zeros_like(u_best)
+    margin_best = chart_margin[idx] if chart_margin.shape[0] >= phase_u.shape[0] else np.zeros_like(u_best)
+
+    fig = plt.figure(figsize=(17.5, 9.6), facecolor="#030712")
+    grid = fig.add_gridspec(2, 2, width_ratios=[1.02, 1.18], height_ratios=[1.0, 0.34], wspace=0.08, hspace=0.14)
+    ax_flat = fig.add_subplot(grid[0, 0])
+    ax_torus = fig.add_subplot(grid[0, 1], projection="3d")
+    ax_phase = fig.add_subplot(grid[1, :])
+    for ax in (ax_flat, ax_phase):
+        ax.set_facecolor("#030712")
+        ax.tick_params(colors="#dff8ff")
+        for spine in ax.spines.values():
+            spine.set_color("#18536a")
+    ax_torus.set_facecolor("#030712")
+
+    branch_colors = ["#38f2ff", "#ff4fd8", "#ffd166", "#8cff6a", "#ad7cff", "#ff7a45", "#7bdff2", "#f15bb5"]
+    for b_index, branch in enumerate(ranked[:8]):
+        u = np.asarray(branch["toric_phase_u"], dtype=float)
+        v = np.asarray(branch["toric_phase_v"], dtype=float)
+        branch_idx = subsample_indices(u.shape[0], min(160, int(branch.get("max_plot_points", 180))))
+        color = branch_colors[b_index % len(branch_colors)]
+        label = f"B{branch['branch_index']} BPB={float(branch['bpb']):.3f}" if b_index < 5 else None
+        _plot_wrapped_torus_square_path(
+            ax_flat,
+            u[branch_idx],
+            v[branch_idx],
+            color=color,
+            alpha=0.22 if branch is not best else 0.88,
+            linewidth=0.75 if branch is not best else 1.7,
+            label=label,
+        )
+
+    phase_points = np.stack([u_best, v_best], axis=-1)
+    delta = np.abs(phase_points[:, None, :] - phase_points[None, :, :])
+    periodic_delta = np.minimum(delta, 1.0 - delta)
+    phase_chord = np.linalg.norm(periodic_delta, axis=-1)
+    local_edges: list[tuple[int, int]] = []
+    window = min(18, max(6, phase_points.shape[0] // 8))
+    for start in range(0, phase_points.shape[0], max(4, window // 2)):
+        stop = min(phase_points.shape[0], start + window)
+        sub = phase_chord[start:stop, start:stop]
+        if sub.shape[0] < 4:
+            continue
+        threshold = float(np.quantile(sub[sub > 1e-8], 0.18)) if np.any(sub > 1e-8) else 0.0
+        for i in range(start, stop):
+            for j in range(i + 1, stop):
+                if phase_chord[i, j] <= threshold and len(local_edges) < 260:
+                    local_edges.append((i, j))
+    for i, j in local_edges:
+        if abs(u_best[i] - u_best[j]) <= 0.5 and abs(v_best[i] - v_best[j]) <= 0.5:
+            ax_flat.plot([u_best[i], u_best[j]], [v_best[i], v_best[j]], color="#b8fbff", alpha=0.12, linewidth=0.55)
+
+    ax_flat.scatter(u_best, v_best, c=energy_best, s=18, cmap="magma", alpha=0.90, edgecolor="#06111f", linewidth=0.15)
+    ax_flat.scatter(u_best[0], v_best[0], s=72, color="#6df6ff", edgecolor="white", linewidth=0.8, zorder=5)
+    ax_flat.scatter(u_best[-1], v_best[-1], s=105, marker="*", color="#ffd166", edgecolor="white", linewidth=0.8, zorder=5)
+    for x in np.linspace(0, 1, 5):
+        ax_flat.axvline(x, color="#11384b", alpha=0.25, linewidth=0.5)
+        ax_flat.axhline(x, color="#11384b", alpha=0.25, linewidth=0.5)
+    ax_flat.set_xlim(0, 1)
+    ax_flat.set_ylim(0, 1)
+    ax_flat.set_aspect("equal", adjustable="box")
+    ax_flat.set_xlabel(r"$k\theta\;\mathrm{mod}\;1$", color="#e8fbff")
+    ax_flat.set_ylabel(r"$k\beta\;\mathrm{mod}\;1$", color="#e8fbff")
+    ax_flat.set_title("Flat irrational phase winding on T^2", color="white", fontsize=13)
+    ax_flat.legend(loc="upper right", fontsize=7, facecolor="#07111f", edgecolor="#18536a", labelcolor="#e8fbff")
+
+    uu, vv = np.meshgrid(np.linspace(0, 2 * np.pi, 84), np.linspace(0, 2 * np.pi, 30))
+    R, r = 1.08, 0.32
+    xx = (R + r * np.cos(vv)) * np.cos(uu)
+    yy = (R + r * np.cos(vv)) * np.sin(uu)
+    zz = r * np.sin(vv)
+    ax_torus.plot_surface(xx, yy, zz, color="#0a2635", alpha=0.16, linewidth=0, shade=True)
+    ax_torus.plot_wireframe(xx, yy, zz, rstride=4, cstride=8, color="#1ad7e8", alpha=0.08, linewidth=0.35)
+    for branch in ranked[:5]:
+        tpath = np.asarray(branch["toric_torus_path"], dtype=float)
+        branch_idx = subsample_indices(tpath.shape[0], min(160, int(branch.get("max_plot_points", 180))))
+        color = branch_colors[int(branch["branch_index"]) % len(branch_colors)]
+        ax_torus.plot(tpath[branch_idx, 0], tpath[branch_idx, 1], tpath[branch_idx, 2], color=color, alpha=0.18, linewidth=0.65)
+    for i, j in local_edges:
+        ax_torus.plot(
+            [torus_best[i, 0], torus_best[j, 0]],
+            [torus_best[i, 1], torus_best[j, 1]],
+            [torus_best[i, 2], torus_best[j, 2]],
+            color="#6df6ff",
+            alpha=0.13,
+            linewidth=0.55,
+        )
+    for start in range(0, torus_best.shape[0] - window, max(6, window)):
+        source = torus_best[start : start + window]
+        target = torus_best[start + window : start + 2 * window]
+        if source.shape[0] < 3 or target.shape[0] < 3:
+            continue
+        c0 = source.mean(axis=0)
+        c1 = target.mean(axis=0)
+        d = c1 - c0
+        ax_torus.quiver(c0[0], c0[1], c0[2], d[0], d[1], d[2], color="#ff4fd8", linewidth=1.0, arrow_length_ratio=0.22, alpha=0.72)
+    sizes = 18.0 + 42.0 * (margin_best - np.nanmin(margin_best)) / max(1e-8, float(np.nanmax(margin_best) - np.nanmin(margin_best)))
+    sc = ax_torus.scatter(
+        torus_best[:, 0],
+        torus_best[:, 1],
+        torus_best[:, 2],
+        c=energy_best,
+        s=sizes,
+        cmap="magma",
+        alpha=0.93,
+        edgecolor="#06111f",
+        linewidth=0.18,
+    )
+    ax_torus.plot(torus_best[:, 0], torus_best[:, 1], torus_best[:, 2], color="#50f5ff", alpha=0.90, linewidth=1.55)
+    ax_torus.scatter(torus_best[0, 0], torus_best[0, 1], torus_best[0, 2], s=80, color="#6df6ff", edgecolor="white", linewidth=0.8)
+    ax_torus.scatter(torus_best[-1, 0], torus_best[-1, 1], torus_best[-1, 2], s=120, marker="*", color="#ffd166", edgecolor="white", linewidth=0.8)
+    ax_torus.set_title("Embedded torus with local simplicial edges", color="white", fontsize=13)
+    ax_torus.set_axis_off()
+    ax_torus.view_init(elev=27, azim=40)
+    cbar = fig.colorbar(sc, ax=ax_torus, shrink=0.62, pad=0.02)
+    cbar.set_label("local NLL / energy proxy", color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.get_yticklabels(), color="white")
+
+    t = np.arange(u_best.shape[0])
+    ax_phase.plot(t, u_best, color="#38f2ff", linewidth=1.0, label=r"$k\theta$")
+    ax_phase.plot(t, v_best, color="#ffd166", linewidth=1.0, label=r"$k\beta$")
+    ax_phase.plot(t, cocycle_best, color="#ff4fd8", linewidth=1.0, label="quadratic cocycle")
+    if energy_best.size:
+        e = (energy_best - np.nanmin(energy_best)) / max(1e-8, float(np.nanmax(energy_best) - np.nanmin(energy_best)))
+        ax_phase.fill_between(t, 0, e, color="#6df6ff", alpha=0.10, label="normalized NLL")
+    ax_phase.set_ylim(-0.03, 1.03)
+    ax_phase.set_xlabel("subsampled reasoning step", color="#e8fbff")
+    ax_phase.set_title("Phase coordinates and noncommutative cocycle along the chosen branch", color="white", fontsize=11)
+    ax_phase.legend(loc="upper right", ncol=4, fontsize=8, facecolor="#07111f", edgecolor="#18536a", labelcolor="#e8fbff")
+
+    fig.suptitle(
+        f"Irrational toric phase winding collection R{record_meta['record_index']} best B{best['branch_index']}",
+        color="white",
+        fontsize=16,
+        y=0.985,
+    )
+    fig.text(
+        0.015,
+        0.012,
+        "left: flat Kronecker winding on the commutative torus shadow | right: same points embedded on a torus surface | faint edges: local VR 1-skeleton | magenta arrows: analogical window transports",
+        color="#e8fbff",
+        fontsize=9,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def plot_toric_shadow_audit(
     record_meta: dict[str, Any],
     branches: list[dict[str, Any]],
@@ -2051,6 +2256,11 @@ def main() -> None:
             branches,
             traj_dir / f"{record_slug}_toric_phase_simplicial_trajectory.png",
         )
+        plot_toric_phase_winding_collection(
+            meta,
+            branches,
+            traj_dir / f"{record_slug}_toric_phase_winding_collection.png",
+        )
         plot_toric_shadow_audit(meta, branches, topology_dir / f"{record_slug}_toric_shadow_audit.png")
         plot_toric_slepian_audit(meta, branches, topology_dir / f"{record_slug}_toric_slepian_audit.png")
         plot_directed_filtration(meta, branches, topology_dir / f"{record_slug}_directed_filtration.png")
@@ -2229,6 +2439,7 @@ def main() -> None:
         for pattern in (
             "trajectories/*_trajectory_3d.png",
             "trajectories/*_toric_phase_simplicial_trajectory.png",
+            "trajectories/*_toric_phase_winding_collection.png",
             "topology/*_directed_filtration.png",
             "topology/*_toric_shadow_audit.png",
             "topology/*_toric_slepian_audit.png",
