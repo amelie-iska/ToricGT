@@ -148,7 +148,7 @@ data:
   # high-entropy shelf.  Keep zero burn-in, but rotate the resume seed again so
   # the next step-1500 restart does not replay either analyzed 1500--2000 row
   # segment.  This preserves random-order AR decoding and optimizer state.
-  stream_origin_step: 3500
+  stream_origin_step: 37750
   stream_burnin_steps: 0
   document_separator: "\n\n"
   # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
@@ -219,23 +219,23 @@ training:
   # so this stricter retry makes detected shock updates nearly no-op.  It does
   # not skip examples or change the objective.
   shock_guard_enabled: true
-  shock_guard_start_step: 1500
-  shock_guard_end_step: 2200
-  shock_guard_loss_ratio: 1.035
-  shock_guard_loss_delta: 0.08
-  shock_guard_grad_norm: 0.55
-  shock_guard_update_scale: 0.05
+  shock_guard_start_step: 37500
+  shock_guard_end_step: 39250
+  shock_guard_loss_ratio: 1.03
+  shock_guard_loss_delta: 0.07
+  shock_guard_grad_norm: 0.45
+  shock_guard_update_scale: 0.08
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
   # high-entropy examples visible in metrics while preventing them from
   # dominating the optimizer step.
   robust_micro_loss_guard_enabled: true
-  robust_micro_loss_guard_start_step: 1500
-  robust_micro_loss_guard_end_step: 1850
-  robust_micro_loss_guard_ratio: 1.14
-  robust_micro_loss_guard_delta: 0.22
-  robust_micro_loss_guard_min_scale: 0.45
+  robust_micro_loss_guard_start_step: 37500
+  robust_micro_loss_guard_end_step: 39250
+  robust_micro_loss_guard_ratio: 1.12
+  robust_micro_loss_guard_delta: 0.20
+  robust_micro_loss_guard_min_scale: 0.50
   precision: bf16
   device: cuda
   seed: 17
@@ -435,28 +435,27 @@ phase_curriculum:
       mtp_loss_weight: 0.02
       toric_entropy_loss_weight: 0.0005
       qat_loss_weight: 0.0
-    - name: bpb_recovery_36750_38500
-      start_step: 36000
-      end_step: 38500
-      # Live step-36750 analysis found validation BPB still improving, but
-      # recent train BPB had a positive local slope and Hessian probes were
-      # NaN.  This phase makes the next window likelihood-first: keep the
-      # ToricGT modules present for diagnostics, but stop using auxiliary
-      # geometry/GFlowNet/QAT losses until the byte objective descends again.
-      lr_multiplier: 1.05
-      grad_clip_norm: 0.65
-      medium_mix_ratio: 0.20
+    - name: bpb_recovery_37500_39250
+      start_step: 37500
+      end_step: 39250
+      # Step-37750 handoff review: checkpoint finite differences improved from
+      # 37250->37500, then reversed from 37500->37750.  Restart at 37500 with a
+      # narrower likelihood-first window, rotate the stream, and keep the
+      # topology/toric/GFlowNet machinery diagnostic-only until BPB descends.
+      lr_multiplier: 0.95
+      grad_clip_norm: 0.50
+      medium_mix_ratio: 0.10
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.00002
+      graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.00025
-      mtp_loss_weight: 0.004
+      contrastive_loss_weight: 0.00010
+      mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
     - name: compression_and_scaling
