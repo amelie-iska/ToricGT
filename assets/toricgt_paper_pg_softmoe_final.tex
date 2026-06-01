@@ -84,7 +84,7 @@
 
 \title{\vspace{-2em}ToricGT: Graph-Token Reasoning with Tropical Ring Attention, Noncommutative Tori, Soft-MoE Routing, and Parameter-Golf Compression}
 \author{Amelie Schreiber}
-\date{May 25, 2026}
+\date{June 1, 2026}
 
 \begin{document}
 \maketitle
@@ -1917,6 +1917,33 @@ The Parameter-Golf track has different failure modes from the research model.  T
   \item document every compression, tokenizer, and test-time adaptation trick in the README.
 \end{enumerate}
 The contest leaderboard shows that successful submissions often combine small-model architecture changes, quantization, recurrent or parallel residual computation, tokenizer/data transforms, and legal test-time adaptation.  ToricGT should borrow these tactics only when they are compatible with the self-contained artifact and validation rules.
+
+\subsection{Current \texttt{oai} implementation and recovery snapshot}
+
+The active competition branch is \texttt{oai}.  Its deployable candidate remains the dense random-order Parameter-Golf model, not the full graph encoder: seven stored dense blocks of width $384$ are applied recurrently twice, input and output embeddings are tied, lower blocks use ordinary softmax attention, upper blocks use stabilized tropical-ring attention, and the deployable artifact excludes training-only toric, GraphCG, Koszul, Slepian, and multi-token-head probes.  The current artifact audit is about $12.94$ MB after int8 compression, comfortably below the $16{,}000{,}000$ byte limit.  The training run uses score-before-update random-order autoregression, compact prefix-visible GFlowNet actions, graph-projected byte chunks from the curated split mirror, and W\&B logging for BPB, GFlowNet, topology, toric, complexity, and checkpoint-publishing metrics.
+
+The live training protocol is deliberately conservative.  Auxiliary geometric losses are permitted only when deterministic validation BPB is improving or stable.  When local BPB curvature flattens or rebounds, the controller enters a scalar recovery phase:
+\begin{equation}
+  \lambda_{\mathrm{GFN}}=\lambda_{\mathrm{toric}}=\lambda_{\mathrm{Koszul}}=
+  \lambda_{\mathrm{flow}}=\lambda_{\mathrm{QAT}}=0,
+  \qquad
+  \lambda_{\mathrm{GraphCG}}\ll1,\quad
+  \lambda_{\mathrm{contrastive}},\lambda_{\mathrm{MTP}}\text{ small},
+\end{equation}
+with a slightly increased learning-rate multiplier and tighter gradient clipping.  This is the phase used after checkpoint \texttt{random\_order\_step\_00036750.pt}.  The training loop resumed from \texttt{random\_order\_step\_00037250.pt} after a checkpoint-gated analysis pass; the next watcher is scheduled to pause only after a fresh step-$37750$ checkpoint, run the full metric/simplex/geometry suite, and hand off a written recommendation before any further restart.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.82\textwidth]{fig_oai_step37250_reasoning_k_bpb.png}
+  \caption{Step-$37250$ \texttt{oai} recovery diagnostic.  The reasoning/K$(x\mid\mathrm{helpers})$/BPB simplex places graph-of-thought branches in a three-way tradeoff among additional reasoning budget, conditional-compression structure, and low BPB.  The plot is produced from model computations by the periodic analysis suite; it is an audit snapshot, not a final benchmark claim.}
+  \label{fig:oai-step37250-simplex}
+\end{figure}
+
+The most recent completed analysis gate at step $37250$ used four held-out validation records and $24$ GFlowNet branches.  It reported mean branch BPB $4.758$, best branch BPB $4.039$, mean answer-span BPB $4.644$, best answer-span BPB $3.630$, mean hidden-trajectory MST efficiency $0.507$, mean path smoothness $0.0895$, directed topology asymmetry $0.401$, HDBSCAN stability $0.943$, exact directed-edge validity $0.958$, exact triangle validity $0.818$, Slepian concentration $1.000$, and Slepian leakage $0.000$.  These values show that the analysis stack is functioning and that graph-of-thought search can find better local branches than the mean branch, but they also show that the BPB objective is still far from the competition target band.  The same pass recorded weak tropical active-face margins, with mean toric-shadow margin around $2.94\times10^{-2}$ and very small minimum margin, so strong toric or Koszul loss should remain off during BPB recovery.  In operational terms, this means the geometry is useful as an audit and routing signal, while byte likelihood must keep priority until the BPB descent slope is restored.
+
+\begin{remark}[Analysis-gate reliability]
+The post-resume watcher intentionally interrupts training only after a checkpoint is safely written.  A fragile point in early runs was W\&B path resolution: the metric analyzer expected an entity/project/run-id path but was sometimes given the human-readable run name.  The current analyzer resolves both run ids and run names before downloading history.  Thus a pause for analysis should no longer become a terminal stop merely because the W\&B display name differs from the run id.
+\end{remark}
 
 
 \section{Datasets, synthetic families, and leakage control}
