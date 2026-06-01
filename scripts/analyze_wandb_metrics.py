@@ -269,7 +269,23 @@ def download_history(run_path: str) -> tuple[pd.DataFrame, dict[str, Any]]:
     import wandb
 
     api = wandb.Api()
-    run = api.run(run_path)
+    requested_run_path = run_path
+    try:
+        run = api.run(run_path)
+    except Exception:
+        parts = run_path.split("/")
+        if len(parts) != 3:
+            raise
+        entity, project, run_key = parts
+        candidates = api.runs(f"{entity}/{project}", per_page=200)
+        run = None
+        for candidate in candidates:
+            if candidate.id == run_key or candidate.name == run_key:
+                run = candidate
+                break
+        if run is None:
+            raise
+        run_path = f"{entity}/{project}/{run.id}"
     rows = list(run.scan_history(page_size=1000))
     if not rows:
         raise RuntimeError(f"No W&B history rows found for {run_path}")
@@ -278,6 +294,8 @@ def download_history(run_path: str) -> tuple[pd.DataFrame, dict[str, Any]]:
         raise RuntimeError("W&B history does not contain _step")
     meta = {
         "run_path": run_path,
+        "requested_run_path": requested_run_path,
+        "run_id": run.id,
         "name": run.name,
         "state": run.state,
         "url": run.url,
