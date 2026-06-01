@@ -4325,3 +4325,184 @@ Acceptance criteria:
 5. best branch BPB beats `4.0204` or mean branch BPB moves below `4.7681`;
 6. inclusion violation remains `0.0`, HDBSCAN stability remains above `0.90`,
    and Slepian leakage remains `0.0`.
+
+## Step 39,500 Handoff Review
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-continue-39000-20260601T065718Z/step-00039500
+```
+
+The 39,500 checkpoint is not promotable.  The key checkpoint finite differences
+are:
+
+| step | train BPB | train loss | first difference | second difference |
+|---:|---:|---:|---:|---:|
+| 38,500 | `3.592812` | `2.490348` | n/a | n/a |
+| 38,750 | `3.750200` | `2.599440` | `+0.157388` | n/a |
+| 39,000 | `3.592368` | `2.490040` | `-0.157831` | `-0.315219` |
+| 39,250 | `4.227429` | `2.930231` | `+0.635061` | `+0.792892` |
+| 39,500 | `4.363518` | `3.024560` | `+0.136089` | `-0.498972` |
+
+The first large positive derivative appears immediately after 39,000.  The
+large positive second difference at 39,250 is the floor-bounce signature: the
+optimizer left the good local byte-compression basin and entered a harder
+row-group shelf.  This is corroborated by the W&B trace after the 39k restart:
+robust guard fractions repeatedly sat near `0.5`, and microbatch BPB spiked
+above `5.0`.  The failure is therefore a data-order shock, not an architectural
+failure.
+
+### Categories
+
+| group | count | read |
+|---|---:|---|
+| desired | `335` | structural diagnostics and many long-window slopes remain healthy |
+| desired but too weak or slow | `121` | validation and branch selection are not improving fast enough |
+| not desired | `160` | checkpoint BPB/loss, toric entropy decay, and hard-shelf guards require correction |
+
+### Desired
+
+Topology and geometric diagnostics remain coherent:
+
+| diagnostic | value | read |
+|---|---:|---|
+| exact edge validity | `0.9896` | desired |
+| exact directed edge validity | `0.9598` | desired |
+| exact triangle validity | `0.8373` | acceptable |
+| exact persistence morphisms | `20.0` | desired |
+| inclusion violation | `0.0` | desired |
+| boundary residual | `0.0` | desired |
+| directed cycle flux | `5.26e-18` | desired |
+| HDBSCAN stability | `0.9320` | desired |
+| Slepian concentration/leakage | `1.0 / 0.0` | desired |
+| Buchsbaum-Eisenbud residual | `0.00499` | desired |
+| variety-complex residual | `0.0` | desired |
+
+The chain-complex checks still satisfy the algebraic invariants we care about:
+the sampled complexes are nested, the directed edge maps are mostly valid, and
+the toric Slepian audit is numerically clean.  This justifies preserving the
+current ToricGT diagnostic stack.
+
+The long-window W&B slopes also still contain useful descent:
+
+| metric | first median | last median | recent slope / 1k |
+|---|---:|---:|---:|
+| `train/bpb` | `3.862507` | `3.589069` | `-0.329946` |
+| `train/loss` | `2.677286` | `2.487753` | `-0.228701` |
+| `complexity/train/bpb` | `4.220424` | `3.715799` | `-0.595038` |
+| `train/gflownet_loss` | `3.499146` | `3.316718` | `-0.574711` |
+
+These are not enough to promote 39,500, because the checkpoint-local BPB is the
+competition gate, but they indicate that rollback should be local rather than
+resetting training.
+
+### Desired But Too Weak Or Slow
+
+| metric | value / trend | read |
+|---|---:|---|
+| `val/bpb` | median `4.934834 -> 4.941551` | weak regression |
+| `val/loss` | median `3.420566 -> 3.425222` | weak regression |
+| `complexity/val/bpb` | median `4.823268 -> 4.832008` | weak regression |
+| `complexity/val/argmax_byte_accuracy` | `0.200684 -> 0.200195` | weak |
+| mean branch BPB | `4.743205` | weak |
+| best branch BPB | `4.020677` | useful pocket, not improving |
+| mean answer BPB | `4.626401` | weak |
+| best answer BPB | `3.618824` | useful pocket, worse than 39k |
+| MST efficiency | `0.501350` | modest |
+| path smoothness | `0.086616` | modest |
+
+The simplex plots show high-reasoning branches and low-\(K(x\mid y)\) structure,
+but the branch cloud does not move sharply toward the low-BPB vertex.  In the
+toric/GFlowNet/BPB tetrahedron, points cluster near toric entropy and
+exploration rather than the low-BPB corner.  The graph-of-thought search is
+alive; it is not yet a strong validation-likelihood improver in this window.
+
+### Undesirable
+
+| signal | behavior |
+|---|---|
+| checkpoint BPB | `3.592368 -> 4.227429 -> 4.363518` after 39k |
+| checkpoint loss | `2.490040 -> 2.930231 -> 3.024560` after 39k |
+| robust guard fraction | often near `0.5` after stream rotation |
+| `train/grad_norm` | still categorized not desired; occasional spikes |
+| `train/toric_memory_entropy` | median `0.356932 -> 0.306739` |
+| toric active-face margin | negative, `-0.9857` |
+| toric shadow min margin | tiny, `2.03e-4` |
+| phase-leaf residual | about `1.0003` |
+
+Mathematically, the checkpoint differences indicate an impulse response rather
+than smooth curvature-limited descent.  If \(b_t\) is checkpoint BPB, then
+\(\Delta b_{39250}=b_{39250}-b_{39000}\approx0.635\) and
+\(\Delta^2 b_{39250}\approx0.793\).  That positive second difference is too
+large to interpret as ordinary minibatch noise.  Combined with high robust
+guard activation, it says the stochastic gradient estimate is being dominated
+by a hard stream segment.  A lower LR alone did not fix it because the stream
+origin changed the sampled row-group shelf.
+
+The toric/tropical margins also explain why auxiliary geometry should remain a
+diagnostic rather than the primary correction.  The observed active-face
+margin does not satisfy the stability condition
+
+\[
+  \Delta_{ic} > 2(\epsilon_S+\epsilon_V),
+\]
+
+so increasing toric or tropical auxiliary pressure during the hard shelf would
+risk optimizing unstable faces instead of improving byte likelihood.
+
+### Plot Review
+
+Reviewed plots:
+
+```text
+metrics/core_metric_timeseries.png
+simplex/reasoning_k_bpb_triangle.png
+geometry/triangles/reasoning_k_bpb.png
+geometry/tetrahedra/toric_gfn_bpb.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_trajectory_3d.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_energy_landscape.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_toric_phase_winding_collection.png
+geometry/topology/R2_gss1147-got_math_500k_got_math_exact_persistence_morphisms.png
+```
+
+The 3D trajectory plot shows broad branch coverage and solution-span contact,
+but the local energy landscape remains rugged and fragmented rather than a
+single low-energy funnel.  The toric phase winding collection now contains the
+flat irrational winding, torus embedding, simplicial edges, and cocycle trace;
+it verifies dense phase coverage, but branch selection still jumps rather than
+following smooth leaves.  The exact persistence morphism audit remains useful
+and structurally valid.
+
+### Decision
+
+Pause the bad 39,500 continuation and resume from
+`checkpoints/parameter_golf_oai_dense/random_order_step_00039000.pt`.
+
+Implemented the smallest high-impact scalar correction:
+
+| control | old | new | reason |
+|---|---:|---:|---|
+| `data.stream_origin_step` | `39000` | `37750` | restore the healthier stream origin used by the descending 38.5k->39k segment |
+| `data.stream_burnin_steps` | `0` | `500` | continue that stream path from its post-39k position without replaying the 38.5k->39k rows |
+| recovery LR multiplier | `0.88` | `0.88` | keep damped updates; no extra architecture change |
+| shock/robust guard end | `39750` | `39750` | keep bounded-influence updates through the next review |
+
+This preserves random-order autoregressive graph decoding, tropical
+ring/hybrid attention, toric memory, dense contest weights, embedding-space
+GFlowNet graph-of-thought diagnostics, conditional Kolmogorov monitors, and
+persistence/Koszul diagnostics.
+
+Next review target: `39500`, using a fresh checkpoint modification-time floor
+so the watcher ignores the old bad 39,500 file.
+
+Acceptance criteria:
+
+1. checkpoint `train_bpb < 3.59237`;
+2. no immediate 250-step positive BPB impulse above `+0.05`;
+3. robust guard median below `0.25`;
+4. `val/bpb <= 4.9416` or no regression above `4.9486`;
+5. `complexity/val/bpb <= 4.8320`;
+6. best branch BPB beats `4.0204` or mean branch BPB moves below `4.7432`;
+7. inclusion violation remains `0.0`, HDBSCAN stability remains above `0.90`,
+   and Slepian leakage remains `0.0`.

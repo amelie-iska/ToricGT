@@ -144,12 +144,14 @@ data:
   # A rollback should not replay the identical data order.  The seed is offset
   # by the checkpoint step after loading, while validation remains fixed.
   resume_aware_stream_seed: true
-  # The stream-rotated retry moved the old single impulse into a broader
-  # high-entropy shelf.  Keep zero burn-in, but rotate the resume seed again so
-  # the next step-1500 restart does not replay either analyzed 1500--2000 row
-  # segment.  This preserves random-order AR decoding and optimizer state.
-  stream_origin_step: 39000
-  stream_burnin_steps: 0
+  # The 39.5k audit showed that using the checkpoint step itself as the stream
+  # origin created a broad high-entropy shelf: robust guards fired on roughly
+  # half the microbatches and checkpoint BPB jumped from 3.59 to 4.36.  Resume
+  # from the healthier 39k checkpoint, keep the older 37.75k stream origin, and
+  # burn in 500 steps so the loader continues the previously descending
+  # 38.5k->39k row-group path without replaying it.
+  stream_origin_step: 37750
+  stream_burnin_steps: 500
   document_separator: "\n\n"
   # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
   # found token quantiles p25~=123, p40~=294, p50~=489, so the buckets below
