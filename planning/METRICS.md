@@ -5436,3 +5436,217 @@ Acceptance criteria:
 5. best branch BPB below `4.021306` or mean answer BPB below `4.624957`;
 6. inclusion violation remains `0.0`, HDBSCAN stability above `0.90`,
    Slepian leakage `0.0`.
+
+## Step 40000 Review: Valmix18 Restart Decision
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-valmix18-39500-20260601T160202Z/step-00040000
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00040000.pt
+```
+
+The watcher paused the training session before this review.  No active
+Parameter-Golf training tmux remained; GPU memory was idle except for the
+review session.  The W&B run history is partially stale because repeated
+39.5k--40k restarts reused the same W&B run and W&B rejected non-monotone
+step logs.  Therefore the local training log is the authoritative source for
+this gate.
+
+### Numeric Summary
+
+Metric categories:
+
+| class | count |
+|---|---:|
+| as desired | `304` |
+| as desired but too weak or slow | `114` |
+| not as desired | `201` |
+
+Validation records from the local log:
+
+| step | deterministic BPB | score-first BPB | complexity BPB | controller best |
+|---:|---:|---:|---:|---:|
+| 39750 | `4.936550` | `4.935478` | `4.822938` | `4.933094` |
+| 40000 | `4.937589` | `4.934494` | `4.825294` | `4.933094` |
+
+Train BPB over the retry stayed mostly in the `3.5--3.7` median band, but
+medium-row impulses recurred:
+
+| band | median BPB | max BPB |
+|---:|---:|---:|
+| 39500 | `3.6360` | `4.3150` |
+| 39700 | `3.6300` | `4.4770` |
+| 39850 | `3.5640` | `4.4010` |
+| 39950 | `3.6390` | `4.4080` |
+
+Across the recovery sequence, medium validation-like exposure is still moving
+the fixed validation set in the right direction:
+
+```text
+easy-only     primary 4.9461, complexity 4.8324
+3% medium     primary 4.9415, complexity 4.8279
+8% medium     primary 4.9392, complexity 4.8259
+18% medium    primary 4.9376, complexity 4.8253
+```
+
+The derivative is improving, but it remains above the 39.5k deterministic
+gate.  Inside the 18% retry the local finite difference turned positive:
+
+\[
+  \Delta_{\mathrm{39750\to40000}}\operatorname{BPB}
+  =4.937589-4.936550
+  =1.04\times10^{-3}>0.
+\]
+
+This is the floor-bounce signature: the direction helps globally relative to
+easy-only recovery but overshoots locally before crossing the promotion gate.
+
+### Desired
+
+| diagnostic | value | interpretation |
+|---|---:|---|
+| checkpoint train BPB | `3.498351` | strong local likelihood improvement |
+| exact persistence morphisms | `20.0` | exact module maps computed |
+| boundary residual | `0.0` | chain-complex consistency preserved |
+| inclusion violation | `0.0` | nested filtration maps remain valid |
+| HDBSCAN stability | `0.937744` | radius-parametrized clusters are stable |
+| exact edge validity | `0.978670` | local complex construction valid |
+| exact directed edge validity | `0.950114` | directed topology remains coherent |
+| Slepian concentration/leakage | `1.0 / 0.0` | toric projection audit is numerically clean |
+
+The topology, persistence, Koszul, and toric projection audits do not show a
+structural failure.  They should stay active as diagnostics but should not be
+given new loss weight during BPB recovery.
+
+### Desired But Too Weak Or Slow
+
+| diagnostic | value | interpretation |
+|---|---:|---|
+| mean branch BPB | `4.749627` | slight improvement, still too high |
+| best branch BPB | `4.031180` | weaker than earlier best branches |
+| mean answer BPB | `4.630701` | close to prior but not a promotion signal |
+| best answer BPB | `3.617439` | useful but not enough |
+| MST efficiency | `0.498880` | roughly flat |
+| path smoothness | `0.082728` | improved smoothness, not enough BPB gain |
+| topology analogical map loss | `0.095687` | acceptable but not decisive |
+| directed map loss | `0.145265` | acceptable but not decisive |
+| toric shadow mean margin | `0.029378` | positive but thin |
+
+The simplex and tetrahedron plots show meaningful branches, but the points are
+still too interior: they do not migrate consistently toward the low-BPB vertex
+or toward a low-BPB/low-relative-K/high-MST boundary.  That means
+test-time-scaling structure exists, but is not yet translating into a better
+validation gate.
+
+### Not As Desired
+
+| diagnostic | value | issue |
+|---|---:|---|
+| deterministic validation BPB | `4.937589` | above the `4.933094` gate |
+| 39750 -> 40000 validation derivative | `+0.001038` | local bounce |
+| active-face margin | `-0.979736` | tropical face confidence remains inverted |
+| toric binomial residual | `0.508865` | algebraic relation probe still weak |
+| toric leaf residual | `0.998852` | noncommutative phase leaf audit remains poor |
+| toric shadow min margin | `1.88e-4` | walls are too thin |
+
+Mathematically, this is a distributional directional-derivative problem rather
+than an architecture failure.  Let the recovery stream be
+
+\[
+  P_\alpha=(1-\alpha)P_{\mathrm{easy}}+\alpha P_{\mathrm{medium}}.
+\]
+
+For the fixed validation distribution \(Q\), the observed values imply
+
+\[
+  \frac{\partial}{\partial \alpha}
+  \mathbb{E}_{Q}[-\log p_{\theta_\alpha}(x)] < 0
+\]
+
+over the easy-to-18% sweep, but the optimizer step size is still high enough
+that the finite-difference trajectory in parameter space curves back upward
+inside the last half-gate.  The high-BPB train impulses are the same signal in
+the training stream: medium rows are needed for the validation direction, but
+the update must be more damped.
+
+### Plot Review
+
+Reviewed the generated contact sheets covering 70 PNG artifacts:
+
+```text
+metrics/core_metric_timeseries.png
+metrics/recent_metric_slopes.png
+metrics/selected_metric_correlations.png
+simplex/*.png
+geometry/triangles/*.png
+geometry/tetrahedra/*.png
+geometry/trajectories/*trajectory_3d.png
+geometry/trajectories/*phase_energy.png
+geometry/trajectories/*energy_landscape.png
+geometry/trajectories/*toric_phase_winding_collection.png
+geometry/topology/*commutative_algebra_audit.png
+geometry/topology/*directed_filtration.png
+geometry/topology/*exact_persistence_morphisms.png
+geometry/topology/*noncommutative_heatmaps.png
+geometry/topology/*step_radius_hierarchy.png
+geometry/topology/*toric_shadow_audit.png
+geometry/topology/*toric_slepian_audit.png
+```
+
+Visual conclusions:
+
+1. The 3D graph-of-thought trajectories still branch and terminate near
+   solution-span markers, but the terminal clusters are not yet concentrated
+   in low-BPB basins.
+2. Ramachandran-style phase plots are stable and diverse; they do not show
+   collapse.
+3. Energy landscapes remain rugged rather than funnel-shaped, so increasing
+   reasoning loss weights would likely add variance before improving BPB.
+4. Toric phase-winding collections correctly show the flat irrational winding,
+   embedded torus with local simplicial edges, and phase-coordinate traces.
+5. Exact persistence-module morphism and nested simplex plots remain coherent.
+
+### Decision
+
+Do not promote the 40,000 checkpoint.  Restart from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00039500.pt
+```
+
+Implemented the smallest high-impact scalar change:
+
+| control | old | new |
+|---|---:|---:|
+| recovery `lr_multiplier` | `0.30` | `0.24` |
+| recovery `medium_mix_ratio` | `0.18` | `0.35` |
+| recovery `hard_mix_ratio` | `0.0` | `0.0` |
+| recovery `complex_mix_ratio` | `0.0` | `0.0` |
+
+This keeps the intervention faithful to the current ToricGT Parameter-Golf
+architecture.  Random-order autoregressive graph decoding, tropical
+ring/hybrid attention, toric memory, dense contest weights, embedding-space
+GFlowNet graph-of-thought, relative Kolmogorov diagnostics, persistence
+modules, Koszul audits, and toric phase-winding plots remain unchanged.
+
+The next restart should use a fresh W&B run in the same project.  Reusing the
+old run made W&B reject repeated checkpoint-step logs, so the next watcher must
+point at the fresh run path.
+
+Next review target: `40000`.
+
+Acceptance criteria:
+
+1. deterministic `val/bpb < 4.933094`;
+2. `complexity/val/bpb < 4.822938`, preferably below `4.822091`;
+3. local derivative from 39750 to 40000 non-positive;
+4. train BPB band max below `4.45` despite higher medium mix;
+5. mean branch BPB below `4.745`;
+6. inclusion violation `0.0`, HDBSCAN stability above `0.90`, Slepian leakage
+   `0.0`.

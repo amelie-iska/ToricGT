@@ -471,9 +471,16 @@ phase_curriculum:
       # but still missed the 39.5k gate.  The derivative is improving but
       # remains positive, so increase the medium component enough to test the
       # validation-aligned gradient while keeping hard/complex rows off.
-      lr_multiplier: 0.30
+      # Step-40000 valmix18 review: 18% medium mix continued the validation
+      # improvement trend (primary 4.9392 -> 4.9376, complexity 4.8259 ->
+      # 4.8253) but the local 39750->40000 derivative turned positive and
+      # the train stream showed repeated high-BPB impulses.  Restart again
+      # from the 39.5k gate with more validation-like medium rows but a lower
+      # scalar step size; this keeps the intervention one-dimensional in the
+      # data mixture plus one optimizer damping scalar.
+      lr_multiplier: 0.24
       grad_clip_norm: 0.50
-      medium_mix_ratio: 0.18
+      medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
