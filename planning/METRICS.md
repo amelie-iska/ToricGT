@@ -1,5 +1,181 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-01 Automated Review: Step 40,000 Low-LR Medium-Mix Retry
+
+Training was paused by the watcher at a fresh step-`40000` checkpoint from the
+run `toricgt_oai_bpb_valmix_39500_20260601T130711Z`.  The GPU was idle at
+review time and no training session remained active, so the decision below is a
+restart decision, not an interruption of live optimization.
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00040000.pt
+```
+
+Analysis outputs:
+
+```text
+outputs/post_resume_analysis/oai-bpb-valmix-39500-20260601T130711Z/step-00040000/
+```
+
+The W&B export is still partially stale because the same run id was resumed
+from a lower local step.  Fresh values for the retry are taken from
+`logs/training/oai-bpb-valmix-39500-20260601T130711Z.log`.
+
+### Metric Categorization
+
+The automatic audit reported the same broad category counts as the prior
+seed-rotate review:
+
+| category | count |
+|---|---:|
+| as desired | `304` |
+| as desired but too weak or slow | `114` |
+| not as desired | `201` |
+
+Local train BPB stayed controlled throughout the 39.5k--40k window:
+
+| step band | median train BPB | mean train BPB | max train BPB |
+|---:|---:|---:|---:|
+| `39500` | `3.6320` | `3.6451` | `4.293` |
+| `39550` | `3.6340` | `3.6643` | `4.302` |
+| `39600` | `3.6240` | `3.6368` | `4.296` |
+| `39650` | `3.6180` | `3.6345` | `4.296` |
+| `39700` | `3.6400` | `3.6688` | `4.311` |
+| `39750` | `3.6245` | `3.6278` | `4.322` |
+| `39800` | `3.5605` | `3.5971` | `4.323` |
+| `39850` | `3.6800` | `3.6795` | `4.250` |
+| `39900` | `3.5630` | `3.5935` | `4.287` |
+| `39950` | `3.6160` | `3.6382` | `4.296` |
+
+The validation gate did not recover:
+
+| step | primary val BPB | complexity val BPB | controller train BPB EMA |
+|---:|---:|---:|---:|
+| `39500` | `4.933094` | previous gate | `3.682681` before restart |
+| `39750` | `4.939244` | `4.827275` | n/a |
+| `40000` | `4.941543` | `4.827858` | `3.663048` |
+
+Compared with the easy-only retry, the low-LR 3% medium mix helped:
+`val/bpb` improved from `4.946108` to `4.941543` and
+`complexity/val/bpb` improved from `4.832355` to `4.827858`.  It still failed
+the promotion gate because the primary validation derivative remains positive
+relative to step `39500`.
+
+### Desired Behavior
+
+The following should be preserved:
+
+| diagnostic | value | read |
+|---|---:|---|
+| train checkpoint BPB | `3.630631` | stable likelihood recovery |
+| train checkpoint loss | `2.516562` | stable |
+| exact persistence morphisms | `20.0` | desired |
+| topology boundary residual | `0.0` | desired |
+| topology inclusion violation | `0.0` | desired |
+| exact edge validity | `0.979004` | desired |
+| directed edge validity | `0.951329` | desired |
+| HDBSCAN stability | `0.938314` | desired |
+| directed cycle flux | `~5.13e-18` | desired |
+| Slepian leakage | `0.0` | desired |
+| Slepian concentration | `1.0` | desired |
+| toric occupied fan cells | `12.0` | active |
+
+The generated plots remained visually valid.  Contact sheets were generated
+locally for review under:
+
+```text
+outputs/post_resume_analysis/oai-bpb-valmix-39500-20260601T130711Z/step-00040000/plot_contact_sheets/
+```
+
+The 3D graph-of-thought trajectories, Ramachandran-style phase plots, energy
+landscapes, irrational toric winding collections, noncommutative heatmaps,
+radius filtrations, exact persistence-module morphisms, and toric/Slepian
+audits are all nonblank and structured.  The topology/geometry stack should
+not be disabled.
+
+### Desired But Too Weak Or Slow
+
+| diagnostic | value | read |
+|---|---:|---|
+| mean branch BPB | `4.751865` | slightly better than easy-only but still weak |
+| best branch BPB | `4.030099` | worse than prior best |
+| mean answer BPB | `4.632189` | weak |
+| best answer BPB | `3.619655` | weaker than earlier gates |
+| mean MST efficiency | `0.498363` | below useful threshold |
+| mean path smoothness | `0.089855` | not improving enough |
+| active-face entropy | `0.840971` | active, not decisive |
+| active-face margin | `-0.963135` | still negative |
+| toric phase recurrence | `0.028038` | present, low |
+| transport entropy | `0.993750` | healthy but not yet linked to BPB |
+
+The simplex/tetrahedron sheets show branches clustered away from the low-BPB
+vertices.  This means the inference-time geometry is expressive but not yet
+aligned strongly enough with the byte-likelihood objective.
+
+### Undesirable
+
+| metric | behavior |
+|---|---|
+| primary validation BPB | `4.933094 -> 4.939244 -> 4.941543` |
+| primary validation derivative | still positive over both 250-step intervals |
+| complexity validation | better than easy-only, still not better than earlier gates |
+| toric binomial residual | `0.505173`, worse than desired |
+| toric phase leaf residual | `0.998815`, still effectively uncorrected |
+| geometry best BPB | `4.030099`, not a new low |
+
+The mathematical read is that the 3% medium mixture changed the validation
+directional derivative in the right direction but not enough.  If the recovery
+gradient is
+\[
+  g_\alpha=(1-\alpha)g_e+\alpha g_m,
+\]
+where \(g_e\) is the easy-stream gradient and \(g_m\) is the medium-row
+gradient, the observed validation drift gives
+\[
+  -\eta \langle \nabla L_v,g_{0.03}\rangle > 0,
+\]
+but the magnitude is smaller than for \(g_0\).  The next intervention should
+therefore increase \(\alpha\) modestly and reduce \(\eta\) enough that the
+hard/complex shelf remains absent.  This is a scalar control change, not an
+architecture change.
+
+### Decision
+
+Do not continue from step `40000`.  Restart again from the last checkpoint
+before the validation derivative turned positive:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00039500.pt
+```
+
+Implemented the smallest scalar correction:
+
+| control | old | new | reason |
+|---|---:|---:|---|
+| `phase/lr_multiplier` | `0.52` | `0.36` | reduce validation drift and floor-bounce step size |
+| `phase/medium_mix_ratio` | `0.03` | `0.08` | make the recovery gradient more validation-aligned |
+| `phase/hard_mix_ratio` | `0.00` | `0.00` | avoid hard-row shelf |
+| `phase/complex_mix_ratio` | `0.00` | `0.00` | avoid graph-projection shelf |
+
+No JEPA and no architecture changes.  Keep random-order autoregressive graph
+decoding, tropical ring/hybrid attention, toric memory, dense contest weights,
+embedding-space GFlowNet graph-of-thought, Kolmogorov diagnostics,
+GraphCG-style directions, directed persistence, Koszul audits, toric probes,
+and PSWF/Slepian torus audits.
+
+Next review target: `40000`.
+
+Acceptance criteria:
+
+1. primary `val/bpb <= 4.933094`;
+2. if primary val only ties, require `complexity/val/bpb < 4.827858`;
+3. train BPB median remains below `3.8` without repeated `>4.3` impulses;
+4. mean branch BPB below `4.751865` or best branch BPB below `4.030099`;
+5. topology inclusion violation `0.0`, HDBSCAN stability above `0.90`, and
+   Slepian leakage `0.0`.
+
 ## 2026-06-01 Automated Review: Step 40,000 Seed-Rotate Retry
 
 Training was paused by the watcher before this review.  The requested training

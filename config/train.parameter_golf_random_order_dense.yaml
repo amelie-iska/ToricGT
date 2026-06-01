@@ -461,9 +461,14 @@ phase_curriculum:
       # medium-row mixture so the gradient remains byte-likelihood-first while
       # retaining enough validation-like reasoning exposure to avoid overfitting
       # the easy stream.
-      lr_multiplier: 0.52
+      # Step-40000 val-mix review: 3% medium mix improved over easy-only
+      # recovery but still drifted above the 39.5k validation gate.  Reduce the
+      # step size again and increase only the medium component so the next
+      # 500-step gate estimates a validation-aligned directional derivative,
+      # while hard/complex graph rows remain off.
+      lr_multiplier: 0.36
       grad_clip_norm: 0.50
-      medium_mix_ratio: 0.03
+      medium_mix_ratio: 0.08
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
