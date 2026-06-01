@@ -214,16 +214,16 @@ training:
   grad_clip_norm: 1.0
   # Step-2000 shock-guard analysis reproduced the same sharp BPB impulse:
   # local minimum at ~1690, then a large positive first/second difference at
-  # 1710.  The first guard fired but 0.30 update scale was still too permissive,
-  # so this stricter retry makes detected shock updates nearly no-op.  It does
-  # not skip examples or change the objective.
+  # 1710.  The first guard fired but the update was still too permissive, so
+  # this retry makes detected shock updates nearly no-op.  It does not skip
+  # examples or change the objective.
   shock_guard_enabled: true
   shock_guard_start_step: 1000
   shock_guard_end_step: 40750
   shock_guard_loss_ratio: 1.025
   shock_guard_loss_delta: 0.06
-  shock_guard_grad_norm: 0.42
-  shock_guard_update_scale: 0.06
+  shock_guard_grad_norm: 0.36
+  shock_guard_update_scale: 0.04
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
@@ -232,9 +232,9 @@ training:
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 1000
   robust_micro_loss_guard_end_step: 40750
-  robust_micro_loss_guard_ratio: 1.10
-  robust_micro_loss_guard_delta: 0.16
-  robust_micro_loss_guard_min_scale: 0.45
+  robust_micro_loss_guard_ratio: 1.08
+  robust_micro_loss_guard_delta: 0.14
+  robust_micro_loss_guard_min_scale: 0.40
   precision: bf16
   device: cuda
   seed: 17
@@ -361,18 +361,19 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_curvature_damped_1500_2000
+    - name: bpb_valmix_curvature_damped_1500_2000
       start_step: 1500
       end_step: 2000
-      # Step-1500 review: train BPB fell hard, but the local quadratic fit had
-      # positive curvature and the only deterministic validation point was
-      # weak.  Resume from 1500 with a lower update scale and less medium mix;
-      # keep graph/GFlowNet/topology/toric losses diagnostic-only until the
-      # next validation gate confirms likelihood descent.
-      lr_multiplier: 0.18
-      grad_clip_norm: 0.45
+      # Step-2000 review: the 0.18/0.18 retry gave a slightly lower raw train
+      # BPB but worse known validation behavior, worse branch/answer BPB, and
+      # a clear first/second-derivative bounce around 1700-1800.  Roll back to
+      # the step-1500 checkpoint, restore validation-like medium exposure, and
+      # lower only the optimizer scale so the next gate estimates a smoother
+      # validation-aligned descent direction.
+      lr_multiplier: 0.12
+      grad_clip_norm: 0.40
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.18
+      medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
@@ -381,7 +382,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.00005
+      contrastive_loss_weight: 0.00003
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

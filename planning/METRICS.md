@@ -1,5 +1,171 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-01 Automated Review: Step 2,000 Damped Early Replay
+
+Training was already paused by the watcher.  No active trainer remained in the
+requested tmux session; only the Codex review tmux was present, and the 4090 was
+idle.  I reviewed the W&B export, checkpoint metadata, metric summaries, and
+generated plot contact sheets for:
+
+```text
+outputs/post_resume_analysis/oai-bpb-damped-01500-20260601T203131Z/step-00002000/
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00002000.pt
+```
+
+### Metric Categorization
+
+| category | count | read |
+|---|---:|---|
+| as desired | `198` | core train likelihood descended over the full 1500-2000 window; topology and toric audit machinery remained coherent |
+| as desired but too weak/slow | `83` | descent became shallow after the bounce; geometry exists but does not yet lower validation/test-time branch BPB |
+| not as desired | `111` | validation at the only gate worsened, branch BPB worsened, and several complexity/topology variances rose |
+
+Core W&B behavior:
+
+| window | train BPB slope / 1k | BPB second derivative / 1k^2 | interpretation |
+|---|---:|---:|---|
+| `1501-1700` | `-2.564` | `+13.589` | strong descent but already convex upward |
+| `1700-1800` | `+3.687` | `-131.406` | sharp bounce impulse after the local minimum |
+| `1800-1990` | `-0.037` | `+1.956` | essentially flat recovery |
+| `1501-1990` | `-0.375` | `+4.539` | net improvement, but too slow and too curved |
+
+Validation and checkpoint gates:
+
+| checkpoint / gate | train BPB | validation BPB | branch mean BPB | branch answer BPB |
+|---|---:|---:|---:|---:|
+| step `1500` analysis | `3.5454` | previous gate only | `4.9275` | `4.8044` |
+| W&B eval at `1750` | `3.7296` | `5.4281` | n/a | n/a |
+| step `2000` analysis | `3.5362` | n/a | `4.9338` | `4.8148` |
+
+The step-2000 raw train BPB is only `0.0092` lower than step 1500, while the
+known validation gate at step 1750 worsened and branch/answer BPB weakened.
+This is not a promotion-quality improvement.
+
+### Desired Behavior
+
+The following should be preserved:
+
+| diagnostic | value |
+|---|---:|
+| checkpoint train BPB | `3.536199` |
+| checkpoint train loss | `2.451106` |
+| exact persistence morphisms | `20.0` |
+| topology boundary residual | `0.0` |
+| topology inclusion violation | `0.0` |
+| exact edge validity | `0.974807` |
+| directed edge validity | `0.933642` |
+| HDBSCAN stability | `0.883708` |
+| directed cycle flux | `~6.55e-18` |
+| Slepian concentration / leakage | `1.0 / 0.0` |
+| toric fan-cell entropy | `0.691788` |
+| toric binomial residual | `1.603516`, improved but still high |
+
+The plot review confirmed that the 3D graph-of-thought trajectories branch
+coherently, Ramachandran-style phase plots remain diverse, toric phase-winding
+collections render both the flat irrational winding and torus projection, exact
+persistence-module morphism plots are coherent, and the noncommutative heatmaps
+show structured directed adjacency rather than numerical collapse.
+
+### Desired But Too Weak Or Slow
+
+| diagnostic | step-2000 value | issue |
+|---|---:|---|
+| train BPB recent slope | `-0.037 / 1k` | effectively flat after the rebound |
+| GFlowNet entropy | `2.7549` | healthy but drifting down |
+| GFlowNet action diversity | `0.9941` | high but slightly decreasing |
+| best branch BPB | `4.0414` | not better than the step-1500 branch best |
+| MST efficiency | `0.7023` | slightly worse than step 1500 |
+| path smoothness | `0.0584` | worse than step 1500 |
+| HDBSCAN stability | `0.8837` | still usable, but just below the previous gate |
+
+The simplex and tetrahedron plots place most branches near the interior rather
+than near the low-BPB boundary.  This means the reasoning geometry is alive but
+not yet converted into likelihood gains.  Increasing auxiliary weights would be
+premature; the failure is a scalar optimization/curriculum mismatch.
+
+### Not As Desired
+
+| diagnostic | behavior | read |
+|---|---|---|
+| `val/bpb` | `5.4281` at step `1750` | worse than the previous deterministic gate |
+| `complexity/val/bpb` | `5.1358` at step `1750` | complexity probe agrees validation is weak |
+| train BPB finite differences | hard negative slope, then hard positive slope, then flat | floor-bounce basin |
+| `mean_bpb` branch audit | `4.9338`, worse than step 1500 | test-time branches are not improving |
+| `mean_answer_bpb` | `4.8148`, worse than step 1500 | answer spans are not improving |
+| toric active-face margin | `-1.7319`, worse than step 1500 | tropical faces are still inverted/low-margin |
+| toric leaf residual | `0.9987` | phase leaves remain audit-only |
+| DEC conservation/mass residuals | rose relative to step 1500 | topology regularization should stay off |
+
+### Mathematical Explanation
+
+The observed BPB curve is consistent with a stochastic objective
+\[
+  L_\alpha(\theta)=(1-\alpha)L_{\rm easy}(\theta)+\alpha L_{\rm med}(\theta)
+\]
+whose local Hessian along the optimizer direction becomes sharply positive
+near the 1700-step region.  The 1500-1700 window has the right sign
+\(\langle \nabla L_\alpha, \Delta\theta\rangle<0\), but the positive quadratic
+term
+\[
+  \tfrac12\Delta\theta^\top H_\alpha\Delta\theta
+\]
+grows enough to reverse the finite difference by 1700-1800.  After that, the
+guarded updates reduce the damage but leave the run on a nearly flat shelf.
+
+The geometry diagnostics support this interpretation: filtrations, persistence
+morphisms, toric winding, and Slepian concentration remain coherent, so the
+architecture did not fail.  The bad behavior is the validation-aligned gradient
+not being strong enough relative to curvature and high-BPB microbatch impulses.
+
+### Decision
+
+Do not continue from step `2000`.  Restart from the last checkpoint before the
+first strong positive derivative:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt
+```
+
+Implemented scalar-only changes:
+
+| control | previous 1500-2000 retry | new 1500-2000 retry |
+|---|---:|---:|
+| phase name | `bpb_curvature_damped_1500_2000` | `bpb_valmix_curvature_damped_1500_2000` |
+| `lr_multiplier` | `0.18` | `0.12` |
+| `grad_clip_norm` | `0.45` | `0.40` |
+| `medium_mix_ratio` | `0.18` | `0.35` |
+| `contrastive_loss_weight` | `5e-5` | `3e-5` |
+| `shock_guard_grad_norm` | `0.42` | `0.36` |
+| `shock_guard_update_scale` | `0.06` | `0.04` |
+| robust guard ratio/delta | `1.10 / 0.16` | `1.08 / 0.14` |
+| robust guard min scale | `0.45` | `0.40` |
+
+No architecture changes.  No JEPA.  Random-order autoregressive graph decoding,
+tropical ring/hybrid attention, toric memory, dense contest weights,
+embedding-space GFlowNet graph-of-thought, relative Kolmogorov diagnostics,
+GraphCG axes, directed persistence, Koszul audits, and toric probes remain
+unchanged.  Auxiliary GFlowNet/topology/toric/QAT losses remain diagnostic-only
+for this gate.
+
+Next target: fresh step `2000`.
+
+Acceptance criteria:
+
+1. `val/bpb < 5.4281`, preferably below the prior `5.3285` gate;
+2. `complexity/val/bpb < 5.1358`, preferably below `5.0305`;
+3. train BPB finite-difference slope after 1700 non-positive or materially
+   smaller than `+3.687 / 1k`;
+4. no repeated shock-guard cascade;
+5. mean branch BPB below `4.9275` and best branch BPB below `4.0414`;
+6. HDBSCAN stability above `0.88`, inclusion violation `0.0`, Slepian leakage
+   `0.0`;
+7. toric active-face margin no worse than `-1.7017`.
+
 ## 2026-06-01 Automated Review: Step 40,000 Medium-Mix 8% Retry
 
 Training was paused by the watcher at a fresh step-`40000` checkpoint from

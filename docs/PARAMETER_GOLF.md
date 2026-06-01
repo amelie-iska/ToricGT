@@ -377,9 +377,12 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
 That replay keeps the dense ToricGT contest architecture fixed while applying
 the validation-mixed BPB recovery controls immediately after the early
 checkpoint: `medium_mix_ratio: 0.35`, damped LR multiplier `0.24`, hard/complex
-rows off, and geometry/GFlowNet/QAT losses diagnostic-only. The step-1500
-analysis gate hands off to a more damped phase through step 2000 with medium mix
-`0.18`, LR multiplier `0.18`, and contrastive weight `5e-5`.
+rows off, and geometry/GFlowNet/QAT losses diagnostic-only. The step-2000
+handoff rejected the lower-medium `0.18/0.18` retry because train BPB flattened,
+the known validation gate worsened, and branch geometry weakened. The active
+rollback resumes from step `1500` and hands off to a lower-update but
+validation-mixed phase through step `2000` with medium mix `0.35`, LR
+multiplier `0.12`, clip norm `0.40`, and contrastive weight `3e-5`.
 
 Probe the long-context packed curriculum from an existing checkpoint:
 

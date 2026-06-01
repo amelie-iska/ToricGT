@@ -17,9 +17,12 @@ step-1000 recovery replay. It resumes from
 the data stream from step 1000, and places the validation-mixed BPB recovery
 phase first in the phase list so the `medium_mix_ratio: 0.35`, damped
 `lr_multiplier: 0.24`, and likelihood-first auxiliary-loss shutoff are active
-immediately. After the step-1500 gate it switches to the curvature-damped
-`bpb_curvature_damped_1500_2000` phase with `medium_mix_ratio: 0.18` and
-`lr_multiplier: 0.18`.
+immediately. The step-2000 handoff showed the lower-medium `0.18/0.18` retry
+entered a shallow floor-bounce basin. The active rollback resumes from the
+step-1500 checkpoint and switches to
+`bpb_valmix_curvature_damped_1500_2000` with `medium_mix_ratio: 0.35`,
+`lr_multiplier: 0.12`, `grad_clip_norm: 0.40`, and diagnostic-only auxiliary
+geometry losses.
 
 | Component | Default |
 | --- | --- |

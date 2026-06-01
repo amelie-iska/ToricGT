@@ -550,9 +550,12 @@ This replay uses the same dense ToricGT Parameter-Golf architecture, but starts
 the valmix35 BPB-recovery controls at step `1000`: medium-row mix `0.35`,
 hard/complex graph rows off, GFlowNet/topology/toric/QAT losses diagnostic-only,
 contrastive weight `1e-4`, LR multiplier `0.24`, and clip norm `0.50`. The
-step-1500 analysis gate then switches to a curvature-damped phase through step
-`2000`: medium mix `0.18`, LR multiplier `0.18`, contrastive weight `5e-5`,
-and the same diagnostic-only auxiliary geometry policy.
+step-2000 handoff found that the earlier `0.18/0.18` 1500-2000 retry flattened
+train BPB, worsened the known validation gate, and weakened branch geometry.
+The active replay therefore rolls back to step `1500` and uses
+`bpb_valmix_curvature_damped_1500_2000`: medium mix `0.35`, LR multiplier
+`0.12`, contrastive weight `3e-5`, clip norm `0.40`, and the same
+diagnostic-only auxiliary geometry policy.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
