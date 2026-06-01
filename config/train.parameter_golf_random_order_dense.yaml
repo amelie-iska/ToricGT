@@ -148,7 +148,7 @@ data:
   # high-entropy shelf.  Keep zero burn-in, but rotate the resume seed again so
   # the next step-1500 restart does not replay either analyzed 1500--2000 row
   # segment.  This preserves random-order AR decoding and optimizer state.
-  stream_origin_step: 37750
+  stream_origin_step: 39000
   stream_burnin_steps: 0
   document_separator: "\n\n"
   # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
@@ -220,7 +220,7 @@ training:
   # not skip examples or change the objective.
   shock_guard_enabled: true
   shock_guard_start_step: 37500
-  shock_guard_end_step: 39250
+  shock_guard_end_step: 39750
   shock_guard_loss_ratio: 1.03
   shock_guard_loss_delta: 0.07
   shock_guard_grad_norm: 0.45
@@ -232,7 +232,7 @@ training:
   # dominating the optimizer step.
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 37500
-  robust_micro_loss_guard_end_step: 39250
+  robust_micro_loss_guard_end_step: 39750
   robust_micro_loss_guard_ratio: 1.12
   robust_micro_loss_guard_delta: 0.20
   robust_micro_loss_guard_min_scale: 0.50
@@ -435,14 +435,18 @@ phase_curriculum:
       mtp_loss_weight: 0.02
       toric_entropy_loss_weight: 0.0005
       qat_loss_weight: 0.0
-    - name: bpb_recovery_37500_39250
+    - name: bpb_recovery_37500_39750
       start_step: 37500
-      end_step: 39250
+      end_step: 39750
       # Step-37750 handoff review: checkpoint finite differences improved from
       # 37250->37500, then reversed from 37500->37750.  Restart at 37500 with a
       # narrower likelihood-first window, rotate the stream, and keep the
       # topology/toric/GFlowNet machinery diagnostic-only until BPB descends.
-      lr_multiplier: 0.95
+      # Step-39000 review: checkpoint BPB barely improved over 38500 while
+      # validation/complexity BPB and branch BPB drifted upward.  Extend the
+      # likelihood-first window and lower only the scalar LR multiplier to
+      # damp the observed 250-step floor-bounce without changing architecture.
+      lr_multiplier: 0.88
       grad_clip_norm: 0.50
       medium_mix_ratio: 0.10
       hard_mix_ratio: 0.0
