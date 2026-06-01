@@ -1,5 +1,224 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-01 Automated Review: Step 38,000
+
+Training was paused by the watcher before this review.  GPU utilization was
+idle, so the analysis below is a stop-and-resume decision rather than a
+background-only observation.
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00038000.pt
+```
+
+W&B run:
+
+```text
+https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/oai37500r2-20260601T024939Z
+```
+
+Analysis outputs:
+
+```text
+outputs/post_resume_analysis/oai-bpb-recovery-37500-20260601T024939Z/step-00038000/
+```
+
+Reviewed plots included `metrics/core_metric_timeseries.png`,
+`metrics/recent_metric_slopes.png`, `metrics/selected_metric_correlations.png`,
+`simplex/reasoning_k_bpb_triangle.png`,
+`geometry/tetrahedra/toric_gfn_bpb.png`,
+`geometry/trajectories/*_trajectory_3d.png`,
+`geometry/trajectories/*_energy_landscape.png`,
+`geometry/trajectories/*_toric_phase_simplicial_trajectory.png`,
+`geometry/trajectories/*_toric_phase_winding_collection.png`, and the
+directed-topology audit panels under `geometry/topology/`.
+
+### Metric Categorization
+
+The automatic metric audit reported:
+
+| category | count |
+|---|---:|
+| as desired | `210` |
+| as desired but too weak or slow | `84` |
+| not as desired | `98` |
+
+Core likelihood is now moving in the right direction:
+
+| metric | first median | last median | recent slope / 1k | category |
+|---|---:|---:|---:|---|
+| `train/bpb` | `3.8575` | `3.5320` | `-0.9867` | desired |
+| `train/loss` | `2.6738` | `2.4482` | `-0.6839` | desired |
+| `train/loss_ema` | `2.6947` | `2.4810` | `-0.5688` | desired |
+| `train/gflownet_loss` | `3.4943` | `3.3684` | `-0.0439` | desired but weak |
+| `train/gflownet_entropy` | `2.77253` | `2.77250` | `-1.05e-4` | weak/flat |
+| `train/gflownet_action_diversity` | `0.999982` | `0.999971` | `-4.36e-5` | weak/flat |
+
+Checkpoint finite differences support continuation:
+
+| checkpoint | train BPB | train loss |
+|---:|---:|---:|
+| `37500` | `4.907855` | `3.401866` |
+| `37750` | `3.829687` | `2.654536` |
+| `38000` | `3.633273` | `2.518393` |
+
+The first differences are still negative:
+
+\[
+  \Delta \mathrm{BPB}_{37500\to37750}=-1.078168,\qquad
+  \Delta \mathrm{BPB}_{37750\to38000}=-0.196413.
+\]
+
+The second difference is positive, about `+0.881755`, so descent is
+decelerating, but it has not yet become a floor-bounce or rollback signal.
+The correct rule here is to keep the run while monitoring curvature closely:
+a positive second difference only becomes actionable when the first derivative
+also turns positive or when validation/guard metrics break.
+
+### Desired Behavior
+
+The byte objective recovered after the 37,500 rollback.  Cross-entropy and BPB
+are the same signal up to a constant byte normalization, so their matching
+slopes are expected:
+
+\[
+  \mathrm{BPB}=\frac{\mathcal L_{\mathrm{nats}}}{\log 2}
+  \cdot \frac{\text{tokens}}{\text{bytes}}.
+\]
+
+The current descent has no detected robust-difference spikes in the analyzed
+W&B interval.  Gradient norm is bounded, and the robust microbatch guard
+fraction is near but still below the operating ceiling (`0.1875` latest W&B
+summary).  The artifact budget is stable at `14,816,001` deployable parameters
+under the 16,000,000 byte competition cap.
+
+Directed topology is also healthy as an audit object.  The nested complexes
+have zero inclusion violation, exact persistence morphisms are being computed,
+edge validity is about `0.9787`, directed edge validity about `0.9565`,
+triangle validity about `0.8119`, boundary residual is `0.0`, and HDBSCAN
+stability is `0.9450` with low noise (`0.0550`).  These values mean the
+radius-parametrized directed complexes remain coherent chain-level objects
+while likelihood recovery proceeds.
+
+### Desired But Too Weak Or Slow
+
+The geometry suite shows useful but under-exploited inference-time scaling:
+
+| diagnostic | value | read |
+|---|---:|---|
+| mean branch BPB | `4.7592` | weak |
+| best branch BPB | `4.0135` | useful branch variance |
+| mean answer BPB | `4.6467` | weak |
+| best answer BPB | `3.6025` | useful but not enough |
+| mean MST efficiency | `0.5082` | partially organized |
+| mean path smoothness | `0.0886` | bounded but not funnel-like |
+| analogical map loss | `0.0985` | bounded but loose |
+| directed map loss | `0.1428` | bounded but loose |
+
+The simplex and tetrahedron plots show low-BPB pockets, but the branch clouds
+remain closer to the toric/GFlowNet-diversity side than to the low-BPB vertex.
+Mathematically, entropy near \(\log 16\) and action diversity near `1.0` mean
+the action policy is almost uniform over the 16 graph-of-thought actions.  That
+is good coverage, but it is not yet a reward-calibrated sampler:
+
+\[
+  P_F(\tau)\approx \text{uniform over actions}
+  \quad\not\approx\quad
+  \frac{R(x_\tau)}{Z}.
+\]
+
+Because the recovery phase deliberately keeps GFlowNet and topology weights at
+zero, this is acceptable for this 500-step window.  The branch sampler should
+remain diagnostic until the byte model stops recovering.
+
+### Undesirable Behavior
+
+Validation remains too high relative to training.  W&B summary values at this
+review were `val/bpb = 4.9348`, `val/score_first_bpb = 4.9328`, and
+`complexity/val/bpb = 4.8233`, while the latest training BPB summary was
+`3.5436`.  That gap indicates the current recovery window is still mainly
+repairing the train stream likelihood rather than transferring to validation.
+This is a known consequence of the likelihood-first recovery phase; it should
+not be hidden, but it is not by itself a rollback criterion while train BPB is
+falling sharply.
+
+The toric phase/active-face diagnostics are not ready to become training
+pressure.  Geometry summaries show:
+
+| toric diagnostic | value | read |
+|---|---:|---|
+| active-face margin | `-0.9565` | unstable argmax faces |
+| shadow mean margin | `0.0283` | too close to walls |
+| shadow minimum margin | `1.93e-4` | effectively on a wall |
+| binomial residual | `0.5461` | weak toric ideal consistency |
+| phase-leaf residual | `0.99996` | weak Kronecker-leaf organization |
+
+The tropical stability condition is
+
+\[
+  \Delta_{ic} > 2(\epsilon_S+\epsilon_V).
+\]
+
+The observed margins are far too small, so increasing toric or tropical
+regularization now would likely push noisy wall-crossings rather than stable
+Newton-fan decisions.  The toric plots are valuable audits, not promotion
+signals for this interval.
+
+Hessian probes are unavailable because `hessian.enabled` is currently false.
+The finite-difference curvature above is therefore the active curvature proxy
+for this decision.
+
+### Plot Review
+
+The metric time-series plot shows jagged but monotone recovery in the moving
+average of train BPB/loss.  The slope plot is dominated by stream-composition
+and complexity-distribution terms, so the robust median and checkpoint
+differences are more reliable than any single raw recent slope.
+
+The selected-correlation plot shows train BPB/loss tightly correlated, as
+expected.  Trajectory kinetic energy and viscous dissipation are negatively
+correlated with train BPB in this window, which means the current descent is
+not coming from collapsing the reasoning trajectory; the hidden trajectory is
+remaining active while likelihood improves.
+
+The 3D graph-of-thought trajectories are branch-diverse and noncollapsed, but
+the energy landscapes are rugged rather than funnel-shaped.  Terminal markers
+are not consistently at the deepest local minima, so the inference-time
+scaling controller is not yet reliably selecting the best basin.
+
+The toric phase winding plots now include both the flat irrational torus shadow
+and the embedded torus with local simplicial edges.  They show dense,
+chord-rich Kronecker winding rather than smooth motion along a few coherent
+leaves.  This matches the high phase-leaf residual and supports keeping phase
+foliation as an audit until margins improve.
+
+### Decision
+
+Continue from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00038000.pt
+```
+
+No code or config scalar change is warranted at this checkpoint.  The rollback
+rule prefers the last checkpoint before the first derivative turns positive;
+the first derivative is still negative at step 38,000.  The only action is to
+resume training and schedule the next interrupting analysis at step 38,500
+with a fresh checkpoint mtime cutoff.
+
+Acceptance criteria for the next review around `38500`:
+
+1. checkpoint `train_bpb < 3.6333`;
+2. recent median `train/bpb < 3.5320`, or no positive 250-step derivative
+   larger than `0.02`;
+3. robust microbatch guard fraction stays below `0.20`;
+4. `val/bpb < 4.9348` or no validation regression larger than `0.01`;
+5. `complexity/val/bpb < 4.8233`;
+6. best branch BPB beats `4.0135`, and mean branch BPB moves below `4.75`;
+7. topology inclusion violation remains `0.0`, HDBSCAN stability remains above
+   `0.90`, and Slepian leakage remains `0.0`.
+
 ## 2026-05-31 DEC/Toric/Relative-K Audit
 
 Training remained paused during this audit.  The checkpoint analyzed was:
