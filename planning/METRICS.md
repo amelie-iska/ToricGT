@@ -1,5 +1,236 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-01 Automated Review: Step 38,500
+
+Training was paused by the watcher before this review.  The GPU was idle after
+analysis, so the run needed an explicit continue/restart decision.
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00038500.pt
+```
+
+W&B run:
+
+```text
+https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/oai37500r2-20260601T024939Z
+```
+
+Analysis outputs:
+
+```text
+outputs/post_resume_analysis/oai-bpb-continue-38000-20260601T041332Z/step-00038500/
+```
+
+Reviewed plots included the metric time series, recent slopes, selected
+correlations, reasoning/K-helper/BPB simplex, toric-GFlowNet-BPB tetrahedron,
+3D graph-of-thought trajectories, energy landscapes, toric shadow audits, and
+exact directed persistence-module morphism panels.
+
+### Metric Categorization
+
+The automatic audit reported:
+
+| category | count |
+|---|---:|
+| as desired | `353` |
+| as desired but too weak or slow | `123` |
+| not as desired | `140` |
+
+Core W&B history remains favorable:
+
+| metric | first median | last median | recent slope / 1k | category |
+|---|---:|---:|---:|---|
+| `train/bpb` | `3.8531` | `3.5668` | `-1.3253` | desired |
+| `train/loss` | `2.6707` | `2.4723` | `-0.9186` | desired |
+| `train/loss_ema` | `2.6652` | `2.5003` | `-0.7551` | desired |
+| `train/total_loss` | `2.6708` | `2.4724` | `-0.9187` | desired |
+
+Retained checkpoint metrics show a noisy but net-improving segment:
+
+| checkpoint | train BPB | train loss |
+|---:|---:|---:|
+| `37500` | `4.907855` | `3.401866` |
+| `37750` | `3.829687` | `2.654536` |
+| `38000` | `3.633273` | `2.518393` |
+| `38250` | `3.751553` | `2.600379` |
+| `38500` | `3.592812` | `2.490348` |
+
+The `38250` checkpoint is an upward impulse, but `38500` recovers below
+`38000`.  The equal-interval differences around this impulse are
+
+\[
+  \Delta_{38000\to38250}=+0.118280,\qquad
+  \Delta_{38250\to38500}=-0.158741.
+\]
+
+That is not a persistent floor-bounce basin.  It is a recoverable stochastic
+stream impulse under the current shock guard.  The 500-step net difference is
+
+\[
+  \Delta_{38000\to38500}=-0.040461,
+\]
+
+which is slower than the prior recovery, but still negative.
+
+### Desired Behavior
+
+The byte objective keeps descending in the W&B median and in the retained
+checkpoint.  The robust microbatch guard improved materially:
+
+| metric | 38,000 summary | 38,500 summary |
+|---|---:|---:|
+| `train/robust_micro_loss_guard_fraction` | `0.1875` | `0.0` |
+| `train/robust_micro_loss_guard_scale` | `0.9930` | `1.0` |
+| `train/grad_norm` | `0.4223` | `0.1803` |
+
+This is the behavior the recovery controller was designed to produce: preserve
+the high-entropy examples in the metric stream while preventing them from
+dominating optimizer updates.  In statistical terms, the guard is behaving like
+a Huberized stochastic-gradient estimator: the logged loss remains the true
+cross-entropy sample, while the influence function for outlying microbatches is
+bounded during the active recovery window.
+
+Complexity validation improved slightly: `complexity/val/bpb` moved from
+`4.8233` to `4.8226`, and validation NCD diagnostics improved in the plotted
+window.  This is small, but it means the BPB recovery has not broken the
+relative-K/helper-string monitors.
+
+Directed topology remains a coherent audit layer.  Inclusion violation is
+`0.0`; boundary residual is `0.0`; exact morphisms computed remains `20.0`;
+edge validity is `0.9768`; directed edge validity is `0.9546`; triangle
+validity improved slightly to `0.8207`; HDBSCAN stability is `0.9448`; and
+Slepian leakage is `0.0`.  These are exactly the invariants that must remain
+stable while the byte model is repaired.
+
+### Desired But Too Weak Or Slow
+
+Validation and branch-level inference-time scaling are not improving quickly
+enough:
+
+| diagnostic | step 38,000 | step 38,500 | read |
+|---|---:|---:|---|
+| `val/bpb` | `4.9348` | `4.9384` | slight regression, still under the `0.01` guard |
+| `val/score_first_bpb` | `4.9328` | `4.9372` | slight regression |
+| `complexity/val/bpb` | `4.8233` | `4.8226` | slight improvement |
+| mean branch BPB | `4.7592` | `4.7638` | weaker |
+| best branch BPB | `4.0135` | `4.0180` | weaker |
+| mean answer BPB | `4.6467` | `4.6512` | weaker |
+| best answer BPB | `3.6025` | `3.6060` | nearly flat |
+| MST efficiency | `0.5082` | `0.5106` | slightly better |
+| path smoothness | `0.0886` | `0.0897` | slightly rougher |
+
+The simplex plot still places one branch near the low-BPB vertex, while most
+branches remain in the reasoning/K-helper interior.  The toric/GFlowNet/BPB
+tetrahedron remains clustered near toric entropy and exploration rather than
+the low-BPB vertex.  This means branch diversity exists, but the current
+diagnostic sampler is not yet a good selector.  Formally, the marginal over
+terminal graph-of-thought branches is still closer to high-entropy exploration
+than to a reward-proportional terminal law:
+
+\[
+  P_F(x) \not\propto R_{\mathrm{BPB}}(x)
+\]
+
+in the current recovery phase.  Since GFlowNet weights are intentionally zero
+in `bpb_recovery_37500_39250`, this remains a diagnostic weakness rather than
+a reason to restart.
+
+### Undesirable Behavior
+
+Toric memory entropy is still decaying:
+
+```text
+train/toric_memory_entropy: 0.3604 -> 0.3030 median, latest 0.3027
+```
+
+This is not ideal, but it is also not surprising while toric and GFlowNet
+losses are disabled.  The model is using the dense byte path for recovery and
+is not being rewarded for preserving phase diversity.  Do not increase the
+toric-memory weight inside the recovery segment; the active-face margins are
+still too small for a reliable toric training signal.
+
+Toric geometry remains unstable as supervision:
+
+| toric diagnostic | value |
+|---|---:|
+| active-face margin | `-0.9922` |
+| shadow mean margin | `0.0283` |
+| shadow minimum margin | `1.71e-4` |
+| binomial residual | `0.5169` |
+| phase-leaf residual | `0.99998` |
+
+The tropical argmax stability condition
+
+\[
+  \Delta_{ic} > 2(\epsilon_S+\epsilon_V)
+\]
+
+is not close to being satisfied.  This explains why the toric shadow plots show
+many wall hops and bend spikes: the empirical path is near fan walls.  A strong
+fan or bend loss here would amplify unstable wall-crossing noise.
+
+Hessian probes remain unavailable because the config has `hessian.enabled:
+false`.  The active curvature evidence is therefore checkpoint finite
+differences plus the robust-gradient/guard statistics.
+
+### Plot Review
+
+`core_metric_timeseries.png` shows a clean moving-average drop after the
+38,250 impulse.  The latest local values are near the lower envelope of the
+window, not at the spike top.  `recent_metric_slopes.png` shows the strongest
+recent changes are in relative-K training diagnostics and LR/guard controls;
+core BPB is not among the pathological positive slopes.  The selected
+correlation plot again shows train BPB/loss tightly coupled, while kinetic
+energy and viscous dissipation are negatively correlated with BPB.  The
+trajectory is active rather than collapsing.
+
+The 3D reasoning trajectories show a broader branch fan than at 38,000,
+including a long branch excursion away from the main solution cloud.  This is
+useful exploration, but the energy landscape remains rugged.  Low-energy
+basins are visible; terminal markers are not consistently seated in the best
+basins.  This explains the weak branch BPB improvement.
+
+The toric shadow audit shows nontrivial fan occupancy and slight improvement in
+binomial residual, but the phase-leaf residual remains near `1.0` and the
+minimum fan margin remains effectively zero.  The exact persistence morphism
+plot is healthy: H0/H1 ranks are nonzero, edge and triangle validity remain
+high, and directed edge validity stays bounded.  This supports preserving the
+current topology diagnostics unchanged.
+
+### Decision
+
+Continue from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00038500.pt
+```
+
+No code or config scalar change is warranted yet.  The 38,250 impulse recovered
+by 38,500, and 38,500 is the best retained checkpoint in the current recovery
+sequence.  Validation slipped by only about `0.0036` BPB, below the configured
+decision guard, while complexity validation and robust guard behavior improved.
+
+Schedule the next interrupting review at step `39000`.  If `39000` shows
+another upward checkpoint impulse without recovery, or if validation regresses
+by more than `0.01` relative to `4.9348`, then the next scalar adjustment should
+be conservative: reduce the recovery LR multiplier from `0.95` to `0.88` and
+keep auxiliary toric/GFlowNet/topology losses at zero until after step `39250`.
+
+Acceptance criteria for `39000`:
+
+1. checkpoint `train_bpb < 3.5928`;
+2. recent median `train/bpb < 3.5668`, or no positive 250-step derivative
+   larger than `0.02`;
+3. `val/bpb < 4.9384`, or no regression above `4.9448`;
+4. `complexity/val/bpb <= 4.8226`;
+5. robust guard fraction remains below `0.10`;
+6. best branch BPB beats `4.0180`, or mean branch BPB moves below `4.7638`;
+7. topology inclusion violation remains `0.0`, exact edge validity remains
+   above `0.95`, HDBSCAN stability remains above `0.90`, and Slepian leakage
+   remains `0.0`.
+
 ## 2026-06-01 Automated Review: Step 38,000
 
 Training was paused by the watcher before this review.  GPU utilization was
