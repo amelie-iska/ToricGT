@@ -144,14 +144,14 @@ data:
   # A rollback should not replay the identical data order.  The seed is offset
   # by the checkpoint step after loading, while validation remains fixed.
   resume_aware_stream_seed: true
-  # The 39.5k audit showed that using the checkpoint step itself as the stream
-  # origin created a broad high-entropy shelf: robust guards fired on roughly
-  # half the microbatches and checkpoint BPB jumped from 3.59 to 4.36.  Resume
-  # from the healthier 39k checkpoint, keep the older 37.75k stream origin, and
-  # burn in 500 steps so the loader continues the previously descending
-  # 38.5k->39k row-group path without replaying it.
-  stream_origin_step: 37750
-  stream_burnin_steps: 500
+  # The 40k audit showed that the 39.5k retry with the older 37.75k stream
+  # origin and a 500-step burn-in replayed a broad high-entropy row-group
+  # shelf.  One-step probes showed burn-ins >=750 landed directly on the shelf;
+  # 20-step probes showed a fresh 39.5k stream seed with no burn-in was stable
+  # (median BPB ~3.62, max ~3.65).  Rotate the stream seed at the retry
+  # checkpoint instead of burning through a diagnosed bad segment.
+  stream_origin_step: 39500
+  stream_burnin_steps: 0
   document_separator: "\n\n"
   # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
   # found token quantiles p25~=123, p40~=294, p50~=489, so the buckets below
@@ -222,7 +222,7 @@ training:
   # not skip examples or change the objective.
   shock_guard_enabled: true
   shock_guard_start_step: 37500
-  shock_guard_end_step: 40250
+  shock_guard_end_step: 40750
   shock_guard_loss_ratio: 1.03
   shock_guard_loss_delta: 0.07
   shock_guard_grad_norm: 0.45
@@ -234,7 +234,7 @@ training:
   # dominating the optimizer step.
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 37500
-  robust_micro_loss_guard_end_step: 40250
+  robust_micro_loss_guard_end_step: 40750
   robust_micro_loss_guard_ratio: 1.12
   robust_micro_loss_guard_delta: 0.20
   robust_micro_loss_guard_min_scale: 0.50
@@ -437,9 +437,9 @@ phase_curriculum:
       mtp_loss_weight: 0.02
       toric_entropy_loss_weight: 0.0005
       qat_loss_weight: 0.0
-    - name: bpb_recovery_37500_40250
+    - name: bpb_recovery_37500_40750
       start_step: 37500
-      end_step: 40250
+      end_step: 40750
       # Step-37750 handoff review: checkpoint finite differences improved from
       # 37250->37500, then reversed from 37500->37750.  Restart at 37500 with a
       # narrower likelihood-first window, rotate the stream, and keep the
@@ -454,6 +454,10 @@ phase_curriculum:
       # likelihood-only window, and set medium/hard/complex mix to zero so the
       # next gate measures byte-distribution improvement instead of curriculum
       # row difficulty.
+      # Step-40000 review: 40k improved complexity validation and geometry, but
+      # did not beat the 39.5k primary validation BPB gate and replayed a
+      # high-BPB stream shelf.  Keep the likelihood-only recovery controls and
+      # extend the guard window while stream_burnin_steps skips the shelf.
       lr_multiplier: 0.88
       grad_clip_norm: 0.50
       medium_mix_ratio: 0.0

@@ -1,5 +1,204 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-01 Automated Review: Step 40,000
+
+Training was paused by the watcher before this review.  No active training tmux
+session remained and the GPU was idle, so the correct action was an explicit
+restart/continue decision.
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00040000.pt
+```
+
+W&B run:
+
+```text
+https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/oai37500r2-20260601T024939Z
+```
+
+Analysis outputs:
+
+```text
+outputs/post_resume_analysis/oai-bpb-continue-39500-20260601T094346Z/step-00040000/
+```
+
+Reviewed plots included all generated contact sheets plus the full core metric
+time-series plot, simplex/tetrahedron panels, 3D graph-of-thought trajectories,
+energy landscapes, Ramachandran-style phase plots, irrational toric phase
+winding collections, toric shadow audits, Slepian/PSWF torus audits, directed
+filtration panels, noncommutative heatmaps, and exact persistence-module
+morphism/commutative-algebra audit panels.
+
+### Metric Categorization
+
+The automatic audit reported:
+
+| category | count |
+|---|---:|
+| as desired | `322` |
+| as desired but too weak or slow | `109` |
+| not as desired | `185` |
+
+Primary metric behavior:
+
+| metric | first median | last median | recent slope / 1k | category |
+|---|---:|---:|---:|---|
+| `train/bpb` | `3.8575` | `4.1416` | `+0.6453` | not desired |
+| `train/loss` | `2.6738` | `2.8708` | `+0.4473` | not desired |
+| `train/loss_ema` | `2.6737` | `2.8438` | `+0.4060` | not desired |
+| `val/bpb` | `4.9348` | `4.9416` | `-0.0006` | weak/slow |
+| `complexity/train/bpb` | `4.1096` | `3.5673` | `-0.1566` | desired |
+| `complexity/val/bpb` | `4.8233` | `4.8308` | `-0.0017` | weak/slow |
+| `train/gflownet_loss` | `3.4943` | `2.4157` | `-1.0375` | desired |
+| `train/toric_memory_entropy` | `0.3546` | `0.2964` | `-0.0180` | not desired |
+
+The local training log is more current than the W&B history export, which ends
+near step `39990`.  The final validation event in the log gives:
+
+| step | primary val BPB | complexity val BPB | controller train BPB EMA |
+|---:|---:|---:|---:|
+| `39750` | `4.939299` | `4.832129` | `4.251428` |
+| `40000` | `4.935114` | `4.820252` | `4.495193` |
+
+This is mixed.  Step `40000` recovers validation relative to `39750` and
+improves complexity validation, but it does not beat the step-`39500` primary
+validation gate (`4.933111`).  The retained checkpoint itself is not
+promotable: its raw checkpoint BPB is `5.063979` and train loss is `3.510083`.
+
+### Desired Behavior
+
+The geometry and topology diagnostics are coherent and should be preserved.
+Mean branch BPB improved slightly to `4.74385`, best branch BPB to `4.020996`,
+mean answer BPB to `4.62197`, and best answer BPB to `3.60942`.  Path
+smoothness improved to `0.08425`, HDBSCAN stability stayed high at `0.93783`,
+directed cycle flux remained numerically zero, inclusion violation stayed
+`0.0`, exact persistence morphisms computed stayed at `20`, and Slepian
+leakage remained `0.0`.
+
+The trajectory/contact-sheet review supports this reading.  The 3D
+graph-of-thought branches remain noncollapsed; energy landscapes have visible
+low-energy basins; Ramachandran-style phase plots show structured phase
+clusters rather than uniform noise; toric winding plots show dense projected
+Kronecker-style motion with local simplicial overlays; and exact
+persistence-module panels show valid H0/H1 rank structure and bounded directed
+edge validity.  These are useful reasoning-geometry signals, not enough to
+override the primary BPB gate.
+
+### Desired But Too Weak Or Slow
+
+Validation recovery is too small.  The log shows a `39750 -> 40000` primary
+validation BPB improvement of about `0.00418`, but the step-`39500` validation
+gate remains better.  Complexity validation did improve from the step-`39500`
+area (`~4.8221`) to `4.82025`, and the simplex plots place some branches closer
+to the low-BPB vertex, but branch selection is still weak: most branches sit in
+the reasoning/K-helper interior rather than at the low-BPB boundary.
+
+The GFlowNet policy remains useful as an analysis and test-time-scaling
+diagnostic, but under the recovery phase its training weights are zero.  The
+near-uniform entropy/action-diversity traces therefore represent preserved
+exploration capacity, not a terminal-law improvement:
+
+\[
+  P_F(x) \not\approx R(x)/Z
+\]
+
+inside the likelihood-only recovery window.
+
+### Undesirable Behavior
+
+The raw training shelf is the dominant failure.  The first roughly 60 resumed
+steps from `39500` were healthy (`BPB \approx 3.5--3.7`), then a deterministic
+high-entropy row-group shelf began and persisted:
+
+| step band | median train BPB | qualitative behavior |
+|---:|---:|---|
+| `39500--39599` | `~3.61` | healthy early resume |
+| `39600--39699` | `~4.19` | shelf begins |
+| `39700--39799` | `~4.35` | shelf persists |
+| `39800--39899` | `~4.82` | high-BPB regime |
+| `39900--39999` | `~4.92` | high-BPB regime |
+| `40000+` | `~5.10` | not promotable |
+
+This pattern is too structured to explain as ordinary stochastic noise.  Let
+\(P_t\) denote the empirical row-group distribution seen at step \(t\).  The
+retry used the same stream origin and only a `500`-step burn-in, which placed
+the resumed optimizer back onto a diagnosed high-entropy segment.  The observed
+loss is therefore a mixture-shift effect
+
+\[
+  \mathbb{E}_{(x,y)\sim P_t}[-\log p_\theta(y\mid x)]
+\]
+
+rather than evidence that the architecture lost capacity.  The model can still
+score fixed validation and complexity probes slightly better, but the training
+stream is measuring a harder local data slice and the optimizer is spending
+updates in that shelf.
+
+Toric supervision is still not reliable as a stronger recovery signal:
+active-face margin is negative (`-1.0518`), shadow minimum margin is tiny
+(`2.42e-4`), and phase-leaf residual is near `1.0`.  The tropical stability
+condition
+
+\[
+  \Delta_{ic} > 2(\epsilon_S+\epsilon_V)
+\]
+
+is not satisfied, so fan/bend/phase losses should remain diagnostic-only until
+the byte objective leaves the shelf.
+
+### Decision
+
+Restart from the step-`39500` checkpoint, not from step `40000`:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00039500.pt
+```
+
+Initial scalar hypothesis rejected:
+
+- `stream_burnin_steps=1000` landed immediately on the same bad shelf
+  (`first live BPB \approx 5.04`), so that retry was stopped before it could
+  consume the full window.
+- One-step probes over burn-ins `{0,250,500,750,1000,1250,1500,1750,2000}`
+  showed that the old `500` burn-in was best for the first batch (`3.532`) but
+  was already known to hit the shelf after roughly 60 steps; burn-ins
+  `750--1750` were not acceptable.
+- Seed-rotation probes with zero burn-in showed better alternatives.  A
+  20-step CUDA probe from the same step-`39500` checkpoint gave:
+
+| stream origin | burn-in | 20-step median BPB | max BPB | last BPB |
+|---:|---:|---:|---:|---:|
+| `37750` | `0` | `3.888` | `4.038` | `3.878` |
+| `39500` | `0` | `3.6225` | `3.653` | `3.648` |
+| `40000` | `0` | `3.6710` | `3.819` | `3.570` |
+| `50000` | `0` | `3.6635` | `3.722` | `3.608` |
+
+The revised minimal scalar update is therefore:
+
+1. rotate the stream origin to `39500`;
+2. set `stream_burnin_steps` to `0`;
+3. extend the likelihood-only recovery and robust/shock guards through
+   `40750`;
+4. keep medium/hard/complex mixture ratios at `0.0`;
+5. keep random-order autoregressive decoding, tropical ring/hybrid attention,
+   toric memory, dense contest weights, GFlowNet diagnostics,
+   GraphCG/analogy/persistence/Koszul diagnostics, and relative-K monitoring
+   unchanged.
+
+Acceptance criteria for the next step-`40000` review:
+
+1. primary validation BPB beats the step-`39500` gate: `val/bpb < 4.933111`;
+2. complexity validation remains at least as good as this review:
+   `complexity/val/bpb <= 4.820252`;
+3. step-band median raw train BPB over the resumed `39500--40000` interval is
+   below `4.0`, or at minimum the final checkpoint BPB is below `4.5`;
+4. branch mean BPB stays below `4.74385` or best branch BPB beats `4.020996`;
+5. topology invariants remain intact: inclusion violation `0.0`, boundary
+   residual `0.0`, HDBSCAN stability above `0.90`, directed cycle flux near
+   zero, and Slepian leakage `0.0`.
+
 ## 2026-06-01 Automated Review: Step 38,500
 
 Training was paused by the watcher before this review.  The GPU was idle after
