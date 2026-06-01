@@ -11,6 +11,14 @@ values loaded from `--config`.
 configuration. It keeps the research model's ToricGT bias while adapting to the
 16,000,000 byte artifact cap:
 
+`train.parameter_golf_random_order_dense_valmix35_from1000.yaml` is the
+step-1000 recovery replay. It resumes from
+`checkpoints/parameter_golf_oai_dense/random_order_step_00001000.pt`, rotates
+the data stream from step 1000, and places the validation-mixed BPB recovery
+phase first in the phase list so the `medium_mix_ratio: 0.35`, damped
+`lr_multiplier: 0.24`, and likelihood-first auxiliary-loss shutoff are active
+immediately.
+
 | Component | Default |
 | --- | --- |
 | Tokenization | byte-level, tied input/output embedding |

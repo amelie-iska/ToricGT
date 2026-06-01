@@ -364,6 +364,21 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --config config/train.parameter_golf_random_order_dense.yaml
 ```
 
+Replay the current `oai` valmix35 recovery from step 1000:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/train_parameter_golf_random_order.py \
+  --config config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml \
+  --resume checkpoints/parameter_golf_oai_dense/random_order_step_00001000.pt \
+  --wandb --wandb-project toricgt-parameter-golf
+```
+
+That replay keeps the dense ToricGT contest architecture fixed while applying
+the validation-mixed BPB recovery controls immediately after the early
+checkpoint: `medium_mix_ratio: 0.35`, damped LR multiplier `0.24`, hard/complex
+rows off, and geometry/GFlowNet/QAT losses diagnostic-only.
+
 Probe the long-context packed curriculum from an existing checkpoint:
 
 ```bash

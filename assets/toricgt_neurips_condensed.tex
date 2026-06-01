@@ -292,7 +292,16 @@ The competition score is BPB, but BPB alone does not distinguish shallow byte co
   \Kc_c(s)=|c(s)|,\qquad
   \Kc_c(y\mid x)=\max\{0,\Kc_c(x\,\Vert\,y)-\Kc_c(x)\},
 \end{equation}
-and for two trajectories
+as a computable proxy for the ideal but uncomputable quantities
+\begin{equation}
+  K_U(y\mid x)=\min\{|p|:U(p,x)=y\},\qquad
+  K_U(x\mid y)=\min\{|p|:U(p,y)=x\}.
+\end{equation}
+The forward direction measures how much extra program information is needed to produce the answer or next byte from the problem/prefix; the reverse direction measures how much of the problem structure is recoverable from the answer or trace.  A terse guess can have low forward proxy complexity while still losing explanatory information visible through high reverse conditional complexity.  ToricGT also logs a signed relative proxy
+\begin{equation}
+  \widetilde K_c(y\mid x;h_0)=\Kc_c(h_0\,\Vert\,y)-\Kc_c(h_0)-\Kc_c(y\mid x),
+\end{equation}
+where $h_0$ is a named baseline helper.  Negative values are relative compression gains over the baseline; they are not negative true Kolmogorov complexity.  For two trajectories
 \begin{equation}
   \operatorname{NCD}_c(a,b)=
   \frac{\Kc_c(a\,\Vert\,b)-\min(\Kc_c(a),\Kc_c(b))}
@@ -318,7 +327,7 @@ Negative $\Delta K_c^{\mathrm{ana}}$ means the analogy shortened the target prog
 \begin{equation}
   \left|(\widehat K_c(x)-\widehat K_c(x\mid y))-(\widehat K_c(y)-\widehat K_c(y\mid x))\right|
 \end{equation}
-to catch unreliable compressor asymmetries.
+to catch unreliable compressor asymmetries and solutions that preserve only one direction of the problem--answer relation.  The score-valid helper rule is the same as for random-order decoding: $\pi$, the strict prefix, prefix-visible GFlowNet actions, and serialized graph/tree helpers may condition the proxy before scoring, while the target byte and future bytes may not.
 
 \paragraph{Reasoning simplex diagnostics.}
 For evaluation, ToricGT projects compute-quality tradeoffs into small simplices.  Let $r$ be a normalized reasoning-budget score from trajectory length, recurrent passes, GFlowNet samples, and wall time; let $k$ be a compressor-based complexity score; and let $p$ be a low-BPB score.  The triangle point is

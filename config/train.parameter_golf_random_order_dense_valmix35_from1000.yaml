@@ -1,0 +1,558 @@
+model:
+  # Dense is the default contest path. The research graph model still uses
+  # Soft-MoE by default, but dense shared weights are the safer 16 MB tradeoff.
+  vocab_size: 260
+  byte_offset: 4
+  max_seq_len: 1024
+  d_model: 384
+  num_heads: 6
+  num_layers: 7
+  recurrent_passes: 2
+  ffn_multiplier: 4
+  # The BPB sprint is explicitly underfit/likelihood-first.  Disable dropout
+  # during the early supervised compression phase; later audits and QAT protect
+  # the deployable contest artifact.
+  dropout: 0.0
+  attention: hybrid
+  ring_block_size: 256
+  polarquant_kv_bits: 8
+  polarquant_train: false
+  use_gflownet_policy: true
+  gflownet_num_actions: 16
+  gflownet_hidden_dim: 192
+  gflownet_action_scale: 0.12
+  use_bigram_hash: true
+  bigram_hash_buckets: 4096
+  bigram_hash_weight: 0.35
+  use_caseops_features: true
+  caseops_weight: 0.35
+  use_smear_gate: true
+  smear_temperature_min: 0.55
+  smear_temperature_max: 1.75
+  use_toric_memory: true
+  toric_memory_slots: 32
+  toric_memory_weight: 0.08
+  # Low-rank toric-geometry probes provide compact auxiliary supervision for
+  # Newton active faces, fan margins, bend consistency, binomial relations,
+  # affine-Coxeter walls, braid relations, and noncommutative phase leaves.
+  # The probe is not part of the packed contest export.
+  use_toric_geometry_tasks: true
+  toric_geometry_num_exponents: 16
+  toric_geometry_exponent_dim: 4
+  toric_geometry_probe_rank: 12
+  toric_geometry_quant_bits: 6
+  toric_geometry_teacher_temperature: 0.55
+  toric_geometry_margin: 0.18
+  toric_geometry_fan_weight: 1.0
+  toric_geometry_bend_weight: 0.30
+  toric_geometry_binom_weight: 0.30
+  toric_geometry_moment_weight: 0.50
+  toric_geometry_coxeter_weight: 0.20
+  toric_geometry_braid_weight: 0.10
+  toric_geometry_leaf_weight: 0.25
+  toric_geometry_max_positions: 256
+  # GraphCG-style training uses a tiny learned steerable frame for hidden-space
+  # edits.  The added parameter count is negligible under the 16 MB budget, and
+  # the model is trained to align embeddings to disentangled analogy axes.
+  use_graphcg: true
+  graphcg_num_directions: auto
+  graphcg_min_directions: 16
+  graphcg_max_directions: 256
+  graphcg_memory_fraction: 0.09
+  graphcg_direction_safety: 0.90
+  graphcg_alpha: 0.10
+  graphcg_temperature: 0.2
+  graphcg_max_codes: 192
+  graphcg_orthogonal_weight: 0.1
+  graphcg_covariance_weight: 0.05
+  graphcg_sparsity_weight: 0.00005
+  # Analogical reasoning is trained as a scale-insensitive map between local
+  # simplex-tree signatures, not only as raw vector arithmetic.  The fast
+  # contest path uses a differentiable 0D-persistence/MST proxy and soft
+  # Vietoris-Rips triangle closure over sampled relation classes.
+  use_analogy_lattice: true
+  analogy_lattice_max_pairs: 256
+  analogy_lattice_stride: 1
+  analogy_lattice_temperature: 0.2
+  analogy_lattice_basis_weight: 0.5
+  analogy_lattice_parallelogram_weight: 0.35
+  analogy_lattice_topology_weight: 0.35
+  analogy_topology_max_points_per_group: 16
+  analogy_topology_max_groups: 24
+  analogy_topology_k: 4
+  analogy_topology_filtration_levels: 4
+  analogy_topology_radius_min: 0.55
+  analogy_topology_radius_max: 1.65
+  analogy_topology_chain_weight: 0.25
+  analogy_topology_inclusion_weight: 0.10
+  analogy_topology_directed: true
+  analogy_topology_directed_weight: 0.35
+  analogy_topology_skew_scale: 0.35
+  analogy_topology_cycle_weight: 0.10
+  # Radius-parametrized HDBSCAN surrogate: compute mutual-reachability density
+  # across the same filtration radii, then pull only persistent high-stability
+  # relation neighbors. Unstable/outlier arrows mostly stop contributing.
+  analogy_hdbscan_enabled: true
+  analogy_hdbscan_weight: 0.20
+  analogy_hdbscan_min_cluster_size: 4
+  analogy_hdbscan_min_samples: 4
+  analogy_hdbscan_stability_threshold: 0.18
+  # Per-reasoning-step topology uses hidden states themselves, not only
+  # relation arrows.  Local windows become radius-parametrized directed flag
+  # complexes with HDBSCAN mutual-reachability gates and time-oriented skew.
+  analogy_step_topology_weight: 0.25
+  analogy_step_topology_max_points: 24
+  analogy_step_topology_max_windows: 6
+  analogy_step_topology_window_size: 32
+  analogy_step_topology_step_stride: 8
+  analogy_step_topology_time_bias: 0.18
+  # Affine-toric/Koszul persistence audit.  Local reasoning windows define
+  # small chart actions; training receives a tiny residual for Koszul exactness
+  # while analysis computes exact F2 chain-complex, Fitting, and
+  # Buchsbaum-Eisenbud complementary-minor checks.
+  use_koszul_persistence: true
+  koszul_max_points: 24
+  koszul_max_windows: 4
+  koszul_window_size: 32
+  koszul_step_stride: 8
+  koszul_num_parameters: 3
+  koszul_temperature: 0.12
+  koszul_chart_exponents: 12
+  koszul_rank_temperature: 0.05
+  contrastive_temperature: 0.2
+  trajectory_flow_viscosity: 0.05
+  aux_mtp_offsets: 2
+  target_artifact_bytes: 15600000
+
+data:
+  train_parquet_glob: data/curated_hf_shards/train/*.parquet
+  val_parquet_glob: data/curated_hf_shards/validation/*.parquet
+  rows_per_batch: 128
+  num_workers: 2
+  # Parameter-Golf BPB is scored on byte likelihood.  Keep the main early
+  # stream text-first so the compressor is not paying for synthetic graph JSON
+  # scaffolding before it has learned the byte distribution.  The delayed
+  # complex curriculum below can still project graph structure when it turns on.
+  include_graph_projection: false
+  complex_include_graph_projection: true
+  graph_projection_max_chars: 4096
+  coprime_row_stride: true
+  # Mix row groups across shards instead of reading whole Parquet shards in
+  # long contiguous stretches.  This removes the easy-then-hard file cycle that
+  # showed up as a repeatable ~750-step BPB ricochet after rollbacks.
+  interleave_row_groups: true
+  # A rollback should not replay the identical data order.  The seed is offset
+  # by the checkpoint step after loading, while validation remains fixed.
+  resume_aware_stream_seed: true
+  # Step-1000 replay config.  This keeps the valmix35 likelihood-first controls
+  # active immediately after the early checkpoint while rotating the data stream
+  # from the replay step.  The original late-run config remains unchanged.
+  stream_origin_step: 1000
+  stream_burnin_steps: 0
+  document_separator: "\n\n"
+  # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
+  # found token quantiles p25~=123, p40~=294, p50~=489, so the buckets below
+  # separate short byte-compression rows from medium reasoning rows and long
+  # technical/graph records.
+  difficulty_curriculum_enabled: true
+  easy_min_estimated_tokens: 0
+  # Keep the initial byte-compression stream unfiltered.  A live GraphCG
+  # restart showed <=128-token rows were not actually easier for BPB; they were
+  # short but higher-entropy.  Medium/hard streams still provide explicit
+  # stratified reasoning exposure after the capture window.
+  easy_max_estimated_tokens: 0
+  medium_start_step: 2500
+  medium_mix_ratio: 0.05
+  medium_min_estimated_tokens: 129
+  medium_max_estimated_tokens: 384
+  medium_include_graph_projection: false
+  hard_start_step: 6000
+  hard_mix_ratio: 0.00
+  hard_min_estimated_tokens: 385
+  hard_include_graph_projection: true
+  hard_task_family_keywords:
+    - math
+    - code
+    - graph
+    - got
+    - reasoning
+    - health
+    - physics
+    - biomed
+    - biochem
+  # Backward-compatible aliases for older scripts/checkpoints and the adaptive
+  # controller; hard_* is the canonical name for new runs.
+  complex_start_step: 6000
+  complex_mix_ratio: 0.00
+  complex_min_estimated_tokens: 385
+  complex_task_family_keywords:
+    - math
+    - code
+    - graph
+    - got
+    - reasoning
+    - health
+    - physics
+    - biomed
+    - biochem
+
+training:
+  checkpoint_dir: checkpoints/parameter_golf_oai_dense
+  max_steps: 50000
+  # Keep the stream-aligned 2x16 microbatch structure. Batch size 4 OOMs on
+  # the current tropical-ring path at 24 GB; changing accumulation also changes
+  # the iterable data state, so preserve the proven alignment.
+  batch_size: 2
+  grad_accum_steps: 16
+  # The stream-aligned 1250->1750 audit showed the fast descent returned, but
+  # BPB began bouncing once the warmup pushed effective LR above roughly
+  # 2.3e-5.  Restart from the aligned step-1500 checkpoint with Adam moments
+  # intact and keep the next 500-step window below that observed bounce band.
+  lr: 0.000038
+  weight_decay: 0.03
+  warmup_steps: 3500
+  grad_clip_norm: 1.0
+  # Step-2000 shock-guard analysis reproduced the same sharp BPB impulse:
+  # local minimum at ~1690, then a large positive first/second difference at
+  # 1710.  The first guard fired but 0.30 update scale was still too permissive,
+  # so this stricter retry makes detected shock updates nearly no-op.  It does
+  # not skip examples or change the objective.
+  shock_guard_enabled: true
+  shock_guard_start_step: 1000
+  shock_guard_end_step: 40750
+  shock_guard_loss_ratio: 1.03
+  shock_guard_loss_delta: 0.07
+  shock_guard_grad_norm: 0.45
+  shock_guard_update_scale: 0.08
+  # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
+  # high-loss microbatches in the early capture window.  This is a Huber-style
+  # stochastic-gradient estimator, not a data deletion path, and it keeps the
+  # high-entropy examples visible in metrics while preventing them from
+  # dominating the optimizer step.
+  robust_micro_loss_guard_enabled: true
+  robust_micro_loss_guard_start_step: 1000
+  robust_micro_loss_guard_end_step: 40750
+  robust_micro_loss_guard_ratio: 1.12
+  robust_micro_loss_guard_delta: 0.20
+  robust_micro_loss_guard_min_scale: 0.50
+  precision: bf16
+  device: cuda
+  seed: 17
+  log_interval: 10
+  eval_interval: 250
+  eval_batches: 20
+  eval_order_samples: 1
+  eval_gflownet_samples: 2
+  gflownet_loss_weight: 0.001
+  # Target policy entropy keeps branching noncollapsed without rewarding a
+  # permanently uniform GFlowNet policy.
+  gflownet_entropy_weight: 0.0005
+  gflownet_entropy_target: 2.00
+  graphcg_loss_weight: 0.0002
+  analogy_lattice_loss_weight: 0.0002
+  toric_geometry_loss_weight: 0.00015
+  koszul_persistence_loss_weight: 0.00002
+  toric_entropy_floor: 0.20
+  toric_entropy_loss_weight: 0.001
+  mtp_loss_weight: 0.01
+  qat_loss_weight: 0.0000001
+  qat_bits: 6
+  qat_max_tensors: 2
+  qat_start_step: 25000
+  qat_warmup_steps: 5000
+  contrastive_loss_weight: 0.001
+  trajectory_flow_loss_weight: 0.0001
+  trajectory_flow_target: 0.075
+  eval_score_first_bias_lr: 0.025
+  eval_score_first_bias_decay: 0.98
+  eval_score_first_bias_clip: 3.0
+  causal_audit_interval: 1000
+  resize_position_embedding: true
+  # Retain dense resume points frequently. The model is small enough that
+  # keeping historical optimizer checkpoints is useful for curriculum rollbacks.
+  ckpt_interval: 250
+
+complexity:
+  enabled: true
+  eval_every: 50
+  eval_samples: 2
+  compressors:
+    - zlib
+    - lzma
+
+adaptive_training:
+  enabled: true
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01000_valmix35.json
+  # Checkpoint-level controller only: updates after eval windows, never per
+  # microbatch.  It keeps the architecture and optimizer state fixed while
+  # gently tuning the three controls identified by the 23.25k rollback analysis.
+  entropy_target_min: 2.00
+  entropy_target_tau_steps: 8000
+  gflownet_loss_min: 0.0
+  gflownet_loss_max: 0.006
+  gflownet_gap_step: 0.00025
+  gflownet_relax_step: 0.0005
+  complex_mix_min: 0.00
+  complex_mix_max: 0.04
+  complex_down_step: 0.03
+  complex_up_step: 0.005
+  train_bpb_ema_beta: 0.70
+  train_drift_threshold: 0.01
+  val_improvement_delta: 0.002
+  warmup_updates: 0
+  reset_on_start_step_mismatch: true
+  gflownet_increase_drift_guard: 0.00
+  recovery_mode_enabled: true
+  recovery_train_drift_threshold: 0.04
+  recovery_complex_down_step: 0.04
+  recovery_gflownet_down_step: 0.00075
+  recovery_exit_val_improvements: 3
+
+hessian:
+  enabled: false
+  # Diagnostic-only stochastic HVP probes on a cropped batch.  These estimate
+  # local sharpness and average curvature around rollback checkpoints without
+  # attempting a full Hessian or adding an optimizer-side second-order method.
+  eval_every: 250
+  max_tokens: 128
+  trace_samples: 1
+  power_iters: 1
+  max_tensors: 4
+  max_parameters: 1500000
+
+phase_curriculum:
+  enabled: true
+  phases:
+    - name: bpb_valmix35_recovery_01000_40750
+      start_step: 1000
+      end_step: 40750
+      # Step-1000 replay of the validation-mixed recovery controls.  Because
+      # phase selection uses the first active phase, this block must remain
+      # above the historical early curriculum phases.
+      lr_multiplier: 0.24
+      grad_clip_norm: 0.50
+      medium_mix_ratio: 0.35
+      hard_mix_ratio: 0.0
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.0
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.00010
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_stream_recovery
+      start_step: 1000
+      end_step: 1500
+      lr_multiplier: 0.95
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.00005
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.0005
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_sprint_1500_2000
+      start_step: 1500
+      end_step: 2000
+      # Step-2000 shock-guard review: the local BPB floor still broke at the
+      # deterministic easy-stream impulse around step 1710.  Keep this retry
+      # gentler and leave auxiliary geometry terms diagnostic-only in capture.
+      lr_multiplier: 0.58
+      grad_clip_norm: 0.45
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.0
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.0
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.00025
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_sprint_2000_3000
+      start_step: 2000
+      end_step: 3000
+      lr_multiplier: 0.60
+      grad_clip_norm: 0.55
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.05
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.0
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.00025
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_stabilization_hold
+      start_step: 3000
+      end_step: 6000
+      lr_multiplier: 0.72
+      grad_clip_norm: 0.90
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.18
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.00005
+      analogy_lattice_loss_weight: 0.00003
+      toric_geometry_loss_weight: 0.00002
+      koszul_persistence_loss_weight: 0.000005
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.0005
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: light_gflownet_alignment
+      start_step: 6000
+      end_step: 12000
+      lr_multiplier: 1.0
+      complex_mix_ratio: 0.02
+      medium_mix_ratio: 0.45
+      hard_mix_ratio: 0.02
+      gflownet_loss_weight: 0.001
+      gflownet_entropy_weight: 0.0005
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.0003
+      analogy_lattice_loss_weight: 0.0002
+      toric_geometry_loss_weight: 0.00008
+      koszul_persistence_loss_weight: 0.00001
+      trajectory_flow_loss_weight: 0.0001
+      contrastive_loss_weight: 0.0015
+      mtp_loss_weight: 0.015
+      toric_entropy_loss_weight: 0.00025
+      qat_loss_weight: 0.0
+    - name: adaptive_reasoning_curriculum
+      start_step: 12000
+      end_step: 25000
+      lr_multiplier: 1.0
+      medium_mix_ratio: 0.50
+      hard_mix_ratio: 0.04
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.0004
+      analogy_lattice_loss_weight: 0.0003
+      toric_geometry_loss_weight: 0.00012
+      koszul_persistence_loss_weight: 0.00002
+      trajectory_flow_loss_weight: 0.00025
+      contrastive_loss_weight: 0.002
+      mtp_loss_weight: 0.02
+      toric_entropy_loss_weight: 0.0005
+      qat_loss_weight: 0.0
+    - name: bpb_recovery_37500_40750
+      start_step: 37500
+      end_step: 40750
+      # Step-37750 handoff review: checkpoint finite differences improved from
+      # 37250->37500, then reversed from 37500->37750.  Restart at 37500 with a
+      # narrower likelihood-first window, rotate the stream, and keep the
+      # topology/toric/GFlowNet machinery diagnostic-only until BPB descends.
+      # Step-39000 review: checkpoint BPB barely improved over 38500 while
+      # validation/complexity BPB and branch BPB drifted upward.  Extend the
+      # likelihood-first window and lower only the scalar LR multiplier to
+      # damp the observed 250-step floor-bounce without changing architecture.
+      # Step-39500 retry review: raw train BPB rose because medium/harder row
+      # groups entered the stream, but deterministic validation BPB and
+      # complexity validation BPB improved.  Continue from 39500, extend the
+      # likelihood-only window, and set medium/hard/complex mix to zero so the
+      # next gate measures byte-distribution improvement instead of curriculum
+      # row difficulty.
+      # Step-40000 seed-rotate review: rotating the 39.5k stream seed fixed the
+      # raw train BPB shelf, but easy-only recovery moved primary validation BPB
+      # from 4.9331 to 4.9461 and slightly weakened branch geometry.  Resume
+      # from the 39.5k validation gate with a smaller update scale and a tiny
+      # medium-row mixture so the gradient remains byte-likelihood-first while
+      # retaining enough validation-like reasoning exposure to avoid overfitting
+      # the easy stream.
+      # Step-40000 val-mix review: 3% medium mix improved over easy-only
+      # recovery but still drifted above the 39.5k validation gate.  Reduce the
+      # step size again and increase only the medium component so the next
+      # 500-step gate estimates a validation-aligned directional derivative,
+      # while hard/complex graph rows remain off.
+      # Step-40000 valmix8 review: 8% medium mix improved primary validation
+      # again (4.9415 -> 4.9392) and complexity validation (4.8279 -> 4.8259),
+      # but still missed the 39.5k gate.  The derivative is improving but
+      # remains positive, so increase the medium component enough to test the
+      # validation-aligned gradient while keeping hard/complex rows off.
+      # Step-40000 valmix18 review: 18% medium mix continued the validation
+      # improvement trend (primary 4.9392 -> 4.9376, complexity 4.8259 ->
+      # 4.8253) but the local 39750->40000 derivative turned positive and
+      # the train stream showed repeated high-BPB impulses.  Restart again
+      # from the 39.5k gate with more validation-like medium rows but a lower
+      # scalar step size; this keeps the intervention one-dimensional in the
+      # data mixture plus one optimizer damping scalar.
+      lr_multiplier: 0.24
+      grad_clip_norm: 0.50
+      medium_mix_ratio: 0.35
+      hard_mix_ratio: 0.0
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.0
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      contrastive_loss_weight: 0.00010
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: compression_and_scaling
+      start_step: 25000
+      end_step:
+      lr_multiplier: 0.85
+      medium_mix_ratio: 0.45
+      hard_mix_ratio: 0.04
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.0005
+      analogy_lattice_loss_weight: 0.0004
+      toric_geometry_loss_weight: 0.00015
+      koszul_persistence_loss_weight: 0.00002
+      trajectory_flow_loss_weight: 0.0004
+      contrastive_loss_weight: 0.003
+      mtp_loss_weight: 0.03
+      toric_entropy_loss_weight: 0.001
+      qat_loss_weight: 0.0000001
+      qat_start_step: 25000
+      qat_warmup_steps: 5000
+
+checkpoint_publishing:
+  enabled: true
+  repo_id: AmelieSchreiber/toricgt-checkpoints
+  repo_type: model
+  checkpoint_filename: parameter_golf_oai_best.pt
+  manifest_filename: parameter_golf_oai_best.json
+  state_path: checkpoints/parameter_golf_oai_dense/hf_best_publish_state.json
+  # Lower is better.  This composite keeps BPB primary while requiring the
+  # prediction-target complexity/NCD diagnostic to be part of promotion.
+  complexity_metric: complexity/val/prediction_target_ncd_lzma_mean
+  complexity_weight: 0.05
+  min_score_delta: 0.0
+  max_complexity_regression: 0.10
+  private: false
+
+export:
+  bits: 6
+  quantization_mode: row
+  compression: lzma
+
+logging:
+  wandb: true
+  project: toricgt-parameter-golf
+  run_name: oai-dense-random-order-toricgt-gflownet

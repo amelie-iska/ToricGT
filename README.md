@@ -535,6 +535,22 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --config config/train.parameter_golf_random_order_dense.yaml
 ```
 
+Current `oai` recovery replay from the early checkpoint:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/train_parameter_golf_random_order.py \
+  --config config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml \
+  --resume checkpoints/parameter_golf_oai_dense/random_order_step_00001000.pt \
+  --wandb --wandb-project toricgt-parameter-golf \
+  --wandb-run-name oai-bpb-valmix35-01000-<timestamp>
+```
+
+This replay uses the same dense ToricGT Parameter-Golf architecture, but starts
+the valmix35 BPB-recovery controls at step `1000`: medium-row mix `0.35`,
+hard/complex graph rows off, GFlowNet/topology/toric/QAT losses diagnostic-only,
+contrastive weight `1e-4`, LR multiplier `0.24`, and clip norm `0.50`.
+
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
 fixed run seed plus per-chunk/sample ids, so each new input gets a new
@@ -698,7 +714,8 @@ compressor-tagged proxies such as `complexity/train/target_cond_k_lzma_mean`,
 `complexity/train/analogical_transfer_relative_k_lzma_mean`, and validation
 analogues. These estimate conditional reasoning/program complexity,
 random-order tree-program length, prediction-target NCD, GFlowNet action-trace
-complexity, and analogical transfer of `K(x|y)`. The helper side of the
+complexity, forward and reverse conditional proxies `K(y|x)` and `K(x|y)`,
+symmetry-of-information residuals, and analogical transfer of `K(y|x)`. The helper side of the
 conditional program includes the strict random-order prefix, the public
 permutation/tree program, the original byte chunk, optional GFlowNet action
 traces, and optional serialized graph/tree helper payloads. Negative

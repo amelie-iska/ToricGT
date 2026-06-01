@@ -1469,7 +1469,18 @@ The competition objective is BPB, but BPB alone does not reveal whether a small 
   \widehat K_c(s)=|c(s)|,\qquad
   \widehat K_c(y\mid x)=\max\{0,\widehat K_c(x\Vert y)-\widehat K_c(x)\}.
 \end{equation}
-This is not true Kolmogorov complexity, which is uncomputable; it is an auditable estimator whose compressor and helper context are always named.
+This is not true Kolmogorov complexity, which is uncomputable; it is an auditable estimator whose compressor and helper context are always named.  The underlying ideal quantities are the conditional complexities
+\begin{equation}
+  K_U(y\mid x)=\min\{|p|:U(p,x)=y\},\qquad
+  K_U(x\mid y)=\min\{|p|:U(p,y)=x\},
+\end{equation}
+for a fixed universal machine $U$.  Up to the invariance constant, these measure how much extra program information is needed to reconstruct one object from the other.  The two directions matter.  In ToricGT, $x$ is usually a problem, graph prefix, or helper trajectory, while $y$ is a target answer, future byte block, or reasoning trace; $K(y\mid x)$ measures forward reasoning economy, whereas $K(x\mid y)$ measures how much of the original problem structure is recoverable from the proposed solution.  A short answer with low $K(y\mid x)$ but high $K(x\mid y)$ can be an overcompressed guess rather than a faithful solution.
+
+For diagnostics that allow signed improvement over the best direct helper, ToricGT also logs
+\begin{equation}
+  \widetilde K_c(y\mid x;h_0)=\widehat K_c(h_0\Vert y)-\widehat K_c(h_0)-\widehat K_c(y\mid x),
+\end{equation}
+where $h_0$ is a named baseline helper such as the strict prefix or shortest-known direct program proxy.  Negative values mean that the new helper encoded $y$ more compactly than the baseline proxy.  These signed values are never interpreted as negative true Kolmogorov complexity; they are relative compression gains.
 
 For random-order autoregression, the helper object is structured.  At random-order step $k$, the direct helper family is
 \begin{equation}
@@ -1499,7 +1510,7 @@ Finally, the suite records a symmetry-of-information residual
   \left|(\widehat K_c(x)-\widehat K_c(x\mid y))
   -(\widehat K_c(y)-\widehat K_c(y\mid x))\right|.
 \end{equation}
-Large $S_c$ indicates that the chosen compressor/helper encoding may be asymmetric for the domain at hand.  In the current branch these quantities are diagnostics and checkpoint-selection aids, not replacements for the BPB objective.
+This mirrors the algorithmic-information identity $K(x)-K(x\mid y)\approx K(y)-K(y\mid x)$ up to logarithmic and machine-dependent terms.  Large $S_c$ indicates that the chosen compressor/helper encoding may be asymmetric for the domain at hand, or that the model's prediction preserved one direction of the relation while losing the other.  In the current branch these quantities are diagnostics and checkpoint-selection aids, not replacements for the BPB objective.  They interact with random-order autoregression only through score-valid helpers: at position $k$, the order program $\pi$, strict prefix $b_{\pi_{<k}}$, prefix-visible GFlowNet actions, and previously generated graph/tree helpers may condition the proxy, while the target byte $b_{\pi_k}$ and future bytes may not.
 
 \subsection{GraphCG bases and directed topological analogies}
 
