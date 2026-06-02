@@ -436,6 +436,22 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --config config/train.parameter_golf_random_order_dense.yaml
 ```
 
+Fresh native all-phases training with automated Codex review handoffs:
+
+```bash
+scripts/launch_parameter_golf_all_phases.sh
+```
+
+This uses `config/train.parameter_golf_all_phases.yaml`. It keeps the early
+optimization likelihood-first, then ramps GraphCG, toric geometry, directed
+topology, Koszul persistence, trajectory memory, and finally Toric BGG Category
+O. BGG is constructed for metrics from step zero but its loss stays off until
+the late `toric_bgg_category_o` phase, so early BPB recovery is not competing
+with homological supervision. The launcher also starts
+`scripts/watch_training_analysis.py`; the watcher pauses at the first fresh
+checkpoint at or above step 1000, runs W&B/simplex/geometry analysis, and calls
+`scripts/codex_training_review_resume.sh` with the BPB target loop controls.
+
 Replay the current `oai` valmix35 recovery from step 1000:
 
 ```bash

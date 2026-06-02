@@ -535,6 +535,22 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --config config/train.parameter_golf_random_order_dense.yaml
 ```
 
+Launch the fresh native all-phases run with automated Codex check-ins:
+
+```bash
+scripts/launch_parameter_golf_all_phases.sh
+```
+
+This path uses `config/train.parameter_golf_all_phases.yaml` and trains the
+implemented stack in ordered phases: byte warmup, GraphCG/toric probes,
+directed topology plus Koszul persistence, trajectory memory and reasoning,
+late Toric BGG Category O supervision, and final QAT/export stabilization.
+The Toric BGG probe is instantiated from the start so `train/toric_bgg_*`
+diagnostics are visible in W&B, but `toric_bgg_loss_weight` remains `0.0`
+until the late `toric_bgg_category_o` phase. The launcher starts a watcher that
+pauses at a fresh checkpoint, runs W&B/geometry/simplex analyses, and hands off
+to the Codex review hook with `BPB_TARGET=1.2` and a 100-review cap.
+
 Current `oai` recovery replay from the early checkpoint:
 
 ```bash
