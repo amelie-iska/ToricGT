@@ -235,8 +235,8 @@ training:
   shock_guard_end_step: 40750
   shock_guard_loss_ratio: 1.025
   shock_guard_loss_delta: 0.06
-  shock_guard_grad_norm: 0.32
-  shock_guard_update_scale: 0.025
+  shock_guard_grad_norm: 0.30
+  shock_guard_update_scale: 0.015
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
@@ -303,9 +303,13 @@ adaptive_training:
   entropy_target_min: 2.00
   entropy_target_tau_steps: 8000
   gflownet_loss_min: 0.0
-  gflownet_loss_max: 0.001
+  # Step-3500 curvcap review: keep the adaptive controller from relaxing
+  # GFlowNet back to 1e-3 during the BPB likelihood-capture hold.  In this
+  # regime GFlowNet remains active, but the byte likelihood objective must own
+  # the optimizer direction.
+  gflownet_loss_max: 0.00008
   gflownet_gap_step: 0.0
-  gflownet_relax_step: 0.0005
+  gflownet_relax_step: 0.00002
   complex_mix_min: 0.00
   complex_mix_max: 0.04
   complex_down_step: 0.03
@@ -319,7 +323,7 @@ adaptive_training:
   recovery_mode_enabled: true
   recovery_train_drift_threshold: 0.04
   recovery_complex_down_step: 0.04
-  recovery_gflownet_down_step: 0.00075
+  recovery_gflownet_down_step: 0.00004
   recovery_exit_val_improvements: 3
 
 hessian:
@@ -463,28 +467,28 @@ phase_curriculum:
     - name: bpb_stabilization_hold
       start_step: 3250
       end_step: 6000
-      # Step-3500 review: the 3000 replay improved overall but formed a
-      # shallow U-shaped BPB/loss basin: sampled BPB reached a local minimum
-      # near step 3280 and rebounded before the saved 3500 checkpoint.  Keep
-      # all ToricGT mechanisms active, but make this a curvature-capture
-      # window: lower scalar update size, tighten shock clipping, and save
-      # dense checkpoints every 50 steps so the next review can promote the
-      # actual local low instead of the later rebound.
-      lr_multiplier: 0.08
-      grad_clip_norm: 0.32
+      # Step-3500 curvcap review: the saved step-3300 checkpoint beat both
+      # step 3000 and step 3500, while finite differences turned positive from
+      # 3300->3450 and the controller had relaxed GFlowNet pressure to 1e-3.
+      # Restart from 3300 and keep every ToricGT mechanism present, but make
+      # this a lower-curvature BPB hold: smaller scalar LR, tighter clipping,
+      # and very light GFlowNet/topology shaping so the LM objective owns the
+      # basin.
+      lr_multiplier: 0.06
+      grad_clip_norm: 0.30
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00004
-      gflownet_entropy_weight: 0.00001
+      gflownet_loss_weight: 0.00002
+      gflownet_entropy_weight: 0.000005
       gflownet_entropy_target: 2.0
       graphcg_loss_weight: 0.00004
-      analogy_lattice_loss_weight: 0.000002
+      analogy_lattice_loss_weight: 0.000001
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00003
+      contrastive_loss_weight: 0.00002
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

@@ -1,5 +1,217 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-02 Automated Review: Step 3,500 Curvature-Capture Replay
+
+The watcher analyzed:
+
+```text
+outputs/post_resume_analysis/oai-bpb-graphcg-gfn-03000-curvcap-20260602T054043Z/step-00003500/
+```
+
+Training was still alive as an orphaned tmux-launched process even though the
+tmux session listing only showed the Codex review session.  I stopped only the
+active `03000_curvcap` process group after the review, leaving checkpoints
+intact.
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003500.pt
+```
+
+Best checkpoint found in the fresh replay window:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003300.pt
+```
+
+### Metric Categorization
+
+| category | count | read |
+|---|---:|---|
+| as desired | `227` | core likelihood improved over the full 3000-3500 replay; GraphCG, toric phase, persistence, and branch diversity remain active |
+| as desired but too weak/slow | `87` | GFlowNet entropy/action diversity are noncollapsed but mostly flat; topology and toric audits are coherent but not yet converting to validation BPB |
+| not as desired | `87` | checkpoint finite differences show a post-3300 rebound; validation remains far above the inherited best gate |
+
+Core W&B behavior:
+
+| metric | first median | last median | relative change | recent slope / 1k |
+|---|---:|---:|---:|---:|
+| train BPB | `3.88766` | `3.68032` | `-5.33%` | `-0.0244` in the automated report; local 3370-3490 slope is negative but EMA had already turned positive after the low |
+| train loss | `2.69472` | `2.55101` | `-5.33%` | `-0.0169` |
+| total loss | `2.69521` | `2.55137` | `-5.34%` | `-0.0170` |
+| GFlowNet loss | `3.07216` | `2.85438` | `-7.09%` | decreases overall, but strongly co-varies with BPB |
+| GFlowNet entropy | `2.77242` | `2.77248` | near `0%` | healthy but saturated |
+| action diversity | `0.998611` | `0.998708` | near `0%` | healthy but not improving |
+
+Checkpoint finite differences:
+
+| window | train BPB delta |
+|---|---:|
+| `3050 -> 3100` | `-0.182124` |
+| `3100 -> 3150` | `+0.145250` |
+| `3150 -> 3200` | `-0.065660` |
+| `3200 -> 3250` | `-0.057311` |
+| `3250 -> 3300` | `-0.213448` |
+| `3300 -> 3350` | `+0.108755` |
+| `3350 -> 3400` | `+0.094319` |
+| `3400 -> 3450` | `+0.068880` |
+| `3450 -> 3500` | `-0.062681` |
+| `3500 -> 3550` | `+0.036912` |
+
+The saved step-`3300` checkpoint has train BPB `3.4573897600`, better than
+step `3000` (`3.5026167257`), step `3500` (`3.6666615173`), and step `3550`
+(`3.7035734657`).  This is the last clean checkpoint before the sustained
+positive finite-difference sequence.
+
+### Plot Review
+
+Reviewed:
+
+```text
+metrics/core_metric_timeseries.png
+metrics/selected_metric_correlations.png
+metrics/recent_metric_slopes.png
+simplex/reasoning_k_bpb_triangle.png
+simplex/reasoning_k_bpb_mst_tetrahedron.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_trajectory_3d.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_energy_landscape.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_phase_energy.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_toric_phase_simplicial_trajectory.png
+geometry/topology/R2_gss1147-got_math_500k_got_math_exact_persistence_morphisms.png
+```
+
+Visual conclusions:
+
+1. BPB/loss form a U-shaped local basin: descent through the `3280-3300`
+   neighborhood followed by rebound.
+2. Spearman correlations show GFlowNet loss positively correlated with BPB and
+   gradient norm; entropy and action diversity remain noncollapsed.
+3. The energy landscape is thinner and less chaotic than earlier runs, but
+   branch excursions remain long.
+4. Ramachandran-style phase plots show structured bands rather than uniform
+   phase noise, so toric phase memory is active.
+5. Persistence-module morphism plots are coherent: boundary residual and
+   inclusion violations are zero, edge validity is high, and 2-simplex validity
+   is weaker but usable as an audit.
+6. The toric/simplicial overlay is visually dense, but the numerical topology
+   summaries do not indicate collapse.
+
+### Desired
+
+| diagnostic | value |
+|---|---:|
+| best fresh checkpoint | step `3300`, train BPB `3.4573897600` |
+| exact persistence morphisms | `20.0` |
+| topology boundary residual | `0.0` |
+| topology inclusion violation | `0.0` |
+| directed cycle flux | `~5.55e-18` |
+| exact edge validity | `0.979499` |
+| directed edge validity | `0.927638` |
+| HDBSCAN stability | `0.876248` |
+| Slepian concentration / leakage | `1.0 / 0.0` |
+| action diversity | `~0.9987` |
+
+### Desired But Too Weak Or Slow
+
+| diagnostic | value | issue |
+|---|---:|---|
+| mean branch BPB | `4.9914` | not yet competitive with base likelihood |
+| best branch BPB | `4.0302` | useful branch exists, but not enough to promote |
+| mean answer BPB | `4.8738` | answer-span branch compression remains weak |
+| MST efficiency | `0.6961` | coherent but not improving |
+| path smoothness | `0.0753` | acceptable but excursions remain long |
+| GFlowNet entropy | `2.7725` | saturated, not producing stronger low-BPB branches |
+| GraphCG loss | flat around `5.46` | stable steering frame, little recent improvement |
+
+### Not As Desired
+
+| diagnostic | value / trend | read |
+|---|---|---|
+| validation BPB | controller gate around `5.5358`; inherited best checkpoint still `4.6961` | current basin not validation-promoted |
+| checkpoint BPB deltas | positive from `3300 -> 3450` | first derivative turns positive after the local low |
+| train BPB EMA | minimum near `3310`, then increases | floor-bounce basin |
+| GFlowNet controller weight | relaxed to `0.001` despite tiny phase schedule | auxiliary direction overrode BPB hold |
+| active-face margin | `-1.8128` | tropical faces remain low-margin/inverted |
+| toric binomial residual | `1.2643` | still audit-scale, not ready for stronger weight |
+| toric leaf residual | `1.0020` | phase leaves remain diagnostics rather than loss pressure |
+| exact triangle validity | `0.7114` | topology is usable but too weak for promotion |
+
+### Mathematical Explanation
+
+The checkpoint sequence is a one-dimensional trace of the stochastic objective
+along the optimizer path.  Around step `3300`, the first finite difference
+\(\Delta L_t=L_{t+50}-L_t\) changes sign:
+
+\[
+  \Delta L_{3250}<0,\qquad
+  \Delta L_{3300}>0,\qquad
+  \Delta L_{3350}>0.
+\]
+
+This is the signature of crossing a local low in the effective objective
+
+\[
+  L_{\rm eff}
+  = L_{\rm BPB}
+    + \lambda_{\rm GFN}L_{\rm GFN}
+    + \lambda_{\rm GraphCG}L_{\rm GraphCG}
+    + \lambda_{\rm topo}L_{\rm topo}.
+\]
+
+The run did not fail structurally: phase plots, directed filtrations, exact
+persistence morphisms, and GraphCG axes remain coherent.  The failure is scalar:
+the adaptive controller relaxed \(\lambda_{\rm GFN}\) to `1e-3`, while the
+phase schedule intended \(\lambda_{\rm GFN}\le 4e-5\).  Since GFlowNet loss is
+positively correlated with BPB in this window, that relaxation increases the
+component of the update pointing away from the low-BPB basin.
+
+Geometrically, the trajectory machinery is producing noncollapsed search, but
+the active-face margins are small and toric leaf/binomial residuals remain
+audit-scale.  Therefore increasing geometric losses would add curvature before
+the byte model has stabilized.  The appropriate intervention is not a new
+architecture; it is a smaller post-low scalar step and a controller cap.
+
+### Decision
+
+Restart from step `3300`, not step `3500` or `3550`.
+
+Implemented scalar-only changes:
+
+| control | old | new |
+|---|---:|---:|
+| global shock guard grad norm | `0.32` | `0.30` |
+| global shock guard update scale | `0.025` | `0.015` |
+| controller `gflownet_loss_max` | `0.001` | `0.00008` |
+| controller `gflownet_relax_step` | `0.0005` | `0.00002` |
+| controller recovery down step | `0.00075` | `0.00004` |
+| `3250-6000` LR multiplier | `0.08` | `0.06` |
+| `3250-6000` grad clip | `0.32` | `0.30` |
+| `3250-6000` GFlowNet loss weight | `4e-5` | `2e-5` |
+| `3250-6000` GFlowNet entropy weight | `1e-5` | `5e-6` |
+| `3250-6000` analogy lattice weight | `2e-6` | `1e-6` |
+| `3250-6000` contrastive weight | `3e-5` | `2e-5` |
+
+No code path, model architecture, dataset stream, or feature family was
+removed.  Random-order autoregressive graph decoding, dense contest weights,
+tropical ring/hybrid attention, toric memory, GraphCG axes, embedding-space
+GFlowNet graph-of-thought, relative Kolmogorov diagnostics, directed
+persistence, Koszul audits, and toric probes remain active.
+
+Next target: fresh step `3800`.
+
+Acceptance criteria:
+
+1. checkpoint train BPB stays below the step-3300 value for at least one saved
+   checkpoint, preferably below `3.40`;
+2. no two consecutive positive 50-step BPB deltas after the new low;
+3. controller-reported GFlowNet loss weight stays below `8e-5`;
+4. validation/complexity BPB at the next gate improves over the current
+   controller gate (`5.5358`) and preferably over `5.2601` complexity val BPB;
+5. GFlowNet entropy/action diversity remain noncollapsed;
+6. exact edge validity remains above `0.97`, directed edge validity above
+   `0.92`, inclusion violation `0.0`, and Slepian leakage `0.0`.
+
 ## 2026-06-01 Automated Review: Step 2,000 Valmix35-r2 Replay
 
 The watcher paused training at a fresh step-`2000` checkpoint from:
