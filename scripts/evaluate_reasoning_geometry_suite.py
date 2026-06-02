@@ -907,6 +907,78 @@ def subsample_indices(length: int, max_points: int) -> np.ndarray:
     return np.linspace(0, length - 1, num=max_points).round().astype(int)
 
 
+def _focus_transform_params(
+    branches: list[dict[str, Any]],
+    *,
+    dims: int,
+    max_points: int = 4096,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Robust center/scale for readable projected hidden-space plots."""
+
+    chunks: list[np.ndarray] = []
+    for branch in branches:
+        path = np.asarray(branch.get("projected_path", np.zeros((0, dims))), dtype=float)
+        if path.ndim != 2 or path.shape[0] == 0 or path.shape[1] < dims:
+            continue
+        idx = subsample_indices(path.shape[0], max(8, max_points // max(1, len(branches))))
+        chunks.append(path[idx, :dims])
+    if not chunks:
+        return np.zeros((dims,), dtype=float), np.ones((dims,), dtype=float)
+    points = np.concatenate(chunks, axis=0)
+    center = np.nanmedian(points, axis=0)
+    q10 = np.nanpercentile(points, 10.0, axis=0)
+    q90 = np.nanpercentile(points, 90.0, axis=0)
+    scale = 0.5 * (q90 - q10)
+    fallback = np.nanstd(points, axis=0)
+    scale = np.where(scale > 1e-6, scale, np.where(fallback > 1e-6, fallback, 1.0))
+    return center.astype(float), scale.astype(float)
+
+
+def _focus_project(points: np.ndarray, center: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    """Asinh-compressed robust projection preserving local geometry visibility."""
+
+    arr = np.asarray(points, dtype=float)
+    dims = min(arr.shape[-1], center.shape[0])
+    out = arr.copy()
+    out[..., :dims] = np.arcsinh((arr[..., :dims] - center[:dims]) / np.maximum(scale[:dims], 1e-8))
+    return out
+
+
+def _triangle_long_edge_mask(
+    triangles: np.ndarray,
+    xs: list[float] | np.ndarray,
+    ys: list[float] | np.ndarray,
+    *,
+    edge_quantile: float = 0.82,
+) -> np.ndarray:
+    """Mask projection-triangulation artifacts with very long edges."""
+
+    tri = np.asarray(triangles, dtype=int)
+    if tri.ndim != 2 or tri.shape[0] == 0:
+        return np.zeros((0,), dtype=bool)
+    x = np.asarray(xs, dtype=float)
+    y = np.asarray(ys, dtype=float)
+    pts = np.stack([x, y], axis=-1)
+    pa = pts[tri[:, 0]]
+    pb = pts[tri[:, 1]]
+    pc = pts[tri[:, 2]]
+    e01 = np.linalg.norm(pa - pb, axis=-1)
+    e12 = np.linalg.norm(pb - pc, axis=-1)
+    e20 = np.linalg.norm(pc - pa, axis=-1)
+    all_edges = np.concatenate([e01, e12, e20])
+    finite = all_edges[np.isfinite(all_edges) & (all_edges > 1e-10)]
+    if finite.size == 0:
+        return np.zeros((tri.shape[0],), dtype=bool)
+    threshold = float(np.quantile(finite, min(0.98, max(0.50, edge_quantile))))
+    max_edge = np.maximum.reduce([e01, e12, e20])
+    area = 0.5 * np.abs((pb[:, 0] - pa[:, 0]) * (pc[:, 1] - pa[:, 1]) - (pc[:, 0] - pa[:, 0]) * (pb[:, 1] - pa[:, 1]))
+    mask = (max_edge > threshold) | (area < 1e-10)
+    if np.count_nonzero(~mask) < min(12, tri.shape[0]):
+        threshold = float(np.quantile(finite, 0.94))
+        mask = (max_edge > threshold) | (area < 1e-10)
+    return mask
+
+
 def plot_trajectory_3d(record_meta: dict[str, Any], branches: list[dict[str, Any]], output_path: Path) -> None:
     fig = plt.figure(figsize=(10, 8), facecolor="#030712")
     ax = fig.add_subplot(111, projection="3d")
@@ -915,10 +987,11 @@ def plot_trajectory_3d(record_meta: dict[str, Any], branches: list[dict[str, Any
     bpbs = np.array([float(branch["bpb"]) for branch in branches], dtype=float)
     lo, hi = float(bpbs.min()), float(bpbs.max())
     best_index = int(np.argmin(bpbs))
+    focus_center, focus_scale = _focus_transform_params(branches, dims=3, max_points=4096)
     for branch in branches:
         path = branch["projected_path"]
         idx = subsample_indices(path.shape[0], int(branch.get("max_plot_points", 180)))
-        plotted = path[idx]
+        plotted = _focus_project(path[idx, :3], focus_center, focus_scale)
         norm = 0.5 if abs(hi - lo) < 1e-8 else (float(branch["bpb"]) - lo) / (hi - lo)
         color = cmap(1.0 - norm)
         ax.plot(plotted[:, 0], plotted[:, 1], plotted[:, 2], color=color, linewidth=1.4, alpha=0.78)
@@ -957,7 +1030,7 @@ def plot_trajectory_3d(record_meta: dict[str, Any], branches: list[dict[str, Any
     ax.text2D(
         0.02,
         0.02,
-        "cyan=start, gold=actual answer/solution span, star=best-likelihood terminal",
+        "focused coordinates: asinh((PC-median)/robust-scale) | cyan=start, gold=answer span, star=best terminal",
         transform=ax.transAxes,
         color="#e8fbff",
         fontsize=9,
@@ -977,10 +1050,12 @@ def write_interactive_trajectory(record_meta: dict[str, Any], branches: list[dic
     lo, hi = float(bpbs.min()), float(bpbs.max())
     ranked = sorted(branches, key=lambda item: float(item["bpb"]))
     best = ranked[0]
+    focus_center, focus_scale = _focus_transform_params(branches, dims=3, max_points=4096)
     best_path = np.asarray(best.get("projected_path", np.zeros((0, 3))), dtype=float)
     if best_path.ndim == 2 and best_path.shape[0] >= 6:
         best_idx = subsample_indices(best_path.shape[0], min(150, int(best.get("max_plot_points", 180))))
-        best_points = best_path[best_idx, :3]
+        best_raw_points = best_path[best_idx, :3]
+        best_points = _focus_project(best_raw_points, focus_center, focus_scale)
         active_faces = _sample_toric_shadow_vector(best, "active_faces", best_idx, default=0.0, integer=True)
         margins = _sample_toric_shadow_vector(best, "margins", best_idx, default=0.0)
         traces.extend(
@@ -1022,8 +1097,17 @@ def write_interactive_trajectory(record_meta: dict[str, Any], branches: list[dic
                 },
                 "name": "best-branch active-face vertices",
                 "hovertext": [
-                    f"step={int(step)}<br>active face={int(face)}<br>tropical margin={float(margin):.4f}"
-                    for step, face, margin in zip(best_idx.tolist(), active_faces.tolist(), margins.tolist(), strict=True)
+                    (
+                        f"step={int(step)}<br>active face={int(face)}<br>tropical margin={float(margin):.4f}<br>"
+                        f"raw PC=({raw[0]:.3f}, {raw[1]:.3f}, {raw[2]:.3f})"
+                    )
+                    for step, face, margin, raw in zip(
+                        best_idx.tolist(),
+                        active_faces.tolist(),
+                        margins.tolist(),
+                        best_raw_points.tolist(),
+                        strict=True,
+                    )
                 ],
                 "hoverinfo": "text",
             }
@@ -1031,7 +1115,8 @@ def write_interactive_trajectory(record_meta: dict[str, Any], branches: list[dic
     for branch in branches:
         path = np.asarray(branch["projected_path"], dtype=float)
         idx = subsample_indices(path.shape[0], int(branch.get("max_plot_points", 180)))
-        plotted = path[idx]
+        raw_plotted = path[idx, :3]
+        plotted = _focus_project(raw_plotted, focus_center, focus_scale)
         norm = 0.5 if abs(hi - lo) < 1e-8 else (float(branch["bpb"]) - lo) / (hi - lo)
         color = f"hsl({int(200 - 160 * norm)}, 95%, 58%)"
         traces.append(
@@ -1084,8 +1169,8 @@ def write_interactive_trajectory(record_meta: dict[str, Any], branches: list[dic
     payload = {
         "title": f"R{record_meta['record_index']} {record_meta.get('dataset', '')} / {record_meta.get('task_family', '')}",
         "subtitle": (
-            "lines: random-order/GFlowNet branches | translucent local complexes: best-branch reasoning-step VR windows | "
-            "gold diamonds: toric chamber crossings | magenta open circles: low tropical-margin wall samples"
+            "focused coordinates: asinh((PC-median)/robust-scale) | lines: random-order/GFlowNet branches | "
+            "window-colored local VR complexes: best branch | gold diamonds: chamber crossings | magenta open circles: low tropical margins"
         ),
         "traces": traces,
         "updatemenus": density_menu,
@@ -1104,9 +1189,9 @@ const payload = {json.dumps(payload)};
 Plotly.newPlot('plot', payload.traces, {{
   paper_bgcolor:'#030712', plot_bgcolor:'#030712',
   scene:{{
-    xaxis:{{title:'PC1', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
-    yaxis:{{title:'PC2', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
-    zaxis:{{title:'PC3', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#ffd166'}},
+    xaxis:{{title:'focused PC1', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    yaxis:{{title:'focused PC2', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    zaxis:{{title:'focused PC3', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#ffd166'}},
     bgcolor:'#030712',
     aspectmode:'data',
     camera:{{eye:{{x:1.35,y:-1.45,z:1.05}}}}
@@ -1161,17 +1246,20 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
     xs: list[float] = []
     ys: list[float] = []
     zs: list[float] = []
+    focus_center, focus_scale = _focus_transform_params(branches, dims=2, max_points=4096)
     for branch in branches:
         path = branch["projected_path"]
         energy = np.asarray(branch["per_token_nll"], dtype=float)
         idx = subsample_indices(path.shape[0], 800)
-        xs.extend(path[idx, 0].tolist())
-        ys.extend(path[idx, 1].tolist())
+        focused = _focus_project(path[idx, :2], focus_center, focus_scale)
+        xs.extend(focused[:, 0].tolist())
+        ys.extend(focused[:, 1].tolist())
         zs.extend(energy[idx].tolist())
     fig, ax = plt.subplots(figsize=(8.2, 7), facecolor="#030712")
     ax.set_facecolor("#030712")
     if len(xs) > 12:
         tri = mtri.Triangulation(xs, ys)
+        tri.set_mask(_triangle_long_edge_mask(tri.triangles, xs, ys, edge_quantile=0.82))
         contour = ax.tricontourf(tri, zs, levels=28, cmap="magma", alpha=0.92)
         ax.tricontour(tri, zs, levels=9, colors="#dff8ff", linewidths=0.22, alpha=0.35)
         cbar = fig.colorbar(contour, ax=ax, fraction=0.04, pad=0.02)
@@ -1183,10 +1271,20 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
     plt.setp(cbar.ax.get_yticklabels(), color="white")
     for branch in branches:
         path = branch["projected_path"]
-        ax.plot(path[:: max(1, path.shape[0] // 160), 0], path[:: max(1, path.shape[0] // 160), 1], color="#6df6ff", alpha=0.28, linewidth=0.8)
-    ax.set_xlabel("PC1", color="white")
-    ax.set_ylabel("PC2", color="white")
+        step = max(1, path.shape[0] // 160)
+        focused_path = _focus_project(path[::step, :2], focus_center, focus_scale)
+        ax.plot(focused_path[:, 0], focused_path[:, 1], color="#6df6ff", alpha=0.28, linewidth=0.8)
+    ax.set_xlabel("focused PC1", color="white")
+    ax.set_ylabel("focused PC2", color="white")
     ax.set_title(f"Embedding energy landscape R{record_meta['record_index']}", color="white")
+    ax.text(
+        0.015,
+        0.02,
+        "asinh-focused projection; long Delaunay edges masked",
+        transform=ax.transAxes,
+        color="#e8fbff",
+        fontsize=8,
+    )
     ax.tick_params(colors="white")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
@@ -1217,6 +1315,7 @@ def write_interactive_energy_landscape(
     best_branch_index = int(np.argmin(bpbs)) if bpbs.size else -1
     bpb_lo = float(np.nanmin(bpbs)) if bpbs.size else 0.0
     bpb_hi = float(np.nanmax(bpbs)) if bpbs.size else 1.0
+    focus_center, focus_scale = _focus_transform_params(branches, dims=2, max_points=4096)
 
     for branch in branches:
         path = np.asarray(branch.get("projected_path", np.zeros((0, 3))), dtype=float)
@@ -1224,7 +1323,9 @@ def write_interactive_energy_landscape(
         if path.ndim != 2 or path.shape[0] < 3 or energy.shape[0] < path.shape[0]:
             continue
         idx = subsample_indices(path.shape[0], min(800, int(branch.get("max_plot_points", 800))))
-        sampled_path = path[idx]
+        focused_path = _focus_project(path[:, :2], focus_center, focus_scale)
+        sampled_path = focused_path[idx]
+        raw_sampled_path = path[idx, :2]
         sampled_energy = energy[idx]
         branch_id = int(branch.get("branch_index", len(branch_paths)))
         branch_bpb = float(branch.get("bpb", 0.0))
@@ -1234,8 +1335,11 @@ def write_interactive_energy_landscape(
         zs.extend(sampled_energy.tolist())
         hover.extend(
             [
-                f"B{branch_id} step {int(step)}<br>local NLL={float(e):.4f}<br>BPB={branch_bpb:.4f}<br>answer BPB={answer_bpb:.4f}"
-                for step, e in zip(idx.tolist(), sampled_energy.tolist(), strict=True)
+                (
+                    f"B{branch_id} step {int(step)}<br>local NLL={float(e):.4f}<br>BPB={branch_bpb:.4f}<br>"
+                    f"answer BPB={answer_bpb:.4f}<br>raw PC1={raw[0]:.3f}<br>raw PC2={raw[1]:.3f}"
+                )
+                for step, e, raw in zip(idx.tolist(), sampled_energy.tolist(), raw_sampled_path.tolist(), strict=True)
             ]
         )
         branch_paths.append(
@@ -1263,6 +1367,8 @@ def write_interactive_energy_landscape(
     try:
         tri = mtri.Triangulation(xs, ys)
         triangles = np.asarray(tri.triangles, dtype=int)
+        tri_mask = _triangle_long_edge_mask(triangles, xs, ys, edge_quantile=0.82)
+        triangles = triangles[~tri_mask]
         if triangles.size:
             mesh_trace = {
                 "type": "mesh3d",
@@ -1314,10 +1420,11 @@ def write_interactive_energy_landscape(
         best_energy = np.asarray(best_branch.get("per_token_nll", np.zeros((best_path.shape[0],))), dtype=float)
         if best_path.ndim == 2 and best_path.shape[0] >= 6 and best_energy.shape[0] >= best_path.shape[0]:
             best_idx = subsample_indices(best_path.shape[0], min(150, int(best_branch.get("max_plot_points", 180))))
+            best_focus = _focus_project(best_path[:, :2], focus_center, focus_scale)
             best_points = np.column_stack(
                 [
-                    best_path[best_idx, 0],
-                    best_path[best_idx, 1],
+                    best_focus[best_idx, 0],
+                    best_focus[best_idx, 1],
                     best_energy[best_idx] + 0.055,
                 ]
             )
@@ -1444,6 +1551,10 @@ def write_interactive_energy_landscape(
             f"Interactive embedding energy landscape R{record_meta['record_index']} "
             f"{html.escape(str(record_meta.get('dataset', '')))} / {html.escape(str(record_meta.get('task_family', '')))}"
         ),
+        "subtitle": (
+            "Focused hidden-space coordinates use asinh((PC-median)/robust-scale); mesh triangles with long projection "
+            "edges are masked. Branches, local VR complexes, chamber crossings, and low-margin wall samples are overlaid."
+        ),
         "traces": traces,
         "updatemenus": density_menu,
     }
@@ -1451,23 +1562,26 @@ def write_interactive_energy_landscape(
 <html><head><meta charset="utf-8"><title>Embedding energy landscape</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
 <body style="margin:0;background:#030712;color:white;font-family:system-ui">
+<div style="position:absolute;z-index:5;left:18px;top:12px;max-width:1040px;color:#e8fbff">
+  <div style="font-size:20px;font-weight:650">{payload['title']}</div>
+  <div style="font-size:12px;opacity:.84;margin-top:4px">{payload['subtitle']}</div>
+</div>
 <div id="plot" style="width:100vw;height:100vh"></div>
 <script>
 const payload = {json.dumps(payload)};
 Plotly.newPlot('plot', payload.traces, {{
-  title:{{text:payload.title, font:{{color:'white'}}}},
   paper_bgcolor:'#030712',
   plot_bgcolor:'#030712',
   scene:{{
     bgcolor:'#030712',
-    xaxis:{{title:'PC1', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
-    yaxis:{{title:'PC2', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    xaxis:{{title:'focused PC1', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    yaxis:{{title:'focused PC2', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
     zaxis:{{title:'local NLL energy', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#ffd166'}},
     camera:{{eye:{{x:1.45, y:-1.65, z:1.20}}}}
   }},
   updatemenus: payload.updatemenus,
   legend:{{font:{{color:'white'}}, bgcolor:'rgba(3,7,18,0.58)'}},
-  margin:{{l:0,r:0,b:0,t:54}},
+  margin:{{l:0,r:0,b:0,t:0}},
   annotations:[{{
     text:'mesh: local NLL over hidden-state PCA | adjustable local VR complexes | gold=chamber crossings | magenta=open low-margin wall samples',
     x:0.02, y:0.02, xref:'paper', yref:'paper', showarrow:false,
@@ -1652,6 +1766,30 @@ def _clean_windowed_simplicial_traces(
                         "meta": density_meta,
                     }
                 )
+            centroid = np.mean(local, axis=0)
+            traces.append(
+                {
+                    "type": "scatter3d",
+                    "mode": "markers+text",
+                    "x": [float(centroid[0])],
+                    "y": [float(centroid[1])],
+                    "z": [float(centroid[2])],
+                    "marker": {"size": 5, "color": color, "symbol": "circle", "line": {"color": "white", "width": 0.6}},
+                    "text": [f"W{window_id}"],
+                    "textposition": "top center",
+                    "textfont": {"color": "#e8fbff", "size": 9},
+                    "name": f"{name_prefix} {level_label} local window W{window_id}",
+                    "legendgroup": f"{name_prefix}-simplices-{level_label}",
+                    "hovertext": (
+                        f"local reasoning window W{window_id}<br>"
+                        f"steps {start}-{stop - 1}<br>radius q={level_quantile:.2f}<br>radius={radius:.4f}"
+                    ),
+                    "hoverinfo": "text",
+                    "visible": visible,
+                    "meta": density_meta,
+                    "showlegend": False,
+                }
+            )
     return traces
 
 
@@ -1765,6 +1903,7 @@ def _projected_chamber_traces(
     chamber_y: list[float] = []
     chamber_z: list[float] = []
     chamber_text: list[str] = []
+    chamber_labels: list[str] = []
     for face in np.unique(active)[:12]:
         mask = active == int(face)
         if np.count_nonzero(mask) < 2:
@@ -1780,6 +1919,7 @@ def _projected_chamber_traces(
         chamber_text.append(
             f"active face {int(face)}<br>states={int(np.count_nonzero(mask))}<br>mean margin={float(np.mean(margin[mask])):.4f}"
         )
+        chamber_labels.append(str(int(face)))
     if ray_x:
         traces.append(
             {
@@ -1801,7 +1941,7 @@ def _projected_chamber_traces(
                 "x": chamber_x,
                 "y": chamber_y,
                 "z": chamber_z,
-                "text": [str(int(face)) for face in np.unique(active)[: len(chamber_x)]],
+                "text": chamber_labels,
                 "textposition": "top center",
                 "marker": {"size": 7, "color": "#2de2e6", "symbol": "square", "line": {"color": "white", "width": 0.8}},
                 "textfont": {"color": "#e8fbff", "size": 10},
@@ -1841,7 +1981,9 @@ def write_interactive_projected_simplicial_toric_geometry(
     path = np.asarray(best["projected_path"], dtype=float)
     n_steps = path.shape[0]
     idx = subsample_indices(n_steps, min(180, int(best.get("max_plot_points", 180))))
-    plotted = path[idx, :3]
+    focus_center, focus_scale = _focus_transform_params(usable, dims=3, max_points=4096)
+    raw_plotted = path[idx, :3]
+    plotted = _focus_project(raw_plotted, focus_center, focus_scale)
     energy = np.asarray(best.get("per_token_nll", np.zeros((n_steps,))), dtype=float)
     plotted_energy = energy[np.minimum(idx, energy.shape[0] - 1)] if energy.size else np.zeros((idx.shape[0],), dtype=float)
     active_faces = _sample_toric_shadow_vector(best, "active_faces", idx, default=0.0, integer=True)
@@ -1872,7 +2014,7 @@ def write_interactive_projected_simplicial_toric_geometry(
     for rank, branch in enumerate(ranked[:8]):
         branch_path = np.asarray(branch["projected_path"], dtype=float)
         bidx = subsample_indices(branch_path.shape[0], min(220, int(branch.get("max_plot_points", 180))))
-        sampled = branch_path[bidx, :3]
+        sampled = _focus_project(branch_path[bidx, :3], focus_center, focus_scale)
         color = branch_palette[rank % len(branch_palette)]
         is_best = branch is best
         traces.append(
@@ -1910,15 +2052,17 @@ def write_interactive_projected_simplicial_toric_geometry(
             f"active-face margin={float(margin):.4f}<br>"
             f"local NLL={float(e):.4f}<br>"
             f"GraphCG axis={int(axis)}<br>"
-            f"chart margin={float(chart_m):.4f}"
+            f"chart margin={float(chart_m):.4f}<br>"
+            f"raw PC=({float(raw[0]):.3f}, {float(raw[1]):.3f}, {float(raw[2]):.3f})"
         )
-        for step, face, margin, e, axis, chart_m in zip(
+        for step, face, margin, e, axis, chart_m, raw in zip(
             idx.tolist(),
             active_faces.tolist(),
             margins.tolist(),
             plotted_energy.tolist(),
             plotted_axis.tolist(),
             plotted_chart_margin.tolist(),
+            raw_plotted.tolist(),
             strict=True,
         )
     ]
@@ -1960,8 +2104,9 @@ def write_interactive_projected_simplicial_toric_geometry(
         f"{html.escape(str(record_meta.get('dataset', '')))} / {html.escape(str(record_meta.get('task_family', '')))}"
     )
     subtitle = (
-        "PCA coordinates are hidden reasoning states; translucent triangles and cyan edges are the actual step-level "
-        "Vietoris-Rips complex; vertex colors are empirical toric active faces; gold markers are chamber crossings."
+        "Focused hidden-state coordinates use asinh((PC-median)/robust-scale). Translucent triangles and cyan edges "
+        "are local step-level Vietoris-Rips complexes; vertex colors are empirical toric active faces; gold markers "
+        "are chamber crossings."
     )
     density_menu = _simplicial_density_menu(traces)
     html_text = f"""<!doctype html>
@@ -1980,9 +2125,9 @@ Plotly.newPlot('plot', traces, {{
   plot_bgcolor:'#030712',
   scene:{{
     bgcolor:'#030712',
-    xaxis:{{title:'PC1', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
-    yaxis:{{title:'PC2', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
-    zaxis:{{title:'PC3', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#ffd166'}},
+    xaxis:{{title:'focused PC1', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    yaxis:{{title:'focused PC2', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    zaxis:{{title:'focused PC3', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#ffd166'}},
     aspectmode:'data',
     camera:{{eye:{{x:1.35,y:-1.45,z:1.05}}}}
   }},
@@ -2034,16 +2179,16 @@ def plot_toric_phase_simplicial_trajectory(
     diffs = plotted[:, None, :] - plotted[None, :, :]
     chord = np.linalg.norm(diffs, axis=-1)
     local_edges: list[tuple[int, int]] = []
-    window = min(18, max(6, plotted.shape[0] // 8))
+    window = min(14, max(6, plotted.shape[0] // 10))
     for start in range(0, plotted.shape[0], max(4, window // 2)):
         stop = min(plotted.shape[0], start + window)
         sub = chord[start:stop, start:stop]
         if sub.shape[0] < 4:
             continue
-        threshold = float(np.quantile(sub[sub > 1e-8], 0.18)) if np.any(sub > 1e-8) else 0.0
+        threshold = float(np.quantile(sub[sub > 1e-8], 0.10)) if np.any(sub > 1e-8) else 0.0
         for i in range(start, stop):
             for j in range(i + 1, stop):
-                if chord[i, j] <= threshold and len(local_edges) < 260:
+                if chord[i, j] <= threshold and len(local_edges) < 100:
                     local_edges.append((i, j))
     for i, j in local_edges:
         ax.plot(
@@ -2210,34 +2355,48 @@ def write_interactive_toric_phase_simplicial_trajectory(
     edge_y: list[float | None] = []
     edge_z: list[float | None] = []
     local_edges: list[tuple[int, int]] = []
-    window = min(18, max(6, plotted.shape[0] // 8))
-    for start in range(0, plotted.shape[0], max(4, window // 2)):
-        stop = min(plotted.shape[0], start + window)
-        sub = chord[start:stop, start:stop]
-        if sub.shape[0] < 4:
-            continue
-        threshold = float(np.quantile(sub[sub > 1e-8], 0.18)) if np.any(sub > 1e-8) else 0.0
-        for i in range(start, stop):
-            for j in range(i + 1, stop):
-                if chord[i, j] <= threshold and len(local_edges) < 320:
-                    local_edges.append((i, j))
-                    edge_x.extend([float(plotted[i, 0]), float(plotted[j, 0]), None])
-                    edge_y.extend([float(plotted[i, 1]), float(plotted[j, 1]), None])
-                    edge_z.extend([float(plotted[i, 2]), float(plotted[j, 2]), None])
-    if edge_x:
-        traces.append(
-            {
-                "type": "scatter3d",
-                "mode": "lines",
-                "x": edge_x,
-                "y": edge_y,
-                "z": edge_z,
-                "line": {"color": "#6df6ff", "width": 1},
-                "opacity": 0.20,
-                "name": "local VR 1-skeleton",
-                "hoverinfo": "skip",
-            }
-        )
+    window = min(14, max(6, plotted.shape[0] // 10))
+    default_level = str(best.get("simplicial_default_level", "sparse"))
+    if default_level not in {"sparse", "default", "dense"}:
+        default_level = "sparse"
+    for level_label, edge_quantile, max_edges, opacity in (
+        ("sparse", 0.07, 80, 0.16),
+        ("default", 0.11, 130, 0.20),
+        ("dense", 0.17, 220, 0.24),
+    ):
+        edge_x = []
+        edge_y = []
+        edge_z = []
+        local_edges = []
+        for start in range(0, plotted.shape[0], max(4, window // 2)):
+            stop = min(plotted.shape[0], start + window)
+            sub = chord[start:stop, start:stop]
+            if sub.shape[0] < 4:
+                continue
+            threshold = float(np.quantile(sub[sub > 1e-8], edge_quantile)) if np.any(sub > 1e-8) else 0.0
+            for i in range(start, stop):
+                for j in range(i + 1, stop):
+                    if chord[i, j] <= threshold and len(local_edges) < max_edges:
+                        local_edges.append((i, j))
+                        edge_x.extend([float(plotted[i, 0]), float(plotted[j, 0]), None])
+                        edge_y.extend([float(plotted[i, 1]), float(plotted[j, 1]), None])
+                        edge_z.extend([float(plotted[i, 2]), float(plotted[j, 2]), None])
+        if edge_x:
+            traces.append(
+                {
+                    "type": "scatter3d",
+                    "mode": "lines",
+                    "x": edge_x,
+                    "y": edge_y,
+                    "z": edge_z,
+                    "line": {"color": "#6df6ff", "width": 1},
+                    "opacity": opacity,
+                    "name": f"torus local VR 1-skeleton {level_label}",
+                    "hoverinfo": "skip",
+                    "visible": level_label == default_level,
+                    "meta": {"simplicial_density": level_label, "radius_quantile": edge_quantile},
+                }
+            )
 
     arrow_x: list[float | None] = []
     arrow_y: list[float | None] = []
@@ -2357,8 +2516,8 @@ def write_interactive_toric_phase_simplicial_trajectory(
             f"{html.escape(str(record_meta.get('dataset', '')))} / {html.escape(str(record_meta.get('task_family', '')))}"
         ),
         "subtitle": (
-            "Torus surface = commutative projection; phase-wound paths = noncommutative toric memory shadow; "
-            "cyan edges = local directed/simplicial neighborhood; magenta arrows = analogical transports."
+            "Commutative torus shadow of the noncommutative phase memory; branch paths follow projected irrational "
+            "phase leaves. Local VR edges are adjustable; magenta arrows are analogical window transports."
         ),
         "traces": traces,
     }
@@ -2384,6 +2543,7 @@ Plotly.newPlot('plot', traces, {{
     aspectmode:'data',
     camera:{{eye:{{x:1.45,y:1.45,z:0.95}}}}
   }},
+  updatemenus: {json.dumps(_simplicial_density_menu(traces))},
   legend:{{font:{{color:'white'}}, x:0.02, y:0.82, bgcolor:'rgba(3,7,18,0.45)'}},
   margin:{{l:0,r:0,b:0,t:0}}
 }}, {{responsive:true, displaylogo:false}});
@@ -2486,20 +2646,20 @@ def plot_toric_phase_winding_collection(
     periodic_delta = np.minimum(delta, 1.0 - delta)
     phase_chord = np.linalg.norm(periodic_delta, axis=-1)
     local_edges: list[tuple[int, int]] = []
-    window = min(18, max(6, phase_points.shape[0] // 8))
+    window = min(14, max(6, phase_points.shape[0] // 10))
     for start in range(0, phase_points.shape[0], max(4, window // 2)):
         stop = min(phase_points.shape[0], start + window)
         sub = phase_chord[start:stop, start:stop]
         if sub.shape[0] < 4:
             continue
-        threshold = float(np.quantile(sub[sub > 1e-8], 0.18)) if np.any(sub > 1e-8) else 0.0
+        threshold = float(np.quantile(sub[sub > 1e-8], 0.10)) if np.any(sub > 1e-8) else 0.0
         for i in range(start, stop):
             for j in range(i + 1, stop):
-                if phase_chord[i, j] <= threshold and len(local_edges) < 260:
+                if phase_chord[i, j] <= threshold and len(local_edges) < 100:
                     local_edges.append((i, j))
     for i, j in local_edges:
         if abs(u_best[i] - u_best[j]) <= 0.5 and abs(v_best[i] - v_best[j]) <= 0.5:
-            ax_flat.plot([u_best[i], u_best[j]], [v_best[i], v_best[j]], color="#b8fbff", alpha=0.12, linewidth=0.55)
+            ax_flat.plot([u_best[i], u_best[j]], [v_best[i], v_best[j]], color="#b8fbff", alpha=0.10, linewidth=0.45)
 
     ax_flat.scatter(u_best, v_best, c=energy_best, s=18, cmap="magma", alpha=0.90, edgecolor="#06111f", linewidth=0.15)
     ax_flat.scatter(u_best[0], v_best[0], s=72, color="#6df6ff", edgecolor="white", linewidth=0.8, zorder=5)
@@ -2533,8 +2693,8 @@ def plot_toric_phase_winding_collection(
             [torus_best[i, 1], torus_best[j, 1]],
             [torus_best[i, 2], torus_best[j, 2]],
             color="#6df6ff",
-            alpha=0.13,
-            linewidth=0.55,
+            alpha=0.10,
+            linewidth=0.45,
         )
     for start in range(0, torus_best.shape[0] - window, max(6, window)):
         source = torus_best[start : start + window]

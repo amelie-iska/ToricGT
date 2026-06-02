@@ -414,42 +414,50 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_sprint_2500_3000
+    - name: bpb_likelihood_hold_2500_3250
       start_step: 2500
-      end_step: 3000
-      lr_multiplier: 0.24
-      grad_clip_norm: 0.50
+      end_step: 3250
+      # Step-2750 review: likelihood still improved from the 2500 checkpoint
+      # and retained the same best validation gate, but the local first
+      # difference turned positive and geometry losses started drifting against
+      # BPB.  Continue from 2750 rather than rolling back, but remove the
+      # step-2500 optimizer jump and keep GraphCG/GFlowNet as light steering
+      # signals only.  Heavier toric/Koszul/flow terms stay off until a later
+      # gate shows lower BPB and stronger active-face margins moving together.
+      lr_multiplier: 0.16
+      grad_clip_norm: 0.42
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00035
-      gflownet_entropy_weight: 0.00008
+      gflownet_loss_weight: 0.00025
+      gflownet_entropy_weight: 0.00005
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.00008
-      analogy_lattice_loss_weight: 0.000015
+      graphcg_loss_weight: 0.00005
+      analogy_lattice_loss_weight: 0.00001
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.00010
+      contrastive_loss_weight: 0.00006
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
     - name: bpb_stabilization_hold
-      start_step: 3000
+      start_step: 3250
       end_step: 6000
-      lr_multiplier: 0.72
-      grad_clip_norm: 0.90
+      lr_multiplier: 0.24
+      grad_clip_norm: 0.50
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.18
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.0
-      gflownet_entropy_weight: 0.0
+      gflownet_loss_weight: 0.00020
+      gflownet_entropy_weight: 0.00004
+      gflownet_entropy_target: 2.0
       graphcg_loss_weight: 0.00005
-      analogy_lattice_loss_weight: 0.00003
-      toric_geometry_loss_weight: 0.00002
-      koszul_persistence_loss_weight: 0.000005
+      analogy_lattice_loss_weight: 0.00001
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.0005
+      contrastive_loss_weight: 0.00008
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

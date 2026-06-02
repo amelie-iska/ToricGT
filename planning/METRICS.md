@@ -6266,3 +6266,213 @@ should stay off until active-face margins improve.
 Next review target: `2750`, with the watcher required to use
 `--pause-training-before-analysis` and
 `--codex-review-hook scripts/codex_training_review_resume.sh`.
+
+## Step 2750 GraphCG/GFlowNet Gate
+
+Date: 2026-06-02 UTC.
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-graphcg-gfn-02250-20260602T011416Z/step-00002750
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00002750.pt
+```
+
+W&B run:
+
+```text
+amelie-iska-math/toricgt-parameter-golf/oai02250graphcggfn20260602T011416Z
+```
+
+### Metric Categorization
+
+The automatic classifier found:
+
+| category | count |
+|---|---:|
+| desired | `187` |
+| desired but weak/slow | `92` |
+| undesirable | `113` |
+
+Core likelihood metrics are still broadly desired:
+
+| metric | first median | last median | relative change | recent slope / 1k |
+|---|---:|---:|---:|---:|
+| `train/bpb` | `3.9243` | `3.6496` | `-7.00%` | `-0.1060` |
+| `train/loss` | `2.7201` | `2.5297` | `-7.00%` | `-0.0735` |
+| `train/total_loss` | `2.7213` | `2.5313` | `-6.98%` | `-0.0734` |
+| `train/gflownet_loss` | `3.0693` | `2.8567` | `-6.93%` | `+0.1479` |
+| `train/gflownet_entropy` | `2.7640` | `2.7724` | `+0.31%` | `+0.00019` |
+| `train/gflownet_action_diversity` | `0.9958` | `0.9987` | `+0.29%` | `-0.00025` |
+
+The checkpoint itself reports:
+
+| checkpoint metric | value |
+|---|---:|
+| `train_bpb` | `3.63849` |
+| `train_loss` | `2.52201` |
+| `best_val_bpb` | `4.69611` |
+
+The step-2500 W&B export showed `val/bpb=5.4630`, but the durable checkpoint
+metadata still carries the better historical validation gate `4.6961`.  The
+step-2750 checkpoint improves train BPB over step 2500 while preserving that
+same best validation gate, so rolling back to step 2500 would discard useful
+likelihood progress without evidence of validation improvement.
+
+### Plot And Geometry Review
+
+Reviewed plot set:
+
+```text
+metrics/core_metric_timeseries.png
+metrics/recent_metric_slopes.png
+simplex/reasoning_k_bpb_triangle.png
+simplex/efficiency_triangle.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_energy_landscape.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_trajectory_3d.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_toric_phase_simplicial_trajectory.png
+geometry/topology/R2_gss1147-got_math_500k_got_math_toric_shadow_audit.png
+geometry/topology/R2_gss1147-got_math_500k_got_math_exact_persistence_morphisms.png
+```
+
+Geometry summary:
+
+| metric | value | behavior |
+|---|---:|---|
+| mean branch BPB | `4.8281` | weak/slow |
+| best branch BPB | `3.4624` | desired |
+| mean answer BPB | `4.8014` | weak/slow |
+| best answer BPB | `3.4624` | desired |
+| MST efficiency | `0.6662` | weak/slow |
+| path smoothness | `0.0895` | desired |
+| directed asymmetry | `0.3573` | desired |
+| directed cycle flux | `~0` | desired |
+| HDBSCAN stability | `0.9235` | desired |
+| exact edge validity | `0.9734` | desired |
+| exact directed-edge validity | `0.9298` | desired |
+| exact triangle validity | `0.7043` | weak/slow |
+| topology analogical map loss | `0.1440` | weak/slow |
+| toric active-face entropy | `0.6751` | weak/slow |
+| toric active-face margin | `-1.8707` | undesirable |
+| toric binomial residual | `0.9746` | undesirable |
+| toric phase-leaf residual | `0.9754` | undesirable |
+| toric shadow min margin | `0.0000945` | undesirable |
+| Slepian concentration / leakage | `1.0 / 0.0` | desired |
+
+The core metric plot shows a real early descent into a local minimum around
+step `2440`, followed by a rebound and noisy plateau.  The last local
+difference in train BPB is positive (`2740 - 2730 = +0.06994`) and the last
+second difference is also slightly positive, but the full-window trend from
+2250 to 2740 remains negative.  This is a weak floor-bounce basin, not
+catastrophic divergence.
+
+The simplex plots are useful but statistically underpowered: four records and
+a narrow BPB color range.  They confirm the scoring and plotting path, but they
+should not drive checkpoint selection.  The 3D trajectory and energy plots show
+a dense local search cloud plus a few long terminal excursions.  This is valid
+GFlowNet exploration, but the branch search has not yet made lower-BPB
+terminals typical.  The toric phase/simplicial plot is rich but dense; the
+numerical issue is not plotting, it is weak active-face margin and high
+binomial/leaf residuals.
+
+### Mathematical Interpretation
+
+The likelihood objective is estimating a byte-level cross-entropy.  The
+negative full-window slope means the stochastic gradient is still aligned with
+compression, but the positive local first and second finite differences show
+that the current optimizer scale and auxiliary terms are occasionally pushing
+updates across a shallow basin floor.  Since the best validation gate is not
+improved by the 2500 evaluation, validation BPB remains the promotion metric
+and the train descent must be made smoother before heavier reasoning losses
+are trusted.
+
+GraphCG is behaving as a weak chart-regularizer: covariance and basis losses
+improve, but basis coherence and orthogonal loss drift upward.  In geometric
+terms, the learned chart is beginning to resolve concept directions, but the
+frame is still poorly conditioned enough that strong auxiliary gradients can
+rotate the chart faster than the byte-likelihood objective can absorb.
+
+GFlowNet is noncollapsed: entropy is near the target and action diversity is
+very high.  However, high entropy at this stage means broad exploration, not
+yet calibrated high-reward sampling.  The best branch BPB is much better than
+mean branch BPB, so the policy contains useful candidates, but the trajectory
+balance signal should remain light until branch improvements become typical.
+
+The nested directed topology terms are mostly healthy.  Inclusion violations
+are zero, edge validity is high, HDBSCAN stability is high, and directed cycle
+flux is essentially zero.  Triangle validity and analogical map loss remain
+weak, so topology should remain a diagnostic and light shaping signal.
+
+The toric audit is the strongest reason not to activate heavier toric/Koszul
+losses yet.  Active-face margins are too thin and sometimes negative under the
+audit convention, while binomial and phase-leaf residuals are near one.  In
+tropical terms, the model is crossing chamber walls without stable margins; in
+noncommutative-toric terms, the projected phase leaves are not yet organizing
+latent search strongly enough to deserve a large gradient weight.
+
+Relative Kolmogorov metrics are diagnostic only at this window.  The compressor
+proxies have small sample counts and are heavily affected by input difficulty
+changes, so their recent slopes should not override deterministic validation
+BPB.  They remain useful for detecting whether analogical helper strings reduce
+conditional description length, but they are not checkpoint gates yet.
+
+### Decision
+
+Resume from step `2750`, not from step `2500`.  The model improved train BPB
+from `3.7255` to `3.6385` while preserving the same best validation BPB, and
+there is no saved checkpoint closer to the raw step-2440 local minimum.
+
+Implemented in:
+
+```text
+config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml
+```
+
+The active 2500-3250 phase is changed from a sprint to a likelihood hold:
+
+| control | previous 2500-3000 | new 2500-3250 |
+|---|---:|---:|
+| LR multiplier | `0.24` | `0.16` |
+| grad clip | `0.50` | `0.42` |
+| medium mix | `0.35` | `0.35` |
+| GFlowNet loss | `0.00035` | `0.00025` |
+| GFlowNet entropy loss | `0.00008` | `0.00005` |
+| GraphCG loss | `0.00008` | `0.00005` |
+| analogy lattice loss | `0.000015` | `0.00001` |
+| contrastive loss | `0.00010` | `0.00006` |
+| toric/Koszul/flow/QAT losses | `0.0` | `0.0` |
+
+The following 3250-6000 stabilization phase is also damped so the next watcher
+cannot accidentally enter a high-LR auxiliary-heavy regime before review:
+
+| control | previous 3000-6000 | new 3250-6000 |
+|---|---:|---:|
+| LR multiplier | `0.72` | `0.24` |
+| grad clip | `0.90` | `0.50` |
+| GFlowNet loss | `0.0` | `0.00020` |
+| GraphCG loss | `0.00005` | `0.00005` |
+| analogy lattice loss | `0.00003` | `0.00001` |
+| toric/Koszul losses | `0.00002 / 0.000005` | `0.0 / 0.0` |
+| contrastive loss | `0.0005` | `0.00008` |
+
+Next review target: `3250`.  The watcher should pause training before
+analysis, run on CUDA/bf16, and call
+`scripts/codex_training_review_resume.sh`.
+
+Acceptance criteria:
+
+1. step-3250 checkpoint train BPB below `3.60`;
+2. validation BPB no worse than `5.4630`, with any improvement below `4.6961`
+   treated as promotion-grade;
+3. recent train BPB slope negative with no positive second-difference cluster;
+4. mean branch BPB below `4.80` and best branch BPB below `3.45`;
+5. HDBSCAN stability above `0.90`, exact edge validity above `0.95`, exact
+   triangle validity above `0.72`;
+6. toric active-face margin not worse than `-1.87` and toric shadow minimum
+   margin above `1e-4`;
+7. GraphCG basis coherence stops its rapid upward drift.
