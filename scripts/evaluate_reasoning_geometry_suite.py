@@ -1100,6 +1100,538 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
     plt.close(fig)
 
 
+def write_interactive_energy_landscape(
+    record_meta: dict[str, Any],
+    branches: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    """Write a rotatable 3D embedding-energy landscape.
+
+    The static landscape is a top-down tricontour plot over the first two
+    hidden-state PCA coordinates.  This companion HTML lifts the same
+    model-computed local NLL values into the z-axis.  The mesh is built from the
+    sampled reasoning states, while each branch path is drawn on top of the
+    surface so low-energy basins and high-energy ridges can be inspected by
+    rotating the plot.
+    """
+
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    hover: list[str] = []
+    branch_paths: list[dict[str, Any]] = []
+    bpbs = np.asarray([float(branch["bpb"]) for branch in branches], dtype=float)
+    best_branch_index = int(np.argmin(bpbs)) if bpbs.size else -1
+    bpb_lo = float(np.nanmin(bpbs)) if bpbs.size else 0.0
+    bpb_hi = float(np.nanmax(bpbs)) if bpbs.size else 1.0
+
+    for branch in branches:
+        path = np.asarray(branch.get("projected_path", np.zeros((0, 3))), dtype=float)
+        energy = np.asarray(branch.get("per_token_nll", np.zeros((path.shape[0],))), dtype=float)
+        if path.ndim != 2 or path.shape[0] < 3 or energy.shape[0] < path.shape[0]:
+            continue
+        idx = subsample_indices(path.shape[0], min(800, int(branch.get("max_plot_points", 800))))
+        sampled_path = path[idx]
+        sampled_energy = energy[idx]
+        branch_id = int(branch.get("branch_index", len(branch_paths)))
+        branch_bpb = float(branch.get("bpb", 0.0))
+        answer_bpb = float(branch.get("answer_bpb", branch_bpb))
+        xs.extend(sampled_path[:, 0].tolist())
+        ys.extend(sampled_path[:, 1].tolist())
+        zs.extend(sampled_energy.tolist())
+        hover.extend(
+            [
+                f"B{branch_id} step {int(step)}<br>local NLL={float(e):.4f}<br>BPB={branch_bpb:.4f}<br>answer BPB={answer_bpb:.4f}"
+                for step, e in zip(idx.tolist(), sampled_energy.tolist(), strict=True)
+            ]
+        )
+        branch_paths.append(
+            {
+                "branch_index": branch_id,
+                "bpb": branch_bpb,
+                "answer_bpb": answer_bpb,
+                "x": sampled_path[:, 0].tolist(),
+                "y": sampled_path[:, 1].tolist(),
+                "z": (sampled_energy + 0.035).tolist(),
+                "steps": idx.astype(int).tolist(),
+                "is_best": branch_id == int(branches[best_branch_index].get("branch_index", best_branch_index))
+                if best_branch_index >= 0
+                else False,
+            }
+        )
+
+    if len(xs) < 12:
+        return
+
+    # Triangulation can fail if many PCA samples are repeated or nearly
+    # collinear.  Fall back to a point cloud in that case, but keep the same
+    # interactive branch overlays.
+    mesh_trace: dict[str, Any] | None = None
+    try:
+        tri = mtri.Triangulation(xs, ys)
+        triangles = np.asarray(tri.triangles, dtype=int)
+        if triangles.size:
+            mesh_trace = {
+                "type": "mesh3d",
+                "x": xs,
+                "y": ys,
+                "z": zs,
+                "i": triangles[:, 0].tolist(),
+                "j": triangles[:, 1].tolist(),
+                "k": triangles[:, 2].tolist(),
+                "intensity": zs,
+                "colorscale": "Magma",
+                "opacity": 0.78,
+                "flatshading": False,
+                "name": "local NLL energy surface",
+                "hovertext": hover,
+                "hoverinfo": "text",
+                "colorbar": {"title": "local NLL energy"},
+            }
+    except Exception:
+        mesh_trace = None
+
+    traces: list[dict[str, Any]] = []
+    if mesh_trace is not None:
+        traces.append(mesh_trace)
+    else:
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "markers",
+                "x": xs,
+                "y": ys,
+                "z": zs,
+                "marker": {
+                    "size": 3,
+                    "color": zs,
+                    "colorscale": "Magma",
+                    "opacity": 0.78,
+                    "colorbar": {"title": "local NLL energy"},
+                },
+                "hovertext": hover,
+                "hoverinfo": "text",
+                "name": "local NLL samples",
+            }
+        )
+
+    branch_palette = ["#38f2ff", "#ff4fd8", "#ffd166", "#8cff6a", "#ad7cff", "#ff7a45", "#7bdff2", "#f15bb5"]
+    for rank, item in enumerate(sorted(branch_paths, key=lambda row: row["bpb"])):
+        denom = max(1e-8, bpb_hi - bpb_lo)
+        norm = 0.5 if abs(denom) < 1e-8 else (float(item["bpb"]) - bpb_lo) / denom
+        color = branch_palette[rank % len(branch_palette)]
+        width = 8 if item["is_best"] else max(2, int(5 - 2 * norm))
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "lines+markers" if item["is_best"] else "lines",
+                "x": item["x"],
+                "y": item["y"],
+                "z": item["z"],
+                "line": {"color": color, "width": width},
+                "marker": {"size": 3.5, "color": color},
+                "opacity": 0.96 if item["is_best"] else 0.36,
+                "name": f"{'best ' if item['is_best'] else ''}B{item['branch_index']} BPB={item['bpb']:.3f}",
+                "hovertext": [
+                    f"B{item['branch_index']} step {int(step)}<br>BPB={item['bpb']:.4f}<br>answer BPB={item['answer_bpb']:.4f}"
+                    for step in item["steps"]
+                ],
+                "hoverinfo": "text",
+            }
+        )
+        if item["x"]:
+            traces.append(
+                {
+                    "type": "scatter3d",
+                    "mode": "markers",
+                    "x": [item["x"][-1]],
+                    "y": [item["y"][-1]],
+                    "z": [item["z"][-1]],
+                    "marker": {
+                        "size": 8 if item["is_best"] else 5,
+                        "color": color,
+                        "symbol": "diamond",
+                        "line": {"color": "white", "width": 1.2},
+                    },
+                    "name": f"terminal B{item['branch_index']}",
+                    "hovertext": f"terminal B{item['branch_index']}<br>BPB={item['bpb']:.4f}<br>answer BPB={item['answer_bpb']:.4f}",
+                    "hoverinfo": "text",
+                    "showlegend": False,
+                }
+            )
+
+    z_arr = np.asarray(zs, dtype=float)
+    low_count = min(10, max(3, int(0.01 * z_arr.shape[0])))
+    low_idx = np.argsort(z_arr)[:low_count]
+    traces.append(
+        {
+            "type": "scatter3d",
+            "mode": "markers",
+            "x": [xs[int(i)] for i in low_idx],
+            "y": [ys[int(i)] for i in low_idx],
+            "z": [zs[int(i)] + 0.08 for i in low_idx],
+            "marker": {"size": 6, "color": "#b9ff66", "symbol": "circle", "line": {"color": "white", "width": 1.0}},
+            "name": "low-energy basin samples",
+            "hovertext": [hover[int(i)] for i in low_idx],
+            "hoverinfo": "text",
+        }
+    )
+
+    payload = {
+        "title": (
+            f"Interactive embedding energy landscape R{record_meta['record_index']} "
+            f"{html.escape(str(record_meta.get('dataset', '')))} / {html.escape(str(record_meta.get('task_family', '')))}"
+        ),
+        "traces": traces,
+    }
+    html_text = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>Embedding energy landscape</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
+<body style="margin:0;background:#030712;color:white;font-family:system-ui">
+<div id="plot" style="width:100vw;height:100vh"></div>
+<script>
+const payload = {json.dumps(payload)};
+Plotly.newPlot('plot', payload.traces, {{
+  title:{{text:payload.title, font:{{color:'white'}}}},
+  paper_bgcolor:'#030712',
+  plot_bgcolor:'#030712',
+  scene:{{
+    bgcolor:'#030712',
+    xaxis:{{title:'PC1', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    yaxis:{{title:'PC2', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    zaxis:{{title:'local NLL energy', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#ffd166'}},
+    camera:{{eye:{{x:1.45, y:-1.65, z:1.20}}}}
+  }},
+  legend:{{font:{{color:'white'}}, bgcolor:'rgba(3,7,18,0.58)'}},
+  margin:{{l:0,r:0,b:0,t:54}},
+  annotations:[{{
+    text:'mesh: local NLL over hidden-state PCA | bright branch: best BPB terminal | green: low-energy basin samples',
+    x:0.02, y:0.02, xref:'paper', yref:'paper', showarrow:false,
+    font:{{color:'#e8fbff', size:12}}, align:'left'
+  }}]
+}}, {{responsive:true}});
+</script></body></html>
+"""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html_text, encoding="utf-8")
+
+
+def _rips_edges_and_triangles(
+    points: np.ndarray,
+    *,
+    max_edges: int = 520,
+    max_triangles: int = 220,
+) -> tuple[float, list[tuple[int, int]], list[tuple[int, int, int]]]:
+    """Build a capped Vietoris-Rips 1/2-complex on projected reasoning steps."""
+
+    if points.ndim != 2 or points.shape[0] < 3:
+        return 0.0, [], []
+    diffs = points[:, None, :] - points[None, :, :]
+    dist = np.linalg.norm(diffs, axis=-1)
+    nonzero = dist[dist > 1e-8]
+    if nonzero.size == 0:
+        return 0.0, [], []
+    chosen_radius = float(np.quantile(nonzero, 0.14))
+    edges_with_dist: list[tuple[float, int, int]] = []
+    for quantile in (0.10, 0.14, 0.18, 0.22, 0.28):
+        radius = float(np.quantile(nonzero, quantile))
+        candidates: list[tuple[float, int, int]] = []
+        for i in range(points.shape[0]):
+            for j in range(i + 1, points.shape[0]):
+                if dist[i, j] <= radius:
+                    candidates.append((float(dist[i, j]), i, j))
+        if len(candidates) >= min(24, max(6, points.shape[0] // 3)) or quantile == 0.28:
+            chosen_radius = radius
+            edges_with_dist = candidates
+            break
+    edges_with_dist.sort(key=lambda item: item[0])
+    edges = [(i, j) for _, i, j in edges_with_dist[:max_edges]]
+    edge_set = set(edges)
+    adjacency: dict[int, list[int]] = {i: [] for i in range(points.shape[0])}
+    for i, j in edges:
+        adjacency[i].append(j)
+        adjacency[j].append(i)
+    triangles: list[tuple[int, int, int]] = []
+    for i in range(points.shape[0]):
+        nbrs = sorted(j for j in adjacency[i] if j > i)
+        for a_pos in range(len(nbrs)):
+            j = nbrs[a_pos]
+            for k in nbrs[a_pos + 1 :]:
+                if (min(j, k), max(j, k)) in edge_set:
+                    triangles.append((i, j, k))
+                    if len(triangles) >= max_triangles:
+                        return chosen_radius, edges, triangles
+    return chosen_radius, edges, triangles
+
+
+def _sample_toric_shadow_vector(
+    branch: dict[str, Any],
+    key: str,
+    idx: np.ndarray,
+    *,
+    default: float = 0.0,
+    integer: bool = False,
+) -> np.ndarray:
+    """Align a sampled toric-shadow sequence to the plotted hidden states."""
+
+    values = np.asarray(branch.get("toric_shadow", {}).get(key, []), dtype=float)
+    if values.ndim != 1 or values.size == 0:
+        fill = int(default) if integer else float(default)
+        dtype = int if integer else float
+        return np.full((idx.shape[0],), fill, dtype=dtype)
+    if values.size >= idx.shape[0] and values.size < int(np.max(idx)) + 1:
+        sampled = values[: idx.shape[0]]
+    else:
+        sampled = values[np.minimum(idx, values.size - 1)]
+    return sampled.astype(int if integer else float)
+
+
+def write_interactive_projected_simplicial_toric_geometry(
+    record_meta: dict[str, Any],
+    branches: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    """Write a 3D hidden-space trajectory with Rips simplices and toric chambers.
+
+    This is the embedding-space companion to the torus-projected phase plot.  It
+    keeps the actual model trajectory in the PCA projection used by the static
+    graph-of-thought plots, then overlays the local Vietoris-Rips 1/2-complex
+    built from the same reasoning-step embeddings.  Toric active faces color
+    the vertices; chamber transitions and normal-fan rays expose where tropical
+    or toric geometry changes along the trajectory.
+    """
+
+    usable = [
+        branch
+        for branch in branches
+        if np.asarray(branch.get("projected_path", [])).ndim == 2
+        and np.asarray(branch.get("projected_path", [])).shape[0] >= 4
+    ]
+    if not usable:
+        return
+    ranked = sorted(usable, key=lambda item: float(item["bpb"]))
+    best = ranked[0]
+    path = np.asarray(best["projected_path"], dtype=float)
+    n_steps = path.shape[0]
+    idx = subsample_indices(n_steps, min(180, int(best.get("max_plot_points", 180))))
+    plotted = path[idx, :3]
+    energy = np.asarray(best.get("per_token_nll", np.zeros((n_steps,))), dtype=float)
+    plotted_energy = energy[np.minimum(idx, energy.shape[0] - 1)] if energy.size else np.zeros((idx.shape[0],), dtype=float)
+    active_faces = _sample_toric_shadow_vector(best, "active_faces", idx, default=0.0, integer=True)
+    margins = _sample_toric_shadow_vector(best, "margins", idx, default=0.0)
+    chart_axis = np.asarray(best.get("graphcg_chart_axis", np.zeros((n_steps,))), dtype=float)
+    chart_margin = np.asarray(best.get("graphcg_chart_margin", np.zeros((n_steps,))), dtype=float)
+    plotted_axis = chart_axis[np.minimum(idx, chart_axis.shape[0] - 1)] if chart_axis.size else np.zeros((idx.shape[0],), dtype=float)
+    plotted_chart_margin = (
+        chart_margin[np.minimum(idx, chart_margin.shape[0] - 1)] if chart_margin.size else np.zeros((idx.shape[0],), dtype=float)
+    )
+
+    radius, edges, triangles = _rips_edges_and_triangles(plotted)
+    traces: list[dict[str, Any]] = []
+    if triangles:
+        tri_i, tri_j, tri_k = zip(*triangles, strict=True)
+        traces.append(
+            {
+                "type": "mesh3d",
+                "x": plotted[:, 0].tolist(),
+                "y": plotted[:, 1].tolist(),
+                "z": plotted[:, 2].tolist(),
+                "i": list(tri_i),
+                "j": list(tri_j),
+                "k": list(tri_k),
+                "color": "#38f2ff",
+                "opacity": 0.16,
+                "name": f"VR 2-simplices r={radius:.3g}",
+                "hoverinfo": "skip",
+                "flatshading": False,
+                "showscale": False,
+            }
+        )
+    if edges:
+        ex: list[float | None] = []
+        ey: list[float | None] = []
+        ez: list[float | None] = []
+        for i, j in edges:
+            ex.extend([float(plotted[i, 0]), float(plotted[j, 0]), None])
+            ey.extend([float(plotted[i, 1]), float(plotted[j, 1]), None])
+            ez.extend([float(plotted[i, 2]), float(plotted[j, 2]), None])
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "lines",
+                "x": ex,
+                "y": ey,
+                "z": ez,
+                "line": {"color": "#7afcff", "width": 1},
+                "opacity": 0.26,
+                "name": f"VR 1-skeleton ({len(edges)} edges)",
+                "hoverinfo": "skip",
+            }
+        )
+
+    branch_palette = ["#38f2ff", "#ff4fd8", "#ffd166", "#8cff6a", "#ad7cff", "#ff7a45", "#7bdff2", "#f15bb5"]
+    for rank, branch in enumerate(ranked[:8]):
+        branch_path = np.asarray(branch["projected_path"], dtype=float)
+        bidx = subsample_indices(branch_path.shape[0], min(220, int(branch.get("max_plot_points", 180))))
+        sampled = branch_path[bidx, :3]
+        color = branch_palette[rank % len(branch_palette)]
+        is_best = branch is best
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "lines",
+                "x": sampled[:, 0].tolist(),
+                "y": sampled[:, 1].tolist(),
+                "z": sampled[:, 2].tolist(),
+                "line": {"color": color, "width": 7 if is_best else 2},
+                "opacity": 0.94 if is_best else 0.28,
+                "name": f"{'best ' if is_best else ''}B{branch['branch_index']} BPB={float(branch['bpb']):.3f}",
+                "hoverinfo": "name",
+            }
+        )
+
+    transition_idx = np.flatnonzero(np.diff(active_faces) != 0) + 1 if active_faces.size > 1 else np.asarray([], dtype=int)
+    if transition_idx.size:
+        trans = plotted[transition_idx]
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "markers",
+                "x": trans[:, 0].tolist(),
+                "y": trans[:, 1].tolist(),
+                "z": trans[:, 2].tolist(),
+                "marker": {"size": 8, "color": "#ffd166", "symbol": "diamond", "line": {"color": "white", "width": 1.0}},
+                "name": "toric chamber crossings",
+                "hovertext": [
+                    f"step {int(idx[pos])}<br>active face {int(active_faces[pos - 1])} → {int(active_faces[pos])}<br>margin={float(margins[pos]):.4f}"
+                    for pos in transition_idx.tolist()
+                ],
+                "hoverinfo": "text",
+            }
+        )
+
+    centroid = plotted.mean(axis=0)
+    unique_faces = np.unique(active_faces.astype(int))
+    ray_x: list[float | None] = []
+    ray_y: list[float | None] = []
+    ray_z: list[float | None] = []
+    for face in unique_faces[:12]:
+        mask = active_faces.astype(int) == int(face)
+        if np.count_nonzero(mask) < 2:
+            continue
+        endpoint = plotted[mask].mean(axis=0)
+        ray_x.extend([float(centroid[0]), float(endpoint[0]), None])
+        ray_y.extend([float(centroid[1]), float(endpoint[1]), None])
+        ray_z.extend([float(centroid[2]), float(endpoint[2]), None])
+    if ray_x:
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "lines",
+                "x": ray_x,
+                "y": ray_y,
+                "z": ray_z,
+                "line": {"color": "#ff4fd8", "width": 3},
+                "opacity": 0.56,
+                "name": "empirical normal-fan rays",
+                "hoverinfo": "skip",
+            }
+        )
+
+    margin_lo = float(np.nanmin(plotted_chart_margin)) if plotted_chart_margin.size else 0.0
+    margin_hi = float(np.nanmax(plotted_chart_margin)) if plotted_chart_margin.size else 1.0
+    marker_sizes = 3.5 + 8.5 * (plotted_chart_margin - margin_lo) / max(1e-8, margin_hi - margin_lo)
+    hover = [
+        (
+            f"reasoning step={int(step)}<br>"
+            f"toric active face={int(face)}<br>"
+            f"active-face margin={float(margin):.4f}<br>"
+            f"local NLL={float(e):.4f}<br>"
+            f"GraphCG axis={int(axis)}<br>"
+            f"chart margin={float(chart_m):.4f}"
+        )
+        for step, face, margin, e, axis, chart_m in zip(
+            idx.tolist(),
+            active_faces.tolist(),
+            margins.tolist(),
+            plotted_energy.tolist(),
+            plotted_axis.tolist(),
+            plotted_chart_margin.tolist(),
+            strict=True,
+        )
+    ]
+    traces.append(
+        {
+            "type": "scatter3d",
+            "mode": "markers",
+            "x": plotted[:, 0].tolist(),
+            "y": plotted[:, 1].tolist(),
+            "z": plotted[:, 2].tolist(),
+            "marker": {
+                "size": marker_sizes.tolist(),
+                "color": active_faces.tolist(),
+                "colorscale": "Turbo",
+                "opacity": 0.94,
+                "line": {"color": "#06111f", "width": 1},
+                "colorbar": {"title": {"text": "toric active face", "font": {"color": "white"}}, "tickfont": {"color": "white"}},
+            },
+            "text": hover,
+            "hoverinfo": "text",
+            "name": "reasoning-step vertices",
+        }
+    )
+    traces.append(
+        {
+            "type": "scatter3d",
+            "mode": "markers",
+            "x": [float(plotted[0, 0]), float(plotted[-1, 0])],
+            "y": [float(plotted[0, 1]), float(plotted[-1, 1])],
+            "z": [float(plotted[0, 2]), float(plotted[-1, 2])],
+            "marker": {"size": [9, 12], "color": ["#6df6ff", "#ffd166"], "symbol": ["circle", "diamond"], "line": {"color": "white", "width": 1}},
+            "name": "start / terminal",
+            "hoverinfo": "name",
+        }
+    )
+
+    title = (
+        f"Projected simplicial-toric reasoning geometry R{record_meta['record_index']} "
+        f"{html.escape(str(record_meta.get('dataset', '')))} / {html.escape(str(record_meta.get('task_family', '')))}"
+    )
+    subtitle = (
+        "PCA coordinates are hidden reasoning states; translucent triangles and cyan edges are the actual step-level "
+        "Vietoris-Rips complex; vertex colors are empirical toric active faces; gold markers are chamber crossings."
+    )
+    html_text = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>Projected simplicial toric reasoning geometry</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
+<body style="margin:0;background:#030712;color:white;font-family:system-ui">
+<div style="position:absolute;z-index:5;left:18px;top:12px;max-width:1040px;color:#e8fbff">
+  <div style="font-size:20px;font-weight:650">{title}</div>
+  <div style="font-size:12px;opacity:.84;margin-top:4px">{subtitle}</div>
+</div>
+<div id="plot" style="width:100vw;height:100vh"></div>
+<script>
+const traces = {json.dumps(traces)};
+Plotly.newPlot('plot', traces, {{
+  paper_bgcolor:'#030712',
+  plot_bgcolor:'#030712',
+  scene:{{
+    bgcolor:'#030712',
+    xaxis:{{title:'PC1', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    yaxis:{{title:'PC2', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    zaxis:{{title:'PC3', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#ffd166'}},
+    aspectmode:'data',
+    camera:{{eye:{{x:1.35,y:-1.45,z:1.05}}}}
+  }},
+  legend:{{font:{{color:'white'}}, x:0.02, y:0.82, bgcolor:'rgba(3,7,18,0.48)'}},
+  margin:{{l:0,r:0,b:0,t:0}}
+}}, {{responsive:true, displaylogo:false}});
+</script></body></html>
+"""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html_text, encoding="utf-8")
+
+
 def plot_toric_phase_simplicial_trajectory(
     record_meta: dict[str, Any],
     branches: list[dict[str, Any]],
@@ -2519,6 +3051,7 @@ def main() -> None:
         write_interactive_trajectory(meta, branches, traj_dir / f"{record_slug}_trajectory_3d.html")
         plot_phase_energy(meta, branches, traj_dir / f"{record_slug}_phase_energy.png")
         plot_energy_landscape(meta, branches, traj_dir / f"{record_slug}_energy_landscape.png")
+        write_interactive_energy_landscape(meta, branches, traj_dir / f"{record_slug}_energy_landscape.html")
         plot_toric_phase_simplicial_trajectory(
             meta,
             branches,
@@ -2528,6 +3061,11 @@ def main() -> None:
             meta,
             branches,
             traj_dir / f"{record_slug}_toric_phase_simplicial_trajectory.html",
+        )
+        write_interactive_projected_simplicial_toric_geometry(
+            meta,
+            branches,
+            traj_dir / f"{record_slug}_projected_simplicial_toric_geometry.html",
         )
         plot_toric_phase_winding_collection(
             meta,

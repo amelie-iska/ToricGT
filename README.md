@@ -650,7 +650,10 @@ hidden reasoning states. The analysis suite also writes
 `*_toric_phase_simplicial_trajectory.png`, which projects the
 irrational rotation-algebra phase path onto a torus, overlays local
 Vietoris-Rips edges, and draws the soft analogical maps between reasoning
-windows. These plots sit next to the 3D graph-of-thought trajectories,
+windows. The companion `*_projected_simplicial_toric_geometry.html` hidden-space
+plot adds actual step-level Vietoris-Rips 1/2-simplices, toric active-face
+coloring, chamber crossings, and empirical normal-fan rays. These plots sit
+next to the 3D graph-of-thought trajectories,
 Ramachandran-style phase plots, energy landscapes, reasoning/K/BPB triangles,
 and tetrahedral simplex diagnostics.
 The condensed and full papers now make the next-iteration algebra explicit:
@@ -948,7 +951,14 @@ interactive torus-projected reasoning trajectories with the embedded
 commutative torus surface, noncommutative phase-wound paths, local simplicial
 edges, GraphCG-margin markers, and analogical transport arrows,
 Ramachandran-style reasoning torsion plots, and energy/fitness landscapes
-whose low-energy basins represent high-quality terminal reasoning states.
+whose low-energy basins represent high-quality terminal reasoning states.  The
+analysis suite also emits `*_energy_landscape.html` files: rotatable 3D
+Plotly meshes where PC1/PC2 are the hidden-state projection, height is local
+NLL energy, branch paths are lifted onto the surface, and green markers flag
+low-energy basin samples. The same pass emits
+`*_projected_simplicial_toric_geometry.html`, a rotatable 3D hidden-space
+plot with the actual reasoning-step simplicial complex and toric chamber/fan
+diagnostics attached to the trajectory vertices.
 
 ## Toric Music
 

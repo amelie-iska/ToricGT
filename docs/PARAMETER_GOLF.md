@@ -231,6 +231,16 @@ the static images. Each HTML file overlays the best and competing reasoning
 branches on the embedded commutative torus surface, colors points by local NLL,
 sizes points by GraphCG chart margin, draws local simplicial edges, and adds
 magenta analogical transport arrows between reasoning windows.
+It also writes `*_energy_landscape.html` companions for the static energy
+landscape plots: rotatable 3D meshes with PC1/PC2 as hidden-state projection
+coordinates, local NLL as height, branch paths lifted onto the surface, and
+low-energy basin samples marked explicitly.
+The projected hidden-space companion,
+`*_projected_simplicial_toric_geometry.html`, keeps the actual reasoning
+trajectory in 3D PCA coordinates, overlays the step-level Vietoris-Rips
+1-skeleton and translucent 2-simplices, colors vertices by empirical toric
+active face, marks chamber crossings, and draws empirical normal-fan rays from
+the trajectory centroid to occupied fan cells.
 
 The same window hierarchy now includes DEC-style conservative flow diagnostics
 adapted from Mohamed, Hirani, and Samtaney's DEC discretization of
