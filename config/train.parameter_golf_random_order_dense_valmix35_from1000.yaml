@@ -235,8 +235,8 @@ training:
   shock_guard_end_step: 40750
   shock_guard_loss_ratio: 1.025
   shock_guard_loss_delta: 0.06
-  shock_guard_grad_norm: 0.30
-  shock_guard_update_scale: 0.015
+  shock_guard_grad_norm: 0.28
+  shock_guard_update_scale: 0.010
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
@@ -245,9 +245,9 @@ training:
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 1000
   robust_micro_loss_guard_end_step: 40750
-  robust_micro_loss_guard_ratio: 1.06
-  robust_micro_loss_guard_delta: 0.10
-  robust_micro_loss_guard_min_scale: 0.32
+  robust_micro_loss_guard_ratio: 1.05
+  robust_micro_loss_guard_delta: 0.075
+  robust_micro_loss_guard_min_scale: 0.25
   precision: bf16
   device: cuda
   seed: 17
@@ -307,9 +307,9 @@ adaptive_training:
   # GFlowNet back to 1e-3 during the BPB likelihood-capture hold.  In this
   # regime GFlowNet remains active, but the byte likelihood objective must own
   # the optimizer direction.
-  gflownet_loss_max: 0.00003
+  gflownet_loss_max: 0.00001
   gflownet_gap_step: 0.0
-  gflownet_relax_step: 0.000005
+  gflownet_relax_step: 0.000001
   complex_mix_min: 0.00
   complex_mix_max: 0.04
   complex_down_step: 0.03
@@ -323,7 +323,7 @@ adaptive_training:
   recovery_mode_enabled: true
   recovery_train_drift_threshold: 0.04
   recovery_complex_down_step: 0.04
-  recovery_gflownet_down_step: 0.00001
+  recovery_gflownet_down_step: 0.000005
   recovery_exit_val_improvements: 3
 
 hessian:
@@ -467,28 +467,26 @@ phase_curriculum:
     - name: bpb_stabilization_hold
       start_step: 3250
       end_step: 6000
-      # Step-3800 curvcap review: step 3600 is the fresh local low
-      # (train BPB 3.5207), followed by positive first differences at
-      # 3600->3650 and 3650->3700, rising validation BPB, and worse
-      # branch/complexity BPB.  Restart from 3600 and keep every ToricGT
-      # mechanism present, but make this a narrower low-curvature capture
-      # phase: smaller scalar LR, tighter clipping, less medium-stream
-      # pressure, and very light nonzero GFlowNet/GraphCG shaping.
-      lr_multiplier: 0.045
-      grad_clip_norm: 0.28
+      # Step-4100 lowcurv review: the replay still failed to beat the
+      # step-3600 train-BPB low and showed a positive 4050->4100 first
+      # difference with rising sparse validation gates.  Keep the dense
+      # random-order ToricGT machinery active, but turn this into an
+      # ultra-low-curvature byte-likelihood capture window.
+      lr_multiplier: 0.032
+      grad_clip_norm: 0.24
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.25
+      medium_mix_ratio: 0.15
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00001
-      gflownet_entropy_weight: 0.000002
+      gflownet_loss_weight: 0.000005
+      gflownet_entropy_weight: 0.000001
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.00003
+      graphcg_loss_weight: 0.00002
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00001
+      contrastive_loss_weight: 0.000005
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
