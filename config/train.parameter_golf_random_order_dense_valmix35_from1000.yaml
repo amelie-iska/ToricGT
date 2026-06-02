@@ -258,16 +258,16 @@ training:
   # observed in metrics but should not be allowed to kick Adam out of the
   # basin.  This is a stochastic line-search surrogate, not data deletion.
   shock_guard_enabled: true
-  # Step-2250 and step-2125 replay reviews: the loss shock detector was logging
-  # impulses in the 2000--2500 cliff window, and the first guarded replay still
-  # oscillated between the 2075/2125 lows and high-loss rebounds.  Keep the
-  # whole cliff band in a Huber-like stochastic line-search mode.
+  # Step-2250, step-2125, and step-2150 replay reviews: the loss shock detector
+  # was logging impulses in the 2000--2500 cliff window, and guarded replays
+  # still oscillated between the 2075/2125 lows and high-loss rebounds.  Keep
+  # the whole cliff band in a near-zero-update trust-region mode for shocks.
   shock_guard_start_step: 2000
   shock_guard_end_step: 2500
-  shock_guard_loss_ratio: 1.010
-  shock_guard_loss_delta: 0.025
-  shock_guard_grad_norm: 0.10
-  shock_guard_update_scale: 0.002
+  shock_guard_loss_ratio: 1.006
+  shock_guard_loss_delta: 0.008
+  shock_guard_grad_norm: 0.00
+  shock_guard_update_scale: 0.000
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
@@ -276,9 +276,9 @@ training:
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 2000
   robust_micro_loss_guard_end_step: 2500
-  robust_micro_loss_guard_ratio: 1.010
-  robust_micro_loss_guard_delta: 0.010
-  robust_micro_loss_guard_min_scale: 0.05
+  robust_micro_loss_guard_ratio: 1.006
+  robust_micro_loss_guard_delta: 0.006
+  robust_micro_loss_guard_min_scale: 0.02
   precision: bf16
   device: cuda
   seed: 17
@@ -497,14 +497,14 @@ phase_curriculum:
       start_step: 2000
       end_step: 2160
       # Re-enter the first strong likelihood basin from the step-2000 to 2125
-      # checkpoints.  The 2075/2125 replay lows are real, but the 0.14 LR
-      # multiplier produces alternating low/rebound checkpoints.  Freeze
-      # auxiliary steering and use a smaller scalar step so the basin is
-      # consolidated rather than repeatedly rediscovered.
-      lr_multiplier: 0.060
-      grad_clip_norm: 0.16
+      # checkpoints.  The step-2125 -> step-2150 replay still rebounded with
+      # medium rows present, even after lowering the LR.  This phase is now a
+      # byte-only trust-region replay: no medium/hard/reasoning rows and no
+      # auxiliary steering.
+      lr_multiplier: 0.035
+      grad_clip_norm: 0.08
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.25
+      medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
@@ -527,10 +527,10 @@ phase_curriculum:
       # positive curvature shortly afterward.  Damp the scalar step while
       # preserving random-order decoding and row diversity.  Auxiliaries remain
       # diagnostic-only so the BPB gradient owns the update direction.
-      lr_multiplier: 0.045
-      grad_clip_norm: 0.12
+      lr_multiplier: 0.025
+      grad_clip_norm: 0.08
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.20
+      medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
@@ -553,10 +553,10 @@ phase_curriculum:
       # instead consolidate the byte-likelihood basin.  The watcher pauses at
       # 2250 and launches a Codex review; these values are only the fallback if
       # continuation is selected by the evidence.
-      lr_multiplier: 0.030
-      grad_clip_norm: 0.10
+      lr_multiplier: 0.018
+      grad_clip_norm: 0.06
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.12
+      medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0

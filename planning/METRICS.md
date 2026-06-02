@@ -9048,3 +9048,58 @@ Acceptance criteria for the step-2175 review:
    diagnostic-only in this cliff band;
 5. if BPB still plateaus, the next action should be an even shorter 25-step
    trust-region replay from the best checkpoint, not a continuation to 2325.
+
+## 2026-06-02 Step-2150 Trust-Region Replay Update
+
+The tightened step-2125 replay did not stabilize the basin.  The run used a
+fresh W&B id and lower scalar step, so the signal is no longer an artifact of
+out-of-order W&B logging.  It still rebounded:
+
+```text
+2125 train_bpb=3.683005
+2150 train_bpb=4.051360
+```
+
+The live trace from 2125 to 2145 sat mostly around `4.0--4.29` BPB.  This means
+the remaining `medium_mix_ratio=0.25` and nonzero motion are enough to leave the
+byte-likelihood basin even under the stricter 2000--2500 guard.  The correct
+next test is therefore not another 50--250 step continuation.  It is a
+25-step trust-region replay from the best checkpoint with no medium rows and no
+shock updates.
+
+Action: `EDIT_AND_RESTART`.
+
+Additional controls:
+
+| control | old | new |
+|---|---:|---:|
+| shock guard ratio | `1.010` | `1.006` |
+| shock guard delta | `0.025` | `0.008` |
+| shock guard grad threshold | `0.10` | `0.00` |
+| shock guard update scale | `0.002` | `0.000` |
+| micro guard ratio | `1.010` | `1.006` |
+| micro guard delta | `0.010` | `0.006` |
+| micro guard min scale | `0.05` | `0.02` |
+| 2000--2160 LR multiplier | `0.060` | `0.035` |
+| 2000--2160 grad clip | `0.16` | `0.08` |
+| 2000--2160 medium mix | `0.25` | `0.0` |
+| 2160--2225 LR multiplier | `0.045` | `0.025` |
+| 2160--2225 medium mix | `0.20` | `0.0` |
+| 2225--2500 LR multiplier | `0.030` | `0.018` |
+| 2225--2500 medium mix | `0.12` | `0.0` |
+
+Restart target:
+
+```text
+resume: checkpoints/parameter_golf_oai_dense/random_order_step_00002125.pt
+next gate: 2150
+```
+
+Acceptance criteria:
+
+1. step-2150 checkpoint BPB must not rebound above `4.0`;
+2. if step-2150 still rebounds, stop training and evaluate whether the
+   checkpoint at 2125 should be promoted as the local low rather than trying to
+   push through this cliff with the current data order;
+3. do not activate Toric BGG, toric geometry, topology, GraphCG, memory, QAT,
+   or GFlowNet losses in this band.
