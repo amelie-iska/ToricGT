@@ -6641,3 +6641,145 @@ Acceptance criteria for the next gate:
    and triangle validity above `0.68`;
 5. toric shadow minimum margin above `1e-4`, fan entropy not below `0.67`, and
    bend spikes not increasing relative to this review.
+
+## Step 3500 Handoff Review: Curvature-Capture Restart From Step 3000
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-graphcg-gfn-03000-damped-auxguard-20260602T041537Z/step-00003500
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003500.pt
+```
+
+The watcher completed the CUDA/bf16 analysis suite and attempted to pause
+`toricgt_oai_graphcg_gfn_03000_damped_auxguard_20260602T041537Z`.  The tmux
+pane was already gone by the time the pause command ran, so training is treated
+as stopped at the step-3500 gate.  No checkpoint files were deleted.
+
+### Metric Categorization
+
+| family | observed behavior | category |
+|---|---|---|
+| train BPB/loss | automatic report marks median BPB/loss as improved (`train/bpb` first median `3.8876`, last median `3.6790`, relative change `-5.37%`), but the raw trace has a shallow U-shape: sampled BPB reaches `3.3902` near step `3280` and rebounds before the saved step-3500 checkpoint (`3.6656`) | desired overall, but too weak/slow locally |
+| checkpoint finite differences | checkpoint BPB sequence for the fresh run is `3000: 3.5026`, `3250: 3.6714`, `3500: 3.6656`; the saved checkpoints do not capture the around-3280 local minimum | undesirable as a promotion trajectory |
+| validation/complexity validation | controller validation remained at `5.5431`, while the small complexity-val probe reported BPB around `5.24-5.27`; both remain above the stored historical best `4.6961` | undesirable as a checkpoint gate |
+| GFlowNet loss | median decreased (`3.0596 -> 2.8559`), but the trace is strongly correlated with train BPB and spikes after the around-3280 low | desired but too coupled to BPB |
+| GFlowNet entropy/diversity | entropy stays near maximum and action diversity remains around `0.9987`; no collapse, but the policy is too uniform to provide selective low-BPB search pressure | desired but too weak/slow |
+| GraphCG | basis and covariance losses are stable and active; GraphCG does not explain the BPB bounce | desired |
+| analogy/topology losses | lattice, HDBSCAN, and barcode losses improve in aggregate, but directed map and step-topology losses drift upward in the recent window | mixed; keep light |
+| relative Kolmogorov proxies | prediction-target NCD improves and analogical-transfer rewards are active, but sample counts are small and many compressor statistics are dominated by row difficulty | diagnostic only |
+| trajectory geometry | mean branch BPB `4.9971`, best branch BPB `4.0310`, answer-span best `3.6156`, MST efficiency `0.6946`, path smoothness `0.0772`; branch search is rich but not yet aligned with low-BPB terminals | desired but too weak/slow |
+| nested directed topology | inclusion violation is zero, undirected edge validity is high (`0.9803`), directed edge validity is high (`0.9274`), triangle validity is moderate (`0.7040`), and directed cycle flux is effectively zero | desired, with triangle transport still weak |
+| toric/tropical geometry | fan entropy is healthy (`0.7338`), occupied cells are broad (`13.21`), but mean active-face margin is tiny (`0.0239` in the toric shadow; `-1.821` in the signed task convention), bend magnitude is large, and leaf residual is near `1.0` | undesirable as a training gate |
+| phase/Ramachandran plots | coherent phase islands are present, but local energy is not concentrated tightly inside them | desired structure, too weak/slow |
+| Hessian/sharpness | disabled in this run; curvature inference comes from first/second finite differences and gradient-norm/BPB correlation | unavailable |
+
+Automatic category counts:
+
+```text
+as_desired: 228
+as_desired_but_not_strong_or_fast_enough: 87
+not_as_desired: 86
+```
+
+### Mathematical and Statistical Interpretation
+
+The useful signal is the local finite-difference pattern, not the aggregate
+classifier count.  Over W&B steps `3001-3490`, train BPB has negative average
+slope, but the raw series reaches a local minimum around step `3280` and then
+returns toward the old floor.  This is a classic high-curvature stochastic
+basin: the local quadratic approximation to byte cross-entropy is good enough
+to descend, but gradient noise plus auxiliary search pressure pushes the
+iterate across a shallow wall before a checkpoint captures the minimum.
+
+The selected Spearman matrix supports this reading.  `train/gflownet_loss` is
+positively correlated with `train/bpb`, and `train/grad_norm` is also
+positively correlated with BPB/loss.  Thus the GFlowNet branch objective is
+not broken, but in this window it is acting like an energy injection term
+rather than a selective low-BPB refinement.  In variational language, the
+policy entropy is high and the action distribution is broad; the trajectory
+balance residual improves, but the induced samples are not yet concentrated
+on low-loss terminal reasoning traces.
+
+The toric shadow explains why stronger toric or topology weights would be the
+wrong response.  Active Newton fan cells are occupied broadly, but tropical
+margins are close to zero while bend magnitudes spike.  A small-margin
+piecewise-linear region is precisely where chamber crossings are unstable: a
+tiny parameter update can change the active face and make the local affine
+model invalid.  Heavy toric/Koszul losses should wait until the byte model
+forms a more stable likelihood basin.
+
+The topology plots are better behaved than the BPB curve.  The directed
+filtration has zero inclusion violation, high edge validity, nontrivial
+directed asymmetry, and negligible cycle flux.  That means the
+noncommutative/persistence machinery is coherent.  Triangle validity and
+branch BPB are not yet strong enough to promote these terms.
+
+### Decision
+
+Restart again from the best available saved checkpoint before the rebound:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003000.pt
+```
+
+The around-3280 local low is not saved.  The next run must save dense
+checkpoints every `50` steps so the review can promote the actual local low
+instead of the later rebound.  Keep the model architecture and method stack
+unchanged: dense contest weights, random-order autoregressive graph decoding,
+hybrid/tropical ring attention, toric memory, GraphCG, embedding-space
+GFlowNet graph-of-thought, directed persistence/Koszul diagnostics, and
+relative Kolmogorov metrics all remain active.
+
+Implemented config-only changes:
+
+| control | previous | new |
+|---|---:|---:|
+| warmup steps | `3500` | `4500` |
+| shock guard grad norm | `0.36` | `0.32` |
+| shock guard update scale | `0.04` | `0.025` |
+| checkpoint interval | `250` | `50` |
+| adaptive controller GFlowNet max | `0.006` | `0.001` |
+| adaptive controller GFlowNet increase step | `0.00025` | `0.0` |
+| 2500-3250 LR multiplier | `0.10` | `0.08` |
+| 2500-3250 grad clip | `0.36` | `0.32` |
+| 2500-3250 GFlowNet loss | `0.00012` | `0.00008` |
+| 2500-3250 GFlowNet entropy loss | `0.000025` | `0.000015` |
+| 2500-3250 analogy lattice loss | `0.000005` | `0.000003` |
+| 2500-3250 contrastive loss | `0.00004` | `0.00003` |
+| 3250-6000 LR multiplier | `0.10` | `0.08` |
+| 3250-6000 grad clip | `0.36` | `0.32` |
+| 3250-6000 GFlowNet loss | `0.00008` | `0.00004` |
+| 3250-6000 GFlowNet entropy loss | `0.00002` | `0.00001` |
+| 3250-6000 analogy lattice loss | `0.000005` | `0.000002` |
+| 3250-6000 contrastive loss | `0.00004` | `0.00003` |
+
+This is a curvature-capture change, not a retreat from ToricGT.  It reduces
+only scalar pressure during the BPB consolidation window and saves more
+checkpoints.
+
+### Next Review Gate
+
+Resume from step `3000`, analyze the first fresh checkpoint at or above step
+`3500`, and use a fresh `--min-mtime-unix` so existing checkpoint filenames do
+not contaminate the watcher.  The next gate should promote any fresh
+checkpoint in `[3200,3500]` whose checkpoint BPB beats step `3000`, or whose
+validation/complexity-validation BPB improves without worsening branch BPB.
+
+Acceptance criteria:
+
+1. saved checkpoint BPB below `3.50`, preferably capturing the local low before
+   the rebound;
+2. controller/validation BPB below `5.5431` and moving toward the historical
+   `4.6961` gate;
+3. best branch BPB below `4.0` and answer-span best below `3.60`;
+4. GFlowNet entropy still noncollapsed but with lower correlation to BPB;
+5. directed edge validity above `0.93`, triangle validity above `0.70`, and
+   inclusion violation still zero;
+6. toric shadow minimum margin not collapsing and bend magnitude not
+   increasing.

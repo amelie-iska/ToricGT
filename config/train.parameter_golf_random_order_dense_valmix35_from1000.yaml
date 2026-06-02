@@ -223,7 +223,7 @@ training:
   # intact and keep the next 500-step window below that observed bounce band.
   lr: 0.000038
   weight_decay: 0.03
-  warmup_steps: 3500
+  warmup_steps: 4500
   grad_clip_norm: 1.0
   # Step-2000 shock-guard analysis reproduced the same sharp BPB impulse:
   # local minimum at ~1690, then a large positive first/second difference at
@@ -235,8 +235,8 @@ training:
   shock_guard_end_step: 40750
   shock_guard_loss_ratio: 1.025
   shock_guard_loss_delta: 0.06
-  shock_guard_grad_norm: 0.36
-  shock_guard_update_scale: 0.04
+  shock_guard_grad_norm: 0.32
+  shock_guard_update_scale: 0.025
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
@@ -284,7 +284,7 @@ training:
   resize_position_embedding: true
   # Retain dense resume points frequently. The model is small enough that
   # keeping historical optimizer checkpoints is useful for curriculum rollbacks.
-  ckpt_interval: 250
+  ckpt_interval: 50
 
 complexity:
   enabled: true
@@ -303,8 +303,8 @@ adaptive_training:
   entropy_target_min: 2.00
   entropy_target_tau_steps: 8000
   gflownet_loss_min: 0.0
-  gflownet_loss_max: 0.006
-  gflownet_gap_step: 0.00025
+  gflownet_loss_max: 0.001
+  gflownet_gap_step: 0.0
   gflownet_relax_step: 0.0005
   complex_mix_min: 0.00
   complex_mix_max: 0.04
@@ -442,45 +442,49 @@ phase_curriculum:
       # from the step-3000 checkpoint with a smaller scalar step and lighter
       # exploration auxiliaries.  This keeps GraphCG/GFlowNet active as
       # steering signals without letting them outrun byte likelihood.
-      lr_multiplier: 0.10
-      grad_clip_norm: 0.36
+      lr_multiplier: 0.08
+      grad_clip_norm: 0.32
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00012
-      gflownet_entropy_weight: 0.000025
+      gflownet_loss_weight: 0.00008
+      gflownet_entropy_weight: 0.000015
       gflownet_entropy_target: 2.0
       graphcg_loss_weight: 0.00004
-      analogy_lattice_loss_weight: 0.000005
+      analogy_lattice_loss_weight: 0.000003
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00004
+      contrastive_loss_weight: 0.00003
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
     - name: bpb_stabilization_hold
       start_step: 3250
       end_step: 6000
-      # Keep the post-3250 window in the same damped regime.  The prior
-      # 0.24 multiplier plus lower medium-row mixture was too aggressive for
-      # the observed curvature and turned validation BPB upward.
-      lr_multiplier: 0.10
-      grad_clip_norm: 0.36
+      # Step-3500 review: the 3000 replay improved overall but formed a
+      # shallow U-shaped BPB/loss basin: sampled BPB reached a local minimum
+      # near step 3280 and rebounded before the saved 3500 checkpoint.  Keep
+      # all ToricGT mechanisms active, but make this a curvature-capture
+      # window: lower scalar update size, tighten shock clipping, and save
+      # dense checkpoints every 50 steps so the next review can promote the
+      # actual local low instead of the later rebound.
+      lr_multiplier: 0.08
+      grad_clip_norm: 0.32
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00008
-      gflownet_entropy_weight: 0.00002
+      gflownet_loss_weight: 0.00004
+      gflownet_entropy_weight: 0.00001
       gflownet_entropy_target: 2.0
       graphcg_loss_weight: 0.00004
-      analogy_lattice_loss_weight: 0.000005
+      analogy_lattice_loss_weight: 0.000002
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00004
+      contrastive_loss_weight: 0.00003
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
