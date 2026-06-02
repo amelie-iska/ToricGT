@@ -200,6 +200,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-pca-points", type=int, default=4096)
     parser.add_argument("--max-plot-points", type=int, default=180)
     parser.add_argument("--max-mst-nodes", type=int, default=96)
+    parser.add_argument("--simplicial-windows", type=int, default=6)
+    parser.add_argument("--simplicial-radius-quantiles", default="0.08,0.14,0.22")
+    parser.add_argument("--simplicial-default-level", default="default", choices=["sparse", "default", "dense"])
+    parser.add_argument("--simplicial-max-edges-per-window", type=int, default=34)
+    parser.add_argument("--simplicial-max-triangles-per-window", type=int, default=12)
     parser.add_argument("--compressors", nargs="+", default=["zlib", "lzma"])
     parser.add_argument("--domain-keywords", nargs="+", default=list(DEFAULT_DOMAIN_KEYWORDS))
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -218,6 +223,21 @@ def safe_text(value: Any) -> str:
 def slug(value: str, max_len: int = 72) -> str:
     value = re.sub(r"[^a-zA-Z0-9_.-]+", "-", value.strip().lower())
     return value.strip("-")[:max_len] or "record"
+
+
+def parse_float_csv(value: str, *, fallback: tuple[float, ...]) -> tuple[float, ...]:
+    parsed: list[float] = []
+    for raw in value.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            item = float(raw)
+        except ValueError:
+            continue
+        if 0.0 < item < 1.0:
+            parsed.append(item)
+    return tuple(parsed) if parsed else fallback
 
 
 def row_domain_prefix(row: dict[str, Any]) -> str:
@@ -950,11 +970,66 @@ def plot_trajectory_3d(record_meta: dict[str, Any], branches: list[dict[str, Any
 
 
 def write_interactive_trajectory(record_meta: dict[str, Any], branches: list[dict[str, Any]], output_path: Path) -> None:
-    traces = []
+    traces: list[dict[str, Any]] = []
+    if not branches:
+        return
     bpbs = np.array([float(branch["bpb"]) for branch in branches], dtype=float)
     lo, hi = float(bpbs.min()), float(bpbs.max())
+    ranked = sorted(branches, key=lambda item: float(item["bpb"]))
+    best = ranked[0]
+    best_path = np.asarray(best.get("projected_path", np.zeros((0, 3))), dtype=float)
+    if best_path.ndim == 2 and best_path.shape[0] >= 6:
+        best_idx = subsample_indices(best_path.shape[0], min(150, int(best.get("max_plot_points", 180))))
+        best_points = best_path[best_idx, :3]
+        active_faces = _sample_toric_shadow_vector(best, "active_faces", best_idx, default=0.0, integer=True)
+        margins = _sample_toric_shadow_vector(best, "margins", best_idx, default=0.0)
+        traces.extend(
+            _clean_windowed_simplicial_traces(
+                best_points,
+                name_prefix="best-branch reasoning-step",
+                windows=int(best.get("simplicial_windows", 6)),
+                radius_quantiles=tuple(best.get("simplicial_radius_quantiles", (0.08, 0.14, 0.22))),
+                default_level=str(best.get("simplicial_default_level", "default")),
+                max_edges_per_window=int(best.get("simplicial_max_edges_per_window", 34)),
+                max_triangles_per_window=int(best.get("simplicial_max_triangles_per_window", 12)),
+                opacity=0.20,
+            )
+        )
+        traces.extend(
+            _projected_chamber_traces(
+                best_points,
+                active_faces,
+                margins,
+                best_idx,
+                z_offset=0.0,
+                name_prefix="projected toric/tropical",
+            )
+        )
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "markers",
+                "x": best_points[:, 0].tolist(),
+                "y": best_points[:, 1].tolist(),
+                "z": best_points[:, 2].tolist(),
+                "marker": {
+                    "size": 4,
+                    "color": active_faces.tolist(),
+                    "colorscale": "Turbo",
+                    "opacity": 0.78,
+                    "line": {"color": "#06111f", "width": 0.7},
+                    "colorbar": {"title": {"text": "active face", "font": {"color": "white"}}, "tickfont": {"color": "white"}},
+                },
+                "name": "best-branch active-face vertices",
+                "hovertext": [
+                    f"step={int(step)}<br>active face={int(face)}<br>tropical margin={float(margin):.4f}"
+                    for step, face, margin in zip(best_idx.tolist(), active_faces.tolist(), margins.tolist(), strict=True)
+                ],
+                "hoverinfo": "text",
+            }
+        )
     for branch in branches:
-        path = branch["projected_path"]
+        path = np.asarray(branch["projected_path"], dtype=float)
         idx = subsample_indices(path.shape[0], int(branch.get("max_plot_points", 180)))
         plotted = path[idx]
         norm = 0.5 if abs(hi - lo) < 1e-8 else (float(branch["bpb"]) - lo) / (hi - lo)
@@ -1005,26 +1080,44 @@ def write_interactive_trajectory(record_meta: dict[str, Any], branches: list[dic
                         "hoverinfo": "name",
                     }
                 )
+    density_menu = _simplicial_density_menu(traces)
     payload = {
         "title": f"R{record_meta['record_index']} {record_meta.get('dataset', '')} / {record_meta.get('task_family', '')}",
+        "subtitle": (
+            "lines: random-order/GFlowNet branches | translucent local complexes: best-branch reasoning-step VR windows | "
+            "gold diamonds: toric chamber crossings | magenta open circles: low tropical-margin wall samples"
+        ),
         "traces": traces,
+        "updatemenus": density_menu,
     }
     html_text = f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Reasoning trajectory</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
 <body style="margin:0;background:#030712;color:white;font-family:system-ui">
+<div style="position:absolute;z-index:5;left:18px;top:12px;max-width:1040px;color:#e8fbff">
+  <div style="font-size:20px;font-weight:650">{html.escape(payload['title'])}</div>
+  <div style="font-size:12px;opacity:.84;margin-top:4px">{payload['subtitle']}</div>
+</div>
 <div id="plot" style="width:100vw;height:100vh"></div>
 <script>
 const payload = {json.dumps(payload)};
 Plotly.newPlot('plot', payload.traces, {{
-  title:{{text:payload.title, font:{{color:'white'}}}},
   paper_bgcolor:'#030712', plot_bgcolor:'#030712',
-  scene:{{xaxis:{{visible:false}}, yaxis:{{visible:false}}, zaxis:{{visible:false}}, bgcolor:'#030712'}},
-  legend:{{font:{{color:'white'}}}},
-  margin:{{l:0,r:0,b:0,t:52}}
-}});
+  scene:{{
+    xaxis:{{title:'PC1', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    yaxis:{{title:'PC2', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#2de2e6'}},
+    zaxis:{{title:'PC3', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#ffd166'}},
+    bgcolor:'#030712',
+    aspectmode:'data',
+    camera:{{eye:{{x:1.35,y:-1.45,z:1.05}}}}
+  }},
+  updatemenus: payload.updatemenus,
+  legend:{{font:{{color:'white'}}, x:0.02, y:0.80, bgcolor:'rgba(3,7,18,0.48)'}},
+  margin:{{l:0,r:0,b:0,t:0}}
+}}, {{responsive:true, displaylogo:false}});
 </script></body></html>
 """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html_text, encoding="utf-8")
 
 
@@ -1215,6 +1308,74 @@ def write_interactive_energy_landscape(
             }
         )
 
+    if best_branch_index >= 0:
+        best_branch = branches[best_branch_index]
+        best_path = np.asarray(best_branch.get("projected_path", np.zeros((0, 3))), dtype=float)
+        best_energy = np.asarray(best_branch.get("per_token_nll", np.zeros((best_path.shape[0],))), dtype=float)
+        if best_path.ndim == 2 and best_path.shape[0] >= 6 and best_energy.shape[0] >= best_path.shape[0]:
+            best_idx = subsample_indices(best_path.shape[0], min(150, int(best_branch.get("max_plot_points", 180))))
+            best_points = np.column_stack(
+                [
+                    best_path[best_idx, 0],
+                    best_path[best_idx, 1],
+                    best_energy[best_idx] + 0.055,
+                ]
+            )
+            active_faces = _sample_toric_shadow_vector(best_branch, "active_faces", best_idx, default=0.0, integer=True)
+            margins = _sample_toric_shadow_vector(best_branch, "margins", best_idx, default=0.0)
+            traces.extend(
+                _clean_windowed_simplicial_traces(
+                    best_points,
+                    name_prefix="energy-surface reasoning-step",
+                    z_values=best_energy[best_idx],
+                    windows=int(best_branch.get("simplicial_windows", 6)),
+                    radius_quantiles=tuple(best_branch.get("simplicial_radius_quantiles", (0.08, 0.14, 0.22))),
+                    default_level=str(best_branch.get("simplicial_default_level", "default")),
+                    max_edges_per_window=int(best_branch.get("simplicial_max_edges_per_window", 34)),
+                    max_triangles_per_window=int(best_branch.get("simplicial_max_triangles_per_window", 12)),
+                    opacity=0.18,
+                )
+            )
+            traces.extend(
+                _projected_chamber_traces(
+                    best_points,
+                    active_faces,
+                    margins,
+                    best_idx,
+                    z_offset=0.08,
+                    name_prefix="energy toric/tropical",
+                )
+            )
+            traces.append(
+                {
+                    "type": "scatter3d",
+                    "mode": "markers",
+                    "x": best_points[:, 0].tolist(),
+                    "y": best_points[:, 1].tolist(),
+                    "z": best_points[:, 2].tolist(),
+                    "marker": {
+                        "size": 4.2,
+                        "color": active_faces.tolist(),
+                        "colorscale": "Turbo",
+                        "opacity": 0.86,
+                        "line": {"color": "#06111f", "width": 0.8},
+                        "colorbar": {"title": {"text": "active face", "font": {"color": "white"}}, "tickfont": {"color": "white"}},
+                    },
+                    "name": "energy-surface toric vertices",
+                    "hovertext": [
+                        f"step={int(step)}<br>active face={int(face)}<br>tropical margin={float(margin):.4f}<br>local NLL={float(e):.4f}"
+                        for step, face, margin, e in zip(
+                            best_idx.tolist(),
+                            active_faces.tolist(),
+                            margins.tolist(),
+                            best_energy[best_idx].tolist(),
+                            strict=True,
+                        )
+                    ],
+                    "hoverinfo": "text",
+                }
+            )
+
     branch_palette = ["#38f2ff", "#ff4fd8", "#ffd166", "#8cff6a", "#ad7cff", "#ff7a45", "#7bdff2", "#f15bb5"]
     for rank, item in enumerate(sorted(branch_paths, key=lambda row: row["bpb"])):
         denom = max(1e-8, bpb_hi - bpb_lo)
@@ -1277,12 +1438,14 @@ def write_interactive_energy_landscape(
         }
     )
 
+    density_menu = _simplicial_density_menu(traces)
     payload = {
         "title": (
             f"Interactive embedding energy landscape R{record_meta['record_index']} "
             f"{html.escape(str(record_meta.get('dataset', '')))} / {html.escape(str(record_meta.get('task_family', '')))}"
         ),
         "traces": traces,
+        "updatemenus": density_menu,
     }
     html_text = f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Embedding energy landscape</title>
@@ -1302,10 +1465,11 @@ Plotly.newPlot('plot', payload.traces, {{
     zaxis:{{title:'local NLL energy', color:'#e8fbff', gridcolor:'#143344', zerolinecolor:'#ffd166'}},
     camera:{{eye:{{x:1.45, y:-1.65, z:1.20}}}}
   }},
+  updatemenus: payload.updatemenus,
   legend:{{font:{{color:'white'}}, bgcolor:'rgba(3,7,18,0.58)'}},
   margin:{{l:0,r:0,b:0,t:54}},
   annotations:[{{
-    text:'mesh: local NLL over hidden-state PCA | bright branch: best BPB terminal | green: low-energy basin samples',
+    text:'mesh: local NLL over hidden-state PCA | adjustable local VR complexes | gold=chamber crossings | magenta=open low-margin wall samples',
     x:0.02, y:0.02, xref:'paper', yref:'paper', showarrow:false,
     font:{{color:'#e8fbff', size:12}}, align:'left'
   }}]
@@ -1319,6 +1483,7 @@ Plotly.newPlot('plot', payload.traces, {{
 def _rips_edges_and_triangles(
     points: np.ndarray,
     *,
+    radius_quantile: float | None = None,
     max_edges: int = 520,
     max_triangles: int = 220,
 ) -> tuple[float, list[tuple[int, int]], list[tuple[int, int, int]]]:
@@ -1333,14 +1498,16 @@ def _rips_edges_and_triangles(
         return 0.0, [], []
     chosen_radius = float(np.quantile(nonzero, 0.14))
     edges_with_dist: list[tuple[float, int, int]] = []
-    for quantile in (0.10, 0.14, 0.18, 0.22, 0.28):
+    quantile_schedule = (float(radius_quantile),) if radius_quantile is not None else (0.10, 0.14, 0.18, 0.22, 0.28)
+    for quantile in quantile_schedule:
+        quantile = min(0.95, max(0.02, float(quantile)))
         radius = float(np.quantile(nonzero, quantile))
         candidates: list[tuple[float, int, int]] = []
         for i in range(points.shape[0]):
             for j in range(i + 1, points.shape[0]):
                 if dist[i, j] <= radius:
                     candidates.append((float(dist[i, j]), i, j))
-        if len(candidates) >= min(24, max(6, points.shape[0] // 3)) or quantile == 0.28:
+        if radius_quantile is not None or len(candidates) >= min(24, max(6, points.shape[0] // 3)) or quantile == 0.28:
             chosen_radius = radius
             edges_with_dist = candidates
             break
@@ -1386,6 +1553,266 @@ def _sample_toric_shadow_vector(
     return sampled.astype(int if integer else float)
 
 
+def _clean_windowed_simplicial_traces(
+    points: np.ndarray,
+    *,
+    name_prefix: str,
+    z_values: np.ndarray | None = None,
+    windows: int = 6,
+    radius_quantiles: tuple[float, ...] = (0.08, 0.14, 0.22),
+    default_level: str = "default",
+    max_edges_per_window: int = 34,
+    max_triangles_per_window: int = 12,
+    opacity: float = 0.22,
+) -> list[dict[str, Any]]:
+    """Build legible local Rips traces instead of one dense global complex."""
+
+    if points.ndim != 2 or points.shape[0] < 6:
+        return []
+    traces: list[dict[str, Any]] = []
+    palette = ["#5efcff", "#a4ff5e", "#ffd166", "#ff6bcb", "#9b8cff", "#ff8f5e"]
+    quantiles = tuple(float(q) for q in radius_quantiles if 0.0 < float(q) < 1.0) or (0.08, 0.14, 0.22)
+    if len(quantiles) == 1:
+        level_specs = [("default", quantiles[0])]
+    else:
+        ordered = sorted(quantiles)
+        level_specs = [
+            ("sparse", ordered[0]),
+            ("default", ordered[len(ordered) // 2]),
+            ("dense", ordered[-1]),
+        ]
+    default_level = default_level if default_level in {label for label, _ in level_specs} else "default"
+    n = points.shape[0]
+    window_size = max(6, int(math.ceil(n / max(1, windows))))
+    for level_label, level_quantile in level_specs:
+        visible = level_label == default_level
+        for window_id, start in enumerate(range(0, n, window_size)):
+            stop = min(n, start + window_size)
+            if stop - start < 4:
+                continue
+            local = points[start:stop]
+            radius, edges, triangles = _rips_edges_and_triangles(
+                local,
+                radius_quantile=level_quantile,
+                max_edges=max_edges_per_window,
+                max_triangles=max_triangles_per_window,
+            )
+            color = palette[window_id % len(palette)]
+            density_meta = {
+                "simplicial_density": level_label,
+                "radius_quantile": level_quantile,
+                "radius": radius,
+            }
+            if triangles:
+                tri_i, tri_j, tri_k = zip(*triangles, strict=True)
+                mesh: dict[str, Any] = {
+                    "type": "mesh3d",
+                    "x": local[:, 0].tolist(),
+                    "y": local[:, 1].tolist(),
+                    "z": local[:, 2].tolist(),
+                    "i": list(tri_i),
+                    "j": list(tri_j),
+                    "k": list(tri_k),
+                    "color": color,
+                    "opacity": opacity,
+                    "flatshading": False,
+                    "showscale": False,
+                    "name": f"{name_prefix} {level_label} 2-simplices W{window_id} q={level_quantile:.2f}",
+                    "legendgroup": f"{name_prefix}-simplices-{level_label}",
+                    "hoverinfo": "skip",
+                    "visible": visible,
+                    "meta": density_meta,
+                }
+                if z_values is not None and z_values.shape[0] >= stop:
+                    local_z = z_values[start:stop]
+                    mesh["intensity"] = local_z.tolist()
+                    mesh["colorscale"] = [[0, "#2de2e6"], [0.5, "#ffd166"], [1, "#ff4fd8"]]
+                traces.append(mesh)
+            if edges:
+                ex: list[float | None] = []
+                ey: list[float | None] = []
+                ez: list[float | None] = []
+                for i, j in edges:
+                    ex.extend([float(local[i, 0]), float(local[j, 0]), None])
+                    ey.extend([float(local[i, 1]), float(local[j, 1]), None])
+                    ez.extend([float(local[i, 2]), float(local[j, 2]), None])
+                traces.append(
+                    {
+                        "type": "scatter3d",
+                        "mode": "lines",
+                        "x": ex,
+                        "y": ey,
+                        "z": ez,
+                        "line": {"color": color, "width": 2},
+                        "opacity": min(0.58, opacity + 0.18),
+                        "name": f"{name_prefix} {level_label} 1-skeleton W{window_id}",
+                        "legendgroup": f"{name_prefix}-simplices-{level_label}",
+                        "hoverinfo": "skip",
+                        "visible": visible,
+                        "meta": density_meta,
+                    }
+                )
+    return traces
+
+
+def _simplicial_density_menu(traces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    levels = ["sparse", "default", "dense"]
+    present = {
+        str(trace.get("meta", {}).get("simplicial_density"))
+        for trace in traces
+        if isinstance(trace.get("meta"), dict) and trace.get("meta", {}).get("simplicial_density")
+    }
+    levels = [level for level in levels if level in present]
+    if len(levels) <= 1:
+        return []
+    buttons = []
+    for level in levels:
+        visible = []
+        for trace in traces:
+            density = trace.get("meta", {}).get("simplicial_density") if isinstance(trace.get("meta"), dict) else None
+            visible.append(True if density is None else str(density) == level)
+        buttons.append(
+            {
+                "label": f"simplicial {level}",
+                "method": "update",
+                "args": [{"visible": visible}],
+            }
+        )
+    return [
+        {
+            "type": "buttons",
+            "direction": "right",
+            "x": 0.02,
+            "y": 0.94,
+            "xanchor": "left",
+            "yanchor": "top",
+            "bgcolor": "rgba(3,7,18,0.72)",
+            "bordercolor": "#2de2e6",
+            "font": {"color": "white", "size": 11},
+            "buttons": buttons,
+        }
+    ]
+
+
+def _projected_chamber_traces(
+    points: np.ndarray,
+    active_faces: np.ndarray,
+    margins: np.ndarray,
+    idx: np.ndarray,
+    *,
+    z_offset: float = 0.0,
+    name_prefix: str = "toric/tropical",
+) -> list[dict[str, Any]]:
+    """Create empirical chamber, wall-crossing, and low-margin traces."""
+
+    traces: list[dict[str, Any]] = []
+    if points.ndim != 2 or points.shape[0] < 3:
+        return traces
+    active = active_faces.astype(int) if active_faces.size else np.zeros((points.shape[0],), dtype=int)
+    margin = margins.astype(float) if margins.size else np.zeros((points.shape[0],), dtype=float)
+    if active.shape[0] != points.shape[0]:
+        active = np.resize(active, points.shape[0])
+    if margin.shape[0] != points.shape[0]:
+        margin = np.resize(margin, points.shape[0])
+    lifted = points.copy()
+    lifted[:, 2] = lifted[:, 2] + z_offset
+    transitions = np.flatnonzero(np.diff(active) != 0) + 1 if active.size > 1 else np.asarray([], dtype=int)
+    if transitions.size:
+        trans = lifted[transitions]
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "markers",
+                "x": trans[:, 0].tolist(),
+                "y": trans[:, 1].tolist(),
+                "z": trans[:, 2].tolist(),
+                "marker": {"size": 9, "color": "#ffd166", "symbol": "diamond", "line": {"color": "white", "width": 1.0}},
+                "name": f"{name_prefix} chamber crossings",
+                "hovertext": [
+                    f"step {int(idx[pos])}<br>active face {int(active[pos - 1])} → {int(active[pos])}<br>tropical margin={float(margin[pos]):.4f}"
+                    for pos in transitions.tolist()
+                ],
+                "hoverinfo": "text",
+            }
+        )
+    finite_margin = margin[np.isfinite(margin)]
+    if finite_margin.size:
+        low_threshold = float(np.quantile(finite_margin, 0.12))
+        low_margin_idx = np.flatnonzero(margin <= low_threshold)
+        if low_margin_idx.size:
+            low_points = lifted[low_margin_idx]
+            traces.append(
+                {
+                    "type": "scatter3d",
+                    "mode": "markers",
+                    "x": low_points[:, 0].tolist(),
+                    "y": low_points[:, 1].tolist(),
+                    "z": low_points[:, 2].tolist(),
+                    "marker": {"size": 6, "color": "#ff4fd8", "symbol": "circle-open", "line": {"color": "#ff4fd8", "width": 2.0}},
+                    "name": f"{name_prefix} low-margin tropical wall samples",
+                    "hovertext": [
+                        f"step {int(idx[pos])}<br>active face={int(active[pos])}<br>tropical margin={float(margin[pos]):.4f}"
+                        for pos in low_margin_idx.tolist()
+                    ],
+                    "hoverinfo": "text",
+                }
+            )
+    centroid = lifted.mean(axis=0)
+    ray_x: list[float | None] = []
+    ray_y: list[float | None] = []
+    ray_z: list[float | None] = []
+    chamber_x: list[float] = []
+    chamber_y: list[float] = []
+    chamber_z: list[float] = []
+    chamber_text: list[str] = []
+    for face in np.unique(active)[:12]:
+        mask = active == int(face)
+        if np.count_nonzero(mask) < 2:
+            continue
+        cluster = lifted[mask]
+        endpoint = cluster.mean(axis=0)
+        ray_x.extend([float(centroid[0]), float(endpoint[0]), None])
+        ray_y.extend([float(centroid[1]), float(endpoint[1]), None])
+        ray_z.extend([float(centroid[2]), float(endpoint[2]), None])
+        chamber_x.append(float(endpoint[0]))
+        chamber_y.append(float(endpoint[1]))
+        chamber_z.append(float(endpoint[2]))
+        chamber_text.append(
+            f"active face {int(face)}<br>states={int(np.count_nonzero(mask))}<br>mean margin={float(np.mean(margin[mask])):.4f}"
+        )
+    if ray_x:
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "lines",
+                "x": ray_x,
+                "y": ray_y,
+                "z": ray_z,
+                "line": {"color": "#ff4fd8", "width": 3},
+                "opacity": 0.50,
+                "name": f"{name_prefix} empirical normal-fan rays",
+                "hoverinfo": "skip",
+            }
+        )
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "markers+text",
+                "x": chamber_x,
+                "y": chamber_y,
+                "z": chamber_z,
+                "text": [str(int(face)) for face in np.unique(active)[: len(chamber_x)]],
+                "textposition": "top center",
+                "marker": {"size": 7, "color": "#2de2e6", "symbol": "square", "line": {"color": "white", "width": 0.8}},
+                "textfont": {"color": "#e8fbff", "size": 10},
+                "name": f"{name_prefix} chamber centroids",
+                "hovertext": chamber_text,
+                "hoverinfo": "text",
+            }
+        )
+    return traces
+
+
 def write_interactive_projected_simplicial_toric_geometry(
     record_meta: dict[str, Any],
     branches: list[dict[str, Any]],
@@ -1426,48 +1853,20 @@ def write_interactive_projected_simplicial_toric_geometry(
         chart_margin[np.minimum(idx, chart_margin.shape[0] - 1)] if chart_margin.size else np.zeros((idx.shape[0],), dtype=float)
     )
 
-    radius, edges, triangles = _rips_edges_and_triangles(plotted)
     traces: list[dict[str, Any]] = []
-    if triangles:
-        tri_i, tri_j, tri_k = zip(*triangles, strict=True)
-        traces.append(
-            {
-                "type": "mesh3d",
-                "x": plotted[:, 0].tolist(),
-                "y": plotted[:, 1].tolist(),
-                "z": plotted[:, 2].tolist(),
-                "i": list(tri_i),
-                "j": list(tri_j),
-                "k": list(tri_k),
-                "color": "#38f2ff",
-                "opacity": 0.16,
-                "name": f"VR 2-simplices r={radius:.3g}",
-                "hoverinfo": "skip",
-                "flatshading": False,
-                "showscale": False,
-            }
+    traces.extend(
+        _clean_windowed_simplicial_traces(
+            plotted,
+            name_prefix="projected reasoning-step",
+            z_values=plotted_energy,
+            windows=int(best.get("simplicial_windows", 6)),
+            radius_quantiles=tuple(best.get("simplicial_radius_quantiles", (0.08, 0.14, 0.22))),
+            default_level=str(best.get("simplicial_default_level", "default")),
+            max_edges_per_window=int(best.get("simplicial_max_edges_per_window", 34)),
+            max_triangles_per_window=int(best.get("simplicial_max_triangles_per_window", 12)),
+            opacity=0.20,
         )
-    if edges:
-        ex: list[float | None] = []
-        ey: list[float | None] = []
-        ez: list[float | None] = []
-        for i, j in edges:
-            ex.extend([float(plotted[i, 0]), float(plotted[j, 0]), None])
-            ey.extend([float(plotted[i, 1]), float(plotted[j, 1]), None])
-            ez.extend([float(plotted[i, 2]), float(plotted[j, 2]), None])
-        traces.append(
-            {
-                "type": "scatter3d",
-                "mode": "lines",
-                "x": ex,
-                "y": ey,
-                "z": ez,
-                "line": {"color": "#7afcff", "width": 1},
-                "opacity": 0.26,
-                "name": f"VR 1-skeleton ({len(edges)} edges)",
-                "hoverinfo": "skip",
-            }
-        )
+    )
 
     branch_palette = ["#38f2ff", "#ff4fd8", "#ffd166", "#8cff6a", "#ad7cff", "#ff7a45", "#7bdff2", "#f15bb5"]
     for rank, branch in enumerate(ranked[:8]):
@@ -1490,53 +1889,16 @@ def write_interactive_projected_simplicial_toric_geometry(
             }
         )
 
-    transition_idx = np.flatnonzero(np.diff(active_faces) != 0) + 1 if active_faces.size > 1 else np.asarray([], dtype=int)
-    if transition_idx.size:
-        trans = plotted[transition_idx]
-        traces.append(
-            {
-                "type": "scatter3d",
-                "mode": "markers",
-                "x": trans[:, 0].tolist(),
-                "y": trans[:, 1].tolist(),
-                "z": trans[:, 2].tolist(),
-                "marker": {"size": 8, "color": "#ffd166", "symbol": "diamond", "line": {"color": "white", "width": 1.0}},
-                "name": "toric chamber crossings",
-                "hovertext": [
-                    f"step {int(idx[pos])}<br>active face {int(active_faces[pos - 1])} → {int(active_faces[pos])}<br>margin={float(margins[pos]):.4f}"
-                    for pos in transition_idx.tolist()
-                ],
-                "hoverinfo": "text",
-            }
+    traces.extend(
+        _projected_chamber_traces(
+            plotted,
+            active_faces,
+            margins,
+            idx,
+            z_offset=0.0,
+            name_prefix="projected toric/tropical",
         )
-
-    centroid = plotted.mean(axis=0)
-    unique_faces = np.unique(active_faces.astype(int))
-    ray_x: list[float | None] = []
-    ray_y: list[float | None] = []
-    ray_z: list[float | None] = []
-    for face in unique_faces[:12]:
-        mask = active_faces.astype(int) == int(face)
-        if np.count_nonzero(mask) < 2:
-            continue
-        endpoint = plotted[mask].mean(axis=0)
-        ray_x.extend([float(centroid[0]), float(endpoint[0]), None])
-        ray_y.extend([float(centroid[1]), float(endpoint[1]), None])
-        ray_z.extend([float(centroid[2]), float(endpoint[2]), None])
-    if ray_x:
-        traces.append(
-            {
-                "type": "scatter3d",
-                "mode": "lines",
-                "x": ray_x,
-                "y": ray_y,
-                "z": ray_z,
-                "line": {"color": "#ff4fd8", "width": 3},
-                "opacity": 0.56,
-                "name": "empirical normal-fan rays",
-                "hoverinfo": "skip",
-            }
-        )
+    )
 
     margin_lo = float(np.nanmin(plotted_chart_margin)) if plotted_chart_margin.size else 0.0
     margin_hi = float(np.nanmax(plotted_chart_margin)) if plotted_chart_margin.size else 1.0
@@ -1601,6 +1963,7 @@ def write_interactive_projected_simplicial_toric_geometry(
         "PCA coordinates are hidden reasoning states; translucent triangles and cyan edges are the actual step-level "
         "Vietoris-Rips complex; vertex colors are empirical toric active faces; gold markers are chamber crossings."
     )
+    density_menu = _simplicial_density_menu(traces)
     html_text = f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Projected simplicial toric reasoning geometry</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
@@ -1623,6 +1986,7 @@ Plotly.newPlot('plot', traces, {{
     aspectmode:'data',
     camera:{{eye:{{x:1.35,y:-1.45,z:1.05}}}}
   }},
+  updatemenus: {json.dumps(density_menu)},
   legend:{{font:{{color:'white'}}, x:0.02, y:0.82, bgcolor:'rgba(3,7,18,0.48)'}},
   margin:{{l:0,r:0,b:0,t:0}}
 }}, {{responsive:true, displaylogo:false}});
@@ -3042,6 +3406,14 @@ def main() -> None:
             topology_stats = directed_filtration_stats(branch["hidden"])
             branch["topology_stats"] = topology_stats
             attach_topology_stats(branch, topology_stats)
+            branch["simplicial_windows"] = int(args.simplicial_windows)
+            branch["simplicial_radius_quantiles"] = parse_float_csv(
+                str(args.simplicial_radius_quantiles),
+                fallback=(0.08, 0.14, 0.22),
+            )
+            branch["simplicial_default_level"] = str(args.simplicial_default_level)
+            branch["simplicial_max_edges_per_window"] = int(args.simplicial_max_edges_per_window)
+            branch["simplicial_max_triangles_per_window"] = int(args.simplicial_max_triangles_per_window)
         enrich_branch_scores(branches)
         branch_records.extend(branches)
         record_slug = f"R{record_index}_{slug(meta['dataset'] + '_' + meta['task_family'])}"

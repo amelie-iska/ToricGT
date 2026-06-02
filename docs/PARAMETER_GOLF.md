@@ -240,7 +240,12 @@ The projected hidden-space companion,
 trajectory in 3D PCA coordinates, overlays the step-level Vietoris-Rips
 1-skeleton and translucent 2-simplices, colors vertices by empirical toric
 active face, marks chamber crossings, and draws empirical normal-fan rays from
-the trajectory centroid to occupied fan cells.
+the trajectory centroid to occupied fan cells. Both hidden-space HTML views now
+include sparse/default/dense buttons for the local simplicial radius parameter.
+The periodic analysis defaults are controlled by
+`--simplicial-radius-quantiles`, `--simplicial-default-level`,
+`--simplicial-windows`, `--simplicial-max-edges-per-window`, and
+`--simplicial-max-triangles-per-window`.
 
 The same window hierarchy now includes DEC-style conservative flow diagnostics
 adapted from Mohamed, Hirani, and Samtaney's DEC discretization of

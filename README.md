@@ -652,7 +652,12 @@ irrational rotation-algebra phase path onto a torus, overlays local
 Vietoris-Rips edges, and draws the soft analogical maps between reasoning
 windows. The companion `*_projected_simplicial_toric_geometry.html` hidden-space
 plot adds actual step-level Vietoris-Rips 1/2-simplices, toric active-face
-coloring, chamber crossings, and empirical normal-fan rays. These plots sit
+coloring, chamber crossings, and empirical normal-fan rays. The interactive
+HTML plots include sparse/default/dense buttons for the radius-quantile
+parameter of the local simplicial complex; periodic runs can set defaults with
+`--simplicial-radius-quantiles`, `--simplicial-default-level`,
+`--simplicial-windows`, `--simplicial-max-edges-per-window`, and
+`--simplicial-max-triangles-per-window`. These plots sit
 next to the 3D graph-of-thought trajectories,
 Ramachandran-style phase plots, energy landscapes, reasoning/K/BPB triangles,
 and tetrahedral simplex diagnostics.
@@ -958,7 +963,9 @@ NLL energy, branch paths are lifted onto the surface, and green markers flag
 low-energy basin samples. The same pass emits
 `*_projected_simplicial_toric_geometry.html`, a rotatable 3D hidden-space
 plot with the actual reasoning-step simplicial complex and toric chamber/fan
-diagnostics attached to the trajectory vertices.
+diagnostics attached to the trajectory vertices. Both interactive hidden-space
+views expose sparse/default/dense local-complex buttons, so the radius
+parameter can be adjusted without rerunning the analysis.
 
 ## Toric Music
 
