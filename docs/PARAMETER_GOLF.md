@@ -186,6 +186,17 @@ directions. Old checkpoints with no basis or a narrower basis can still resume:
 missing rows are initialized and stale optimizer moments are dropped only for
 changed parameters.
 
+GraphCG is the chart-learning part of the geometric stack. It learns a basis
+`B` whose columns act like steerable concept directions, then topology and
+toric probes operate on chart coordinates `B^T h` rather than raw hidden
+coordinates. This matters because the tropical/toric side of ToricGT is
+polyhedral: max-plus probes define active faces of Newton polytopes and normal
+fan cells. Pulling those fan cells back through `B^T` gives chamber boundaries
+aligned with learned concepts instead of arbitrary dense coordinates. The
+desired behavior is therefore not just lower GraphCG loss; it is lower off-axis
+covariance, stable chart margins, clearer fan occupancy, and improved BPB at
+the same time.
+
 The analogy loss is not just vector arithmetic. For repeated coarse byte
 relations, normalized hidden arrows are first projected into the GraphCG
 concept chart and grouped into small point clouds. Each group builds nested
@@ -214,6 +225,12 @@ rank, boundary residual, Dirichlet energy, directed chain commutator, HDBSCAN
 stability/noise, and the number of sampled windows. This is the preferred
 analogue of persistent homology for the contest adapter because it does not add
 a heavyweight dependency to the self-contained artifact.
+
+The analysis suite writes interactive torus-projected reasoning plots next to
+the static images. Each HTML file overlays the best and competing reasoning
+branches on the embedded commutative torus surface, colors points by local NLL,
+sizes points by GraphCG chart margin, draws local simplicial edges, and adds
+magenta analogical transport arrows between reasoning windows.
 
 The same window hierarchy now includes DEC-style conservative flow diagnostics
 adapted from Mohamed, Hirani, and Samtaney's DEC discretization of
@@ -386,8 +403,13 @@ multiplier `0.12`, clip norm `0.40`, and contrastive weight `3e-5`.  The next
 step-2000 gate improved only marginally and still showed the 1700-1800
 floor-bounce, so the current continuation uses
 `bpb_postbounce_valmix_hold_2000_2500`: medium mix `0.35`, LR multiplier
-`0.10`, clip norm `0.36`, contrastive weight `2e-5`, and diagnostic-only
-auxiliary geometry losses.
+`0.16`, clip norm `0.42`, contrastive weight `8e-5`,
+`graphcg_loss_weight: 6e-5`, `analogy_lattice_loss_weight: 1e-5`,
+`gflownet_loss_weight: 2.5e-4`, and `gflownet_entropy_weight: 5e-5`.
+The GFlowNet term is intentionally tiny: the step-2250 geometry suite found a
+large gap between mean and best branch BPB, but the low-BPB branch is not yet
+the dominant reasoning-budget behavior. Heavy toric, Koszul, flow, QAT, and
+Soft-MoE losses remain gated off until BPB and branch quality improve together.
 
 Probe the long-context packed curriculum from an existing checkpoint:
 

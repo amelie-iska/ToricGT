@@ -389,25 +389,28 @@ phase_curriculum:
     - name: bpb_postbounce_valmix_hold_2000_2500
       start_step: 2000
       end_step: 2500
-      # Step-2000 valmix35-r2 review: the rollback was marginally better than
-      # the prior 2000 checkpoint, but the 1700-1800 derivative bounce remains
-      # and the deterministic validation gate is still weak.  Continue from
-      # the fresh step-2000 checkpoint only after replacing the old sprint with
-      # a post-bounce hold phase; do not activate auxiliary geometry losses
-      # until validation and branch BPB move together.
-      lr_multiplier: 0.10
-      grad_clip_norm: 0.36
+      # Step-2250 review: train BPB/loss slope is negative but flattening after
+      # a 2240-2290 bounce, while GraphCG covariance and analogical-map losses
+      # drift because the active phase was diagnostic-only.  Resume from the
+      # fresh step-2250 checkpoint with small real GraphCG and GFlowNet terms
+      # plus a slightly stronger optimizer scale.  Branch search already finds
+      # lower-BPB terminals than the mean branch, so GFlowNet is promoted
+      # gently.  Keep heavier toric/Koszul objectives off until the next
+      # analysis gate verifies that BPB and branch quality move together.
+      lr_multiplier: 0.16
+      grad_clip_norm: 0.42
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.0
-      gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.0
-      analogy_lattice_loss_weight: 0.0
+      gflownet_loss_weight: 0.00025
+      gflownet_entropy_weight: 0.00005
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.00006
+      analogy_lattice_loss_weight: 0.00001
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.00002
+      contrastive_loss_weight: 0.00008
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
@@ -419,14 +422,15 @@ phase_curriculum:
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.0
-      gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.0
-      analogy_lattice_loss_weight: 0.0
+      gflownet_loss_weight: 0.00035
+      gflownet_entropy_weight: 0.00008
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.00008
+      analogy_lattice_loss_weight: 0.000015
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
-      contrastive_loss_weight: 0.00005
+      contrastive_loss_weight: 0.00010
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

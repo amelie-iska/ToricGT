@@ -558,8 +558,11 @@ The active replay therefore rolls back to step `1500` and uses
 diagnostic-only auxiliary geometry policy.  The follow-up step-2000 handoff was
 marginally better but still bounced, so the old 2000-3000 sprint is replaced
 by `bpb_postbounce_valmix_hold_2000_2500`: medium mix `0.35`, LR multiplier
-`0.10`, contrastive weight `2e-5`, clip norm `0.36`, and auxiliary geometry
-losses still off.
+`0.16`, contrastive weight `8e-5`, clip norm `0.42`, `graphcg_loss_weight:
+6e-5`, `analogy_lattice_loss_weight: 1e-5`, `gflownet_loss_weight: 2.5e-4`,
+and `gflownet_entropy_weight: 5e-5`.  Heavy toric, Koszul, trajectory-flow,
+QAT, and Soft-MoE losses remain off until the next analysis gate verifies that
+branch quality and BPB improve together.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
@@ -587,7 +590,12 @@ The same branch now separates GraphCG-style lattice-basis training from the
 analogical-reasoning mechanism. With CUDA memory available,
 `graphcg_num_directions: auto` expands the learned hidden-space concept chart
 under a 10% safety margin; on the local 24GB RTX 4090 this resolves to 256
-directions. Analogical maps are functor-like, but they are not only
+directions. GraphCG changes the coordinate system in which ToricGT geometry is
+measured: hidden states `h` are projected to concept coordinates `B^T h`, and
+tropical/toric probes then induce Newton-polytope active regions, normal-fan
+cells, and chamber walls in that learned chart.  In this view, GraphCG makes
+the axes steerable and less entangled, while toric/tropical geometry supplies
+the sharp polyhedral segmentation and phase/chamber diagnostics. Analogical maps are functor-like, but they are not only
 parallelogram vector losses: they are filtered simplicial/chain maps between
 collections of related thought vectors. Repeated hidden relation classes are
 first expressed in the GraphCG chart, then build normalized nested
@@ -936,6 +944,9 @@ conda run -n tokengt env PYTHONPATH=src python scripts/visualize.py --output-dir
 
 This writes unit-circle braid frames, a tropical decision-boundary plot,
 interactive and static 3D embedding-space graph-of-thought trajectories,
+interactive torus-projected reasoning trajectories with the embedded
+commutative torus surface, noncommutative phase-wound paths, local simplicial
+edges, GraphCG-margin markers, and analogical transport arrows,
 Ramachandran-style reasoning torsion plots, and energy/fitness landscapes
 whose low-energy basins represent high-quality terminal reasoning states.
 

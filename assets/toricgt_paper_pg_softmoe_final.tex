@@ -1531,7 +1531,29 @@ Coarse byte-relation classes are obtained from source and target byte classes: f
   +\lambda_{\perp}\norm{B\transpose B-I}_F^2
   +\lambda_{\mathrm{cov}}\norm{\operatorname{Corr}(H B)-I}_F^2.
 \end{equation}
-This gives an identifiable basis for concept-like coordinates.  An analogical functor loss reduces within-class variance of $a_t$, while a parallelogram loss penalizes failures of local closure:
+This gives an identifiable basis for concept-like coordinates.  The reason this matters for ToricGT is geometric.  Tropical and toric probes do not merely read a hidden vector; they cut hidden space into polyhedral chambers.  If a tropical probe has candidate slopes $a_r$ and biases $b_r$, its active chamber in raw coordinates is
+\begin{equation}
+  C_r=\{h:\ip{a_r-a_s}{h}\ge b_s-b_r\ \text{for all }s\}.
+\end{equation}
+In the GraphCG chart $\xi=B\transpose h$, the same chamber is pulled back to
+\begin{equation}
+  C_r^B=\{\xi:\ip{B\transpose(a_r-a_s)}{\xi}\ge b_s-b_r\ \text{for all }s\}.
+\end{equation}
+Thus GraphCG changes the coordinates in which Newton-normal fans are seen.  A well-conditioned chart makes the active faces align with reusable concept axes; a poorly conditioned chart smears a single toric wall across many dense directions.  This is why the implementation logs both GraphCG covariance/coherence metrics and toric fan occupancy/margins: the desired behavior is not an abstractly small auxiliary loss, but a sharper pullback fan with lower off-axis covariance and stable byte likelihood.
+
+\begin{proposition}[GraphCG chart pullback of toric fans]
+Let $P=\operatorname{Conv}\{a_1,\ldots,a_R\}\subset\R^d$ be the Newton polytope of a tropical probe and let $\mathcal N(P)$ be its normal fan.  If $B\in\R^{d\times r}$ has full column rank, then the chart map $\iota_B:\R^r\to\R^d$, $\iota_B(\xi)=B\xi$, pulls $\mathcal N(P)$ back to a polyhedral fan-like chamber decomposition of chart space with cones
+\begin{equation}
+  \iota_B^{-1}(N_F P)=\{\xi:B\xi\in N_F P\},
+\end{equation}
+where $F$ ranges over faces of $P$.  If $B\transpose B\approx I$ and $\operatorname{Corr}(HB)\approx I$ on hidden samples $H$, then distances to pulled-back walls are stable under small chart-coordinate perturbations up to the conditioning of $B$.
+\end{proposition}
+
+\begin{proof}
+Each normal cone $N_F P$ is an intersection of finitely many linear halfspaces.  The preimage of a linear halfspace under the linear map $\iota_B$ is again a linear halfspace in $\R^r$, so $\iota_B^{-1}(N_F P)$ is polyhedral.  Intersections and common faces are preserved by preimage, giving a chamber decomposition of the chart image.  Full column rank prevents collapse of chart directions.  Approximate orthonormality bounds $\norm{B\xi-B\xi'}_2$ above and below by constants close to $\norm{\xi-\xi'}_2$, while low chart covariance keeps empirical hidden variation from concentrating on a small subset of axes.  Therefore chart-space wall distances change continuously with controlled condition number.
+\end{proof}
+
+An analogical functor loss reduces within-class variance of $a_t$, while a parallelogram loss penalizes failures of local closure:
 \begin{equation}
   \mathcal L_{\mathrm{para}}
   =\Eop\norm{(\xi_{t+s}-\xi_t)+(\xi_{u+s}-\xi_u)-(\xi_{v+s}-\xi_v)}_2^2
@@ -1935,22 +1957,25 @@ The active competition branch is \texttt{oai}.  Its deployable candidate remains
 
 The live training protocol is deliberately conservative.  Auxiliary geometric losses are permitted only when deterministic validation BPB is improving or stable.  When local BPB curvature flattens or rebounds, the controller enters a scalar recovery phase:
 \begin{equation}
-  \lambda_{\mathrm{GFN}}=\lambda_{\mathrm{toric}}=\lambda_{\mathrm{Koszul}}=
+  \lambda_{\mathrm{toric}}=\lambda_{\mathrm{Koszul}}=
   \lambda_{\mathrm{flow}}=\lambda_{\mathrm{QAT}}=0,
   \qquad
+  0<\lambda_{\mathrm{GFN}}\ll1,\quad
   \lambda_{\mathrm{GraphCG}}\ll1,\quad
   \lambda_{\mathrm{contrastive}},\lambda_{\mathrm{MTP}}\text{ small},
 \end{equation}
-with a slightly increased learning-rate multiplier and tighter gradient clipping.  This is the phase used after checkpoint \texttt{random\_order\_step\_00036750.pt}.  The training loop resumed from \texttt{random\_order\_step\_00037250.pt} after a checkpoint-gated analysis pass; the next watcher is scheduled to pause only after a fresh step-$37750$ checkpoint, run the full metric/simplex/geometry suite, and hand off a written recommendation before any further restart.
+with a slightly increased learning-rate multiplier and tighter gradient clipping.  A later step-$2250$ recovery gate found that train BPB and loss were descending but flattening: median train BPB fell from $3.8067$ to $3.5449$ over the exported window, with recent slope about $-1.92$ BPB per $1000$ optimizer steps, while the raw log tail reached local values near $3.49$--$3.60$.  However GraphCG covariance and analogical-map diagnostics drifted because the active phase had GraphCG loss weight set to zero.  Branch search also showed a real inference-time-scaling gap: best branch BPB was $1.33$ below mean branch BPB.  The next run therefore resumes from \texttt{random\_order\_step\_00002250.pt} with $\lambda_{\mathrm{GraphCG}}=6\times10^{-5}$, $\lambda_{\mathrm{analogy}}=10^{-5}$, $\lambda_{\mathrm{GFN}}=2.5\times10^{-4}$, GFlowNet entropy weight $5\times10^{-5}$, contrastive weight $8\times10^{-5}$, learning-rate multiplier $0.16$, and clip norm $0.42$, while keeping heavier toric, Koszul, trajectory-flow, and QAT losses disabled until the next gate.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.82\textwidth]{fig_oai_step37250_reasoning_k_bpb.png}
-  \caption{Step-$37250$ \texttt{oai} recovery diagnostic.  The reasoning/K$(x\mid\mathrm{helpers})$/BPB simplex places graph-of-thought branches in a three-way tradeoff among additional reasoning budget, conditional-compression structure, and low BPB.  The plot is produced from model computations by the periodic analysis suite; it is an audit snapshot, not a final benchmark claim.}
-  \label{fig:oai-step37250-simplex}
+  \includegraphics[width=0.82\textwidth]{fig_oai_step2250_reasoning_k_bpb.png}
+  \caption{Step-$2250$ \texttt{oai} recovery diagnostic.  The reasoning/K$(x\mid\mathrm{helpers})$/BPB simplex places graph-of-thought branches in a three-way tradeoff among additional reasoning budget, conditional-compression structure, and low BPB.  The early checkpoint still favors low-BPB branches over longer reasoning budgets, so GraphCG and a small GFlowNet objective are activated while heavier toric/Koszul losses remain gated.}
+  \label{fig:oai-step2250-simplex}
 \end{figure}
 
-The most recent completed analysis gate at step $37250$ used four held-out validation records and $24$ GFlowNet branches.  It reported mean branch BPB $4.758$, best branch BPB $4.039$, mean answer-span BPB $4.644$, best answer-span BPB $3.630$, mean hidden-trajectory MST efficiency $0.507$, mean path smoothness $0.0895$, directed topology asymmetry $0.401$, HDBSCAN stability $0.943$, exact directed-edge validity $0.958$, exact triangle validity $0.818$, Slepian concentration $1.000$, and Slepian leakage $0.000$.  These values show that the analysis stack is functioning and that graph-of-thought search can find better local branches than the mean branch, but they also show that the BPB objective is still far from the competition target band.  The same pass recorded weak tropical active-face margins, with mean toric-shadow margin around $2.94\times10^{-2}$ and very small minimum margin, so strong toric or Koszul loss should remain off during BPB recovery.  In operational terms, this means the geometry is useful as an audit and routing signal, while byte likelihood must keep priority until the BPB descent slope is restored.
+The step-$2250$ geometry gate used three held-out validation records and nine branches.  It reported mean branch BPB $4.804$, best branch BPB $3.476$, mean answer-span BPB $4.776$, best answer-span BPB $3.476$, mean hidden-trajectory MST efficiency $0.667$, path smoothness $0.0480$, directed topology asymmetry $0.345$, HDBSCAN stability $0.931$, exact directed-edge validity $0.949$, exact triangle validity $0.742$, Slepian concentration $1.000$, and Slepian leakage $0.000$.  Branch search is already finding lower-BPB terminals than the mean branch, but the simplex shows that extra reasoning budget still moves away from the low-BPB corner at this early checkpoint.  GFlowNet is therefore promoted gently, not at the later full-alignment weight.  The same pass recorded weak tropical/toric margins: mean toric-shadow margin $2.27\times10^{-2}$, minimum margin $1.22\times10^{-4}$, and mean toric-geometry active-face margin $-1.85$.  Strong toric or Koszul training losses therefore stay off; GraphCG is the right immediate auxiliary because it improves the coordinate chart in which future fan and chamber losses will act.
+
+The periodic analysis suite now writes both static and interactive toric trajectory overlays.  For each selected validation record it projects hidden reasoning paths through the irrational toric phase map, overlays the best and competing branches on the embedded commutative torus surface, draws local Vietoris--Rips edges, sizes markers by GraphCG chart margin, colors points by local NLL, and draws analogical transport arrows between reasoning windows.  The HTML output is a manipulable $3$D audit of whether noncommutative toric memory is organizing latent search rather than adding decorative sinusoidal features.
 
 \begin{remark}[Analysis-gate reliability]
 The post-resume watcher intentionally interrupts training only after a checkpoint is safely written.  A fragile point in early runs was W\&B path resolution: the metric analyzer expected an entity/project/run-id path but was sometimes given the human-readable run name.  The current analyzer resolves both run ids and run names before downloading history.  Thus a pause for analysis should no longer become a terminal stop merely because the W\&B display name differs from the run id.

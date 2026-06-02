@@ -6137,3 +6137,132 @@ Acceptance criteria:
 6. HDBSCAN stability above `0.88`, inclusion violation `0.0`, and Slepian
    leakage `0.0`;
 7. toric active-face margin no worse than this checkpoint.
+
+## Step 2250 GraphCG Restart Gate
+
+Date: 2026-06-02 UTC.
+
+Analysis directory:
+
+```text
+outputs/manual_analysis/oai-bpb-postbounce-02000_step2250_20260602T002659Z
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00002250.pt
+```
+
+The active run had reached roughly step `2395` in the log, but the latest fresh
+durable replay checkpoint was step `2250`, so the gate uses that checkpoint.
+
+### Metric Summary
+
+The W&B export ended at step `2380`.  Core metrics:
+
+| metric | category | first median | last median | recent slope / 1k |
+|---|---:|---:|---:|---:|
+| `train/bpb` | desired | `3.8067` | `3.5449` | `-1.9207` |
+| `train/loss` | desired | `2.6386` | `2.4571` | `-1.3313` |
+| `train/gflownet_loss` | desired | `2.9575` | `2.5909` | `-5.2094` |
+| `train/gflownet_entropy` | desired but slow | `2.7564` | `2.7567` | `+0.0057` |
+| `train/gflownet_action_diversity` | desired but slow | `0.9946` | `0.9947` | `+0.0036` |
+
+The scalar objective is improving, but the core panel shows a bounce around
+steps `2240-2290` and flattening afterward.  The log tail still contains
+useful low local BPB values near `3.49-3.60`, so the correct action is not a
+large rollback.
+
+### Geometry And Plot Review
+
+The latest generated plots include:
+
+```text
+metrics/core_metric_timeseries.png
+metrics/recent_metric_slopes.png
+simplex/reasoning_k_bpb_triangle.png
+geometry/trajectories/*_toric_phase_simplicial_trajectory.png
+geometry/trajectories/*_toric_phase_winding_collection.png
+geometry/topology/*_exact_persistence_morphisms.png
+geometry_interactive/trajectories/*_toric_phase_simplicial_trajectory.png
+geometry_interactive/trajectories/*_toric_phase_winding_collection.png
+geometry_interactive/topology/*_exact_persistence_morphisms.png
+```
+
+The new analysis script now also writes interactive HTML overlays:
+
+```text
+geometry_interactive/trajectories/*_toric_phase_simplicial_trajectory.html
+```
+
+These HTML plots place reasoning trajectories directly on the embedded torus
+projection, with local simplicial edges, GraphCG-margin marker sizes, NLL
+colors, and analogical transport arrows.
+
+Step-2250 geometry summary:
+
+| metric | value |
+|---|---:|
+| records / branches | `3 / 9` |
+| mean branch BPB | `4.8040` |
+| best branch BPB | `3.4762` |
+| mean answer BPB | `4.7765` |
+| best answer BPB | `3.4762` |
+| MST efficiency | `0.6674` |
+| path smoothness | `0.0480` |
+| directed asymmetry | `0.3449` |
+| HDBSCAN stability | `0.9314` |
+| exact directed-edge validity | `0.9486` |
+| exact triangle validity | `0.7418` |
+| toric shadow mean margin | `0.0227` |
+| toric shadow min margin | `0.000122` |
+| toric active-face margin | `-1.8464` |
+| Slepian concentration / leakage | `1.0 / 0.0` |
+
+Branch search is useful: best branch BPB is `1.33` below mean branch BPB.  The
+simplex still places longer reasoning budgets away from the low-BPB corner, so
+GFlowNet should be promoted only as a tiny branch-learning signal, not as a
+dominant auxiliary objective.  Toric margins remain too thin for heavy
+toric/Koszul pressure.
+
+### Decision
+
+Resume from step `2250` with a small real GraphCG chart-learning term and a
+small GFlowNet trajectory-balance/entropy term.  This is the minimal correction
+because the active 2000-2500 phase had GraphCG diagnostic metrics but zero
+GraphCG optimization, while the geometry suite found a large branch gap that
+should be learned cautiously rather than ignored.
+
+Implemented in:
+
+```text
+config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml
+```
+
+| control | previous 2000-2500 | new 2000-2500 |
+|---|---:|---:|
+| LR multiplier | `0.10` | `0.16` |
+| clip norm | `0.36` | `0.42` |
+| medium mix | `0.35` | `0.35` |
+| GraphCG loss | `0.0` | `0.00006` |
+| analogy lattice loss | `0.0` | `0.00001` |
+| contrastive loss | `0.00002` | `0.00008` |
+| GFlowNet loss | `0.0` | `0.00025` |
+| GFlowNet entropy loss | `0.0` | `0.00005` at target `2.0` |
+| toric/Koszul/flow/QAT losses | `0.0` | `0.0` |
+
+The proposal helper
+
+```text
+scripts/propose_training_adjustments.py
+```
+
+agrees with this decision: BPB/loss slopes are still strong enough to avoid a
+large rollback, GraphCG covariance requires a small chart-learning loss, branch
+search should receive a tiny GFlowNet learning signal, and toric/Koszul losses
+should stay off until active-face margins improve.
+
+Next review target: `2750`, with the watcher required to use
+`--pause-training-before-analysis` and
+`--codex-review-hook scripts/codex_training_review_resume.sh`.

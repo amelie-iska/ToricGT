@@ -1229,6 +1229,274 @@ def plot_toric_phase_simplicial_trajectory(
     plt.close(fig)
 
 
+def write_interactive_toric_phase_simplicial_trajectory(
+    record_meta: dict[str, Any],
+    branches: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    """Write an interactive torus-projected reasoning trajectory audit.
+
+    The static PNG is useful for reports, but the toric path is genuinely a
+    three-dimensional object: the dense phase winding, local Rips edges, and
+    analogical transports are much easier to audit when the torus can be
+    rotated.  This HTML artifact uses only the already-computed model
+    quantities from the branch records.
+    """
+
+    usable = [
+        branch
+        for branch in branches
+        if np.asarray(branch.get("toric_torus_path", [])).ndim == 2
+        and np.asarray(branch.get("toric_torus_path", [])).shape[0] >= 4
+    ]
+    if not usable:
+        return
+    ranked = sorted(usable, key=lambda item: float(item["bpb"]))
+    best = ranked[0]
+    torus = np.asarray(best["toric_torus_path"], dtype=float)
+    energy = np.asarray(best.get("per_token_nll", np.zeros((torus.shape[0],))), dtype=float)
+    phase_u = np.asarray(best.get("toric_phase_u", np.zeros((torus.shape[0],))), dtype=float)
+    phase_v = np.asarray(best.get("toric_phase_v", np.zeros((torus.shape[0],))), dtype=float)
+    chart_axis = np.asarray(best.get("graphcg_chart_axis", np.zeros((torus.shape[0],))), dtype=float)
+    chart_margin = np.asarray(best.get("graphcg_chart_margin", np.zeros((torus.shape[0],))), dtype=float)
+    idx = subsample_indices(torus.shape[0], int(best.get("max_plot_points", 180)))
+    plotted = torus[idx]
+    plotted_energy = energy[idx] if energy.shape[0] >= torus.shape[0] else np.zeros((idx.shape[0],), dtype=float)
+    plotted_u = phase_u[idx] if phase_u.shape[0] >= torus.shape[0] else np.zeros((idx.shape[0],), dtype=float)
+    plotted_v = phase_v[idx] if phase_v.shape[0] >= torus.shape[0] else np.zeros((idx.shape[0],), dtype=float)
+    plotted_axis = chart_axis[idx] if chart_axis.shape[0] >= torus.shape[0] else np.zeros((idx.shape[0],), dtype=float)
+    plotted_margin = chart_margin[idx] if chart_margin.shape[0] >= torus.shape[0] else np.zeros((idx.shape[0],), dtype=float)
+
+    traces: list[dict[str, Any]] = []
+    uu, vv = np.meshgrid(np.linspace(0, 2 * np.pi, 64), np.linspace(0, 2 * np.pi, 28))
+    major_radius, minor_radius = 1.08, 0.32
+    xx = (major_radius + minor_radius * np.cos(vv)) * np.cos(uu)
+    yy = (major_radius + minor_radius * np.cos(vv)) * np.sin(uu)
+    zz = minor_radius * np.sin(vv)
+    traces.append(
+        {
+            "type": "surface",
+            "x": xx.tolist(),
+            "y": yy.tolist(),
+            "z": zz.tolist(),
+            "colorscale": [[0, "#082033"], [1, "#0b3a4a"]],
+            "showscale": False,
+            "opacity": 0.20,
+            "name": "commutative torus shadow",
+            "hoverinfo": "skip",
+        }
+    )
+
+    branch_colors = ["#38f2ff", "#ff4fd8", "#ffd166", "#8cff6a", "#ad7cff", "#ff7a45", "#7bdff2", "#f15bb5"]
+    for rank, branch in enumerate(ranked[:8]):
+        path = np.asarray(branch["toric_torus_path"], dtype=float)
+        branch_idx = subsample_indices(path.shape[0], min(180, int(branch.get("max_plot_points", 180))))
+        sampled = path[branch_idx]
+        color = branch_colors[rank % len(branch_colors)]
+        is_best = branch is best
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "lines",
+                "x": sampled[:, 0].tolist(),
+                "y": sampled[:, 1].tolist(),
+                "z": sampled[:, 2].tolist(),
+                "line": {"color": color, "width": 7 if is_best else 2},
+                "opacity": 0.92 if is_best else 0.28,
+                "name": f"{'best ' if is_best else ''}B{branch['branch_index']} BPB={float(branch['bpb']):.3f}",
+                "hoverinfo": "name",
+            }
+        )
+
+    diffs = plotted[:, None, :] - plotted[None, :, :]
+    chord = np.linalg.norm(diffs, axis=-1)
+    edge_x: list[float | None] = []
+    edge_y: list[float | None] = []
+    edge_z: list[float | None] = []
+    local_edges: list[tuple[int, int]] = []
+    window = min(18, max(6, plotted.shape[0] // 8))
+    for start in range(0, plotted.shape[0], max(4, window // 2)):
+        stop = min(plotted.shape[0], start + window)
+        sub = chord[start:stop, start:stop]
+        if sub.shape[0] < 4:
+            continue
+        threshold = float(np.quantile(sub[sub > 1e-8], 0.18)) if np.any(sub > 1e-8) else 0.0
+        for i in range(start, stop):
+            for j in range(i + 1, stop):
+                if chord[i, j] <= threshold and len(local_edges) < 320:
+                    local_edges.append((i, j))
+                    edge_x.extend([float(plotted[i, 0]), float(plotted[j, 0]), None])
+                    edge_y.extend([float(plotted[i, 1]), float(plotted[j, 1]), None])
+                    edge_z.extend([float(plotted[i, 2]), float(plotted[j, 2]), None])
+    if edge_x:
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "lines",
+                "x": edge_x,
+                "y": edge_y,
+                "z": edge_z,
+                "line": {"color": "#6df6ff", "width": 1},
+                "opacity": 0.20,
+                "name": "local VR 1-skeleton",
+                "hoverinfo": "skip",
+            }
+        )
+
+    arrow_x: list[float | None] = []
+    arrow_y: list[float | None] = []
+    arrow_z: list[float | None] = []
+    cone_x: list[float] = []
+    cone_y: list[float] = []
+    cone_z: list[float] = []
+    cone_u: list[float] = []
+    cone_v: list[float] = []
+    cone_w: list[float] = []
+    for start in range(0, plotted.shape[0] - window, max(6, window)):
+        source = plotted[start : start + window]
+        target = plotted[start + window : start + 2 * window]
+        if source.shape[0] < 3 or target.shape[0] < 3:
+            continue
+        c0 = source.mean(axis=0)
+        c1 = target.mean(axis=0)
+        delta = c1 - c0
+        norm = float(np.linalg.norm(delta))
+        if norm <= 1e-8:
+            continue
+        arrow_x.extend([float(c0[0]), float(c1[0]), None])
+        arrow_y.extend([float(c0[1]), float(c1[1]), None])
+        arrow_z.extend([float(c0[2]), float(c1[2]), None])
+        direction = delta / norm
+        cone_x.append(float(c1[0]))
+        cone_y.append(float(c1[1]))
+        cone_z.append(float(c1[2]))
+        cone_u.append(float(direction[0]))
+        cone_v.append(float(direction[1]))
+        cone_w.append(float(direction[2]))
+    if arrow_x:
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "lines",
+                "x": arrow_x,
+                "y": arrow_y,
+                "z": arrow_z,
+                "line": {"color": "#ff4fd8", "width": 4},
+                "opacity": 0.62,
+                "name": "analogical window transports",
+                "hoverinfo": "skip",
+            }
+        )
+        traces.append(
+            {
+                "type": "cone",
+                "x": cone_x,
+                "y": cone_y,
+                "z": cone_z,
+                "u": cone_u,
+                "v": cone_v,
+                "w": cone_w,
+                "sizemode": "absolute",
+                "sizeref": 0.045,
+                "anchor": "tip",
+                "colorscale": [[0, "#ff4fd8"], [1, "#ff4fd8"]],
+                "showscale": False,
+                "opacity": 0.72,
+                "name": "transport arrowheads",
+                "hoverinfo": "skip",
+            }
+        )
+
+    if plotted_margin.size:
+        margin_lo = float(np.nanmin(plotted_margin))
+        margin_hi = float(np.nanmax(plotted_margin))
+        marker_sizes = 3.5 + 8.0 * (plotted_margin - margin_lo) / max(1e-8, margin_hi - margin_lo)
+    else:
+        marker_sizes = np.full((plotted.shape[0],), 4.0)
+    hover = [
+        (
+            f"substep={int(step)}<br>"
+            f"kθ={float(u):.4f}<br>kβ={float(v):.4f}<br>"
+            f"NLL={float(e):.4f}<br>GraphCG axis={int(axis)}<br>"
+            f"chart margin={float(margin):.4f}"
+        )
+        for step, u, v, e, axis, margin in zip(idx, plotted_u, plotted_v, plotted_energy, plotted_axis, plotted_margin)
+    ]
+    traces.append(
+        {
+            "type": "scatter3d",
+            "mode": "markers",
+            "x": plotted[:, 0].tolist(),
+            "y": plotted[:, 1].tolist(),
+            "z": plotted[:, 2].tolist(),
+            "marker": {
+                "size": marker_sizes.tolist(),
+                "color": plotted_energy.tolist(),
+                "colorscale": "Magma",
+                "opacity": 0.92,
+                "line": {"color": "#06111f", "width": 1},
+                "colorbar": {"title": {"text": "local NLL", "font": {"color": "white"}}, "tickfont": {"color": "white"}},
+            },
+            "text": hover,
+            "hoverinfo": "text",
+            "name": "best-branch phase samples",
+        }
+    )
+    traces.append(
+        {
+            "type": "scatter3d",
+            "mode": "markers",
+            "x": [float(plotted[0, 0]), float(plotted[-1, 0])],
+            "y": [float(plotted[0, 1]), float(plotted[-1, 1])],
+            "z": [float(plotted[0, 2]), float(plotted[-1, 2])],
+            "marker": {"size": [8, 11], "color": ["#6df6ff", "#ffd166"], "symbol": ["circle", "diamond"], "line": {"color": "white", "width": 1}},
+            "name": "start / terminal",
+            "hoverinfo": "name",
+        }
+    )
+
+    payload = {
+        "title": (
+            f"Interactive toric reasoning trajectory R{record_meta['record_index']} "
+            f"{html.escape(str(record_meta.get('dataset', '')))} / {html.escape(str(record_meta.get('task_family', '')))}"
+        ),
+        "subtitle": (
+            "Torus surface = commutative projection; phase-wound paths = noncommutative toric memory shadow; "
+            "cyan edges = local directed/simplicial neighborhood; magenta arrows = analogical transports."
+        ),
+        "traces": traces,
+    }
+    html_text = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>Interactive toric reasoning trajectory</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
+<body style="margin:0;background:#030712;color:white;font-family:system-ui">
+<div style="position:absolute;z-index:5;left:18px;top:12px;max-width:980px;color:#e8fbff">
+  <div style="font-size:20px;font-weight:650">{payload['title']}</div>
+  <div style="font-size:12px;opacity:.82;margin-top:4px">{payload['subtitle']}</div>
+</div>
+<div id="plot" style="width:100vw;height:100vh"></div>
+<script>
+const traces = {json.dumps(traces)};
+Plotly.newPlot('plot', traces, {{
+  paper_bgcolor:'#030712',
+  plot_bgcolor:'#030712',
+  scene:{{
+    bgcolor:'#030712',
+    xaxis:{{visible:false}},
+    yaxis:{{visible:false}},
+    zaxis:{{visible:false}},
+    aspectmode:'data',
+    camera:{{eye:{{x:1.45,y:1.45,z:0.95}}}}
+  }},
+  legend:{{font:{{color:'white'}}, x:0.02, y:0.82, bgcolor:'rgba(3,7,18,0.45)'}},
+  margin:{{l:0,r:0,b:0,t:0}}
+}}, {{responsive:true, displaylogo:false}});
+</script></body></html>
+"""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html_text, encoding="utf-8")
+
+
 def _plot_wrapped_torus_square_path(
     ax: Any,
     phase_u: np.ndarray,
@@ -2255,6 +2523,11 @@ def main() -> None:
             meta,
             branches,
             traj_dir / f"{record_slug}_toric_phase_simplicial_trajectory.png",
+        )
+        write_interactive_toric_phase_simplicial_trajectory(
+            meta,
+            branches,
+            traj_dir / f"{record_slug}_toric_phase_simplicial_trajectory.html",
         )
         plot_toric_phase_winding_collection(
             meta,
