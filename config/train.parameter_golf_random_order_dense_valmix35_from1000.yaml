@@ -245,9 +245,9 @@ training:
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 1000
   robust_micro_loss_guard_end_step: 40750
-  robust_micro_loss_guard_ratio: 1.04
-  robust_micro_loss_guard_delta: 0.055
-  robust_micro_loss_guard_min_scale: 0.20
+  robust_micro_loss_guard_ratio: 1.035
+  robust_micro_loss_guard_delta: 0.040
+  robust_micro_loss_guard_min_scale: 0.15
   precision: bf16
   device: cuda
   seed: 17
@@ -303,11 +303,11 @@ adaptive_training:
   entropy_target_min: 2.00
   entropy_target_tau_steps: 8000
   gflownet_loss_min: 0.0
-  # Step-4100 ultralow-curvature review: keep the adaptive controller from relaxing
+  # Step-4300 basin-lock review: keep the adaptive controller from relaxing
   # GFlowNet back to 1e-3 during the BPB likelihood-capture hold.  In this
   # regime GFlowNet remains active, but the byte likelihood objective must own
   # the optimizer direction.
-  gflownet_loss_max: 0.000005
+  gflownet_loss_max: 0.000002
   gflownet_gap_step: 0.0
   gflownet_relax_step: 0.0
   complex_mix_min: 0.00
@@ -323,7 +323,7 @@ adaptive_training:
   recovery_mode_enabled: true
   recovery_train_drift_threshold: 0.04
   recovery_complex_down_step: 0.04
-  recovery_gflownet_down_step: 0.000002
+  recovery_gflownet_down_step: 0.000001
   recovery_exit_val_improvements: 3
 
 hessian:
@@ -467,26 +467,24 @@ phase_curriculum:
     - name: bpb_stabilization_hold
       start_step: 3250
       end_step: 6000
-      # Step-4100 ultralow-curvature review: this replay finally beat the
-      # earlier step-3600 train-BPB low at step 3800, then bounced with
-      # positive second differences.  Restart from 3800 and lock the basin by
-      # further reducing LR, medium-stream pressure, and auxiliary gradient
-      # amplitude while keeping GFlowNet/GraphCG active for diagnostics.
-      lr_multiplier: 0.026
-      grad_clip_norm: 0.22
+      # Step-4300 basin-lock review: step 4000 was the fresh local minimum
+      # before a positive-curvature exit.  Replay from that checkpoint with a
+      # lower byte-likelihood step size and smaller auxiliary amplitudes.
+      lr_multiplier: 0.020
+      grad_clip_norm: 0.20
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.10
+      medium_mix_ratio: 0.08
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.0000025
-      gflownet_entropy_weight: 0.0000005
+      gflownet_loss_weight: 0.000001
+      gflownet_entropy_weight: 0.0000002
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.000015
+      graphcg_loss_weight: 0.00001
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.000003
+      contrastive_loss_weight: 0.000001
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

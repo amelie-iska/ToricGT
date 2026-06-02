@@ -1,5 +1,177 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-02 Automated Review: Step 4,300 Basin-Lock Replay
+
+The watcher analyzed:
+
+```text
+outputs/post_resume_analysis/oai-bpb-graphcg-gfn-03800-basinlock-20260602T105427Z/step-00004300/
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00004300.pt
+```
+
+The replay was stopped for review after step `4300`.  The target training tmux
+session was already paused by the watcher, so no additional process kill was
+required before choosing a restart checkpoint.
+
+### Metric Categorization
+
+| category | count | read |
+|---|---:|---|
+| as desired | `336` | full-window train BPB/loss decreased from the high-noise post-resume samples; sparse deterministic validation BPB and validation loss moved slightly downward; GFlowNet entropy remains near `log(16)` and action diversity remains near `0.9986`; exact edge validity, directed validity, inclusion checks, toric phase structure, and Slepian leakage stay healthy |
+| as desired but too weak/slow | `141` | step `4000` recovers almost all of the step-3800 low but does not improve on it; validation gates are sparse; branch BPB remains around `5`; MST efficiency and path smoothness are useful but do not yet lower answer BPB |
+| not as desired | `148` | the run exits the step-4000 low with a positive second difference; GFlowNet loss rebounds around the same window; active-face margins remain inverted/low; exact triangle validity remains below target |
+
+Core values:
+
+| metric | value | read |
+|---|---:|---|
+| analyzed train BPB at step 4300 | `3.676559` | too high for promotion |
+| best fresh checkpoint BPB | `3.491981` at step `4000` | close to the step-3800 source low, but not lower |
+| sparse validation BPB | `5.55029` | slight downward movement in the replay, but weaker than the prior ultralow run |
+| complexity validation BPB | rising from about `5.238` to `5.244` | not as desired |
+| complexity validation prediction-target NCD | falling from about `0.929` to `0.921` | desired |
+| GFlowNet entropy/action diversity | `2.77248` / `0.99864` | desired |
+| mean branch BPB | `4.99074` | too weak |
+| best branch BPB | `4.03230` | too weak |
+| mean answer BPB | `4.87349` | too weak |
+| best answer BPB | `3.61037` | desired but marginal |
+| MST efficiency | `0.69670` | desired but weak |
+| path smoothness | `0.07120` | desired, improved |
+| exact edge validity | `0.97813` | desired |
+| exact directed edge validity | `0.92597` | desired |
+| exact triangle validity | `0.67368` | not as desired |
+| toric shadow fan cells | `12.58` | desired |
+| toric shadow min margin | `0.000140` | too weak |
+| Slepian concentration/leakage | `1.0 / 0.0` | desired |
+
+Fresh checkpoint finite differences after the step-3800 restart:
+
+| window | train BPB delta |
+|---|---:|
+| `3850 -> 3900` | `-0.375422` |
+| `3900 -> 3950` | `-0.021743` |
+| `3950 -> 4000` | `-0.221114` |
+| `4000 -> 4050` | `+0.001916` |
+| `4050 -> 4100` | `+0.177784` |
+| `4100 -> 4150` | `-0.171611` |
+| `4150 -> 4200` | `+0.245268` |
+| `4200 -> 4250` | `-0.029085` |
+| `4250 -> 4300` | `-0.039694` |
+
+The local low is:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00004000.pt
+```
+
+with train BPB `3.491981`.  It is the last checkpoint before the first
+positive derivative.  The curvature evidence is:
+
+\[
+  B_{4050}-B_{4000}=0.001916,\qquad
+  B_{4100}-B_{4050}=0.177784,
+\]
+
+so
+
+\[
+  (B_{4100}-B_{4050})-(B_{4050}-B_{4000})=0.175869>0.
+\]
+
+This is again a floor-bounce basin exit.  The later negative deltas into step
+`4300` are not enough to justify continuing from `4300`, because the checkpoint
+is still `0.1846` BPB worse than step `4000`.
+
+### Plot Review
+
+Reviewed:
+
+```text
+metrics/core_metric_timeseries.png
+metrics/selected_metric_correlations.png
+metrics/recent_metric_slopes.png
+simplex/reasoning_k_bpb_triangle.png
+simplex/reasoning_k_bpb_mst_tetrahedron.png
+geometry/trajectories/*_trajectory_3d.png
+geometry/trajectories/*_energy_landscape.png
+geometry/trajectories/*_phase_energy.png
+geometry/trajectories/*_toric_phase_simplicial_trajectory.png
+geometry/trajectories/*_projected_simplicial_toric_geometry.html
+geometry/topology/*_exact_persistence_morphisms.png
+geometry/topology/*_directed_filtration.png
+geometry/topology/*_toric_shadow_audit.png
+geometry/topology/*_toric_slepian_audit.png
+```
+
+Plot categorization:
+
+| diagnostic | category | evidence |
+|---|---|---|
+| core BPB/loss timeseries | mixed | full-window slope is down, but the checkpoint sequence exits the step-4000 low |
+| sparse validation panels | desired but weak | deterministic validation BPB moves down slightly, but complexity BPB rises |
+| selected correlations | not as desired | GFlowNet loss remains positively correlated with BPB; trajectory kinetic/dissipation anti-correlates with BPB but not enough to reduce branch BPB |
+| simplex/tetrahedra | too weak | the best branch remains near the low-BPB vertex, while higher-budget branches still occupy high-reasoning/high-BPB regions |
+| 3D trajectories and energy landscapes | too weak | the flow is coherent and smoother, but still has long chords and endpoint energy that do not form stable low-BPB basins |
+| exact persistence morphisms | mixed | edge validity is high, but triangle validity remains around `0.674` |
+| toric/simplicial phase plots | desired but cluttered | toric winding and local VR structure are real, but active-face margins are too small and the plot remains dense |
+
+### Mathematical Explanation
+
+The basin-lock run lowered the learning rate enough to revisit the good
+likelihood basin, but not enough to stay there.  In finite-difference terms,
+the discrete derivative
+
+\[
+  \nabla B_t \approx B_{t+50}-B_t
+\]
+
+turns positive at step `4000`, and the second difference is positive over the
+next span.  Because GFlowNet entropy and GraphCG axes are noncollapsed, the
+auxiliary systems are not failing by collapse.  They are still adding
+transverse curvature to the byte-likelihood objective before the local basin is
+flat enough.  The geometry plots support that read: trajectory smoothness is
+improving, but branch BPB and answer BPB remain high.  In other words, search
+has coherent structure, but the structure is not yet aligned with compression.
+
+### Decision
+
+Restart from step `4000`, not from `4300`.
+
+Implemented scalar-only changes:
+
+| control | old | new |
+|---|---:|---:|
+| robust micro guard ratio | `1.04` | `1.035` |
+| robust micro guard delta | `0.055` | `0.040` |
+| robust micro guard min scale | `0.20` | `0.15` |
+| controller `gflownet_loss_max` | `5e-6` | `2e-6` |
+| controller recovery down step | `2e-6` | `1e-6` |
+| `3250-6000` LR multiplier | `0.026` | `0.020` |
+| `3250-6000` grad clip | `0.22` | `0.20` |
+| `3250-6000` medium mix ratio | `0.10` | `0.08` |
+| `3250-6000` GFlowNet loss weight | `2.5e-6` | `1e-6` |
+| `3250-6000` GFlowNet entropy weight | `5e-7` | `2e-7` |
+| `3250-6000` GraphCG loss weight | `1.5e-5` | `1e-5` |
+| `3250-6000` contrastive weight | `3e-6` | `1e-6` |
+
+Next target: fresh step `4500`.
+
+Acceptance criteria:
+
+1. step `4000` is preserved as a stable low rather than immediately exited;
+2. at least one fresh checkpoint beats `3.491981`;
+3. deterministic validation BPB remains nonincreasing;
+4. complexity validation BPB stops rising while prediction-target NCD continues
+   falling;
+5. GFlowNet entropy remains near `log(16)` and action diversity remains above
+   `0.998`;
+6. exact triangle validity recovers above `0.69` or at least stops degrading.
+
 ## 2026-06-02 Automated Review: Step 4,100 Ultralow-Curvature Replay
 
 The watcher analyzed:
