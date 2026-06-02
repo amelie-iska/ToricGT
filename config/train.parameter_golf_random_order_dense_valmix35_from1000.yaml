@@ -245,9 +245,9 @@ training:
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 1000
   robust_micro_loss_guard_end_step: 40750
-  robust_micro_loss_guard_ratio: 1.08
-  robust_micro_loss_guard_delta: 0.14
-  robust_micro_loss_guard_min_scale: 0.40
+  robust_micro_loss_guard_ratio: 1.06
+  robust_micro_loss_guard_delta: 0.10
+  robust_micro_loss_guard_min_scale: 0.32
   precision: bf16
   device: cuda
   seed: 17
@@ -307,9 +307,9 @@ adaptive_training:
   # GFlowNet back to 1e-3 during the BPB likelihood-capture hold.  In this
   # regime GFlowNet remains active, but the byte likelihood objective must own
   # the optimizer direction.
-  gflownet_loss_max: 0.00008
+  gflownet_loss_max: 0.00003
   gflownet_gap_step: 0.0
-  gflownet_relax_step: 0.00002
+  gflownet_relax_step: 0.000005
   complex_mix_min: 0.00
   complex_mix_max: 0.04
   complex_down_step: 0.03
@@ -323,7 +323,7 @@ adaptive_training:
   recovery_mode_enabled: true
   recovery_train_drift_threshold: 0.04
   recovery_complex_down_step: 0.04
-  recovery_gflownet_down_step: 0.00004
+  recovery_gflownet_down_step: 0.00001
   recovery_exit_val_improvements: 3
 
 hessian:
@@ -467,28 +467,28 @@ phase_curriculum:
     - name: bpb_stabilization_hold
       start_step: 3250
       end_step: 6000
-      # Step-3500 curvcap review: the saved step-3300 checkpoint beat both
-      # step 3000 and step 3500, while finite differences turned positive from
-      # 3300->3450 and the controller had relaxed GFlowNet pressure to 1e-3.
-      # Restart from 3300 and keep every ToricGT mechanism present, but make
-      # this a lower-curvature BPB hold: smaller scalar LR, tighter clipping,
-      # and very light GFlowNet/topology shaping so the LM objective owns the
-      # basin.
-      lr_multiplier: 0.06
-      grad_clip_norm: 0.30
+      # Step-3800 curvcap review: step 3600 is the fresh local low
+      # (train BPB 3.5207), followed by positive first differences at
+      # 3600->3650 and 3650->3700, rising validation BPB, and worse
+      # branch/complexity BPB.  Restart from 3600 and keep every ToricGT
+      # mechanism present, but make this a narrower low-curvature capture
+      # phase: smaller scalar LR, tighter clipping, less medium-stream
+      # pressure, and very light nonzero GFlowNet/GraphCG shaping.
+      lr_multiplier: 0.045
+      grad_clip_norm: 0.28
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.35
+      medium_mix_ratio: 0.25
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00002
-      gflownet_entropy_weight: 0.000005
+      gflownet_loss_weight: 0.00001
+      gflownet_entropy_weight: 0.000002
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.00004
-      analogy_lattice_loss_weight: 0.000001
+      graphcg_loss_weight: 0.00003
+      analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00002
+      contrastive_loss_weight: 0.00001
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

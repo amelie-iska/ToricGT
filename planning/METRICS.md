@@ -1,5 +1,218 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-02 Automated Review: Step 3,800 Low-Curvature Hold Replay
+
+The watcher analyzed:
+
+```text
+outputs/post_resume_analysis/oai-bpb-graphcg-gfn-03300-curvcap-20260602T070622Z/step-00003800/
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003800.pt
+```
+
+The fresh replay window after the step-3300 restart produced a clear local
+minimum at step `3600`:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003600.pt
+```
+
+### Metric Categorization
+
+| category | count | read |
+|---|---:|---|
+| as desired | `342` | feature systems remain alive: GFlowNet entropy/action diversity are noncollapsed, directed persistence morphisms are computed, toric phase audits are structured, and exact boundary/inclusion errors remain zero |
+| as desired but too weak/slow | `143` | train BPB decreases over the full replay but only by `1.79%`; GraphCG and analogy terms are stable but not materially accelerating validation BPB |
+| not as desired | `140` | validation BPB, complexity validation BPB, and branch BPB move the wrong way after the step-3600 low; finite differences show a floor-bounce basin |
+
+Core W&B behavior:
+
+| metric | first median | last median | relative change | recent slope / 1k |
+|---|---:|---:|---:|---:|
+| train BPB | `3.73412` | `3.66742` | `-1.79%` | `-0.0688` |
+| train loss | `2.58830` | `2.54206` | `-1.79%` | `-0.0477` |
+| total loss | `2.58859` | `2.54235` | `-1.79%` | `-0.0477` |
+| validation BPB | `5.54494` median, controller gate rose from about `5.5394` to `5.5505` | flat in the sparse report, positive in gates | undesirable |
+| complexity validation BPB | about `5.234` to `5.257` in the plotted gates | positive | undesirable |
+| GFlowNet loss | `2.92006` | `2.84043` | `-2.73%` | `-2.5129` |
+| GFlowNet entropy | `2.77242` | `2.77246` | near `0%` | noncollapsed |
+| action diversity | `0.998616` | `0.998608` | near `0%` | noncollapsed |
+
+Fresh checkpoint finite differences:
+
+| window | train BPB delta |
+|---|---:|
+| `3350 -> 3400` | `-0.066283` |
+| `3400 -> 3450` | `+0.113945` |
+| `3450 -> 3500` | `-0.029881` |
+| `3500 -> 3550` | `-0.069380` |
+| `3550 -> 3600` | `-0.161846` |
+| `3600 -> 3650` | `+0.046484` |
+| `3650 -> 3700` | `+0.077951` |
+| `3700 -> 3750` | `+0.022308` |
+| `3750 -> 3800` | `+0.000889` |
+
+Second differences show the same curvature event: the discrete second
+difference over `3550 -> 3600 -> 3650` is `+0.208329`, so the optimizer crossed
+out of a low-BPB basin immediately after the `3600` checkpoint.
+
+### Plot Review
+
+Reviewed:
+
+```text
+metrics/core_metric_timeseries.png
+metrics/selected_metric_correlations.png
+simplex/reasoning_k_bpb_triangle.png
+simplex/reasoning_k_bpb_mst_tetrahedron.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_trajectory_3d.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_energy_landscape.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_phase_energy.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_toric_phase_simplicial_trajectory.png
+geometry/trajectories/R2_gss1147-got_math_500k_got_math_toric_phase_winding_collection.png
+geometry/topology/R2_gss1147-got_math_500k_got_math_toric_shadow_audit.png
+geometry/topology/R2_gss1147-got_math_500k_got_math_exact_persistence_morphisms.png
+geometry/topology/R2_gss1147-got_math_500k_got_math_directed_filtration.png
+```
+
+Visual conclusions:
+
+1. Core BPB/loss plots form a low near `3580-3600`, then rebound.  The sparse
+   validation gates rise across the same interval, so this is not a promotion
+   point.
+2. Correlations show GFlowNet loss and gradient norm positively aligned with
+   BPB/loss, while trajectory kinetic/dissipation terms are negatively aligned
+   with BPB.  This favors keeping GFlowNet active but extremely light during
+   likelihood capture.
+3. The simplex and tetrahedron plots show branches remain in the high-BPB
+   interior rather than moving toward the low-BPB vertex.  Test-time scaling is
+   alive but not yet improving the contest objective.
+4. The 3D trajectory and energy landscape are coherent but still have long
+   excursions and high-energy outliers; the best branch is not enough to rescue
+   validation.
+5. Ramachandran-style phase and toric winding plots show structured projected
+   phase bands, not random phase noise.  Noncommutative toric memory remains
+   useful as an audit signal.
+6. Exact persistence-module morphism and directed-filtration plots remain
+   mathematically healthy: boundary residual and inclusion violation are zero,
+   exact edge validity is high, and cycle flux is effectively zero.  The weak
+   point is conversion to BPB, not topology collapse.
+
+### Desired
+
+| diagnostic | value |
+|---|---:|
+| fresh local low | step `3600`, train BPB `3.520679` |
+| exact morphisms computed | `20.0` |
+| topology boundary residual | `0.0` |
+| topology inclusion violation | `0.0` |
+| exact edge validity | `0.977131` |
+| exact directed edge validity | `0.930216` |
+| directed cycle flux | `~6.05e-18` |
+| HDBSCAN stability | `0.876573` |
+| Slepian concentration / leakage | `1.0 / 0.0` |
+| GFlowNet entropy / diversity | `2.77246 / 0.99861` |
+
+### Desired But Too Weak Or Slow
+
+| diagnostic | value | issue |
+|---|---:|---|
+| full-window train BPB change | `-1.79%` | real improvement, but slower than the desired cliff-like descent |
+| mean branch BPB | `4.9960` | worse than base train BPB and not validation-promoting |
+| best branch BPB | `4.0299` | a useful branch exists, but not a competitive endpoint |
+| mean answer BPB | `4.8781` | answer-span compression remains weak |
+| MST efficiency | `0.6927` | coherent, not improving enough |
+| path smoothness | `0.0761` | acceptable, but long excursions persist |
+| GraphCG loss | flat near `5.459` | steerable frame is stable but not yet accelerating BPB |
+
+### Not As Desired
+
+| diagnostic | value / trend | read |
+|---|---|---|
+| train BPB finite difference | positive after `3600` | first derivative changed sign after the local low |
+| second difference | `+0.208329` over `3550 -> 3600 -> 3650` | sharp curvature/floor-bounce signal |
+| validation BPB gate | rises to about `5.5505` | validation direction worsens |
+| complexity validation BPB | rises to about `5.257` | byte-compression generalization worsens |
+| branch simplex BPB | still around `5.0` mean | inference-time search not converting to BPB |
+| active-face margin | `-1.8288` | tropical faces remain low-margin/inverted |
+| toric leaf residual | `0.9985` | phase leaves are audit-consistent but not yet a loss to strengthen |
+| exact triangle validity | `0.6941` | usable but weaker than the previous handoff |
+
+### Mathematical Explanation
+
+Let \(B_t\) be checkpoint train BPB.  The discrete optimizer trace satisfies
+
+\[
+  B_{3600} < B_{3550},\qquad
+  B_{3650}-B_{3600}>0,\qquad
+  B_{3700}-B_{3650}>0.
+\]
+
+Thus the local directional derivative along the optimizer path switches from
+negative to positive at step `3600`, and the positive second difference
+indicates a high-curvature exit from the basin rather than a noisy one-step
+fluctuation.  The validation gates rising concurrently imply the effective
+objective
+
+\[
+  L_{\rm eff}
+  = L_{\rm BPB}
+    + \lambda_{\rm GFN}L_{\rm GFN}
+    + \lambda_{\rm GraphCG}L_{\rm GraphCG}
+    + \lambda_{\rm topo}L_{\rm topo}
+\]
+
+is still over-curved for the post-low phase.  The geometric systems are not
+collapsing, so the right fix is scalar: lower the step size and auxiliary
+gradient contribution during the basin capture window.  Strengthening toric,
+Koszul, or persistence losses now would add curvature when active-face margins
+and branch BPB say the byte model is not ready for that pressure.
+
+### Decision
+
+Restart from step `3600`, not `3800`.
+
+Implemented scalar-only changes:
+
+| control | old | new |
+|---|---:|---:|
+| robust micro guard ratio | `1.08` | `1.06` |
+| robust micro guard delta | `0.14` | `0.10` |
+| robust micro guard min scale | `0.40` | `0.32` |
+| controller `gflownet_loss_max` | `0.00008` | `0.00003` |
+| controller `gflownet_relax_step` | `0.00002` | `0.000005` |
+| controller recovery down step | `0.00004` | `0.00001` |
+| `3250-6000` LR multiplier | `0.06` | `0.045` |
+| `3250-6000` grad clip | `0.30` | `0.28` |
+| `3250-6000` medium mix ratio | `0.35` | `0.25` |
+| `3250-6000` GFlowNet loss weight | `2e-5` | `1e-5` |
+| `3250-6000` GFlowNet entropy weight | `5e-6` | `2e-6` |
+| `3250-6000` GraphCG loss weight | `4e-5` | `3e-5` |
+| `3250-6000` analogy lattice weight | `1e-6` | `0` |
+| `3250-6000` contrastive weight | `2e-5` | `1e-5` |
+
+No architecture or data feature family was removed.  Random-order
+autoregressive graph decoding, dense contest weights, tropical ring/hybrid
+attention, toric memory, GraphCG axes, embedding-space GFlowNet graph-of-thought,
+relative Kolmogorov diagnostics, directed persistence, Koszul audits, and toric
+probes remain active.
+
+Next target: fresh step `4100`.
+
+Acceptance criteria:
+
+1. at least one checkpoint remains below step-3600 train BPB `3.520679`;
+2. no two consecutive positive 50-step BPB deltas after a new low;
+3. validation BPB and complexity validation BPB stop rising at the next gate;
+4. controller-reported GFlowNet weight stays below `3e-5`;
+5. GFlowNet entropy/action diversity remain noncollapsed;
+6. exact edge validity remains above `0.97`, directed edge validity above
+   `0.92`, inclusion violation `0.0`, Slepian leakage `0.0`.
+
 ## 2026-06-02 Automated Review: Step 3,500 Curvature-Capture Replay
 
 The watcher analyzed:
