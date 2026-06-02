@@ -435,49 +435,52 @@ phase_curriculum:
     - name: bpb_likelihood_hold_2500_3250
       start_step: 2500
       end_step: 3250
-      # Step-2750 review: likelihood still improved from the 2500 checkpoint
-      # and retained the same best validation gate, but the local first
-      # difference turned positive and geometry losses started drifting against
-      # BPB.  Continue from 2750 rather than rolling back, but remove the
-      # step-2500 optimizer jump and keep GraphCG/GFlowNet as light steering
-      # signals only.  Heavier toric/Koszul/flow terms stay off until a later
-      # gate shows lower BPB and stronger active-face margins moving together.
-      lr_multiplier: 0.16
-      grad_clip_norm: 0.42
+      # Step-3250 handoff review: the 2750->3000 window found the current-run
+      # likelihood low point, but 3000->3250 had a positive BPB slope and the
+      # geometry suite showed noisy tropical wall crossings: active-face
+      # margins stayed tiny while bend spikes and branch BPB rose.  Restart
+      # from the step-3000 checkpoint with a smaller scalar step and lighter
+      # exploration auxiliaries.  This keeps GraphCG/GFlowNet active as
+      # steering signals without letting them outrun byte likelihood.
+      lr_multiplier: 0.10
+      grad_clip_norm: 0.36
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00025
-      gflownet_entropy_weight: 0.00005
+      gflownet_loss_weight: 0.00012
+      gflownet_entropy_weight: 0.000025
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.00005
-      analogy_lattice_loss_weight: 0.00001
+      graphcg_loss_weight: 0.00004
+      analogy_lattice_loss_weight: 0.000005
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00006
+      contrastive_loss_weight: 0.00004
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
     - name: bpb_stabilization_hold
       start_step: 3250
       end_step: 6000
-      lr_multiplier: 0.24
-      grad_clip_norm: 0.50
+      # Keep the post-3250 window in the same damped regime.  The prior
+      # 0.24 multiplier plus lower medium-row mixture was too aggressive for
+      # the observed curvature and turned validation BPB upward.
+      lr_multiplier: 0.10
+      grad_clip_norm: 0.36
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.18
+      medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00020
-      gflownet_entropy_weight: 0.00004
+      gflownet_loss_weight: 0.00008
+      gflownet_entropy_weight: 0.00002
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.00005
-      analogy_lattice_loss_weight: 0.00001
+      graphcg_loss_weight: 0.00004
+      analogy_lattice_loss_weight: 0.000005
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00008
+      contrastive_loss_weight: 0.00004
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

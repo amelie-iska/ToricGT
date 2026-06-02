@@ -6476,3 +6476,147 @@ Acceptance criteria:
 6. toric active-face margin not worse than `-1.87` and toric shadow minimum
    margin above `1e-4`;
 7. GraphCG basis coherence stops its rapid upward drift.
+
+## Step 3250 Handoff Review: Damped Restart From Step 3000
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-graphcg-gfn-02750-20260602T024036Z/step-00003250
+```
+
+Checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003250.pt
+```
+
+The requested training tmux session
+`toricgt_oai_graphcg_gfn_02750_20260602T024036Z` was not present when the
+review began.  The watcher log confirms that its attempt to pause the pane
+failed with `can't find pane`, so this review treats training as already
+stopped and performs a clean restart decision.
+
+### Metric Categorization
+
+| family | observed behavior | category |
+|---|---|---|
+| train BPB/loss | median improved from the first window, but recent slope is positive: `train/bpb` recent slope `+0.0697` BPB/1k and checkpoint BPB rose from `3.5026` at step `3000` to `3.6468` at step `3250` | desired but too weak/slow, locally undesirable |
+| validation BPB/loss | validation worsened at the observed gates: `5.4630` at step `2500`, `5.5287` at step `3000`, while the stored best gate remains `4.6961` | undesirable |
+| GFlowNet loss | decreased overall and no collapse was visible | desired |
+| GFlowNet entropy/diversity | entropy is high and action diversity is near saturated; exploration is present but not translating to validation/BPB improvement | desired but too weak/slow |
+| GraphCG and analogy metrics | chart losses and topology diagnostics are active, but recent slopes are dominated by high-variance complexity terms; no evidence justifies increasing their weight | desired but too weak/slow |
+| relative Kolmogorov proxies | helper-string and analogical-transfer rewards are directionally useful, but sample count is too small and input-difficulty variance dominates many `stable` metrics | diagnostic only |
+| trajectory geometry | mean MST efficiency improved to `0.6981`, but path smoothness worsened relative to the prior best window and directed asymmetry rose to `0.3900` | mixed; too weak/slow |
+| nested directed topology | inclusion violations are zero, edge validity is high (`0.9769` undirected, `0.9305` directed), but triangle validity is only `0.6563` and HDBSCAN stability fell to `0.8725` | desired but too weak/slow |
+| toric/tropical geometry | fan entropy improved (`0.7291`), but active-face margin remains weak (`-1.8092` audit convention), bend spikes are large, and binomial residual is high (`1.2960`) | undesirable as a training gate |
+| Slepian/phase-band audit | concentration/leakage remain `1.0/0.0` | desired |
+
+Metric counts from the automatic classifier were:
+
+```text
+as_desired: 329
+as_desired_but_not_strong_or_fast_enough: 136
+not_as_desired: 151
+```
+
+### Statistical Interpretation
+
+The checkpoint sequence in the current run has a clean local likelihood
+minimum at step `3000`:
+
+```text
+step 2500: train BPB 3.7255
+step 2750: train BPB 3.6385
+step 3000: train BPB 3.5026
+step 3250: train BPB 3.6468
+```
+
+The finite difference from `3000 -> 3250` is positive, and the W&B recent
+window also has positive BPB/loss slope.  This is the same floor-bounce
+signature as earlier runs: the model finds a shallow compression basin, then
+auxiliary exploration and optimizer scale push it across the basin wall before
+validation catches up.  Mathematically, the byte cross-entropy gradient is
+still useful, but the local curvature is high enough that a step of size
+roughly `5e-6` with active GFlowNet/GraphCG steering overshoots the local
+quadratic approximation.  The lack of validation improvement means the
+overshoot is not buying a better generalizing basin.
+
+The trajectory plots explain why this is not a reason to disable reasoning.
+GFlowNet branches exist and MST efficiency improved, so search is not
+collapsed.  The failure is calibration: branch exploration is producing long
+latent jumps and noisy tropical wall crossings before the active-face margins
+are stable.  In tropical terms, bend magnitudes are large while margins are
+near zero, so the model crosses chamber walls without a robust argmax face.
+In toric terms, fan occupancy and entropy are useful, but binomial and
+phase-leaf residuals are still too large to use as heavy gradient signals.
+
+The nested-simplicial diagnostics are also not failure signals.  Zero
+inclusion violation and high edge validity show the directed filtration code
+is coherent; weak triangle validity and HDBSCAN stability below `0.90` show
+that the learned chart has not yet stabilized enough for stronger topological
+losses.  Keep those terms light.
+
+### Decision
+
+Restart from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003000.pt
+```
+
+This is the last current-run checkpoint before the local derivative turns
+positive.  Do not restart from step `3250`, and ignore the stale step-`3500`
+checkpoint because its mtime is from `2026-05-27`, not this run.
+
+Implemented scalar-only control changes in:
+
+```text
+config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml
+```
+
+| control | previous 2500-3250 | new 2500-3250 |
+|---|---:|---:|
+| LR multiplier | `0.16` | `0.10` |
+| grad clip | `0.42` | `0.36` |
+| medium mix | `0.35` | `0.35` |
+| GFlowNet loss | `0.00025` | `0.00012` |
+| GFlowNet entropy loss | `0.00005` | `0.000025` |
+| GraphCG loss | `0.00005` | `0.00004` |
+| analogy lattice loss | `0.00001` | `0.000005` |
+| contrastive loss | `0.00006` | `0.00004` |
+
+| control | previous 3250-6000 | new 3250-6000 |
+|---|---:|---:|
+| LR multiplier | `0.24` | `0.10` |
+| grad clip | `0.50` | `0.36` |
+| medium mix | `0.18` | `0.35` |
+| GFlowNet loss | `0.00020` | `0.00008` |
+| GFlowNet entropy loss | `0.00004` | `0.00002` |
+| GraphCG loss | `0.00005` | `0.00004` |
+| analogy lattice loss | `0.00001` | `0.000005` |
+| contrastive loss | `0.00008` | `0.00004` |
+
+All architecture-level choices remain unchanged: dense contest weights,
+random-order autoregressive graph decoding, hybrid tropical ring attention,
+toric memory, GraphCG chart regularization, embedding-space GFlowNet
+graph-of-thought, and Kolmogorov diagnostics.
+
+### Next Review Gate
+
+Restart from step `3000` and analyze the first fresh checkpoint at or above
+step `3500` using a fresh `--min-mtime-unix`, because an old step-3500 file
+already exists.  The watcher should pause training before analysis and run the
+full CUDA/bf16 suite with Codex review hook.
+
+Acceptance criteria for the next gate:
+
+1. train BPB below `3.50`, or at least negative recent BPB slope with no large
+   positive second-difference cluster;
+2. validation BPB below the step-3000 value `5.5287`, with any move toward
+   the stored `4.6961` best gate treated as strong evidence;
+3. mean branch BPB below `4.85` and best branch BPB below `3.50`;
+4. HDBSCAN stability back above `0.90`, directed edge validity above `0.93`,
+   and triangle validity above `0.68`;
+5. toric shadow minimum margin above `1e-4`, fan entropy not below `0.67`, and
+   bend spikes not increasing relative to this review.
