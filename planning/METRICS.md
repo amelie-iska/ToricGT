@@ -8257,13 +8257,22 @@ p_t(b) = (n_t(b) + alpha) / (t + alpha V)
 ```
 
 is a lawful score-before-update model because `n_t` only counts revealed tokens
-from prior reveal steps.  Adding `w log p_t(b)` as a logit product-of-experts
-term reduces the burden on the neural residual and should lower BPB immediately
-on repeated byte structure.  A zero-initialized trainable revealed-neighbor head
-then learns local graph potentials over positions `p +/- r` when those vertices
-have already been revealed.  This stays faithful to the ToricGT contest adapter:
-random-order autoregressive graph decoding, dense packed weights, hybrid
-tropical ring attention, toric memory, GraphCG, and GFlowNet heads are preserved.
+from prior reveal steps.  A first additive product-of-experts trial showed the
+danger of overconfidence: at step `1510`, `train/neural_bpb` was `4.2182` while
+the context-corrected `train/bpb` rose to `4.7690`.  The corrected design mixes
+the prior in probability space,
+
+```text
+q_t = (1 - lambda) q_neural + lambda p_t,
+```
+
+which caps the worst-case penalty from a weak prior by `-log(1-lambda)` while
+still allowing entropy reduction when revealed-prefix statistics are predictive.
+A zero-initialized trainable revealed-neighbor head then learns local graph
+potentials over positions `p +/- r` when those vertices have already been
+revealed.  This stays faithful to the ToricGT contest adapter: random-order
+autoregressive graph decoding, dense packed weights, hybrid tropical ring
+attention, toric memory, GraphCG, and GFlowNet heads are preserved.
 
 ### Decision
 
@@ -8274,9 +8283,9 @@ Implemented controls:
 | control | new setting |
 |---|---:|
 | resume checkpoint | `random_order_step_00001500.pt` |
-| revealed Dirichlet prefix prior | enabled |
+| revealed Dirichlet prefix prior | enabled as probability mixture |
 | prior alpha | `0.25` |
-| prior logit weight | `0.55` |
+| prior mixture mass | `0.10` |
 | trainable revealed-neighbor context | enabled |
 | neighbor radius | `2` |
 | neighbor logit weight | `0.45` |
@@ -8289,7 +8298,7 @@ Acceptance criteria for the next review:
 
 1. fresh `train/bpb` should fall below the current 2250 value quickly and
    ideally return to the `3.37`--`3.55` historical early-basin band;
-2. `train/revealed_context_prior_weight` should be nonzero and
+2. `train/revealed_context_prior_mixture_weight` should be nonzero and
    `train/revealed_neighbor_context_norm` finite;
 3. future-token causal audit remains below tolerance;
 4. first finite difference near 1650--1700 is nonpositive or only weakly

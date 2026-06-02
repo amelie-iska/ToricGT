@@ -27,12 +27,14 @@ model:
   use_caseops_features: true
   caseops_weight: 0.35
   # Legal score-before-update revealed-context compression.  The deterministic
-  # Dirichlet prefix prior gives immediate adaptive arithmetic-coding pressure,
-  # while the zero-initialized neighbor tables can learn local graph potentials
-  # over already revealed original positions.
+  # Dirichlet prefix prior is mixed in probability space, not added as a hard
+  # product-of-experts logit, so a bad prior cannot dominate the neural
+  # distribution.  The zero-initialized neighbor tables can still learn local
+  # graph potentials over already revealed original positions.
   use_revealed_context_prior: true
   revealed_context_prior_alpha: 0.25
-  revealed_context_prior_weight: 0.55
+  revealed_context_prior_mode: mixture
+  revealed_context_prior_weight: 0.10
   use_revealed_neighbor_context: true
   revealed_neighbor_radius: 2
   revealed_neighbor_context_weight: 0.45

@@ -63,6 +63,7 @@ class RandomOrderLMConfig:
     use_revealed_context_prior: bool = False
     revealed_context_prior_alpha: float = 0.25
     revealed_context_prior_weight: float = 0.35
+    revealed_context_prior_mode: str = "additive"
     use_smear_gate: bool = True
     smear_temperature_min: float = 0.55
     smear_temperature_max: float = 1.75
@@ -540,7 +541,7 @@ class DenseRandomOrderToricLM(nn.Module):
         target_positions: torch.Tensor,
         *,
         dtype: torch.dtype,
-    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None] | None:
         """Return legal score-before-update logits from revealed graph neighbors.
 
         Random-order decoding turns a byte string into a graph completion task:
@@ -552,9 +553,12 @@ class DenseRandomOrderToricLM(nn.Module):
         """
 
         table_context_enabled = self.revealed_left_logits is not None and self.revealed_right_logits is not None
-        prior_enabled = bool(self.config.use_revealed_context_prior) and abs(
-            float(self.config.revealed_context_prior_weight)
-        ) > 0.0
+        prior_mode = str(self.config.revealed_context_prior_mode).lower().strip()
+        if prior_mode not in {"additive", "mixture"}:
+            raise ValueError("revealed_context_prior_mode must be 'additive' or 'mixture'")
+        prior_weight = float(self.config.revealed_context_prior_weight)
+        prior_enabled = bool(self.config.use_revealed_context_prior) and abs(prior_weight) > 0.0
+        prior_is_mixture = prior_enabled and prior_mode == "mixture"
         if not table_context_enabled and not prior_enabled:
             return None
         if target_tokens.shape != target_positions.shape:
@@ -566,11 +570,11 @@ class DenseRandomOrderToricLM(nn.Module):
         vocab = int(self.config.vocab_size)
         unknown = vocab
         context_logits = torch.zeros(batch, length, vocab, device=device, dtype=torch.float32)
+        prior_log_probs: torch.Tensor | None = None
         known_counts = torch.zeros(batch, length, device=device, dtype=torch.float32)
         clipped_targets = target_tokens.clamp(0, vocab - 1).to(torch.long)
         positions = target_positions.clamp(0, length - 1).to(torch.long)
         alpha = max(float(self.config.revealed_context_prior_alpha), 1.0e-6)
-        prior_weight = float(self.config.revealed_context_prior_weight)
         uniform_log_prob = -math.log(max(1, vocab))
         if prior_enabled:
             token_one_hot = F.one_hot(clipped_targets, num_classes=vocab).to(torch.float32)
@@ -581,7 +585,10 @@ class DenseRandomOrderToricLM(nn.Module):
                 1,
             )
             log_prior = strict_prefix_counts.clamp_min(1.0e-8).log() - strict_prefix_total.log()
-            context_logits = context_logits + prior_weight * (log_prior - uniform_log_prob)
+            if prior_is_mixture:
+                prior_log_probs = log_prior
+            else:
+                context_logits = context_logits + prior_weight * (log_prior - uniform_log_prob)
         if table_context_enabled:
             neighbor_logits = torch.zeros_like(context_logits)
             tokens_by_position = torch.full((batch, length), unknown, device=device, dtype=torch.long)
@@ -614,7 +621,7 @@ class DenseRandomOrderToricLM(nn.Module):
                 known_counts = known_counts + right_known.to(torch.float32)
             context_logits = context_logits + float(self.config.revealed_neighbor_context_weight) * neighbor_logits
         neighbor_slots = 2.0 * len(self.revealed_left_logits) if table_context_enabled else 1.0
-        return context_logits.to(dtype=dtype), known_counts / max(1.0, neighbor_slots)
+        return context_logits.to(dtype=dtype), known_counts / max(1.0, neighbor_slots), prior_log_probs
 
     def _add_revealed_neighbor_context(
         self,
@@ -629,10 +636,23 @@ class DenseRandomOrderToricLM(nn.Module):
         )
         if context is None:
             return aux
-        context_logits, known_fraction = context
+        context_logits, known_fraction, prior_log_probs = context
         aux = dict(aux)
         aux["neural_logits"] = aux["logits"]
-        aux["logits"] = aux["logits"] + context_logits
+        base_logits = aux["logits"] + context_logits
+        if prior_log_probs is not None:
+            mixture_weight = max(1.0e-6, min(1.0 - 1.0e-6, float(self.config.revealed_context_prior_weight)))
+            model_log_probs = F.log_softmax(base_logits, dim=-1)
+            aux["logits"] = torch.logaddexp(
+                model_log_probs + math.log1p(-mixture_weight),
+                prior_log_probs.to(dtype=model_log_probs.dtype) + math.log(mixture_weight),
+            )
+            aux["revealed_context_prior_mixture_weight"] = torch.as_tensor(
+                mixture_weight,
+                device=context_logits.device,
+            )
+        else:
+            aux["logits"] = base_logits
         aux["revealed_neighbor_known_fraction"] = known_fraction.mean()
         aux["revealed_neighbor_context_norm"] = context_logits.float().norm(dim=-1).mean()
         aux["revealed_context_prior_weight"] = torch.as_tensor(
@@ -1366,6 +1386,8 @@ class DenseRandomOrderToricLM(nn.Module):
             out["revealed_neighbor_context_norm"] = aux["revealed_neighbor_context_norm"].float()
         if "revealed_context_prior_weight" in aux:
             out["revealed_context_prior_weight"] = aux["revealed_context_prior_weight"].float()
+        if "revealed_context_prior_mixture_weight" in aux:
+            out["revealed_context_prior_mixture_weight"] = aux["revealed_context_prior_mixture_weight"].float()
         hidden = aux.get("hidden")
         if hidden is not None and self.aux_mtp_heads:
             mtp_losses = []

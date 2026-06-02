@@ -1828,6 +1828,7 @@ def main() -> None:
         use_revealed_context_prior=config_get(file_config, "model", "use_revealed_context_prior", False),
         revealed_context_prior_alpha=config_get(file_config, "model", "revealed_context_prior_alpha", 0.25),
         revealed_context_prior_weight=config_get(file_config, "model", "revealed_context_prior_weight", 0.35),
+        revealed_context_prior_mode=config_get(file_config, "model", "revealed_context_prior_mode", "additive"),
         use_smear_gate=(
             False
             if args.no_smear_gate
@@ -2841,6 +2842,7 @@ def main() -> None:
         step_revealed_neighbor_known_fraction = 0.0
         step_revealed_neighbor_context_norm = 0.0
         step_revealed_context_prior_weight = 0.0
+        step_revealed_context_prior_mixture_weight = 0.0
         step_toric_memory_entropy = 0.0
         step_toric_entropy_loss = 0.0
         step_toric_geometry_loss = 0.0
@@ -3389,6 +3391,9 @@ def main() -> None:
             step_revealed_context_prior_weight += float(
                 out.get("revealed_context_prior_weight", torch.zeros(())).detach().cpu()
             )
+            step_revealed_context_prior_mixture_weight += float(
+                out.get("revealed_context_prior_mixture_weight", torch.zeros(())).detach().cpu()
+            )
             step_toric_memory_entropy += float(out.get("toric_memory_entropy", torch.zeros(())).detach().cpu())
             step_toric_entropy_loss += float(toric_entropy_loss.detach().cpu())
         step_loss /= grad_accum
@@ -3484,6 +3489,7 @@ def main() -> None:
         step_revealed_neighbor_known_fraction /= grad_accum
         step_revealed_neighbor_context_norm /= grad_accum
         step_revealed_context_prior_weight /= grad_accum
+        step_revealed_context_prior_mixture_weight /= grad_accum
         step_toric_memory_entropy /= grad_accum
         step_toric_entropy_loss /= grad_accum
         step_toric_geometry_loss /= grad_accum
@@ -3690,6 +3696,7 @@ def main() -> None:
                 "train/revealed_neighbor_known_fraction": step_revealed_neighbor_known_fraction,
                 "train/revealed_neighbor_context_norm": step_revealed_neighbor_context_norm,
                 "train/revealed_context_prior_weight": step_revealed_context_prior_weight,
+                "train/revealed_context_prior_mixture_weight": step_revealed_context_prior_mixture_weight,
                 "train/toric_memory_entropy": step_toric_memory_entropy,
                 "train/toric_entropy_floor": float(toric_entropy_floor),
                 "train/toric_entropy_loss": step_toric_entropy_loss,

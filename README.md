@@ -546,23 +546,33 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --wandb-run-name oai-bpb-valmix35-01000-<timestamp>
 ```
 
-This replay uses the same dense ToricGT Parameter-Golf architecture, but starts
-the valmix35 BPB-recovery controls at step `1000`: medium-row mix `0.35`,
-hard/complex graph rows off, GFlowNet/topology/toric/QAT losses diagnostic-only,
-contrastive weight `1e-4`, LR multiplier `0.24`, and clip norm `0.50`. The
-step-2000 handoff found that the earlier `0.18/0.18` 1500-2000 retry flattened
-train BPB, worsened the known validation gate, and weakened branch geometry.
-The active replay therefore rolls back to step `1500` and uses
-`bpb_valmix_curvature_damped_1500_2000`: medium mix `0.35`, LR multiplier
-`0.12`, contrastive weight `3e-5`, clip norm `0.40`, and the same
-diagnostic-only auxiliary geometry policy.  The follow-up step-2000 handoff was
-marginally better but still bounced, so the old 2000-3000 sprint is replaced
-by `bpb_postbounce_valmix_hold_2000_2500`: medium mix `0.35`, LR multiplier
-`0.16`, contrastive weight `8e-5`, clip norm `0.42`, `graphcg_loss_weight:
-6e-5`, `analogy_lattice_loss_weight: 1e-5`, `gflownet_loss_weight: 2.5e-4`,
-and `gflownet_entropy_weight: 5e-5`.  Heavy toric, Koszul, trajectory-flow,
-QAT, and Soft-MoE losses remain off until the next analysis gate verifies that
-branch quality and BPB improve together.
+This replay uses the same dense ToricGT Parameter-Golf architecture, but the
+active BPB recovery now rolls back to the aligned step `1500` checkpoint after
+the step-2250 watcher found the step-2000 retry had left the early likelihood
+basin.  The new likelihood-side intervention is a legal score-before-update
+revealed-context mixture: a Dirichlet-smoothed prefix byte distribution is
+mixed in probability space with the neural distribution, while zero-initialized
+trainable local potentials learn from already revealed graph neighbors at
+positions `p +/- r`.  The mixture form is deliberately conservative: a bad
+revealed-prefix prior cannot dominate the neural distribution the way an
+additive product-of-experts logit can.  This preserves random-order graph
+decoding and does not read the current or future target before scoring.  W&B
+reports `train/neural_bpb`, `train/bpb`,
+`train/revealed_context_prior_mixture_weight`,
+`train/revealed_neighbor_known_fraction`, and
+`train/revealed_neighbor_context_norm` so the analysis gate can separate true
+neural improvement from context correction.
+
+The current launch path is:
+
+```bash
+scripts/launch_oai_bpb_cliff_recovery.sh
+```
+
+It resumes from `random_order_step_00001500.pt`, uses medium mix `0.35`, keeps
+heavy toric/Koszul/GFlowNet/trajectory auxiliaries diagnostic-only through the
+1500--1700 capture window, and pauses at step `1700` for CUDA/bf16 analysis and
+an automated Codex review before any continuation decision.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
@@ -784,13 +794,13 @@ instance. The default `oai` config keeps the initial BPB capture stream
 text-first, introduces medium-length rows after step `2500`, and delays the
 larger technical graph-projection stream until step `6000` with
 math/code/graph/reasoning/health/physics/biomed/biochem task-family filters.
-The current restart is from the aligned step `1,250` checkpoint with a lower
-`1500-2000` LR multiplier and zero medium/hard mixture in that capture window
-to stay below the observed bounce band while the new topology metrics are
-diagnostic-only. A bounded
+The current restart is from the aligned step `1,500` checkpoint with
+revealed-context compression enabled and a two-phase `1500--1600` /
+`1600--1700` capture window designed around the historical low near step
+`1690`. A bounded
 checkpoint-level adaptive controller remains enabled for GFlowNet entropy
 target, GFlowNet loss weight, and hard-row mix; it writes
-`checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_capture_schneller.json`
+`checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_revealed_context.json`
 and logs `controller/*` metrics to W&B.
 
 For challenge-time throughput experiments, use the long-context packed config:

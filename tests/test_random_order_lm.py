@@ -64,7 +64,8 @@ def test_score_before_update_future_tokens_do_not_affect_current_logit():
 def test_revealed_context_prior_is_score_before_update_safe():
     cfg = tiny_config(
         use_revealed_context_prior=True,
-        revealed_context_prior_weight=0.7,
+        revealed_context_prior_weight=0.1,
+        revealed_context_prior_mode="mixture",
         use_revealed_neighbor_context=False,
     )
     model = DenseRandomOrderToricLM(cfg).eval()
@@ -76,6 +77,7 @@ def test_revealed_context_prior_is_score_before_update_safe():
     assert torch.allclose(out_a["logits"][:, 4], out_b["logits"][:, 4], atol=1e-6)
     assert out_a["revealed_neighbor_context_norm"].isfinite()
     assert abs(out_a["revealed_context_prior_weight"].item() - cfg.revealed_context_prior_weight) < 1e-6
+    assert abs(out_a["revealed_context_prior_mixture_weight"].item() - cfg.revealed_context_prior_weight) < 1e-6
 
 
 def test_revealed_neighbor_context_uses_only_revealed_graph_neighbors():
