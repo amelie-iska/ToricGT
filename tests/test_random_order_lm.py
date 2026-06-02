@@ -86,7 +86,7 @@ def test_gflownet_adapter_losses_and_multi_sample_scaling():
     cfg = tiny_config(vocab_size=48, use_gflownet_policy=True, gflownet_num_actions=4, gflownet_hidden_dim=16)
     model = DenseRandomOrderToricLM(cfg)
     tokens = torch.randint(4, cfg.vocab_size, (2, 10))
-    out = model(tokens, sample_ids=torch.arange(2), sample_gflownet=True)
+    out = model(tokens, sample_ids=torch.arange(2), sample_gflownet=True, return_order=True)
     assert out["loss"].isfinite()
     assert out["gflownet_loss"].isfinite()
     assert out["gflownet_entropy"].isfinite()
@@ -96,6 +96,25 @@ def test_gflownet_adapter_losses_and_multi_sample_scaling():
     assert scaled["logits"].shape == (2, 10, cfg.vocab_size)
     assert scaled["loss"].isfinite()
     assert scaled["single_sample_loss"].isfinite()
+
+
+def test_gflownet_sampling_sanitizes_nonfinite_policy_logits():
+    cfg = tiny_config(vocab_size=48, use_gflownet_policy=True, gflownet_num_actions=4, gflownet_hidden_dim=16)
+    model = DenseRandomOrderToricLM(cfg)
+
+    class NanPolicy(torch.nn.Module):
+        def forward(self, hidden: torch.Tensor) -> torch.Tensor:
+            shape = (*hidden.shape[:-1], cfg.gflownet_num_actions)
+            return torch.full(shape, float("nan"), device=hidden.device, dtype=hidden.dtype)
+
+    model.gflownet_policy = NanPolicy()
+    tokens = torch.randint(4, cfg.vocab_size, (2, 10))
+    out = model(tokens, sample_ids=torch.arange(2), sample_gflownet=True, return_order=True)
+    assert out["loss"].isfinite()
+    assert out["gflownet_loss"].isfinite()
+    assert out["gflownet_entropy"].isfinite()
+    assert out["gflownet_action_ids"].min() >= 0
+    assert out["gflownet_action_ids"].max() < cfg.gflownet_num_actions
 
 
 def test_analogy_hdbscan_surrogate_metrics_are_finite():

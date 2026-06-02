@@ -549,8 +549,13 @@ class DenseRandomOrderToricLM(nn.Module):
     ) -> dict[str, torch.Tensor]:
         if self.gflownet_policy is None or self.gflownet_action_embedding is None:
             return {}
-        policy_logits = self.gflownet_policy(hidden)
-        policy_logits_f = policy_logits.float()
+        policy_hidden = torch.nan_to_num(hidden.float(), nan=0.0, posinf=30.0, neginf=-30.0).to(dtype=hidden.dtype)
+        policy_logits = self.gflownet_policy(policy_hidden)
+        policy_logits_f = torch.nan_to_num(policy_logits.float(), nan=0.0, posinf=30.0, neginf=-30.0).clamp(
+            min=-30.0,
+            max=30.0,
+        )
+        policy_logits = policy_logits_f.to(dtype=policy_logits.dtype)
         policy_log_probs = F.log_softmax(policy_logits_f, dim=-1)
         policy_probs = policy_log_probs.exp()
         entropy = -(policy_probs * policy_log_probs).sum(dim=-1)
@@ -1199,7 +1204,11 @@ class DenseRandomOrderToricLM(nn.Module):
         if toric_memory_entropy is not None:
             out["toric_memory_entropy"] = toric_memory_entropy.float()
         if self.gflownet_flow is not None:
-            out["flow_log"] = self.gflownet_flow(hidden).squeeze(-1)
+            flow_hidden = torch.nan_to_num(hidden.float(), nan=0.0, posinf=30.0, neginf=-30.0).to(dtype=hidden.dtype)
+            flow_log = self.gflownet_flow(flow_hidden).squeeze(-1)
+            out["flow_log"] = torch.nan_to_num(flow_log.float(), nan=0.0, posinf=30.0, neginf=-30.0).to(
+                dtype=flow_log.dtype
+            )
         return out
 
     def _supervised_and_gflownet_losses(

@@ -6609,6 +6609,17 @@ step `3500` using a fresh `--min-mtime-unix`, because an old step-3500 file
 already exists.  The watcher should pause training before analysis and run the
 full CUDA/bf16 suite with Codex review hook.
 
+Startup stability note: the first damped restart reached a finite first
+training step, then the complexity diagnostic crashed because sampled GFlowNet
+policy logits became non-finite during auxiliary metric evaluation.  The
+checkpoint policy weights were finite, so this was handled as a runtime
+diagnostic guard rather than a training-method change.  The model now
+sanitizes non-finite GFlowNet policy/flow inputs and logits at the auxiliary
+policy boundary before categorical sampling.  The architecture, loss weights,
+and score-first random-order decoder are unchanged; this prevents monitoring
+from terminating a valid training run when an auxiliary sampled-policy path
+encounters a bad diagnostic batch.
+
 Acceptance criteria for the next gate:
 
 1. train BPB below `3.50`, or at least negative recent BPB slope with no large
