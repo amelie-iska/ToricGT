@@ -66,6 +66,24 @@ def config_get(config: dict[str, Any], section: str, key: str, default: Any) -> 
     return config.get(section, {}).get(key, default)
 
 
+def add_weighted_aux_loss(total: torch.Tensor, weight: float, term: torch.Tensor) -> torch.Tensor:
+    """Add a finite auxiliary scalar only when its effective weight is active.
+
+    Several geometry/topology diagnostics are computed even during phases where
+    their loss weight is zero.  PyTorch still propagates ``0 * NaN`` as NaN, so
+    disabled diagnostics must be skipped explicitly.  Active auxiliaries are
+    finite-clamped before they are allowed to affect the optimizer.
+    """
+
+    weight = float(weight)
+    if weight <= 0.0:
+        return total
+    if term.ndim > 0:
+        term = term.mean()
+    finite = torch.nan_to_num(term.float(), nan=0.0, posinf=1.0e4, neginf=-1.0e4).to(dtype=total.dtype)
+    return total + weight * finite
+
+
 def load_optional_training_tokens(path: str | Path = "keys.txt") -> None:
     """Load local auth tokens without printing or checkpointing them.
 
@@ -3035,20 +3053,63 @@ def main() -> None:
                     if effective_toric_entropy_loss_weight > 0 and float(toric_entropy_floor) > 0
                     else torch.zeros((), device=device)
                 )
-                total_micro_loss = (
-                    micro_loss
-                    + effective_gflownet_loss_weight * gflownet_loss
-                    + effective_gflownet_entropy_weight * gflownet_entropy_objective
-                    + effective_mtp_loss_weight * mtp_loss
-                    + effective_graphcg_loss_weight * graphcg_loss
-                    + effective_analogy_lattice_loss_weight * analogy_lattice_loss
-                    + effective_toric_geometry_loss_weight * toric_geometry_loss
-                    + effective_koszul_persistence_loss_weight * koszul_persistence_loss
-                    + effective_qat_loss_weight * qat_loss
-                    + effective_contrastive_loss_weight * contrastive_loss
-                    + effective_trajectory_flow_loss_weight * trajectory_flow_penalty
-                    + effective_trajectory_memory_loss_weight * trajectory_memory_loss
-                    + effective_toric_entropy_loss_weight * toric_entropy_loss
+                total_micro_loss = torch.nan_to_num(
+                    micro_loss.float(),
+                    nan=0.0,
+                    posinf=1.0e4,
+                    neginf=1.0e4,
+                ).to(dtype=micro_loss.dtype)
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_gflownet_loss_weight,
+                    gflownet_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_gflownet_entropy_weight,
+                    gflownet_entropy_objective,
+                )
+                total_micro_loss = add_weighted_aux_loss(total_micro_loss, effective_mtp_loss_weight, mtp_loss)
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_graphcg_loss_weight,
+                    graphcg_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_analogy_lattice_loss_weight,
+                    analogy_lattice_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_toric_geometry_loss_weight,
+                    toric_geometry_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_koszul_persistence_loss_weight,
+                    koszul_persistence_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(total_micro_loss, effective_qat_loss_weight, qat_loss)
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_contrastive_loss_weight,
+                    contrastive_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_trajectory_flow_loss_weight,
+                    trajectory_flow_penalty,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_trajectory_memory_loss_weight,
+                    trajectory_memory_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_toric_entropy_loss_weight,
+                    toric_entropy_loss,
                 )
                 micro_guard_scale = 1.0
                 micro_guard_cap = 0.0

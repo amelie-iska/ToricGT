@@ -6620,6 +6620,16 @@ and score-first random-order decoder are unchanged; this prevents monitoring
 from terminating a valid training run when an auxiliary sampled-policy path
 encounters a bad diagnostic batch.
 
+Second startup stability note: the next restart survived policy sampling, but
+the following step produced `nan` BPB/loss immediately after a Koszul SVD
+warning.  The active phase had zero Koszul/toric/flow weights, so the likely
+mechanism was disabled diagnostic losses entering the raw sum as `0 * NaN`.
+The training script now skips zero-weight auxiliary losses explicitly and
+finite-clamps only positive-weight auxiliary scalars before they enter the
+optimizer.  This is not a relaxation of the primary objective: byte NLL remains
+the base loss, and disabled topology/toric diagnostics remain logged rather
+than optimized.
+
 Acceptance criteria for the next gate:
 
 1. train BPB below `3.50`, or at least negative recent BPB slope with no large
