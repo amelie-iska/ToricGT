@@ -1,5 +1,159 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-02 Automated Review: Step 1,525 Revealed-Context Recovery Gate
+
+The watcher analyzed:
+
+```text
+outputs/post_resume_analysis/oai-bpb-revealed-context-01500-20260602T174238Z/step-00001525/
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001525.pt
+```
+
+The watcher paused the training process before analysis.  A Codex review hook
+was spawned in:
+
+```text
+toricgt_codex_review_bpb_cliff_00001525
+```
+
+### Metric Categorization
+
+| category | read |
+|---|---|
+| as desired | training restarted cleanly from the step-1500 checkpoint with Adam reset, then produced a fresh step-1525 checkpoint; GFlowNet entropy stayed high (`2.76`) with action diversity near one; GraphCG basis coherence stayed very low; exact topology edge validity was high (`0.973` mean, `0.935` directed); inclusion and variety-of-complexes residuals were zero; HDBSCAN stability was high (`0.884`); Toric BGG resolution consistency was useful as a diagnostic (`0.901`) and signature smoothness was low (`0.0021`); artifact accounting stayed below the cap with training-only probes excluded |
+| desired but too weak/slow | train BPB at the checkpoint was worse than the resume point (`3.5454 -> 4.0688`), but the short post-checkpoint log had already moved back toward lower values (`3.896`, `3.880` at steps 1526--1527); simplex reasoning budgets improved MST/reasoning scores but not BPB; mean geometry BPB was high (`4.930`) while best branch BPB was useful (`4.044`); MST efficiency (`0.707`) and path smoothness (`0.050`) were coherent but not yet compression-aligned; toric shadow margins were positive but tiny (`min 0.00022`) |
+| undesirable | no official-style FineWeb BPB was available at this gate; controller validation BPB in W&B summary remained high/stale (`5.2686`) and cannot promote the checkpoint; active-face margins were still inverted (`train -1.3745`, geometry mean `-1.696`); Toric BGG standard leakage was high (`0.610`), so BGG supervision must remain off; simplex budget scaling made BPB slightly worse (`4.340` at budget 1 vs `4.362` at budget 4); exact triangle validity was only `0.685`, so higher-order topology is not ready to drive optimization |
+
+Core values:
+
+| metric | value | read |
+|---|---:|---|
+| step-1500 train BPB | `3.545400` | resume point before Adam reset |
+| step-1525 checkpoint train BPB | `4.068817` | worse than source checkpoint, but only 25 reset steps |
+| step-1525 checkpoint train loss | `2.820289` | same short-window rebound |
+| best validation BPB in checkpoint metadata | `4.696106` | unchanged; no fresh official-style FineWeb gate |
+| W&B controller validation BPB | `5.268565` | stale/sparse calibration, not a promotion signal |
+| simplex BPB by budget | `4.340`, `4.344`, `4.362`, `4.357` | branch scaling does not yet reduce BPB |
+| simplex MST efficiency by budget | `0.726`, `0.779`, `0.808`, `0.815` | reasoning structure improves with budget |
+| geometry mean / best BPB | `4.930245` / `4.043945` | mean branch quality weak; best Hebrew branch useful |
+| geometry mean / best answer BPB | `4.814122` / `3.610226` | answer-span scoring has isolated strong branches |
+| geometry MST efficiency | `0.706840` | desired but weak |
+| geometry path smoothness | `0.050277` | desired |
+| topology exact edge / directed edge validity | `0.973121` / `0.935311` | desired |
+| topology exact triangle validity | `0.684593` | too weak for topology loss activation |
+| topology HDBSCAN stability/noise | `0.883843` / `0.116157` | desired |
+| Toric BGG resolution consistency | `0.900758` | good diagnostic |
+| Toric BGG standard leakage | `0.610030` | not ready for supervision |
+| Toric BGG Gale consistency | `0.106010` | usable diagnostic, not a loss yet |
+| toric active-face margin | `-1.374512` train, `-1.695964` geometry | not as desired |
+| toric Slepian concentration/leakage | `1.0` / `0.0` | desired phase concentration |
+
+Finite differences are underdetermined for this restarted run.  The W&B export
+contained only one post-restart row, so Hessian/second-difference claims are
+not statistically supported.  Direct checkpoint metadata gives:
+
+\[
+  B_{1500}=3.545400,\qquad B_{1525}=4.068817,
+\]
+
+but the training log immediately after the checkpoint showed lower noisy
+microbatch values at steps `1526` and `1527`.  I treat this as an early Adam
+reset transient rather than evidence for rollback.
+
+### Plot Review
+
+Reviewed representative generated plots:
+
+```text
+simplex/reasoning_k_bpb_triangle.png
+geometry/tetrahedra/toric_gfn_bpb.png
+geometry/trajectories/*_trajectory_3d.png
+geometry/trajectories/*_phase_energy.png
+geometry/trajectories/*_energy_landscape.png
+geometry/topology/*_commutative_algebra_audit.png
+geometry/topology/*_directed_filtration.png
+geometry/topology/*_toric_shadow_audit.png
+geometry/topology/*_toric_slepian_audit.png
+```
+
+Plot categorization:
+
+| diagnostic | category | evidence |
+|---|---|---|
+| simplex BPB/reasoning triangle | mixed | budget 1 is best for BPB; budgets 4/8 improve reasoning/MST placement but move away from the low-BPB vertex |
+| Toric/GFlowNet/BPB tetrahedron | desired but weak | diversity and toric entropy are visible, but most points cluster away from the low-BPB vertex |
+| 3D trajectories | desired but weak | dense terminal basins exist with a few long exploratory jumps; search is structured but not yet consistently likelihood-improving |
+| Ramachandran-style phase plots | desired | phase mass is structured near axes and wrap boundaries without a single pathological high-NLL phase region |
+| energy landscapes | desired but weak | coherent basin/arc appears, but long low-density excursions remain |
+| Koszul/commutative algebra audit | mixed | \(d_1d_2\) and variety residuals are clean, while Fitting/BE and \(H_1\) obstruction panels still show localized violations |
+
+### Mathematical Explanation
+
+This gate is a two-objective disagreement in miniature.  The reasoning gate is
+alive: entropy, branch diversity, edge-level persistence morphisms, toric phase
+concentration, and BGG \(d^2\)-style resolution consistency are all visible.
+The competition gate is not yet favorable: no fresh FineWeb BPB exists, sparse
+validation is stale/high, and branch/test-time scaling does not lower BPB.
+
+Mathematically, the current auxiliary geometry should remain a diagnostic.  The
+standard-filtration mass is still mostly outside the allowed order ideal, so
+turning on Toric BGG would push hidden states toward a finite complex before
+the byte likelihood has recovered.  Likewise, negative active-face margins mean
+the tropical/toric fan decisions are not stable wall-crossing certificates yet.
+The correct intervention is therefore not scalar editing; the config already
+sets `toric_bgg_loss_weight`, `koszul_persistence_loss_weight`, toric geometry,
+GFlowNet, trajectory-flow, and trajectory-memory loss weights to zero in this
+recovery band.
+
+### Decision
+
+`CONTINUE` from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001525.pt
+```
+
+No code or config scalar changes were made for this gate.  The continuation is
+a fresh tmux process, not the paused training process:
+
+```text
+training tmux: toricgt_oai_bpb_revealed_01525_20260602T175354Z
+watcher tmux:  toricgt_watch_bpb_revealed_01525_20260602T175354Z
+W&B run:       amelie-iska-math/toricgt-parameter-golf/oai01500revealed20260602T174238Z
+train log:     logs/training/oai-bpb-revealed-context-01525-20260602T175354Z.log
+watcher log:   logs/training/oai-bpb-revealed-context-01525-20260602T175354Z.watcher.log
+analysis root: outputs/post_resume_analysis/oai-bpb-revealed-context-01525-20260602T175354Z
+```
+
+The trainer loaded optimizer state from the analyzed checkpoint
+(`optimizer_state_loaded=true`).  The next interrupting analysis target is:
+
+```text
+target step: 2025
+min mtime:   1780422834
+```
+
+Acceptance criteria for the next gate:
+
+1. fresh train BPB should recover below the step-1525 transient and preferably
+   approach or beat the step-1500 source BPB;
+2. sparse validation/FineWeb-style BPB, if available, must not deteriorate;
+3. branch budget scaling should stop increasing BPB, or stay disabled as an
+   inference-time promotion path;
+4. GFlowNet entropy should remain near `log(16)` without increasing loss
+   pressure;
+5. Toric BGG standard leakage must fall materially before any nonzero
+   `toric_bgg_loss_weight`;
+6. active-face margins should become less negative before toric geometry losses
+   are promoted from diagnostics;
+7. exact triangle validity should move above `0.69` before topology losses are
+   made active.
+
 ## 2026-06-02 Automated Review: Step 4,500 Curve-Lock Replay
 
 The watcher analyzed:
