@@ -258,23 +258,27 @@ training:
   # observed in metrics but should not be allowed to kick Adam out of the
   # basin.  This is a stochastic line-search surrogate, not data deletion.
   shock_guard_enabled: true
-  shock_guard_start_step: 1500
-  shock_guard_end_step: 1800
-  shock_guard_loss_ratio: 1.006
-  shock_guard_loss_delta: 0.012
-  shock_guard_grad_norm: 0.00
-  shock_guard_update_scale: 0.000
+  # Step-2250 review: the loss shock detector was logging impulses in the
+  # 2000--2500 cliff window, but the global guard window had expired at 1800.
+  # Match BPB-CLIFF-RECOVERY.md so the floor-capture replay damps high-loss
+  # kicks instead of walking through the basin.
+  shock_guard_start_step: 2000
+  shock_guard_end_step: 2500
+  shock_guard_loss_ratio: 1.018
+  shock_guard_loss_delta: 0.045
+  shock_guard_grad_norm: 0.18
+  shock_guard_update_scale: 0.006
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
   # high-entropy examples visible in metrics while preventing them from
   # dominating the optimizer step.
   robust_micro_loss_guard_enabled: true
-  robust_micro_loss_guard_start_step: 1500
-  robust_micro_loss_guard_end_step: 1800
-  robust_micro_loss_guard_ratio: 1.006
-  robust_micro_loss_guard_delta: 0.008
-  robust_micro_loss_guard_min_scale: 0.02
+  robust_micro_loss_guard_start_step: 2000
+  robust_micro_loss_guard_end_step: 2500
+  robust_micro_loss_guard_ratio: 1.018
+  robust_micro_loss_guard_delta: 0.020
+  robust_micro_loss_guard_min_scale: 0.08
   precision: bf16
   device: cuda
   seed: 17

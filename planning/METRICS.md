@@ -1,5 +1,215 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-02 Automated Review: Step 2,250 Revealed-Context BPB-Cliff Gate
+
+The watcher analyzed:
+
+```text
+outputs/post_resume_analysis/oai-bpb-revealed-context-02025-20260602T190948Z/step-00002250/
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00002250.pt
+```
+
+The watcher paused/interrupted the previous training process after producing the
+step-2250 analysis.  A fresh resume was required; the previous tmux is not an
+active run.
+
+### Metric Categorization
+
+| category | read |
+|---|---|
+| desired | best validation BPB in the current run occurred at step 2050 (`val/bpb 5.015896`, `score_first_bpb 5.011459`), and the whole 1500--2200 validation curve still improved from the original `5.27` range; geometry mean BPB improved slightly relative to step 2025 (`4.8340 -> 4.8209`), best branch BPB improved (`4.0772 -> 4.0551`), and best answer BPB improved (`3.6093 -> 3.6027`); MST efficiency remained coherent (`0.7096`); topology inclusion, boundary, and variety-complex residuals stayed zero; exact edge validity remained high (`0.9749`, directed `0.9301`); Toric BGG resolution consistency improved to `0.9431`; standard leakage improved to `0.5110`; toric active-face entropy stayed useful (`0.8775` geometry); toric Slepian concentration/leakage stayed `1.0` / `0.0`; artifact accounting remained below the cap with training-only probes excluded |
+| desired but too weak/slow | validation improved over the long window but no longer improved at the gate (`controller/val_improved=0`, `controller/recovery_active=1`); hard-reasoning geometry has useful isolated branches but weak mean quality (`mean BPB 4.8209`, `frontier_gptoss_reasoning` mean `5.3377`); GraphCG basis coherence is stable (`0.0173`) but axis variance is tiny; GFlowNet entropy/diversity are alive but low (`2.0569`, `0.7454`) while GFlowNet loss is high (`7.7387`) and weight is zero; exact triangle validity (`0.6771`) and HDBSCAN stability (`0.8471`) weakened relative to the prior analysis; toric shadow has good cell coverage (`13.08`) but a very thin minimum margin (`0.000165`); active-face margins remain negative (`geometry -0.8292`, train about `-0.8860`); Kolmogorov/NCD proxies are mostly flat, with validation argmax byte accuracy only about `0.199--0.200` |
+| undesirable | checkpoint train BPB entered a floor-bounce basin: checkpoint sequence `2050: 4.0779`, `2075: 3.6885`, `2100: 3.8878`, `2125: 4.2687`, `2200: 4.4822`, `2225: 4.6892`, `2250: 4.6478`; validation also degraded after the 2050 best (`2100: 5.0165`, `2150: 5.0175`, `2200: 5.0179`); recent train BPB slope was strongly positive (`+3.321/1k`, `t=4.44`); shock metrics detected high-loss impulses (`loss_ratio` around `1.04`, `loss_delta` around `0.12` at the gate), but `shock_guard_active=0` and robust microbatch capping was zero because the global guard window still ended at step 1800; GFlowNet loss rose by about `130%` in the report, entropy/diversity dropped by about `26%`; Toric BGG Gale consistency worsened to `0.2296`; official FineWeb BPB and Hessian/sharpness probes were not available |
+
+Core values:
+
+| metric | value | read |
+|---|---:|---|
+| checkpoint train BPB | `4.647771` | too high for promotion |
+| W&B last train BPB | `4.648819` | same floor-bounce state |
+| W&B train BPB minimum in replay | `3.770102` at step `2060` | confirms a low basin existed before the rebound |
+| best checkpoint before positive checkpoint derivative | `random_order_step_00002075.pt` | selected rollback point |
+| validation BPB at step 2050 | `5.015896` | best validation gate in this replay |
+| validation BPB at step 2200 | `5.017904` | degraded from best |
+| score-first validation BPB at step 2200 | `5.013939` | legal adapter remains slightly better than deterministic |
+| controller recovery active | `1` | controller also marked the run as in recovery |
+| controller train BPB drift | `0.138340` | not acceptable for continue |
+| train loss / loss EMA at gate | `3.222316` / `3.104914` | loss shock and EMA drift |
+| GFlowNet entropy / diversity / loss | `2.056935` / `0.745366` / `7.738666` | degraded diagnostic, not an active gradient source |
+| GFlowNet loss weight | `0.0` | correct for BPB cliff replay |
+| GraphCG coherence / axis variance | `0.017334` / `1.46e-4` | stable but weak |
+| Koszul exactness residual | `0.016170` | stable diagnostic |
+| Toric BGG resolution consistency | `0.943121` | desired diagnostic |
+| Toric BGG standard leakage | `0.510998` | improved but too high for loss activation |
+| Toric BGG Gale consistency | `0.229594` | not ready |
+| Toric BGG loss weight | `0.0` | correct for cliff recovery |
+| geometry mean / best BPB | `4.820879` / `4.055124` | hard-reasoning gate weak but not collapsed |
+| geometry mean / best answer BPB | `4.694436` / `3.602702` | isolated strong branches remain |
+| geometry MST efficiency / smoothness | `0.709618` / `0.060457` | coherent but not a BPB driver |
+| exact edge / directed edge validity | `0.974863` / `0.930075` | desired |
+| exact triangle validity | `0.677108` | too weak for topology loss activation |
+| HDBSCAN stability / noise | `0.847059` / `0.152941` | usable but weaker than prior gate |
+| toric active-face entropy / margin | `0.877461` / `-0.829183` | entropy desired; margin not stable |
+| toric shadow occupied cells / min margin | `13.083333` / `0.000165` | coverage visible; margin too thin |
+| toric Slepian concentration / leakage | `1.0` / `0.0` | desired phase concentration |
+
+Finite differences over fresh checkpoint files:
+
+```text
+step 2050: train_bpb 4.077936
+step 2075: train_bpb 3.688517  first diff -0.389419
+step 2100: train_bpb 3.887838  first diff +0.199321, second diff +0.588740
+step 2125: train_bpb 4.268689  first diff +0.380850
+step 2150: train_bpb 4.021380  first diff -0.247308
+step 2175: train_bpb 3.975372  first diff -0.046008
+step 2200: train_bpb 4.482183  first diff +0.506811
+step 2225: train_bpb 4.689205  first diff +0.207022
+step 2250: train_bpb 4.647771  first diff -0.041434
+```
+
+The checkpoint-level first positive derivative appears immediately after the
+step-2075 low, with a large positive second difference.  That is the statistical
+rollback criterion.  The absence of an official FineWeb probe means this gate
+cannot claim competition-transfer improvement; the fixed validation stream is
+still the BPB gate available here.
+
+### Plot Review
+
+Reviewed representative generated plots:
+
+```text
+metrics/core_metric_timeseries.png
+metrics/recent_metric_slopes.png
+simplex/reasoning_k_bpb_triangle.png
+simplex/reasoning_k_bpb_mst_tetrahedron.png
+geometry/tetrahedra/reasoning_k_bpb_mst.png
+geometry/tetrahedra/energy_control.png
+geometry/trajectories/*_trajectory_3d.png
+geometry/trajectories/*_phase_energy.png
+geometry/trajectories/*_energy_landscape.png
+geometry/topology/*_directed_filtration.png
+geometry/topology/*_exact_persistence_morphisms.png
+geometry/topology/*_commutative_algebra_audit.png
+geometry/topology/*_toric_shadow_audit.png
+geometry/topology/*_toric_slepian_audit.png
+```
+
+Plot categorization:
+
+| diagnostic | category | evidence |
+|---|---|---|
+| core metric timeseries | undesirable for continuation | train BPB/loss show two valley-and-rebound arcs; the second rebound accelerates after step 2200 while validation flattens and then worsens |
+| simplex BPB/reasoning plots | desired but weak | budget scaling improves MST/reasoning placement but does not create a clear low-BPB branch family |
+| reasoning/BPB/MST tetrahedron | desired but weak | Hebrew branches still occupy the low-BPB region; GoT/CoT/frontier branches remain far from the low-BPB vertex |
+| 3D trajectories and energy landscapes | desired but weak | coherent basins exist, but long low-density jumps and high-energy branches remain visible |
+| Ramachandran-style phase plots | desired | phase structure is organized and not dominated by one pathological phase defect |
+| directed filtration/topology | mixed | edge validity and zero boundary residuals are good; exact triangle validity and HDBSCAN stability slipped |
+| toric shadow audit | desired but weak | active Newton-face coverage and bend structure are visible, but margins are near zero and bends spike, so toric geometry should remain audit-only |
+| Toric BGG/Koszul audits | mixed | resolution consistency and `d^2` style residuals are stable; standard leakage and Gale consistency are not ready for training loss |
+
+### Mathematical Reading
+
+The run walked through a narrow byte-likelihood basin.  In the available
+checkpoint series, the low at step 2075 is followed by a positive first
+difference and a large positive second difference at 2100.  Validation confirms
+the same direction: after the best validation point at step 2050, subsequent
+validation probes worsen.  This is not a case where hard reasoning improves
+while the competition BPB gate is merely noisy; both gates fail to promote the
+step-2250 checkpoint.
+
+The mechanism is consistent with the BPB cliff plan.  The loss shock detector
+observed high-loss impulses, but the global shock and robust microbatch guard
+windows had expired at 1800, so the gradients were not damped in the documented
+2000--2500 floor-capture window.  The fix is therefore scalar training control,
+not an architecture change.
+
+Reasoning diagnostics still matter.  The geometry suite shows that toric,
+topological, Koszul, BGG, GFlowNet, GraphCG, and Kolmogorov diagnostics are
+informative, but none is strong enough to override the BPB rollback.  The BGG
+and Koszul probes remain training-only diagnostics with zero loss, exactly as
+the late-phase toggle policy requires.
+
+### Decision
+
+Action: `EDIT_AND_RESTART`.
+
+Minimal config edits:
+
+```text
+config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml
+```
+
+The global guards now match the documented 2000--2500 cliff policy:
+
+```text
+shock_guard_start_step: 2000
+shock_guard_end_step: 2500
+shock_guard_loss_ratio: 1.018
+shock_guard_loss_delta: 0.045
+shock_guard_grad_norm: 0.18
+shock_guard_update_scale: 0.006
+robust_micro_loss_guard_start_step: 2000
+robust_micro_loss_guard_end_step: 2500
+robust_micro_loss_guard_ratio: 1.018
+robust_micro_loss_guard_delta: 0.020
+robust_micro_loss_guard_min_scale: 0.08
+```
+
+Resume from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00002075.pt
+```
+
+Optimizer state is preserved; `--reset-optimizer` was not used.  Existing
+step-2100 through step-2250 checkpoint files were copied to:
+
+```text
+checkpoints/parameter_golf_oai_dense/pre_step2250_rollback_20260602T2250_review/
+```
+
+so the step-numbered replay does not silently discard the analyzed states.
+These checkpoint artifacts are not committed or pushed.
+
+Fresh training and watcher sessions:
+
+| item | value |
+|---|---|
+| training tmux | `toricgt_oai_bpb_revealed_02075_20260602T194909Z` |
+| watcher tmux | `toricgt_watch_bpb_revealed_02075_20260602T194909Z` |
+| W&B run path | `amelie-iska-math/toricgt-parameter-golf/oai01500revealed20260602T174238Z` |
+| run name | `oai-bpb-revealed-context-02075-20260602T194909Z` |
+| training log | `logs/training/oai-bpb-revealed-context-02075-20260602T194909Z.log` |
+| watcher log | `logs/training/oai-bpb-revealed-context-02075-20260602T194909Z.watcher.log` |
+| analysis root | `outputs/post_resume_analysis/oai-bpb-revealed-context-02075-20260602T194909Z` |
+| fresh min mtime | `1780429749` |
+| next target step | `2325` |
+
+The watcher was launched with:
+
+```text
+scripts/watch_training_analysis.py
+  --target-step 2325
+  --pause-training-before-analysis
+  --device cuda
+  --precision bf16
+  --codex-review-hook scripts/codex_training_review_resume.sh
+  --codex-review-tmux-prefix toricgt_codex_review
+```
+
+Live verification:
+
+```text
+optimizer_state_loaded: true
+trainer status: stepping on RTX 4090
+watcher status: waiting for a fresh checkpoint >= 2325
+```
+
 ## 2026-06-02 Automated Review: Step 2,025 Revealed-Context BPB-Cliff Gate
 
 The watcher analyzed:
