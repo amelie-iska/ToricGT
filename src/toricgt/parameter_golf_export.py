@@ -95,7 +95,13 @@ def quantized_state_dict(
     model: nn.Module,
     bits: int = 8,
     mode: str = "tensor",
-    exclude_prefixes: tuple[str, ...] = ("aux_", "graphcg_direction_basis", "toric_geometry_probe."),
+    exclude_prefixes: tuple[str, ...] = (
+        "aux_",
+        "graphcg_direction_basis",
+        "toric_geometry_probe.",
+        "toric_bgg_probe.",
+        "trajectory_memory_head.",
+    ),
 ) -> dict[str, Any]:
     """Symmetric quantization for artifact accounting and export tests.
 
@@ -137,7 +143,13 @@ def write_artifact(
     bits: int = 8,
     quantization_mode: str = "tensor",
     compression: str = "deflated",
-    exclude_prefixes: tuple[str, ...] = ("aux_", "graphcg_direction_basis", "toric_geometry_probe."),
+    exclude_prefixes: tuple[str, ...] = (
+        "aux_",
+        "graphcg_direction_basis",
+        "toric_geometry_probe.",
+        "toric_bgg_probe.",
+        "trajectory_memory_head.",
+    ),
 ) -> ArtifactReport:
     """Write a compressed experimental artifact and return byte accounting."""
 

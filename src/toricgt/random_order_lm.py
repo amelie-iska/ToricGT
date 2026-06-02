@@ -25,6 +25,7 @@ from .koszul_persistence import KoszulPersistenceConfig, koszul_persistence_loss
 from .tropical_attention import TransformerBlock
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
 from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
+from .toric_bgg import ToricBGGConfig, ToricBGGProbe
 from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryRetrievalHead
 
 
@@ -144,6 +145,16 @@ class RandomOrderLMConfig:
     trajectory_memory_topology_weight: float = 0.20
     trajectory_memory_graphcg_weight: float = 0.30
     trajectory_memory_toric_weight: float = 0.20
+    use_toric_bgg: bool = False
+    toric_bgg_num_standard_tokens: int = 8
+    toric_bgg_probe_rank: int = 8
+    toric_bgg_signature_dim: int = 16
+    toric_bgg_max_positions: int = 64
+    toric_bgg_d2_weight: float = 1.0
+    toric_bgg_standard_weight: float = 0.25
+    toric_bgg_koszul_weight: float = 0.15
+    toric_bgg_gale_weight: float = 0.10
+    toric_bgg_signature_weight: float = 0.10
     target_artifact_bytes: int = 15_600_000
     byte_offset: int = 4
     pad_token_id: int = 0
@@ -378,6 +389,24 @@ class DenseRandomOrderToricLM(nn.Module):
                 ),
             )
             if config.use_toric_geometry_tasks
+            else None
+        )
+        self.toric_bgg_probe = (
+            ToricBGGProbe(
+                config.d_model,
+                ToricBGGConfig(
+                    num_standard_tokens=config.toric_bgg_num_standard_tokens,
+                    probe_rank=config.toric_bgg_probe_rank,
+                    signature_dim=config.toric_bgg_signature_dim,
+                    max_positions=config.toric_bgg_max_positions,
+                    d2_weight=config.toric_bgg_d2_weight,
+                    standard_weight=config.toric_bgg_standard_weight,
+                    koszul_weight=config.toric_bgg_koszul_weight,
+                    gale_weight=config.toric_bgg_gale_weight,
+                    signature_weight=config.toric_bgg_signature_weight,
+                ),
+            )
+            if config.use_toric_bgg
             else None
         )
         radius = max(0, int(config.revealed_neighbor_radius))
@@ -1424,6 +1453,8 @@ class DenseRandomOrderToricLM(nn.Module):
             out.update(self._analogy_lattice_losses(hidden, target_tokens))
             if self.toric_geometry_probe is not None and target_positions is not None:
                 out.update(self.toric_geometry_probe(hidden, target_positions, target_tokens))
+            if self.toric_bgg_probe is not None:
+                out.update(self.toric_bgg_probe(hidden, target_positions, target_tokens))
             if self.trajectory_memory_head is not None:
                 out.update(
                     self.trajectory_memory_head(
@@ -1691,7 +1722,13 @@ class DenseRandomOrderToricLM(nn.Module):
 def estimate_uncompressed_quantized_bytes(
     model: nn.Module,
     bits: Literal[4, 6, 8] = 8,
-    exclude_prefixes: tuple[str, ...] = ("aux_", "graphcg_direction_basis", "toric_geometry_probe.", "trajectory_memory_head."),
+    exclude_prefixes: tuple[str, ...] = (
+        "aux_",
+        "graphcg_direction_basis",
+        "toric_geometry_probe.",
+        "toric_bgg_probe.",
+        "trajectory_memory_head.",
+    ),
 ) -> int:
     """Conservative tensor-only byte estimate before zip compression."""
 

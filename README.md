@@ -571,11 +571,14 @@ scripts/launch_oai_bpb_cliff_recovery.sh
 ```
 
 It resumes from `random_order_step_00001500.pt`, keeps medium/hard/graph rows
-off through the 1500--1700 BPB floor-lock, runs fixed validation probes every
-50 steps, skips shock updates inside the recovery band, keeps heavy
-toric/Koszul/GFlowNet/trajectory auxiliaries diagnostic-only, and pauses at
-step `1600` for CUDA/bf16 analysis and an automated Codex review before any
-continuation decision.
+off through the 1500--1700 BPB floor-lock, resets Adam optimizer moments by
+default, runs fixed validation probes every 50 steps, skips shock updates
+inside the recovery band, keeps heavy ToricGT auxiliaries diagnostic-only, and
+pauses first at step `1525` for CUDA/bf16 analysis and an automated Codex
+review before any continuation decision.  Toric BGG certificate probes are
+instantiated as training-only metrics, but `toric_bgg_loss_weight` is explicitly
+`0.0` through the BPB repair phases and becomes nonzero only in the later
+alignment/compression phases if the analysis gate allows it.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
@@ -733,13 +736,15 @@ This is an audit signal, not a new deploy parameter block: it checks whether
 the toric phase path has coherent time-band-limited structure or diffuse
 spectral leakage.
 
-Operational rule for the current `oai` experiments: training remains paused
-until the full analysis suite has completed and the generated plot classes have
-been reviewed. The skeptical-onlooker guardrail is now explicit: advanced
-geometry can influence training only after it has a metric, an ablation, and a
-plot path. The requested "there be dragons" responding-onlooker ablation is an
-absence check in executable paths: repository search finds no matching
-observer, prompt, or role path outside ignored outputs/checkpoints/data.
+Operational rule for the current `oai` experiments: the watcher pauses
+training before each planned analysis gate, runs the fixed BPB/reasoning/plot
+suite, and hands the result to Codex for a CONTINUE/ROLLBACK/EDIT_AND_RESTART
+decision. The skeptical-onlooker guardrail is explicit: advanced geometry,
+including Toric BGG, can influence training only after it has a metric, an
+ablation, and a plot path. The requested "there be dragons"
+responding-onlooker ablation is an absence check in executable paths:
+repository search finds no matching observer, prompt, or role path outside
+ignored outputs/checkpoints/data.
 
 Planning notes:
 [`planning/GRAPHCG-ANALOGY-TOPOLOGY-PLAN.md`](planning/GRAPHCG-ANALOGY-TOPOLOGY-PLAN.md)
@@ -761,6 +766,14 @@ homology/Tor/Betti residuals`, with Fitting-minor ranks, varieties-of-complexes
 residuals, and Buchsbaum-Eisenbud complementary-minor multiplier checks logged
 as small-window audits. It is gated as an audit-first training signal so the
 Parameter-Golf BPB objective is not disrupted by unvalidated geometry.
+The Toric BGG rewrite in
+[`assets/toricgt_toric_bgg_rewrite_amelie_schreiber.tex`](assets/toricgt_toric_bgg_rewrite_amelie_schreiber.tex)
+adds the representation-theoretic companion: finite shadows of hypertoric
+category O, oriented-matroid category O, multigraded BGG/Tate resolutions, and
+Euler-Koszul complexes. The implemented `toricgt.toric_bgg` probe logs
+resolution consistency, standard-filtration leakage, Koszul-linearity
+residual, Gale-dual consistency, and BGG signature smoothness; the current
+`oai` config keeps the loss off until late phases.
 
 Kolmogorov-style reasoning diagnostics are enabled by default on the `oai`
 branch without changing the BPB objective. The trainer periodically logs
@@ -798,9 +811,10 @@ text-first, introduces medium-length rows after step `2500`, and delays the
 larger technical graph-projection stream until step `6000` with
 math/code/graph/reasoning/health/physics/biomed/biochem task-family filters.
 The current restart is from the aligned step `1,500` checkpoint with
-revealed-context compression enabled and a two-phase `1500--1600` /
-`1600--1700` capture window designed to protect the observed low near
-1545--1550 rather than chase the later rebound. A bounded
+revealed-context compression enabled, Adam moments reset, and a first
+`1500--1525` analysis gate before any longer `1500--1600` / `1600--1700`
+capture decision. This protects the observed low near 1545--1550 rather than
+chasing the later rebound. A bounded
 checkpoint-level adaptive controller remains enabled for GFlowNet entropy
 target, GFlowNet loss weight, and hard-row mix; it writes
 `checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_revealed_context.json`

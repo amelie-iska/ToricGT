@@ -113,6 +113,7 @@ Context:
 - Metric categories: $METRICS_SUMMARY
 - Reasoning simplex summary: $SIMPLEX_SUMMARY
 - Reasoning geometry summary: $GEOMETRY_SUMMARY
+- BPB amplification plan: $REPO_ROOT/planning/BPB-AMP.md
 - BPB cliff plan: $REPO_ROOT/planning/BPB-CLIFF-RECOVERY.md
 
 Requested work:
@@ -124,18 +125,32 @@ Requested work:
    i. desired,
    ii. desired but too weak or slow,
    iii. undesirable.
-4. Explain the behavior mathematically and statistically, focusing on BPB,
-   train/validation loss, GFlowNet graph-of-thought quality, Kolmogorov
-   complexity proxies, MST efficiency, trajectory smoothness, toric entropy,
-   tropical/ring behavior, branch/test-time-scaling diagnostics, finite
-   differences of checkpoint metrics, second differences, and Hessian probe
-   sharpness/trace when available.
+4. Explain the behavior mathematically and statistically, focusing on:
+   - official-style FineWeb BPB when available;
+   - ToricGT curated hard-reasoning BPB and validation metrics;
+   - train/validation loss;
+   - GFlowNet graph-of-thought quality and branch replay;
+   - Kolmogorov and relative-K proxies;
+   - GraphCG basis behavior;
+   - persistence/simplex/Koszul topology;
+   - Toric BGG resolution consistency, standard leakage, Gale-dual consistency,
+     and signature metrics when present;
+   - MST efficiency, trajectory smoothness, and trajectory length;
+   - toric entropy, noncommutative phase, tropical active faces, and chamber
+     crossings;
+   - branch/test-time-scaling diagnostics;
+   - finite differences of checkpoint metrics, second differences, and Hessian
+     probe sharpness/trace when available.
+   Treat a strong FineWeb result after limited FineWeb exposure as possible OOD
+   transfer from hard reasoning data, but require controls against tokenizer,
+   n-gram, and dataset-easiness explanations.
 5. If adjustments are warranted, implement the smallest high-impact code/config
    changes that preserve the ToricGT Parameter-Golf architecture. Do not use
    JEPA. Keep random-order autoregressive graph decoding, tropical ring/hybrid
    attention, toric memory, dense contest weights, embedding-space GFlowNet
-   graph-of-thought, and Kolmogorov diagnostics unless the data gives a clear
-   reason to alter a scalar control.
+   graph-of-thought, hard GoT/ToT/CoT training data, GraphCG/topology/toric,
+   Toric BGG diagnostics, and Kolmogorov diagnostics unless the data gives a
+   clear reason to alter a scalar control.
 6. Choose exactly one action:
    - CONTINUE: resume from the analyzed checkpoint with the same config.
    - ROLLBACK: resume from the last dense checkpoint before the first positive
@@ -143,6 +158,11 @@ Requested work:
      floor-bounce basin.
    - EDIT_AND_RESTART: make minimal scalar/config changes, then resume from the
      selected checkpoint.
+   The decision must respect the two-gate rule in planning/BPB-AMP.md:
+   FineWeb BPB is the competition calibration/evaluation gate, while hard
+   ToricGT reasoning, GFlowNet, GraphCG, topology, toric/tropical, and memory
+   metrics are the reasoning gate.  If the gates disagree, adjust mixture
+   ratios and auxiliary weights rather than discarding either objective.
    In all three cases, start a fresh training tmux and report the tmux, log,
    checkpoint, and W&B details.  Do not leave the paused tmux as the active run.
 7. After the resume/restart decision, schedule the next interrupting analysis.

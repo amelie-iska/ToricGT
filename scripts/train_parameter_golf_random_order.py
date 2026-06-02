@@ -66,6 +66,30 @@ def config_get(config: dict[str, Any], section: str, key: str, default: Any) -> 
     return config.get(section, {}).get(key, default)
 
 
+def config_get_float(config: dict[str, Any], section: str, key: str, default: float) -> float:
+    """Return a float config value while preserving explicit zero values."""
+
+    value = config_get(config, section, key, default)
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def config_get_int(config: dict[str, Any], section: str, key: str, default: int) -> int:
+    """Return an int config value while preserving explicit zero values."""
+
+    value = config_get(config, section, key, default)
+    if value is None:
+        return int(default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def add_weighted_aux_loss(total: torch.Tensor, weight: float, term: torch.Tensor) -> torch.Tensor:
     """Add a finite auxiliary scalar only when its effective weight is active.
 
@@ -532,6 +556,7 @@ PHASE_CONTROL_KEYS = {
     "contrastive_loss_weight",
     "mtp_loss_weight",
     "toric_geometry_loss_weight",
+    "toric_bgg_loss_weight",
     "toric_entropy_loss_weight",
     "qat_loss_weight",
     "qat_start_step",
@@ -1222,6 +1247,7 @@ def load_state_dict_with_optional_position_resize(
     allowed_missing_prefixes = (
         "graphcg_",
         "toric_geometry_probe.",
+        "toric_bgg_probe.",
         "trajectory_memory_head.",
         "revealed_left_logits.",
         "revealed_right_logits.",
@@ -1941,6 +1967,16 @@ def main() -> None:
         trajectory_memory_topology_weight=config_get(file_config, "model", "trajectory_memory_topology_weight", 0.20),
         trajectory_memory_graphcg_weight=config_get(file_config, "model", "trajectory_memory_graphcg_weight", 0.30),
         trajectory_memory_toric_weight=config_get(file_config, "model", "trajectory_memory_toric_weight", 0.20),
+        use_toric_bgg=config_get(file_config, "model", "use_toric_bgg", False),
+        toric_bgg_num_standard_tokens=config_get(file_config, "model", "toric_bgg_num_standard_tokens", 8),
+        toric_bgg_probe_rank=config_get(file_config, "model", "toric_bgg_probe_rank", 8),
+        toric_bgg_signature_dim=config_get(file_config, "model", "toric_bgg_signature_dim", 16),
+        toric_bgg_max_positions=config_get(file_config, "model", "toric_bgg_max_positions", 64),
+        toric_bgg_d2_weight=config_get(file_config, "model", "toric_bgg_d2_weight", 1.0),
+        toric_bgg_standard_weight=config_get(file_config, "model", "toric_bgg_standard_weight", 0.25),
+        toric_bgg_koszul_weight=config_get(file_config, "model", "toric_bgg_koszul_weight", 0.15),
+        toric_bgg_gale_weight=config_get(file_config, "model", "toric_bgg_gale_weight", 0.10),
+        toric_bgg_signature_weight=config_get(file_config, "model", "toric_bgg_signature_weight", 0.10),
         aux_mtp_offsets=args.aux_mtp_offsets
         if args.aux_mtp_offsets is not None
         else config_get(file_config, "model", "aux_mtp_offsets", 2),
@@ -1965,20 +2001,20 @@ def main() -> None:
     weight_decay = (
         args.weight_decay if args.weight_decay is not None else config_get(file_config, "training", "weight_decay", 0.05)
     )
-    grad_clip_norm = float(config_get(file_config, "training", "grad_clip_norm", 1.0) or 0.0)
+    grad_clip_norm = config_get_float(file_config, "training", "grad_clip_norm", 1.0)
     shock_guard_enabled = bool(config_get(file_config, "training", "shock_guard_enabled", False))
-    shock_guard_start_step = int(config_get(file_config, "training", "shock_guard_start_step", 0) or 0)
-    shock_guard_end_step = int(config_get(file_config, "training", "shock_guard_end_step", 0) or 0)
-    shock_guard_loss_ratio = float(config_get(file_config, "training", "shock_guard_loss_ratio", 1.12) or 1.12)
-    shock_guard_loss_delta = float(config_get(file_config, "training", "shock_guard_loss_delta", 0.35) or 0.35)
-    shock_guard_grad_norm = float(config_get(file_config, "training", "shock_guard_grad_norm", 0.75) or 0.75)
-    shock_guard_update_scale = float(config_get(file_config, "training", "shock_guard_update_scale", 0.35) or 0.35)
+    shock_guard_start_step = config_get_int(file_config, "training", "shock_guard_start_step", 0)
+    shock_guard_end_step = config_get_int(file_config, "training", "shock_guard_end_step", 0)
+    shock_guard_loss_ratio = config_get_float(file_config, "training", "shock_guard_loss_ratio", 1.12)
+    shock_guard_loss_delta = config_get_float(file_config, "training", "shock_guard_loss_delta", 0.35)
+    shock_guard_grad_norm = config_get_float(file_config, "training", "shock_guard_grad_norm", 0.75)
+    shock_guard_update_scale = config_get_float(file_config, "training", "shock_guard_update_scale", 0.35)
     robust_micro_loss_guard_enabled = bool(config_get(file_config, "training", "robust_micro_loss_guard_enabled", False))
-    robust_micro_loss_guard_start_step = int(config_get(file_config, "training", "robust_micro_loss_guard_start_step", 0) or 0)
-    robust_micro_loss_guard_end_step = int(config_get(file_config, "training", "robust_micro_loss_guard_end_step", 0) or 0)
-    robust_micro_loss_guard_ratio = float(config_get(file_config, "training", "robust_micro_loss_guard_ratio", 1.08) or 1.08)
-    robust_micro_loss_guard_delta = float(config_get(file_config, "training", "robust_micro_loss_guard_delta", 0.18) or 0.18)
-    robust_micro_loss_guard_min_scale = float(config_get(file_config, "training", "robust_micro_loss_guard_min_scale", 0.10) or 0.10)
+    robust_micro_loss_guard_start_step = config_get_int(file_config, "training", "robust_micro_loss_guard_start_step", 0)
+    robust_micro_loss_guard_end_step = config_get_int(file_config, "training", "robust_micro_loss_guard_end_step", 0)
+    robust_micro_loss_guard_ratio = config_get_float(file_config, "training", "robust_micro_loss_guard_ratio", 1.08)
+    robust_micro_loss_guard_delta = config_get_float(file_config, "training", "robust_micro_loss_guard_delta", 0.18)
+    robust_micro_loss_guard_min_scale = config_get_float(file_config, "training", "robust_micro_loss_guard_min_scale", 0.10)
     robust_micro_loss_guard_min_scale = max(0.0, min(1.0, robust_micro_loss_guard_min_scale))
     warmup_steps = (
         args.warmup_steps if args.warmup_steps is not None else config_get(file_config, "training", "warmup_steps", 1_000)
@@ -2032,6 +2068,7 @@ def main() -> None:
         if args.toric_geometry_loss_weight is not None
         else config_get(file_config, "training", "toric_geometry_loss_weight", 0.0)
     )
+    toric_bgg_loss_weight = config_get_float(file_config, "training", "toric_bgg_loss_weight", 0.0)
     koszul_persistence_loss_weight = config_get(file_config, "training", "koszul_persistence_loss_weight", 0.0)
     toric_entropy_floor = (
         args.toric_entropy_floor
@@ -2568,6 +2605,7 @@ def main() -> None:
                     "graphcg_loss_weight": graphcg_loss_weight,
                     "analogy_lattice_loss_weight": analogy_lattice_loss_weight,
                     "toric_geometry_loss_weight": toric_geometry_loss_weight,
+                    "toric_bgg_loss_weight": toric_bgg_loss_weight,
                     "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
                     "toric_entropy_floor": toric_entropy_floor,
                     "toric_entropy_loss_weight": toric_entropy_loss_weight,
@@ -2735,6 +2773,7 @@ def main() -> None:
             "toric_entropy_floor": toric_entropy_floor,
             "toric_entropy_loss_weight": toric_entropy_loss_weight,
             "toric_geometry_loss_weight": toric_geometry_loss_weight,
+            "toric_bgg_loss_weight": toric_bgg_loss_weight,
             "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
             "trajectory_flow_target": trajectory_flow_target,
             "trajectory_memory_loss_weight": trajectory_memory_loss_weight,
@@ -2861,6 +2900,15 @@ def main() -> None:
         step_toric_leaf_residual = 0.0
         step_toric_probe_rank = 0.0
         step_toric_probe_quant_bits = 0.0
+        step_toric_bgg_loss = 0.0
+        step_toric_bgg_d2_residual = 0.0
+        step_toric_bgg_resolution_consistency = 0.0
+        step_toric_bgg_standard_leakage = 0.0
+        step_toric_bgg_standard_allowed_mass = 0.0
+        step_toric_bgg_koszul_linearity_residual = 0.0
+        step_toric_bgg_gale_dual_consistency = 0.0
+        step_toric_bgg_signature_smoothness = 0.0
+        step_toric_bgg_standard_entropy = 0.0
         step_koszul_persistence_loss = 0.0
         step_koszul_exactness_residual = 0.0
         step_koszul_syzygy_residual = 0.0
@@ -2976,6 +3024,10 @@ def main() -> None:
             0.0,
             control_float(phase_controls, "toric_geometry_loss_weight", toric_geometry_loss_weight),
         )
+        effective_toric_bgg_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "toric_bgg_loss_weight", toric_bgg_loss_weight),
+        )
         effective_koszul_persistence_loss_weight = max(
             0.0,
             control_float(phase_controls, "koszul_persistence_loss_weight", koszul_persistence_loss_weight),
@@ -3052,6 +3104,7 @@ def main() -> None:
                 graphcg_loss = out.get("graphcg_loss", torch.zeros((), device=device))
                 analogy_lattice_loss = out.get("analogy_lattice_loss", torch.zeros((), device=device))
                 toric_geometry_loss = out.get("toric_geometry_loss", torch.zeros((), device=device))
+                toric_bgg_loss = out.get("toric_bgg_loss", torch.zeros((), device=device))
                 koszul_persistence_loss = out.get("koszul_persistence_loss", torch.zeros((), device=device))
                 qat_loss = (
                     quantization_grid_loss(qat_named_params, bits=qat_bits)
@@ -3102,6 +3155,11 @@ def main() -> None:
                     total_micro_loss,
                     effective_toric_geometry_loss_weight,
                     toric_geometry_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_toric_bgg_loss_weight,
+                    toric_bgg_loss,
                 )
                 total_micro_loss = add_weighted_aux_loss(
                     total_micro_loss,
@@ -3331,6 +3389,29 @@ def main() -> None:
             step_toric_probe_quant_bits += float(
                 out.get("toric_probe_quant_bits", torch.zeros(())).detach().cpu()
             )
+            step_toric_bgg_loss += float(toric_bgg_loss.detach().cpu())
+            step_toric_bgg_d2_residual += float(out.get("toric_bgg_d2_residual", torch.zeros(())).detach().cpu())
+            step_toric_bgg_resolution_consistency += float(
+                out.get("toric_bgg_resolution_consistency", torch.zeros(())).detach().cpu()
+            )
+            step_toric_bgg_standard_leakage += float(
+                out.get("toric_bgg_standard_leakage", torch.zeros(())).detach().cpu()
+            )
+            step_toric_bgg_standard_allowed_mass += float(
+                out.get("toric_bgg_standard_allowed_mass", torch.zeros(())).detach().cpu()
+            )
+            step_toric_bgg_koszul_linearity_residual += float(
+                out.get("toric_bgg_koszul_linearity_residual", torch.zeros(())).detach().cpu()
+            )
+            step_toric_bgg_gale_dual_consistency += float(
+                out.get("toric_bgg_gale_dual_consistency", torch.zeros(())).detach().cpu()
+            )
+            step_toric_bgg_signature_smoothness += float(
+                out.get("toric_bgg_signature_smoothness", torch.zeros(())).detach().cpu()
+            )
+            step_toric_bgg_standard_entropy += float(
+                out.get("toric_bgg_standard_entropy", torch.zeros(())).detach().cpu()
+            )
             step_koszul_persistence_loss += float(koszul_persistence_loss.detach().cpu())
             step_koszul_exactness_residual += float(
                 out.get("koszul_exactness_residual", torch.zeros(())).detach().cpu()
@@ -3508,6 +3589,15 @@ def main() -> None:
         step_toric_leaf_residual /= grad_accum
         step_toric_probe_rank /= grad_accum
         step_toric_probe_quant_bits /= grad_accum
+        step_toric_bgg_loss /= grad_accum
+        step_toric_bgg_d2_residual /= grad_accum
+        step_toric_bgg_resolution_consistency /= grad_accum
+        step_toric_bgg_standard_leakage /= grad_accum
+        step_toric_bgg_standard_allowed_mass /= grad_accum
+        step_toric_bgg_koszul_linearity_residual /= grad_accum
+        step_toric_bgg_gale_dual_consistency /= grad_accum
+        step_toric_bgg_signature_smoothness /= grad_accum
+        step_toric_bgg_standard_entropy /= grad_accum
         step_koszul_persistence_loss /= grad_accum
         step_koszul_exactness_residual /= grad_accum
         step_koszul_syzygy_residual /= grad_accum
@@ -3718,6 +3808,16 @@ def main() -> None:
                 "train/toric_leaf_residual": step_toric_leaf_residual,
                 "train/toric_probe_rank": step_toric_probe_rank,
                 "train/toric_probe_quant_bits": step_toric_probe_quant_bits,
+                "train/toric_bgg_loss": step_toric_bgg_loss,
+                "train/toric_bgg_loss_weight": float(effective_toric_bgg_loss_weight),
+                "train/toric_bgg_d2_residual": step_toric_bgg_d2_residual,
+                "train/toric_bgg_resolution_consistency": step_toric_bgg_resolution_consistency,
+                "train/toric_bgg_standard_leakage": step_toric_bgg_standard_leakage,
+                "train/toric_bgg_standard_allowed_mass": step_toric_bgg_standard_allowed_mass,
+                "train/toric_bgg_koszul_linearity_residual": step_toric_bgg_koszul_linearity_residual,
+                "train/toric_bgg_gale_dual_consistency": step_toric_bgg_gale_dual_consistency,
+                "train/toric_bgg_signature_smoothness": step_toric_bgg_signature_smoothness,
+                "train/toric_bgg_standard_entropy": step_toric_bgg_standard_entropy,
                 "train/koszul_persistence_loss": step_koszul_persistence_loss,
                 "train/koszul_persistence_loss_weight": float(effective_koszul_persistence_loss_weight),
                 "train/koszul_exactness_residual": step_koszul_exactness_residual,

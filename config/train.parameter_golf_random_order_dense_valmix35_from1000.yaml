@@ -146,6 +146,21 @@ model:
   trajectory_memory_topology_weight: 0.20
   trajectory_memory_graphcg_weight: 0.30
   trajectory_memory_toric_weight: 0.20
+  # Toric BGG probes are training-only finite certificate heads: standard
+  # filtrations, d^2 residuals, Koszul degree profiles, Gale-dual signatures,
+  # and retrieval-signature smoothness.  They are instantiated for audit
+  # compatibility but their loss stays zero through the BPB warmup/recovery
+  # phases below.
+  use_toric_bgg: true
+  toric_bgg_num_standard_tokens: 8
+  toric_bgg_probe_rank: 8
+  toric_bgg_signature_dim: 16
+  toric_bgg_max_positions: 64
+  toric_bgg_d2_weight: 1.0
+  toric_bgg_standard_weight: 0.25
+  toric_bgg_koszul_weight: 0.15
+  toric_bgg_gale_weight: 0.10
+  toric_bgg_signature_weight: 0.10
   aux_mtp_offsets: 2
   target_artifact_bytes: 15600000
 
@@ -278,6 +293,7 @@ training:
   graphcg_loss_weight: 0.0002
   analogy_lattice_loss_weight: 0.0002
   toric_geometry_loss_weight: 0.00015
+  toric_bgg_loss_weight: 0.0
   koszul_persistence_loss_weight: 0.00002
   toric_entropy_floor: 0.20
   toric_entropy_loss_weight: 0.001
@@ -373,6 +389,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -390,6 +407,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00005
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -415,6 +433,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -439,6 +458,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -461,6 +481,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -487,6 +508,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00001
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -512,6 +534,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.000005
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -537,6 +560,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.000005
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -565,6 +589,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00004
       analogy_lattice_loss_weight: 0.000003
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -590,6 +615,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.000005
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -619,6 +645,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.000001
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -644,6 +671,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.000001
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -664,6 +692,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0003
       analogy_lattice_loss_weight: 0.0002
       toric_geometry_loss_weight: 0.00008
+      toric_bgg_loss_weight: 0.000005
       koszul_persistence_loss_weight: 0.00001
       trajectory_flow_loss_weight: 0.0001
       trajectory_memory_loss_weight: 0.00005
@@ -681,6 +710,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0004
       analogy_lattice_loss_weight: 0.0003
       toric_geometry_loss_weight: 0.00012
+      toric_bgg_loss_weight: 0.00001
       koszul_persistence_loss_weight: 0.00002
       trajectory_flow_loss_weight: 0.00025
       trajectory_memory_loss_weight: 0.00008
@@ -739,6 +769,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
@@ -756,6 +787,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.0005
       analogy_lattice_loss_weight: 0.0004
       toric_geometry_loss_weight: 0.00015
+      toric_bgg_loss_weight: 0.000015
       koszul_persistence_loss_weight: 0.00002
       trajectory_flow_loss_weight: 0.0004
       trajectory_memory_loss_weight: 0.00012

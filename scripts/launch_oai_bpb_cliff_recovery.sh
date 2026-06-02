@@ -8,7 +8,8 @@
 # Optional:
 #   RESUME_CKPT=checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt \
 #   START_STEP=1500 \
-#   TARGET_STEP=1600 \
+#   TARGET_STEP=1525 \
+#   RESET_OPTIMIZER=1 \
 #   scripts/launch_oai_bpb_cliff_recovery.sh
 
 set -euo pipefail
@@ -19,7 +20,8 @@ cd "$REPO_ROOT"
 CONFIG="${CONFIG:-config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml}"
 RESUME_CKPT="${RESUME_CKPT:-checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt}"
 START_STEP="${START_STEP:-1500}"
-TARGET_STEP="${TARGET_STEP:-1600}"
+TARGET_STEP="${TARGET_STEP:-1525}"
+RESET_OPTIMIZER="${RESET_OPTIMIZER:-1}"
 PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -76,6 +78,9 @@ TRAIN_CMD=(
   --wandb-project "$PROJECT"
   --wandb-run-name "$RUN_NAME"
 )
+if [[ "$RESET_OPTIMIZER" == "1" || "$RESET_OPTIMIZER" == "true" || "$RESET_OPTIMIZER" == "yes" ]]; then
+  TRAIN_CMD+=(--reset-optimizer)
+fi
 
 WATCH_CMD=(
   conda run --no-capture-output -n tokengt env
@@ -116,6 +121,7 @@ training tmux: $TRAIN_TMUX
 watcher tmux:  $WATCH_TMUX
 run name:      $RUN_NAME
 resume ckpt:   $RESUME_CKPT
+reset opt:     $RESET_OPTIMIZER
 target step:   $TARGET_STEP
 wandb path:    ${ENTITY}/${PROJECT}/${RUN_ID}
 training log:  $TRAIN_LOG

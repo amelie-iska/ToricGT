@@ -251,12 +251,24 @@ During training, an in-batch teacher favors low-NLL trajectories with aligned Gr
 \end{equation}
 and optimizes cross-entropy, KL distillation, and quality regression.  The current implementation enables this head for checkpoint compatibility but gates its loss to zero during BPB-first recovery; later GFlowNet/GraphCG/topology phases activate it at small weight.  Because retrieved helpers are completed training trajectories or legal score-before-update state, the mechanism remains compatible with prequential scoring.
 
-The live \texttt{oai} training run currently uses a BPB-recovery phase rather than the full auxiliary-geometry objective.  The latest step-$2250$ gate found that train BPB and loss were descending but flattening: median train BPB fell from $3.8067$ to $3.5449$, with recent slope about $-1.92$ BPB per $1000$ optimizer steps, while GraphCG covariance and analogical-map diagnostics drifted under a diagnostic-only GraphCG phase.  The resumed run therefore activates a small GraphCG basis term, $\lambda_{\mathrm{GraphCG}}=6\times10^{-5}$, a small analogy-lattice term, $10^{-5}$, a small GFlowNet term, $\lambda_{\mathrm{GFN}}=2.5\times10^{-4}$ with entropy weight $5\times10^{-5}$, contrastive weight $8\times10^{-5}$, LR multiplier $0.16$, and clip norm $0.42$, while keeping toric, Koszul, flow, and QAT losses at zero until the next gate.  The completed step-$2250$ geometry gate evaluated three held-out validation records and nine graph-of-thought branches: mean branch BPB was $4.804$, best branch BPB was $3.476$, mean answer-span BPB was $4.776$, best answer-span BPB was $3.476$, MST efficiency was $0.667$, path smoothness was $0.0480$, directed asymmetry was $0.345$, HDBSCAN stability was $0.931$, Slepian concentration was $1.000$, and Slepian leakage was $0.000$.  The same audit found weak tropical/toric margins, so heavy toric geometry remains diagnostic while GraphCG improves the coordinate chart for later chamber losses and GFlowNet begins learning from the observed branch gap.
+\paragraph{Toric BGG certificates.}
+The new Toric BGG layer uses finite shadows of hypertoric category $\mathcal O$, oriented-matroid category $\mathcal O$, multigraded BGG/Tate resolutions, and Euler-Koszul complexes as training certificates rather than as deployable modules \cite{braden2012hypertoric,brownerman2022tate,matusevich2005homological}.  A certificate is a small tuple of a standard-object poset, a sparse chain complex, internal-degree labels, optional Betti targets, and optional Gale-dual metadata.  The implemented low-rank probe reports
+\begin{equation}
+  \mathcal L_{\mathrm{TBGG}}=
+  \lambda_{\partial^2}\|D_{k-1}D_k\|_F^2+
+  \lambda_{\mathrm{std}}\mathrm{Leak}_{\mathrm{std}}+
+  \lambda_{\mathrm{Kos}}\mathrm{KLR}+
+  \lambda_{\mathrm{Gale}}\mathrm{GDC}+
+  \lambda_{\mathrm{sig}}\mathcal L_{\mathrm{sig}},
+\end{equation}
+where the terms measure resolution consistency, standard-filtration leakage, Koszul-linearity residual, Gale-dual signature consistency, and BGG-signature smoothness.  These probes are excluded from the Parameter-Golf artifact with the other training-only heads.  In the current recovery config they are instantiated for metrics but have zero loss weight until late GFlowNet/GraphCG/topology phases; after warmup they enter at the same tiny scale as toric/Koszul diagnostics and remain subject to the BPB gate.
+
+The live \texttt{oai} training run currently uses a BPB-recovery phase rather than the full auxiliary-geometry objective.  A revealed-context recovery run from step $1500$ showed a local likelihood valley near steps $1545$--$1550$ and then rebounded by step $1700$.  The restart therefore returns to \texttt{random\_order\_step\_00001500.pt}, resets Adam moments, fixes the guard parser so explicit zero scalars remain zero, keeps medium/hard graph rows off, sets shock-update scale to $0$, disables all high-curvature geometry losses through the first repair gates, and pauses first at step $1525$ for fixed BPB, reasoning, topology, toric, and Toric BGG analysis.  If validation BPB does not improve by the next planned gates at $1550$, $1575$, and $1600$, the policy is to stop or edit rather than continue from a shallow train-only valley.  The heavier toric, Koszul, Toric BGG, flow, memory, and QAT terms stay diagnostic until the analysis suite and Codex handoff choose a later-phase promotion.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.86\linewidth]{fig_oai_step2250_reasoning_k_bpb.png}
-  \caption{Step-$2250$ \texttt{oai} recovery diagnostic.  Branches are embedded in the reasoning/K$(x\mid\mathrm{helpers})$/BPB simplex from model-computed statistics.  The early checkpoint still favors the low-BPB corner over longer reasoning budgets, so GraphCG and a small GFlowNet objective are activated while heavier toric/Koszul geometry stays gated.}
+  \caption{Historical step-$2250$ \texttt{oai} recovery diagnostic.  Branches are embedded in the reasoning/K$(x\mid\mathrm{helpers})$/BPB simplex from model-computed statistics.  The checkpoint still favored the low-BPB corner over longer reasoning budgets, motivating later gated GraphCG/GFlowNet promotion while heavier toric, Koszul, and Toric BGG geometry stayed gated.}
   \label{fig:oai-step2250-condensed}
 \end{figure}
 
@@ -489,6 +501,21 @@ Insu Han, Praneeth Kacham, Amin Karbasi, Vahab Mirrokni, and Amir Zandieh.
 Marie-Charlotte Brandenburg, Georg Loho, and Guido Montufar.
 \newblock The real tropical geometry of neural networks.
 \newblock arXiv:2403.11871, 2024.
+
+\bibitem{braden2012hypertoric}
+Tom Braden, Anthony Licata, Nicholas Proudfoot, and Ben Webster.
+\newblock Hypertoric category $\mathcal O$.
+\newblock \emph{Advances in Mathematics}, 231(3--4):1487--1545, 2012.
+
+\bibitem{brownerman2022tate}
+Michael K. Brown and Daniel Erman.
+\newblock Tate resolutions on toric varieties.
+\newblock arXiv:2108.03345, 2022.
+
+\bibitem{matusevich2005homological}
+Laura Felicia Matusevich, Ezra Miller, and Uli Walther.
+\newblock Homological methods for hypergeometric families.
+\newblock \emph{Journal of the American Mathematical Society}, 18(4):919--941, 2005.
 
 \bibitem{edelsbrunner2002topological}
 Herbert Edelsbrunner, David Letscher, and Afra Zomorodian.
