@@ -258,16 +258,16 @@ training:
   # observed in metrics but should not be allowed to kick Adam out of the
   # basin.  This is a stochastic line-search surrogate, not data deletion.
   shock_guard_enabled: true
-  # Step-2250 review: the loss shock detector was logging impulses in the
-  # 2000--2500 cliff window, but the global guard window had expired at 1800.
-  # Match BPB-CLIFF-RECOVERY.md so the floor-capture replay damps high-loss
-  # kicks instead of walking through the basin.
+  # Step-2250 and step-2125 replay reviews: the loss shock detector was logging
+  # impulses in the 2000--2500 cliff window, and the first guarded replay still
+  # oscillated between the 2075/2125 lows and high-loss rebounds.  Keep the
+  # whole cliff band in a Huber-like stochastic line-search mode.
   shock_guard_start_step: 2000
   shock_guard_end_step: 2500
-  shock_guard_loss_ratio: 1.018
-  shock_guard_loss_delta: 0.045
-  shock_guard_grad_norm: 0.18
-  shock_guard_update_scale: 0.006
+  shock_guard_loss_ratio: 1.010
+  shock_guard_loss_delta: 0.025
+  shock_guard_grad_norm: 0.10
+  shock_guard_update_scale: 0.002
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
@@ -276,9 +276,9 @@ training:
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 2000
   robust_micro_loss_guard_end_step: 2500
-  robust_micro_loss_guard_ratio: 1.018
-  robust_micro_loss_guard_delta: 0.020
-  robust_micro_loss_guard_min_scale: 0.08
+  robust_micro_loss_guard_ratio: 1.010
+  robust_micro_loss_guard_delta: 0.010
+  robust_micro_loss_guard_min_scale: 0.05
   precision: bf16
   device: cuda
   seed: 17
@@ -496,27 +496,27 @@ phase_curriculum:
     - name: bpb_cliff_entry_2000_2160
       start_step: 2000
       end_step: 2160
-      # Re-enter the first strong likelihood basin from the step-2000
-      # checkpoint.  Keep the validation-like medium mix that preceded the
-      # 2189 low point, but quarantine all reasoning auxiliaries except a tiny
-      # GraphCG/contrastive frame anchor.  Effective LR is chosen to match the
-      # observed descent band while the shock guards suppress high-loss kicks.
-      lr_multiplier: 0.140
-      grad_clip_norm: 0.30
+      # Re-enter the first strong likelihood basin from the step-2000 to 2125
+      # checkpoints.  The 2075/2125 replay lows are real, but the 0.14 LR
+      # multiplier produces alternating low/rebound checkpoints.  Freeze
+      # auxiliary steering and use a smaller scalar step so the basin is
+      # consolidated rather than repeatedly rediscovered.
+      lr_multiplier: 0.060
+      grad_clip_norm: 0.16
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.35
+      medium_mix_ratio: 0.25
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.00001
+      graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00004
+      contrastive_loss_weight: 0.0
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
@@ -527,22 +527,22 @@ phase_curriculum:
       # positive curvature shortly afterward.  Damp the scalar step while
       # preserving random-order decoding and row diversity.  Auxiliaries remain
       # diagnostic-only so the BPB gradient owns the update direction.
-      lr_multiplier: 0.110
-      grad_clip_norm: 0.22
+      lr_multiplier: 0.045
+      grad_clip_norm: 0.12
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.35
+      medium_mix_ratio: 0.20
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.000005
+      graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00001
+      contrastive_loss_weight: 0.0
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
@@ -553,15 +553,15 @@ phase_curriculum:
       # instead consolidate the byte-likelihood basin.  The watcher pauses at
       # 2250 and launches a Codex review; these values are only the fallback if
       # continuation is selected by the evidence.
-      lr_multiplier: 0.075
-      grad_clip_norm: 0.18
+      lr_multiplier: 0.030
+      grad_clip_norm: 0.10
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.30
+      medium_mix_ratio: 0.12
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.000005
+      graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       toric_bgg_loss_weight: 0.0

@@ -8959,3 +8959,92 @@ Acceptance criteria for the next review:
 4. shock guard may activate, but shock update scale must be zero in the recovery
    band;
 5. GFlowNet/topology/toric metrics remain noncollapsed and diagnostic-only.
+
+## 2026-06-02 Step-2125 Plateau-Control Update
+
+The step-2250 automated review correctly selected `EDIT_AND_RESTART` from the
+step-2075 checkpoint, because the checkpoint finite differences showed a
+floor-bounce pattern:
+
+```text
+2075 train_bpb=3.688517
+2100 train_bpb=3.887838
+2125 train_bpb=4.268689
+2150 train_bpb=4.021380
+2175 train_bpb=3.975372
+2200 train_bpb=4.482183
+2225 train_bpb=4.689205
+2250 train_bpb=4.647771
+```
+
+The first guarded replay recovered another fresh low at step `2125`:
+
+```text
+2075 train_bpb=3.688517
+2100 train_bpb=4.058194
+2125 train_bpb=3.683005
+```
+
+but the live per-step trace after 2125 was already oscillating around
+`3.6--3.8` with the same high-loss impulses visible.  The active phase still
+used `lr_multiplier=0.140` until step 2160, which is too large for the observed
+basin width.  The replay also reused the old W&B run id while stepping backward
+from 2250 to 2075, so W&B ignored logs below the existing run step and made the
+next analysis partially blind to the fresh replay.
+
+Action: `EDIT_AND_RESTART`.
+
+Implemented controls:
+
+| control | old | new |
+|---|---:|---:|
+| shock guard ratio | `1.018` | `1.010` |
+| shock guard delta | `0.045` | `0.025` |
+| shock guard grad threshold | `0.18` | `0.10` |
+| shock guard update scale | `0.006` | `0.002` |
+| micro guard ratio | `1.018` | `1.010` |
+| micro guard delta | `0.020` | `0.010` |
+| micro guard min scale | `0.08` | `0.05` |
+| 2000--2160 LR multiplier | `0.140` | `0.060` |
+| 2000--2160 grad clip | `0.30` | `0.16` |
+| 2000--2160 medium mix | `0.35` | `0.25` |
+| 2160--2225 LR multiplier | `0.110` | `0.045` |
+| 2160--2225 grad clip | `0.22` | `0.12` |
+| 2160--2225 medium mix | `0.35` | `0.20` |
+| 2225--2500 LR multiplier | `0.075` | `0.030` |
+| 2225--2500 grad clip | `0.18` | `0.10` |
+| 2225--2500 medium mix | `0.30` | `0.12` |
+| GraphCG/contrastive anchors in cliff band | nonzero dust | `0.0` |
+| default rollback W&B id | inherited old id | fresh run id by default |
+| default launcher naming | hard-coded `01500` | derived from `START_STEP` |
+
+Restarted from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00002125.pt
+```
+
+Fresh run:
+
+| item | value |
+|---|---|
+| training tmux | `toricgt_oai_bpb_revealed_02125_20260602T195844Z` |
+| watcher tmux | `toricgt_watch_bpb_revealed_02125_20260602T195844Z` |
+| W&B run path | `amelie-iska-math/toricgt-parameter-golf/oai-revealed-20260602T195844Z` |
+| training log | `logs/training/oai-bpb-revealed-context-02125-20260602T195844Z.log` |
+| watcher log | `logs/training/oai-bpb-revealed-context-02125-20260602T195844Z.watcher.log` |
+| next target | `2175` |
+| optimizer state | preserved |
+
+Acceptance criteria for the step-2175 review:
+
+1. checkpoint BPB should remain near the fresh 2125 low instead of rebounding
+   above `4.0`;
+2. shock/micro guards should activate on high-loss impulses without letting
+   those impulses dominate the optimizer update;
+3. validation and complexity validation should be read from the fresh W&B run,
+   not the old monotonic-step-filtered run;
+4. Toric BGG, Koszul, toric, topology, memory, and GFlowNet losses remain
+   diagnostic-only in this cliff band;
+5. if BPB still plateaus, the next action should be an even shorter 25-step
+   trust-region replay from the best checkpoint, not a continuation to 2325.

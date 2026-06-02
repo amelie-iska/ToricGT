@@ -25,10 +25,15 @@ RESET_OPTIMIZER="${RESET_OPTIMIZER:-1}"
 PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-RUN_NAME="${RUN_NAME:-oai-bpb-revealed-context-01500-${STAMP}}"
-RUN_ID="${WANDB_RUN_ID:-oai01500revealed${STAMP//[^0-9A-Za-z]/}}"
-TRAIN_TMUX="${TRAIN_TMUX:-toricgt_oai_bpb_revealed_01500_${STAMP}}"
-WATCH_TMUX="${WATCH_TMUX:-toricgt_watch_bpb_revealed_01500_${STAMP}}"
+START_TAG="$(printf "%05d" "$START_STEP")"
+RUN_NAME="${RUN_NAME:-oai-bpb-revealed-context-${START_TAG}-${STAMP}}"
+# Use a fresh W&B run id by default.  Rollback/replay launches often resume from
+# lower step numbers; reusing the old W&B id causes those steps to be ignored by
+# W&B's monotonic-step guard and makes the next analysis blind to the replay.
+# Set RUN_ID explicitly to intentionally append to an existing run.
+RUN_ID="${RUN_ID:-oai-revealed-${STAMP//[^0-9A-Za-z]/}}"
+TRAIN_TMUX="${TRAIN_TMUX:-toricgt_oai_bpb_revealed_${START_TAG}_${STAMP}}"
+WATCH_TMUX="${WATCH_TMUX:-toricgt_watch_bpb_revealed_${START_TAG}_${STAMP}}"
 CODEX_PREFIX="${CODEX_PREFIX:-toricgt_codex_review_bpb_cliff}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/post_resume_analysis/${RUN_NAME}}"
 LOG_DIR="${LOG_DIR:-logs/training}"
