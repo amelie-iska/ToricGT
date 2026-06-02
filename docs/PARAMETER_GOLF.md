@@ -372,6 +372,21 @@ compares the DPSS spectrum, reconstructed phase signal, local NLL energy, and
 branch BPB. This gives an evaluation-only answer to whether toric phase memory
 is coherent and localized, rather than merely a decorative sinusoidal feature.
 
+The official-style FineWeb BPB launcher is a separate path:
+`scripts/launch_parameter_golf_fineweb_bpb.sh` invokes the local
+`amelie-iska/parameter-golf/train_gpt.py` scaffold.  That scaffold does not
+call the ToricGT random-order model, so it cannot emit live hidden-state
+GraphCG, topology, toric, tropical, complexity, or Toric BGG losses.  The
+launcher starts `scripts/mirror_fineweb_full_diagnostics_to_wandb.py` as a
+companion process to keep W&B dashboards populated with the same namespaces:
+`topology/*`, `toric/*`, `tropical/*`, `complexity/*`,
+`bgg_category_o/*`, and `category_o/*`.  Those companion metrics are explicitly
+marked with status flags, including
+`metrics_status/model_hidden_state_available=0` and
+`metrics_status/metric_scope_fineweb_curve_proxy=1`, until a native ToricGT
+trainer run is active.  When `scripts/train_parameter_golf_random_order.py`
+is used, these namespaces are emitted by the model path itself.
+
 Current operational guardrail: training should resume only after the full
 analysis suite finishes and all generated plot classes have been inspected.
 The skeptic guardrail is metric-first: every advanced geometric object needs a

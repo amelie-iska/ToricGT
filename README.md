@@ -580,6 +580,20 @@ instantiated as training-only metrics, but `toric_bgg_loss_weight` is explicitly
 `0.0` through the BPB repair phases and becomes nonzero only in the later
 alignment/compression phases if the analysis gate allows it.
 
+For official-style FineWeb BPB checks, the repo also includes
+`scripts/launch_parameter_golf_fineweb_bpb.sh`.  That path runs the separate
+local Parameter-Golf scaffold under `amelie-iska/parameter-golf/train_gpt.py`,
+so the trainer itself emits only FineWeb byte-LM loss, BPB, progress, and
+timing.  The launcher therefore starts companion W&B mirrors: one for generic
+BPB aliases and one for ToricGT diagnostic namespaces.  The diagnostic mirror
+logs `topology/*`, `toric/*`, `tropical/*`, `complexity/*`,
+`bgg_category_o/*`, and `category_o/*` from finite training-curve and
+certificate audits, while status metrics such as
+`metrics_status/model_hidden_state_available=0` make clear that these are not
+live hidden-state losses from the external scaffold.  Native hidden-state
+topology, toric, tropical, complexity, and Toric BGG metrics come from
+`scripts/train_parameter_golf_random_order.py`.
+
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
 fixed run seed plus per-chunk/sample ids, so each new input gets a new
