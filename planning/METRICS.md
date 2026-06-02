@@ -7964,3 +7964,242 @@ Acceptance criteria:
    inclusion violation still zero;
 6. toric shadow minimum margin not collapsing and bend magnitude not
    increasing.
+
+## Step 4700 Handoff Review: Restart From the Step-3600 Curvcap Basin
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-graphcg-gfn-04200-basinlock-20260602T131148Z/step-00004700
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00004700.pt
+```
+
+The watcher paused the `04200_basinlock` run for review.  At review time no
+active `train_parameter_golf_random_order.py` process remained, so the correct
+action was to make an explicit continuation/restart decision and then start a
+fresh tmux run.  The W&B screenshot and local logs agree: later replays from
+`3600`, `3800`, `4000`, and `4200` all orbit the same shallow train-BPB floor
+near `3.55-3.70`, while the `03300_curvcap` run contains the strongest early
+drop and the lowest raw local samples around steps `3590-3610`.
+
+### Run Name Clarification
+
+The two requested 3k curvcap runs are not independent successful runs.
+
+```text
+toricgt_oai_graphcg_gfn_03000_curvcap_20260602T053947Z
+toricgt_oai_graphcg_gfn_03000_curvcap_20260602T054043Z
+```
+
+The first launch failed immediately because the command used an unsupported
+CLI argument:
+
+```text
+--wandb-run-id oai03000curvcap20260602T053947Z
+```
+
+The training script accepts W&B run ids through the `WANDB_RUN_ID` environment
+variable, not a `--wandb-run-id` flag.  The second run, at `054043Z`, is the
+actual resumed W&B-backed run from step `3000`; it analyzed at step `3500`.
+The later `03300_curvcap` run is the relevant one for the current rollback
+decision because it gives the cleanest low-BPB basin evidence.
+
+### Metric Categorization
+
+Automatic category counts for the step-4700 analysis:
+
+```text
+as_desired: 361
+as_desired_but_not_strong_or_fast_enough: 137
+not_as_desired: 127
+```
+
+The category count is not sufficient for the training decision.  The automatic
+classifier marks `train/bpb` and `train/loss` as desired because the whole
+`4200-4690` window has improved medians:
+
+```text
+train/bpb: 3.8633 -> 3.5885
+train/loss: 2.6778 -> 2.4874
+```
+
+However, the recent slope for both is positive:
+
+```text
+train/bpb recent slope / 1k: +0.3557
+train/loss recent slope / 1k: +0.2465
+```
+
+That is a late-interval basin exit.  For checkpoint promotion, recent slope
+and finite differences dominate full-window median improvement.
+
+| family | observed behavior | category |
+|---|---|---|
+| train BPB/loss | full-window medians improve, but recent slopes turn positive and the step-4700 checkpoint BPB is `3.5830` | desired overall, but locally undesirable |
+| deterministic validation | W&B `val/bpb` remains around `5.5545`, and the checkpoint still carries historical `best_val_bpb=4.6961`; no validation promotion | undesirable |
+| complexity validation | small probe `complexity/val/bpb=5.2570`, above the historical gate and not enough to justify continuation | undesirable |
+| GFlowNet | entropy and action diversity remain noncollapsed, but `train/gflownet_loss` is still coupled to BPB and does not select lower-BPB terminals reliably | desired but too weak |
+| GraphCG/analogical K metrics | relative-K and analogical-transfer diagnostics remain active and stable; they are not the cause of the floor | desired |
+| nested topology | inclusion violation is zero, directed edge validity is high (`0.9264`), exact edge validity is high (`0.9779`), and exact morphisms are computed | desired |
+| topology strength | exact triangle validity is `0.6724`, cycle rank is low, and branch map losses remain nonzero | desired but too weak |
+| toric shadow | fan entropy `0.7256`, occupied cells `12.9`, and recurrence `0.0280` show noncollapsed toric structure | desired |
+| tropical/toric margins | active-face margin is still signed-negative in the task convention (`-1.8164`), toric-shadow minimum margin is tiny (`1.92e-4`), and binomial residual is `1.242` | undesirable as an optimizer target |
+| branch/test-time scaling | mean branch BPB `4.9930`, best branch BPB `4.0321`, mean answer BPB `4.8765`, best answer BPB `3.6111`; search finds better terminals but not a reliable low-BPB basin | desired but too weak |
+| trajectory geometry | MST efficiency `0.6964`, smoothness `0.0732`, HDBSCAN stability `0.8720`, directed asymmetry `0.3888`, cycle flux near zero | desired structure, too weak for promotion |
+| Hessian probes | disabled; curvature inference comes from checkpoint and W&B finite differences | unavailable |
+
+### Plot Review
+
+The contact sheet at
+
+```text
+outputs/post_resume_analysis/oai-bpb-graphcg-gfn-04200-basinlock-20260602T131148Z/step-00004700/review_contact_sheet.png
+```
+
+was reviewed.  The core metric plot shows exactly the statistical mismatch:
+global descent followed by a late positive-slope bounce.  The energy landscape
+and 3D GoT trajectory plots are nonblank, structured, and still show reachable
+solution regions, but terminals are spread over shallow basins rather than
+settling into a low-BPB attractor.  The toric phase simplicial trajectory plot
+is dense but coherent; the directed-filtration and exact-persistence plots
+show bounded nested-complex structure rather than topology collapse.  The
+reasoning/K/BPB triangle places several high-reasoning points away from the
+low-BPB edge, and the toric/GFlowNet/BPB tetrahedron shows toric entropy and
+GFlowNet diversity preserved while low BPB remains the limiting coordinate.
+
+Therefore the plots agree with the metric diagnosis: geometry is present and
+noncollapsed; likelihood capture is the active failure mode.
+
+### Finite-Difference Evidence
+
+The `03300_curvcap` log gives the cleanest early basin:
+
+```text
+3300-3400: min BPB 3.580 at step 3372, median 3.748
+3400-3500: min BPB 3.547 at step 3465, median 3.705
+3500-3600: min BPB 3.364 at step 3590, median 3.619
+3600-3650: min BPB 3.401 at step 3610, median 3.575
+3650-3700: min BPB 3.566 at step 3651, median 3.697
+```
+
+The raw local minimum is step `3590`, and the nearby low highlighted by the
+W&B screenshot is step `3610`.  There is no exact step-3610 checkpoint, so the
+usable checkpoint is:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003600.pt
+```
+
+Its checkpoint metadata is:
+
+```text
+train_bpb = 3.5206793755398187
+train_loss = 2.440348982810974
+best_val_bpb = 4.69610598173399
+```
+
+The discrete curvature is positive around the basin.  In notation
+\(\Delta b_t=b_t-b_{t-h}\) and
+\(\Delta^2b_t=b_{t+h}-2b_t+b_{t-h}\), the observed low has
+\(\Delta b<0\) entering `3590-3610` and then \(\Delta b>0\) after it.  This is
+not a capacity wall.  It is a shallow likelihood basin with stale optimizer
+momentum and residual auxiliary/data-mixture curvature pushing the iterate
+across the basin wall.
+
+### Decision
+
+Do not continue from step `4700`.  Restart from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00003600.pt
+```
+
+with optimizer reset.  Resetting Adam moments is justified because the model
+weights at step `3600` are good, but the previous momentum vector is exactly
+the vector that carried subsequent runs through the low-BPB basin.
+
+Implemented config-only changes:
+
+| control | old active 3250-6000 value | new value |
+|---|---:|---:|
+| split historical capture | one phase `3250-6000` | keep `3250-3600`, add `3600-4300`, add `4300-6000` |
+| 3600-4300 `lr_multiplier` | `0.016` | `0.036` |
+| 3600-4300 `grad_clip_norm` | `0.18` | `0.16` |
+| 3600-4300 `medium_mix_ratio` | `0.06` | `0.00` |
+| 3600-4300 `gflownet_loss_weight` | `5e-7` | `1e-7` |
+| 3600-4300 `graphcg_loss_weight` | `5e-6` | `1e-6` |
+| 3600-4300 analogy/toric/Koszul/flow/memory/MTP/contrastive | diagnostic or tiny | `0` except GFlowNet/GraphCG dust |
+| 4300-6000 `lr_multiplier` | `0.016` | `0.028` |
+| 4300-6000 `medium_mix_ratio` | `0.06` | `0.02` |
+
+This keeps the ToricGT Parameter-Golf architecture intact: dense contest
+weights, random-order autoregressive graph decoding, hybrid/tropical ring
+attention, toric memory, GraphCG frame, GFlowNet head, relative Kolmogorov
+diagnostics, directed persistence/Koszul analyses, and plotting remain enabled.
+Only scalar optimizer and auxiliary-loss controls changed.
+
+### New Run
+
+An initial recapture launch at `20260602T142041Z` was stopped before it reached
+the next checkpoint because the effective LR under the current `4500`-step
+warmup was only about `3.35e-7`, too low to recapture the basin aggressively.
+The config was corrected to target about `1.1e-6` effective LR at step `3600`.
+
+Started:
+
+```text
+tmux: toricgt_oai_graphcg_gfn_03600_recapture_20260602T142041Z
+W&B:  amelie-iska-math/toricgt-parameter-golf/oai03600recapture20260602T142041Z
+log:  logs/training/oai-bpb-graphcg-gfn-03600-recapture-20260602T142041Z.log
+```
+
+That launch was intentionally stopped before a checkpoint.  The active restart
+is:
+
+```text
+tmux: toricgt_oai_graphcg_gfn_03600_recapture_20260602T142446Z
+W&B:  amelie-iska-math/toricgt-parameter-golf/oai03600recapture20260602T142446Z
+log:  logs/training/oai-bpb-graphcg-gfn-03600-recapture-20260602T142446Z.log
+```
+
+Startup logs should confirm:
+
+```text
+optimizer_state_loaded = false
+resume checkpoint = random_order_step_00003600.pt
+```
+
+### Next Review Gate
+
+Watcher:
+
+```text
+tmux: toricgt_watch_03600_recapture_20260602T142446Z
+target checkpoint: >= 4100
+output root: outputs/post_resume_analysis/oai-bpb-graphcg-gfn-03600-recapture-20260602T142446Z
+```
+
+It uses a fresh `--min-mtime-unix` captured at restart time, pauses training
+before analysis, runs the CUDA/bf16 analysis suite, and hands the results back
+through `scripts/codex_training_review_resume.sh`.
+
+Acceptance criteria for the step-4100 review:
+
+1. checkpoint train BPB below `3.5207`, with raw samples below `3.36` treated
+   as evidence that the old basin has been recaptured;
+2. recent train BPB/loss slope nonpositive after the first 100 fresh steps;
+3. validation and complexity-validation BPB not worse than the step-4700
+   analysis;
+4. GFlowNet entropy/diversity noncollapsed even though its loss weight is dust;
+5. GraphCG basis coherence and axis variance stable;
+6. exact topology inclusion violation still zero, directed edge validity at or
+   above `0.926`, and triangle validity moving toward `0.70`;
+7. toric shadow fan entropy above `0.70`, occupied cells not collapsing, and
+   bend/leaf residuals not worsening materially;
+8. branch best BPB below `4.0` or answer-span best below `3.60` before
+   reintroducing medium rows or heavier geometry losses.

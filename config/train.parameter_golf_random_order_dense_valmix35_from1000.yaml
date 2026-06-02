@@ -466,10 +466,11 @@ phase_curriculum:
       qat_loss_weight: 0.0
     - name: bpb_stabilization_hold
       start_step: 3250
-      end_step: 6000
-      # Step-4500 curve-lock review: step 4200 was the fresh local minimum
-      # before a positive-curvature exit.  Replay from that checkpoint with a
-      # still lower byte-likelihood step size and smaller auxiliary amplitudes.
+      end_step: 3600
+      # Historical 3250-3600 capture window.  The 03300 curvcap run reached
+      # its best early raw BPB at steps 3590-3610, so keep this segment intact
+      # for reproducibility and hand control to a stricter basin-recapture
+      # phase immediately afterward.
       lr_multiplier: 0.016
       grad_clip_norm: 0.18
       complex_mix_ratio: 0.0
@@ -485,6 +486,60 @@ phase_curriculum:
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.0000005
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_basin_recapture_3600_4300
+      start_step: 3600
+      end_step: 4300
+      # Step-4700 handoff review: every 3.6k-4.7k replay finds the same shallow
+      # likelihood floor.  The best observed early basin is the 03300 curvcap
+      # low around 3590-3610; later restarts preserve topology/toric structure
+      # but exit the byte-likelihood basin.  Resume from step 3600 with reset
+      # Adam moments, remove medium-row mixture for one gate, and make geometry
+      # objectives diagnostic-scale so BPB owns the update direction.  The
+      # multiplier targets about 1.1e-6 effective LR under the 4500-step warmup:
+      # meaningfully below the old curvcap descent rate, but not inert.
+      lr_multiplier: 0.036
+      grad_clip_norm: 0.16
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.0
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0000001
+      gflownet_entropy_weight: 0.00000002
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.000001
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
+      contrastive_loss_weight: 0.0
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_basin_extension_4300_6000
+      start_step: 4300
+      end_step: 6000
+      # If the recapture gate improves BPB without harming validation/geometry,
+      # continue with a tiny validation-like medium mixture and still keep all
+      # heavy reasoning auxiliaries off.  The next watcher may edit these
+      # scalars based on the 4100-4300 derivative.
+      lr_multiplier: 0.028
+      grad_clip_norm: 0.14
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.02
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0000001
+      gflownet_entropy_weight: 0.00000002
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.000001
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
+      contrastive_loss_weight: 0.0
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
