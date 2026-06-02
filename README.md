@@ -548,8 +548,9 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
 
 This replay uses the same dense ToricGT Parameter-Golf architecture, but the
 active BPB recovery now rolls back to the aligned step `1500` checkpoint after
-the step-2250 watcher found the step-2000 retry had left the early likelihood
-basin.  The new likelihood-side intervention is a legal score-before-update
+the step-1700 watcher showed that the revealed-context run found a local
+likelihood valley near step 1545--1550 and then bounced out of it.  The
+likelihood-side intervention remains a legal score-before-update
 revealed-context mixture: a Dirichlet-smoothed prefix byte distribution is
 mixed in probability space with the neural distribution, while zero-initialized
 trainable local potentials learn from already revealed graph neighbors at
@@ -569,10 +570,12 @@ The current launch path is:
 scripts/launch_oai_bpb_cliff_recovery.sh
 ```
 
-It resumes from `random_order_step_00001500.pt`, uses medium mix `0.35`, keeps
-heavy toric/Koszul/GFlowNet/trajectory auxiliaries diagnostic-only through the
-1500--1700 capture window, and pauses at step `1700` for CUDA/bf16 analysis and
-an automated Codex review before any continuation decision.
+It resumes from `random_order_step_00001500.pt`, keeps medium/hard/graph rows
+off through the 1500--1700 BPB floor-lock, runs fixed validation probes every
+50 steps, skips shock updates inside the recovery band, keeps heavy
+toric/Koszul/GFlowNet/trajectory auxiliaries diagnostic-only, and pauses at
+step `1600` for CUDA/bf16 analysis and an automated Codex review before any
+continuation decision.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
@@ -796,8 +799,8 @@ larger technical graph-projection stream until step `6000` with
 math/code/graph/reasoning/health/physics/biomed/biochem task-family filters.
 The current restart is from the aligned step `1,500` checkpoint with
 revealed-context compression enabled and a two-phase `1500--1600` /
-`1600--1700` capture window designed around the historical low near step
-`1690`. A bounded
+`1600--1700` capture window designed to protect the observed low near
+1545--1550 rather than chase the later rebound. A bounded
 checkpoint-level adaptive controller remains enabled for GFlowNet entropy
 target, GFlowNet loss weight, and hard-row mix; it writes
 `checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_revealed_context.json`

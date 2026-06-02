@@ -8,7 +8,7 @@
 # Optional:
 #   RESUME_CKPT=checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt \
 #   START_STEP=1500 \
-#   TARGET_STEP=1700 \
+#   TARGET_STEP=1600 \
 #   scripts/launch_oai_bpb_cliff_recovery.sh
 
 set -euo pipefail
@@ -19,7 +19,7 @@ cd "$REPO_ROOT"
 CONFIG="${CONFIG:-config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml}"
 RESUME_CKPT="${RESUME_CKPT:-checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt}"
 START_STEP="${START_STEP:-1500}"
-TARGET_STEP="${TARGET_STEP:-1700}"
+TARGET_STEP="${TARGET_STEP:-1600}"
 PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -45,7 +45,10 @@ for session in \
   toricgt_oai_graphcg_gfn_03600_recapture_20260602T142446Z \
   toricgt_watch_03600_recapture_20260602T142446Z \
   toricgt_oai_bpb_cliff_02000_20260602T143707Z \
-  toricgt_watch_bpb_cliff_02000_20260602T143707Z; do
+  toricgt_watch_bpb_cliff_02000_20260602T143707Z \
+  toricgt_oai_bpb_revealed_01500_20260602T153522Z \
+  toricgt_watch_bpb_revealed_01500_20260602T153522Z \
+  toricgt_codex_review_bpb_cliff_00001700; do
   if tmux has-session -t "$session" 2>/dev/null; then
     tmux send-keys -t "$session" C-c || true
     sleep 2

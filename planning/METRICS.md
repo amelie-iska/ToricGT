@@ -8305,3 +8305,98 @@ Acceptance criteria for the next review:
    positive with better validation behavior;
 5. GFlowNet and topology diagnostics remain noncollapsed while byte likelihood
    owns the optimizer direction.
+
+## 2026-06-02 Step-1700 Revealed-Context BPB Review
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-revealed-context-01500-20260602T153522Z/step-00001700
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001700.pt
+```
+
+The watcher correctly paused the revealed-context replay at step `1700`.  The
+run is not acceptable to continue from this checkpoint.  The live trace found a
+useful local byte-likelihood valley around steps `1545--1550`, but the state
+left that valley before step `1700`.
+
+### Metric Categorization
+
+| metric family | category | evidence |
+|---|---|---|
+| `train/bpb`, `train/loss`, `train/total_loss` | not as desired | the automatic report classifies all three as `not_as_desired`; first median BPB `4.19618` rose to last median `4.55003`, a relative worsening of `8.43%`; recent BPB slope is positive at `11.3025/1k` with `t=3.55`. |
+| checkpoint BPB | not as desired | saved checkpoint metrics rose from the useful local `random_order_step_00001550.pt` value `3.682350` to `4.796419` at `1700`. |
+| validation BPB | not as desired / insufficiently observed | `best_val_bpb` remains `4.69610598173399`; the old `eval_interval=250` did not give a fixed validation read inside the 1500--1700 rebound band. |
+| GFlowNet loss | desired but not causal | recent GFlowNet loss fell about `20.22%`, but its training weight was zero in this window, so it is a diagnostic improvement rather than a byte-likelihood driver. |
+| GFlowNet entropy/diversity | desired but too weak | entropy and diversity are noncollapsed but almost flat; they do not explain the BPB deterioration. |
+| geometry branch BPB | desired but too weak | branch analysis found `best_answer_bpb=3.582888`, so local reasoning branches still contain recoverable signal, but mean geometry BPB is `4.912794`, too high to treat the checkpoint as good. |
+| topology and toric diagnostics | desired but too weak | nested topology is stable (`mean_topology_inclusion_violation=0`, HDBSCAN stability about `0.894`), but toric active-face margins remain negative and leaf/binomial residuals are not yet useful BPB controls. |
+
+### Mathematical Reading
+
+This is a rebound from a narrow stochastic likelihood basin.  The relevant
+finite-difference signal is not a single noisy batch: the report's median BPB
+increases across the recent window, checkpoint BPB worsens materially by step
+`1700`, and the live trace shows the same sustained high-BPB band after about
+step `1653`.  The GFlowNet and topology metrics are not the cause, because
+their loss weights are zero or diagnostic-only in this band.  The failure is an
+optimizer-geometry problem: Adam is still allowed enough nonzero motion that
+high-loss microbatches move the dense byte model across the local tangent cone
+of the early descent basin.
+
+The previous shock guard was also too permissive.  At the bad checkpoint, W&B
+reports `train/shock_guard_active=1`, but the update scale was still `0.01` and
+microbatch guard scaling averaged about `0.8904`; this observed the shock but
+did not sufficiently project it away.  The correct local control is therefore a
+trust-region-like floor lock: if the microbatch exceeds the running loss cap,
+log it, but send no optimizer impulse from that shock.  This is equivalent to a
+Huberized stochastic gradient estimator with a zero update on out-of-trust-region
+samples during the early recovery band.
+
+### Decision
+
+Action: `EDIT_AND_RESTART`.
+
+Restart from:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt
+```
+
+Implemented scalar controls:
+
+| control | old | new |
+|---|---:|---:|
+| fixed validation interval | `250` | `50` |
+| fixed validation batches | `20` | `10` |
+| shock guard end | `1750` | `1800` |
+| shock loss ratio | `1.020` | `1.006` |
+| shock loss delta | `0.040` | `0.012` |
+| shock grad threshold | `0.18` | `0.00` |
+| shock update scale | `0.010` | `0.000` |
+| micro guard ratio | `1.020` | `1.006` |
+| micro guard delta | `0.018` | `0.008` |
+| micro guard min scale | `0.08` | `0.02` |
+| 1500--1600 LR multiplier | `0.150` | `0.075` |
+| 1500--1600 grad clip | `0.30` | `0.16` |
+| 1600--1700 LR multiplier | `0.105` | `0.030` |
+| 1600--1700 grad clip | `0.22` | `0.10` |
+| recovery medium ratio override | `0.35` | `0.0` |
+| GraphCG/contrastive dust in recovery | nonzero | `0.0` |
+| next watcher target | `1700` | `1600` |
+
+Acceptance criteria for the next review:
+
+1. fixed validation BPB appears at step `1550` and `1600` and does not worsen
+   relative to the step-1700 run;
+2. median train BPB after step `1525` remains below `4.0`, with any local dip
+   below `3.6` preserved by the shock guard;
+3. no positive sustained first difference across 1550--1600;
+4. shock guard may activate, but shock update scale must be zero in the recovery
+   band;
+5. GFlowNet/topology/toric metrics remain noncollapsed and diagnostic-only.

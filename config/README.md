@@ -22,11 +22,12 @@ entered a shallow floor-bounce basin. The active rollback resumes from the
 step-1500 checkpoint and switches to
 `bpb_valmix_curvature_damped_1500_2000` with `medium_mix_ratio: 0.35`,
 `lr_multiplier: 0.12`, `grad_clip_norm: 0.40`, and diagnostic-only auxiliary
-geometry losses. The follow-up step-2000 gate was marginally better but still
-showed the same derivative bounce, so the active config continues from the
-fresh step-2000 checkpoint through `bpb_postbounce_valmix_hold_2000_2500` with
-`medium_mix_ratio: 0.35`, `lr_multiplier: 0.10`, `grad_clip_norm: 0.36`, and
-auxiliary geometry losses still off.
+geometry losses. The revealed-context replay then found a usable local valley
+near step 1545--1550 but left it before the step-1700 watcher. The active
+config now treats 1500--1700 as a strict BPB floor-lock: auxiliary losses are
+diagnostic-only, effective LR is reduced, shock updates are skipped, fixed
+validation probes run every 50 steps, and the watcher interrupts at 1600 before
+the historical rebound band.
 
 | Component | Default |
 | --- | --- |
@@ -38,7 +39,7 @@ auxiliary geometry losses still off.
 | Attention | lower softmax, upper tropical-ring attention |
 | PolarQuant | 8-bit KV perturbation in eval/export checks |
 | Graph data | compact `graph_json` node/edge projection is delayed until the hard-composite phase |
-| Complex-row curriculum | text-first restart at step 1500; medium rows at 1650, hard graph-technical rows at 6000 |
+| Complex-row curriculum | text-first restart at step 1500; medium rows delayed until after the 1500--1700 BPB floor-lock, hard graph-technical rows at 6000 |
 | Domain tags | math, code, graph, Hebrew, biomed, biochem, biophysics, toric |
 | GFlowNet | 16-action prefix-visible embedding policy with TB surrogate |
 | Cheap byte features | BigramHash, CaseOps byte classes, SmearGate confidence |

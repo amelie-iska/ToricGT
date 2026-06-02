@@ -244,11 +244,11 @@ training:
   # basin.  This is a stochastic line-search surrogate, not data deletion.
   shock_guard_enabled: true
   shock_guard_start_step: 1500
-  shock_guard_end_step: 1750
-  shock_guard_loss_ratio: 1.020
-  shock_guard_loss_delta: 0.040
-  shock_guard_grad_norm: 0.18
-  shock_guard_update_scale: 0.010
+  shock_guard_end_step: 1800
+  shock_guard_loss_ratio: 1.006
+  shock_guard_loss_delta: 0.012
+  shock_guard_grad_norm: 0.00
+  shock_guard_update_scale: 0.000
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
@@ -256,16 +256,18 @@ training:
   # dominating the optimizer step.
   robust_micro_loss_guard_enabled: true
   robust_micro_loss_guard_start_step: 1500
-  robust_micro_loss_guard_end_step: 1750
-  robust_micro_loss_guard_ratio: 1.020
-  robust_micro_loss_guard_delta: 0.018
-  robust_micro_loss_guard_min_scale: 0.08
+  robust_micro_loss_guard_end_step: 1800
+  robust_micro_loss_guard_ratio: 1.006
+  robust_micro_loss_guard_delta: 0.008
+  robust_micro_loss_guard_min_scale: 0.02
   precision: bf16
   device: cuda
   seed: 17
   log_interval: 10
-  eval_interval: 250
-  eval_batches: 20
+  # Frequent fixed validation probes through the BPB recovery band make it
+  # clear whether a drop is model improvement or just a sampled-batch dip.
+  eval_interval: 50
+  eval_batches: 10
   eval_order_samples: 1
   eval_gflownet_samples: 2
   gflownet_loss_weight: 0.001
@@ -395,18 +397,18 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_revealed_context_entry_1500_1600
+    - name: bpb_revealed_context_lock_1500_1600
       start_step: 1500
       end_step: 1600
-      # Step-2250 watcher review: the step-2000 retry moved into a high-BPB
-      # basin, so recover from the aligned step-1500 checkpoint.  The new
-      # revealed-context prior supplies a legal prequential compression signal;
-      # keep optimizer motion conservative until the prior and neural residual
-      # agree on a descent direction.
-      lr_multiplier: 0.150
-      grad_clip_norm: 0.30
+      # Step-1700 watcher review: the revealed-context run found a good local
+      # byte-likelihood valley near 1545--1550, then left it by checkpoint
+      # 1700.  Restart from the clean step-1500 basin anchor and make this
+      # region a likelihood-only floor lock; all geometric/reasoning heads
+      # remain diagnostic until fixed validation BPB confirms descent.
+      lr_multiplier: 0.075
+      grad_clip_norm: 0.16
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.35
+      medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
@@ -416,31 +418,31 @@ phase_curriculum:
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00003
+      contrastive_loss_weight: 0.0
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_revealed_context_capture_1600_1700
+    - name: bpb_revealed_context_microstep_1600_1700
       start_step: 1600
       end_step: 1700
-      # Prior basin runs reached their first strong low near 1690 before
-      # positive curvature appeared.  This phase lowers the scalar step and
-      # keeps all reasoning auxiliaries diagnostic-only so byte likelihood and
-      # legal revealed-context coding own the gradient direction.
-      lr_multiplier: 0.105
-      grad_clip_norm: 0.22
+      # The previous run's positive second difference appeared before 1700.
+      # Treat this as a microstep continuation, not a new curriculum phase.
+      # The watcher now stops at 1600; if it is unavailable, these settings
+      # keep updates too small to destroy the recovered basin.
+      lr_multiplier: 0.030
+      grad_clip_norm: 0.10
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.35
+      medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.000005
+      graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00001
+      contrastive_loss_weight: 0.0
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
@@ -449,14 +451,14 @@ phase_curriculum:
       end_step: 1750
       # Fallback only.  The watcher should pause at 1700; if it does not,
       # heavily damp the update through the historical rebound band.
-      lr_multiplier: 0.060
-      grad_clip_norm: 0.16
+      lr_multiplier: 0.015
+      grad_clip_norm: 0.08
       complex_mix_ratio: 0.0
-      medium_mix_ratio: 0.30
+      medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.000005
+      graphcg_loss_weight: 0.0
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
