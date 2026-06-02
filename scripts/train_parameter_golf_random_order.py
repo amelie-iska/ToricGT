@@ -1219,7 +1219,13 @@ def load_state_dict_with_optional_position_resize(
         else:
             del state_dict[key]
     incompatible = model.load_state_dict(state_dict, strict=False)
-    allowed_missing_prefixes = ("graphcg_", "toric_geometry_probe.", "trajectory_memory_head.")
+    allowed_missing_prefixes = (
+        "graphcg_",
+        "toric_geometry_probe.",
+        "trajectory_memory_head.",
+        "revealed_left_logits.",
+        "revealed_right_logits.",
+    )
     bad_missing = [key for key in incompatible.missing_keys if not key.startswith(allowed_missing_prefixes)]
     bad_unexpected = list(incompatible.unexpected_keys)
     if bad_missing or bad_unexpected:
@@ -1816,6 +1822,12 @@ def main() -> None:
         caseops_weight=args.caseops_weight
         if args.caseops_weight is not None
         else config_get(file_config, "model", "caseops_weight", 0.35),
+        use_revealed_neighbor_context=config_get(file_config, "model", "use_revealed_neighbor_context", False),
+        revealed_neighbor_radius=config_get(file_config, "model", "revealed_neighbor_radius", 2),
+        revealed_neighbor_context_weight=config_get(file_config, "model", "revealed_neighbor_context_weight", 0.75),
+        use_revealed_context_prior=config_get(file_config, "model", "use_revealed_context_prior", False),
+        revealed_context_prior_alpha=config_get(file_config, "model", "revealed_context_prior_alpha", 0.25),
+        revealed_context_prior_weight=config_get(file_config, "model", "revealed_context_prior_weight", 0.35),
         use_smear_gate=(
             False
             if args.no_smear_gate
@@ -2803,6 +2815,7 @@ def main() -> None:
         model.train()
         optimizer.zero_grad(set_to_none=True)
         step_loss = 0.0
+        step_neural_loss = 0.0
         step_total_loss = 0.0
         step_gflownet_loss = 0.0
         step_gflownet_entropy = 0.0
@@ -2825,6 +2838,9 @@ def main() -> None:
         step_trajectory_memory_score_gap = 0.0
         step_trajectory_memory_teacher_diag_prob = 0.0
         step_smear_temperature = 0.0
+        step_revealed_neighbor_known_fraction = 0.0
+        step_revealed_neighbor_context_norm = 0.0
+        step_revealed_context_prior_weight = 0.0
         step_toric_memory_entropy = 0.0
         step_toric_entropy_loss = 0.0
         step_toric_geometry_loss = 0.0
@@ -3134,6 +3150,7 @@ def main() -> None:
             step_robust_micro_loss_guard_scale += float(micro_guard_scale)
             step_robust_micro_loss_guard_cap += float(micro_guard_cap)
             step_loss += float(micro_loss.detach().cpu())
+            step_neural_loss += float(out.get("neural_loss", micro_loss).detach().cpu())
             step_total_loss += float(total_micro_loss.detach().cpu())
             step_gflownet_loss += float(gflownet_loss.detach().cpu())
             step_gflownet_entropy += float(gflownet_entropy.detach().cpu())
@@ -3363,9 +3380,19 @@ def main() -> None:
                 out.get("trajectory_memory_teacher_diag_prob", torch.zeros(())).detach().cpu()
             )
             step_smear_temperature += float(out.get("smear_temperature", torch.zeros(())).detach().cpu())
+            step_revealed_neighbor_known_fraction += float(
+                out.get("revealed_neighbor_known_fraction", torch.zeros(())).detach().cpu()
+            )
+            step_revealed_neighbor_context_norm += float(
+                out.get("revealed_neighbor_context_norm", torch.zeros(())).detach().cpu()
+            )
+            step_revealed_context_prior_weight += float(
+                out.get("revealed_context_prior_weight", torch.zeros(())).detach().cpu()
+            )
             step_toric_memory_entropy += float(out.get("toric_memory_entropy", torch.zeros(())).detach().cpu())
             step_toric_entropy_loss += float(toric_entropy_loss.detach().cpu())
         step_loss /= grad_accum
+        step_neural_loss /= grad_accum
         step_total_loss /= grad_accum
         step_gflownet_loss /= grad_accum
         step_gflownet_entropy /= grad_accum
@@ -3454,6 +3481,9 @@ def main() -> None:
         step_trajectory_memory_score_gap /= grad_accum
         step_trajectory_memory_teacher_diag_prob /= grad_accum
         step_smear_temperature /= grad_accum
+        step_revealed_neighbor_known_fraction /= grad_accum
+        step_revealed_neighbor_context_norm /= grad_accum
+        step_revealed_context_prior_weight /= grad_accum
         step_toric_memory_entropy /= grad_accum
         step_toric_entropy_loss /= grad_accum
         step_toric_geometry_loss /= grad_accum
@@ -3517,6 +3547,7 @@ def main() -> None:
         optimizer.step()
         running_loss = 0.97 * running_loss + 0.03 * step_loss if running_loss else step_loss
         bpb = step_loss / math.log(2)
+        neural_bpb = step_neural_loss / math.log(2)
         progress.set_postfix(loss=f"{step_loss:.4f}", bpb=f"{bpb:.3f}", gfn=f"{step_gflownet_loss:.3f}", lr=f"{lr_step:.2e}")
         audit_error = None
         if causal_audit_interval > 0 and step % causal_audit_interval == 0:
@@ -3542,9 +3573,11 @@ def main() -> None:
         if step % log_interval == 0:
             metrics = {
                 "train/loss": step_loss,
+                "train/neural_loss": step_neural_loss,
                 "train/total_loss": step_total_loss,
                 "train/loss_ema": running_loss,
                 "train/bpb": bpb,
+                "train/neural_bpb": neural_bpb,
                 "train/lr": lr_step,
                 "train/grad_norm": float(grad_norm.detach().cpu()),
                 "train/shock_guard_active": shock_guard_active,
@@ -3654,6 +3687,9 @@ def main() -> None:
                 "train/trajectory_memory_teacher_diag_prob": step_trajectory_memory_teacher_diag_prob,
                 "train/trajectory_memory_loss_weight": effective_trajectory_memory_loss_weight,
                 "train/smear_temperature": step_smear_temperature,
+                "train/revealed_neighbor_known_fraction": step_revealed_neighbor_known_fraction,
+                "train/revealed_neighbor_context_norm": step_revealed_neighbor_context_norm,
+                "train/revealed_context_prior_weight": step_revealed_context_prior_weight,
                 "train/toric_memory_entropy": step_toric_memory_entropy,
                 "train/toric_entropy_floor": float(toric_entropy_floor),
                 "train/toric_entropy_loss": step_toric_entropy_loss,

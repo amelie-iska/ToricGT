@@ -8203,3 +8203,96 @@ Acceptance criteria for the step-4100 review:
    bend/leaf residuals not worsening materially;
 8. branch best BPB below `4.0` or answer-span best below `3.60` before
    reintroducing medium rows or heavier geometry losses.
+
+## 2026-06-02 Step-2250 BPB-Cliff Watcher Review
+
+Analysis directory:
+
+```text
+outputs/post_resume_analysis/oai-bpb-cliff-02000-20260602T143707Z/step-00002250
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_oai_dense/random_order_step_00002250.pt
+```
+
+The watcher paused the step-2000 BPB-cliff recovery and exported W&B metrics,
+checkpoint metrics, simplex summaries, reasoning geometry summaries, and plot
+artifacts.  The evidence does not support continuing from step `2250`.
+
+### Metric Categorization
+
+| metric family | category | evidence |
+|---|---|---|
+| `train/bpb`, `train/loss` | undesirable | checkpoint BPB was `4.1042`; W&B recent median rose from roughly `4.25` to `4.29`, with positive recent slope.  This is well above earlier 1190/1690/2190 historical lows near `3.37`--`3.42`. |
+| validation BPB | undesirable | best validation BPB was still about `4.6961`, so the replay did not produce a validation-aligned likelihood basin. |
+| GFlowNet loss | undesirable for this window | recent GFlowNet loss increased by roughly `18.8%`; because its scalar weight is zero/dust in the BPB capture window, the increase is diagnostic rather than directly causal, but it confirms unstable hidden search geometry. |
+| reasoning geometry BPB | desired but too weak | branch/answer probes found best answer BPB around `3.56`, showing recoverable local structure, but mean branch BPB remained high (`4.82`) and did not pull the main likelihood down. |
+| MST efficiency and trajectory smoothness | desired but too weak | MST efficiency around `0.706` and smoothness around `0.042` indicate nonchaotic local geometry; however, this geometry is not translating into stronger byte likelihood. |
+| toric/topological diagnostics | desired but too weak | no evidence of catastrophic collapse was reported, but active geometry is not yet a strong BPB control signal in this early compression phase. |
+
+### Mathematical Reading
+
+The step-2250 behavior is a floor-bounce basin, not ordinary slow descent.  The
+first finite difference of BPB is positive over the recent W&B window, and the
+historical 1000--1700 traces show the same pattern: a strong negative slope is
+followed by positive curvature once the optimizer reaches a narrow early basin.
+Under SGD/Adam noise, this looks like a shallow likelihood trough with
+high-variance microbatches repeatedly kicking the state across the local tangent
+cone of descent.  Heavy reasoning auxiliaries are not the direct cause in this
+window because their weights are already zero or tiny; the remaining cause is
+that the neural LM is trying to learn byte-frequency and local-neighbor
+statistics through dense hidden weights that are too slow relative to the BPB
+cliff window.
+
+The remedy should therefore be a legal compression-side intervention rather
+than a larger architecture change.  Random-order graph decoding exposes a set of
+already revealed vertices at every step.  A Dirichlet-smoothed prequential
+prefix distribution
+
+```text
+p_t(b) = (n_t(b) + alpha) / (t + alpha V)
+```
+
+is a lawful score-before-update model because `n_t` only counts revealed tokens
+from prior reveal steps.  Adding `w log p_t(b)` as a logit product-of-experts
+term reduces the burden on the neural residual and should lower BPB immediately
+on repeated byte structure.  A zero-initialized trainable revealed-neighbor head
+then learns local graph potentials over positions `p +/- r` when those vertices
+have already been revealed.  This stays faithful to the ToricGT contest adapter:
+random-order autoregressive graph decoding, dense packed weights, hybrid
+tropical ring attention, toric memory, GraphCG, and GFlowNet heads are preserved.
+
+### Decision
+
+Action: `EDIT_AND_RESTART`.
+
+Implemented controls:
+
+| control | new setting |
+|---|---:|
+| resume checkpoint | `random_order_step_00001500.pt` |
+| revealed Dirichlet prefix prior | enabled |
+| prior alpha | `0.25` |
+| prior logit weight | `0.55` |
+| trainable revealed-neighbor context | enabled |
+| neighbor radius | `2` |
+| neighbor logit weight | `0.45` |
+| stream origin step | `1500` |
+| shock/robust guard window | `1500`--`1750` |
+| phase split | `1500`--`1600`, `1600`--`1700`, fallback `1700`--`1750` |
+| next watcher target | `1700` |
+
+Acceptance criteria for the next review:
+
+1. fresh `train/bpb` should fall below the current 2250 value quickly and
+   ideally return to the `3.37`--`3.55` historical early-basin band;
+2. `train/revealed_context_prior_weight` should be nonzero and
+   `train/revealed_neighbor_context_norm` finite;
+3. future-token causal audit remains below tolerance;
+4. first finite difference near 1650--1700 is nonpositive or only weakly
+   positive with better validation behavior;
+5. GFlowNet and topology diagnostics remain noncollapsed while byte likelihood
+   owns the optimizer direction.

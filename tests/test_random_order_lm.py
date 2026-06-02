@@ -61,6 +61,49 @@ def test_score_before_update_future_tokens_do_not_affect_current_logit():
     assert torch.allclose(out_a["logits"][:, 4], out_b["logits"][:, 4], atol=1e-6)
 
 
+def test_revealed_context_prior_is_score_before_update_safe():
+    cfg = tiny_config(
+        use_revealed_context_prior=True,
+        revealed_context_prior_weight=0.7,
+        use_revealed_neighbor_context=False,
+    )
+    model = DenseRandomOrderToricLM(cfg).eval()
+    permutation = torch.arange(8, dtype=torch.long).view(1, 8)
+    tokens_a = torch.tensor([[4, 5, 6, 7, 8, 9, 10, 11]])
+    tokens_b = torch.tensor([[4, 5, 6, 7, 20, 21, 22, 23]])
+    out_a = model(tokens_a, permutation=permutation, return_order=True)
+    out_b = model(tokens_b, permutation=permutation, return_order=True)
+    assert torch.allclose(out_a["logits"][:, 4], out_b["logits"][:, 4], atol=1e-6)
+    assert out_a["revealed_neighbor_context_norm"].isfinite()
+    assert abs(out_a["revealed_context_prior_weight"].item() - cfg.revealed_context_prior_weight) < 1e-6
+
+
+def test_revealed_neighbor_context_uses_only_revealed_graph_neighbors():
+    cfg = tiny_config(
+        vocab_size=48,
+        use_revealed_context_prior=False,
+        use_revealed_neighbor_context=True,
+        revealed_neighbor_radius=1,
+        revealed_neighbor_context_weight=1.0,
+    )
+    model = DenseRandomOrderToricLM(cfg).eval()
+    assert model.revealed_left_logits is not None
+    with torch.no_grad():
+        model.revealed_left_logits[0].weight[5, 13] = 2.0
+        model.revealed_left_logits[0].weight[6, 13] = -2.0
+    permutation = torch.arange(8, dtype=torch.long).view(1, 8)
+    tokens_a = torch.tensor([[4, 5, 6, 7, 8, 9, 10, 11]])
+    tokens_b = torch.tensor([[4, 6, 6, 7, 8, 9, 10, 11]])
+    out_a = model(tokens_a, permutation=permutation, return_order=True)
+    out_b = model(tokens_b, permutation=permutation, return_order=True)
+    assert out_a["logits"][0, 2, 13] > out_b["logits"][0, 2, 13]
+    future_a = torch.tensor([[4, 5, 6, 7, 8, 9, 10, 11]])
+    future_b = torch.tensor([[4, 5, 6, 20, 21, 22, 23, 24]])
+    out_future_a = model(future_a, permutation=permutation, return_order=True)
+    out_future_b = model(future_b, permutation=permutation, return_order=True)
+    assert torch.allclose(out_future_a["logits"][:, 2], out_future_b["logits"][:, 2], atol=1e-6)
+
+
 def test_dense_random_order_lm_loss_and_generation_shapes():
     cfg = tiny_config(vocab_size=48)
     model = DenseRandomOrderToricLM(cfg)

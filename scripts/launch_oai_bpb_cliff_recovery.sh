@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Launch the BPB cliff recovery run from the robust step-2000 checkpoint and
-# start the first interrupting GPU analysis/Codex-review gate at step 2250.
+# Launch the BPB cliff recovery run from the robust early-basin checkpoint and
+# start the first interrupting GPU analysis/Codex-review gate.
 #
 # Run:
 #   scripts/launch_oai_bpb_cliff_recovery.sh
 #
 # Optional:
-#   RESUME_CKPT=checkpoints/parameter_golf_oai_dense/random_order_step_00002000.pt \
-#   TARGET_STEP=2250 \
+#   RESUME_CKPT=checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt \
+#   START_STEP=1500 \
+#   TARGET_STEP=1700 \
 #   scripts/launch_oai_bpb_cliff_recovery.sh
 
 set -euo pipefail
@@ -16,15 +17,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 CONFIG="${CONFIG:-config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml}"
-RESUME_CKPT="${RESUME_CKPT:-checkpoints/parameter_golf_oai_dense/random_order_step_00002000.pt}"
-TARGET_STEP="${TARGET_STEP:-2250}"
+RESUME_CKPT="${RESUME_CKPT:-checkpoints/parameter_golf_oai_dense/random_order_step_00001500.pt}"
+START_STEP="${START_STEP:-1500}"
+TARGET_STEP="${TARGET_STEP:-1700}"
 PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-RUN_NAME="${RUN_NAME:-oai-bpb-cliff-02000-${STAMP}}"
-RUN_ID="${WANDB_RUN_ID:-oai02000cliff${STAMP//[^0-9A-Za-z]/}}"
-TRAIN_TMUX="${TRAIN_TMUX:-toricgt_oai_bpb_cliff_02000_${STAMP}}"
-WATCH_TMUX="${WATCH_TMUX:-toricgt_watch_bpb_cliff_02000_${STAMP}}"
+RUN_NAME="${RUN_NAME:-oai-bpb-revealed-context-01500-${STAMP}}"
+RUN_ID="${WANDB_RUN_ID:-oai01500revealed${STAMP//[^0-9A-Za-z]/}}"
+TRAIN_TMUX="${TRAIN_TMUX:-toricgt_oai_bpb_revealed_01500_${STAMP}}"
+WATCH_TMUX="${WATCH_TMUX:-toricgt_watch_bpb_revealed_01500_${STAMP}}"
 CODEX_PREFIX="${CODEX_PREFIX:-toricgt_codex_review_bpb_cliff}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/post_resume_analysis/${RUN_NAME}}"
 LOG_DIR="${LOG_DIR:-logs/training}"
@@ -39,7 +41,11 @@ if [[ ! -f "$RESUME_CKPT" ]]; then
   exit 1
 fi
 
-for session in toricgt_oai_graphcg_gfn_03600_recapture_20260602T142446Z toricgt_watch_03600_recapture_20260602T142446Z; do
+for session in \
+  toricgt_oai_graphcg_gfn_03600_recapture_20260602T142446Z \
+  toricgt_watch_03600_recapture_20260602T142446Z \
+  toricgt_oai_bpb_cliff_02000_20260602T143707Z \
+  toricgt_watch_bpb_cliff_02000_20260602T143707Z; do
   if tmux has-session -t "$session" 2>/dev/null; then
     tmux send-keys -t "$session" C-c || true
     sleep 2
@@ -73,7 +79,7 @@ WATCH_CMD=(
   "PYTHONPATH=src"
   python scripts/watch_training_analysis.py
   --checkpoint-dir checkpoints/parameter_golf_oai_dense
-  --start-step 2000
+  --start-step "$START_STEP"
   --target-step "$TARGET_STEP"
   --run-path "${ENTITY}/${PROJECT}/${RUN_ID}"
   --output-root "$OUTPUT_ROOT"
@@ -102,10 +108,12 @@ tmux new-session -d -s "$TRAIN_TMUX" "cd '$REPO_ROOT' && bash '${LOG_DIR}/${RUN_
 tmux new-session -d -s "$WATCH_TMUX" "cd '$REPO_ROOT' && bash '${LOG_DIR}/${RUN_NAME}.watcher.command.sh' 2>&1 | tee '$WATCH_LOG'"
 
 cat <<EOF
-started BPB cliff recovery
+started BPB revealed-context cliff recovery
 training tmux: $TRAIN_TMUX
 watcher tmux:  $WATCH_TMUX
 run name:      $RUN_NAME
+resume ckpt:   $RESUME_CKPT
+target step:   $TARGET_STEP
 wandb path:    ${ENTITY}/${PROJECT}/${RUN_ID}
 training log:  $TRAIN_LOG
 watcher log:   $WATCH_LOG

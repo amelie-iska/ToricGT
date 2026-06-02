@@ -57,6 +57,12 @@ class RandomOrderLMConfig:
     bigram_hash_weight: float = 0.35
     use_caseops_features: bool = True
     caseops_weight: float = 0.35
+    use_revealed_neighbor_context: bool = False
+    revealed_neighbor_radius: int = 2
+    revealed_neighbor_context_weight: float = 0.75
+    use_revealed_context_prior: bool = False
+    revealed_context_prior_alpha: float = 0.25
+    revealed_context_prior_weight: float = 0.35
     use_smear_gate: bool = True
     smear_temperature_min: float = 0.55
     smear_temperature_max: float = 1.75
@@ -373,16 +379,33 @@ class DenseRandomOrderToricLM(nn.Module):
             if config.use_toric_geometry_tasks
             else None
         )
+        radius = max(0, int(config.revealed_neighbor_radius))
+        if config.use_revealed_neighbor_context and radius > 0:
+            self.revealed_left_logits = nn.ModuleList(
+                [nn.Embedding(config.vocab_size + 1, config.vocab_size, padding_idx=config.vocab_size) for _ in range(radius)]
+            )
+            self.revealed_right_logits = nn.ModuleList(
+                [nn.Embedding(config.vocab_size + 1, config.vocab_size, padding_idx=config.vocab_size) for _ in range(radius)]
+            )
+        else:
+            self.revealed_left_logits = None
+            self.revealed_right_logits = None
         self.apply(self._init_module)
         if self.toric_memory_value is not None:
             nn.init.normal_(self.toric_memory_value, mean=0.0, std=0.02)
         if self.graphcg_direction_basis is not None:
             nn.init.orthogonal_(self.graphcg_direction_basis)
+        if self.revealed_left_logits is not None and self.revealed_right_logits is not None:
+            for table in list(self.revealed_left_logits) + list(self.revealed_right_logits):
+                nn.init.zeros_(table.weight)
         nn.init.zeros_(self.output_bias) if self.output_bias is not None else None
 
     def _init_module(self, module: nn.Module) -> None:
         if isinstance(module, nn.Embedding):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.padding_idx is not None:
+                with torch.no_grad():
+                    module.weight[module.padding_idx].zero_()
         elif isinstance(module, nn.Linear):
             nn.init.xavier_uniform_(module.weight)
             if module.bias is not None:
@@ -510,6 +533,113 @@ class DenseRandomOrderToricLM(nn.Module):
         temperature = lo + (hi - lo) * torch.sigmoid(raw)
         scaled = logits.float() / temperature.unsqueeze(-1).clamp_min(1e-4)
         return scaled.to(dtype=logits.dtype), temperature
+
+    def _revealed_neighbor_context_logits(
+        self,
+        target_tokens: torch.Tensor,
+        target_positions: torch.Tensor,
+        *,
+        dtype: torch.dtype,
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Return legal score-before-update logits from revealed graph neighbors.
+
+        Random-order decoding turns a byte string into a graph completion task:
+        positions are vertices and the reveal prefix is the known induced
+        subgraph.  For step ``k`` this head may use tokens already revealed at
+        original positions ``p-r`` or ``p+r`` for ``r <= radius``.  It never
+        reads the current target or any unrevealed future token before scoring
+        the current position.
+        """
+
+        table_context_enabled = self.revealed_left_logits is not None and self.revealed_right_logits is not None
+        prior_enabled = bool(self.config.use_revealed_context_prior) and abs(
+            float(self.config.revealed_context_prior_weight)
+        ) > 0.0
+        if not table_context_enabled and not prior_enabled:
+            return None
+        if target_tokens.shape != target_positions.shape:
+            raise ValueError("target_tokens and target_positions must have the same shape")
+        if target_tokens.ndim != 2:
+            raise ValueError("target tensors must have shape [batch, length]")
+        batch, length = target_tokens.shape
+        device = target_tokens.device
+        vocab = int(self.config.vocab_size)
+        unknown = vocab
+        context_logits = torch.zeros(batch, length, vocab, device=device, dtype=torch.float32)
+        known_counts = torch.zeros(batch, length, device=device, dtype=torch.float32)
+        clipped_targets = target_tokens.clamp(0, vocab - 1).to(torch.long)
+        positions = target_positions.clamp(0, length - 1).to(torch.long)
+        alpha = max(float(self.config.revealed_context_prior_alpha), 1.0e-6)
+        prior_weight = float(self.config.revealed_context_prior_weight)
+        uniform_log_prob = -math.log(max(1, vocab))
+        if prior_enabled:
+            token_one_hot = F.one_hot(clipped_targets, num_classes=vocab).to(torch.float32)
+            strict_prefix_counts = alpha + torch.cumsum(token_one_hot, dim=1) - token_one_hot
+            strict_prefix_total = alpha * vocab + torch.arange(length, device=device, dtype=torch.float32).view(
+                1,
+                length,
+                1,
+            )
+            log_prior = strict_prefix_counts.clamp_min(1.0e-8).log() - strict_prefix_total.log()
+            context_logits = context_logits + prior_weight * (log_prior - uniform_log_prob)
+        if table_context_enabled:
+            neighbor_logits = torch.zeros_like(context_logits)
+            tokens_by_position = torch.full((batch, length), unknown, device=device, dtype=torch.long)
+            tokens_by_position.scatter_(1, positions, clipped_targets)
+            reveal_step = torch.arange(length, device=device, dtype=torch.long).view(1, length).expand(batch, -1)
+            step_by_position = torch.empty(batch, length, device=device, dtype=torch.long)
+            step_by_position.scatter_(1, positions, reveal_step)
+            for offset, (left_table, right_table) in enumerate(
+                zip(self.revealed_left_logits, self.revealed_right_logits),
+                start=1,
+            ):
+                left_pos = positions - offset
+                left_valid = left_pos >= 0
+                left_idx = left_pos.clamp(0, length - 1)
+                left_step = step_by_position.gather(1, left_idx)
+                left_known = left_valid & (left_step < reveal_step)
+                left_tok = tokens_by_position.gather(1, left_idx)
+                left_tok = torch.where(left_known, left_tok, torch.full_like(left_tok, unknown))
+                neighbor_logits = neighbor_logits + left_table(left_tok).float()
+                known_counts = known_counts + left_known.to(torch.float32)
+
+                right_pos = positions + offset
+                right_valid = right_pos < length
+                right_idx = right_pos.clamp(0, length - 1)
+                right_step = step_by_position.gather(1, right_idx)
+                right_known = right_valid & (right_step < reveal_step)
+                right_tok = tokens_by_position.gather(1, right_idx)
+                right_tok = torch.where(right_known, right_tok, torch.full_like(right_tok, unknown))
+                neighbor_logits = neighbor_logits + right_table(right_tok).float()
+                known_counts = known_counts + right_known.to(torch.float32)
+            context_logits = context_logits + float(self.config.revealed_neighbor_context_weight) * neighbor_logits
+        neighbor_slots = 2.0 * len(self.revealed_left_logits) if table_context_enabled else 1.0
+        return context_logits.to(dtype=dtype), known_counts / max(1.0, neighbor_slots)
+
+    def _add_revealed_neighbor_context(
+        self,
+        aux: dict[str, torch.Tensor],
+        target_tokens: torch.Tensor,
+        target_positions: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        context = self._revealed_neighbor_context_logits(
+            target_tokens,
+            target_positions,
+            dtype=aux["logits"].dtype,
+        )
+        if context is None:
+            return aux
+        context_logits, known_fraction = context
+        aux = dict(aux)
+        aux["neural_logits"] = aux["logits"]
+        aux["logits"] = aux["logits"] + context_logits
+        aux["revealed_neighbor_known_fraction"] = known_fraction.mean()
+        aux["revealed_neighbor_context_norm"] = context_logits.float().norm(dim=-1).mean()
+        aux["revealed_context_prior_weight"] = torch.as_tensor(
+            float(self.config.revealed_context_prior_weight),
+            device=context_logits.device,
+        )
+        return aux
 
     def _toric_memory_basis(self, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
         slots = torch.arange(self.config.toric_memory_slots, device=device, dtype=torch.float32)
@@ -1223,6 +1353,19 @@ class DenseRandomOrderToricLM(nn.Module):
         per_token_nll = F.cross_entropy(flat_logits, flat_targets, reduction="none").view_as(target_tokens)
         loss = per_token_nll.mean()
         out: dict[str, torch.Tensor] = {"loss": loss}
+        if "neural_logits" in aux:
+            neural_nll = F.cross_entropy(
+                aux["neural_logits"].reshape(-1, aux["neural_logits"].shape[-1]),
+                flat_targets,
+                reduction="none",
+            ).view_as(target_tokens)
+            out["neural_loss"] = neural_nll.mean()
+        if "revealed_neighbor_known_fraction" in aux:
+            out["revealed_neighbor_known_fraction"] = aux["revealed_neighbor_known_fraction"].float()
+        if "revealed_neighbor_context_norm" in aux:
+            out["revealed_neighbor_context_norm"] = aux["revealed_neighbor_context_norm"].float()
+        if "revealed_context_prior_weight" in aux:
+            out["revealed_context_prior_weight"] = aux["revealed_context_prior_weight"].float()
         hidden = aux.get("hidden")
         if hidden is not None and self.aux_mtp_heads:
             mtp_losses = []
@@ -1341,6 +1484,7 @@ class DenseRandomOrderToricLM(nn.Module):
                 )
                 if not isinstance(aux, dict):
                     raise RuntimeError("expected auxiliary output")
+                aux = self._add_revealed_neighbor_context(aux, batch.target_tokens, batch.target_positions)
                 losses = self._supervised_and_gflownet_losses(aux, batch.target_tokens, batch.target_positions)
                 logp = F.log_softmax(aux["logits"], dim=-1).gather(-1, batch.target_tokens.unsqueeze(-1)).squeeze(-1)
                 sample_logps.append(logp)
@@ -1371,6 +1515,7 @@ class DenseRandomOrderToricLM(nn.Module):
             )
             if not isinstance(aux, dict):
                 raise RuntimeError("expected auxiliary output")
+            aux = self._add_revealed_neighbor_context(aux, batch.target_tokens, batch.target_positions)
             logits = aux["logits"]
             order_aux = aux
             aux_losses = self._supervised_and_gflownet_losses(aux, batch.target_tokens, batch.target_positions)
@@ -1433,6 +1578,7 @@ class DenseRandomOrderToricLM(nn.Module):
             )
             if not isinstance(aux, dict):
                 raise RuntimeError("expected auxiliary output")
+            aux = self._add_revealed_neighbor_context(aux, batch.target_tokens, batch.target_positions)
             sample_log_probs.append(F.log_softmax(aux["logits"].float(), dim=-1))
         base_log_probs = torch.logsumexp(torch.stack(sample_log_probs, dim=0), dim=0) - math.log(
             max(1, gflownet_samples)

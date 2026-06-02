@@ -26,6 +26,16 @@ model:
   bigram_hash_weight: 0.35
   use_caseops_features: true
   caseops_weight: 0.35
+  # Legal score-before-update revealed-context compression.  The deterministic
+  # Dirichlet prefix prior gives immediate adaptive arithmetic-coding pressure,
+  # while the zero-initialized neighbor tables can learn local graph potentials
+  # over already revealed original positions.
+  use_revealed_context_prior: true
+  revealed_context_prior_alpha: 0.25
+  revealed_context_prior_weight: 0.55
+  use_revealed_neighbor_context: true
+  revealed_neighbor_radius: 2
+  revealed_neighbor_context_weight: 0.45
   use_smear_gate: true
   smear_temperature_min: 0.55
   smear_temperature_max: 1.75
@@ -157,11 +167,11 @@ data:
   # A rollback should not replay the identical data order.  The seed is offset
   # by the checkpoint step after loading, while validation remains fixed.
   resume_aware_stream_seed: true
-  # BPB-cliff replay config.  The current recovery starts from the robust
-  # step-2000 checkpoint, just before the first sharp BPB floor around
-  # 2160--2210.  Use the checkpoint step as the data-stream seed offset so a
-  # rollback does not replay the exact same row order that produced the rebound.
-  stream_origin_step: 2000
+  # BPB-cliff replay config.  The current recovery rolls back to the aligned
+  # step-1500 checkpoint, because the step-2250 watcher found the step-2000
+  # retry had left the early likelihood basin.  The resume-aware seed keeps the
+  # stream aligned to the checkpoint while still avoiding exact row replay.
+  stream_origin_step: 1500
   stream_burnin_steps: 0
   document_separator: "\n\n"
   # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
@@ -231,22 +241,22 @@ training:
   # observed in metrics but should not be allowed to kick Adam out of the
   # basin.  This is a stochastic line-search surrogate, not data deletion.
   shock_guard_enabled: true
-  shock_guard_start_step: 2000
-  shock_guard_end_step: 2500
-  shock_guard_loss_ratio: 1.018
-  shock_guard_loss_delta: 0.045
+  shock_guard_start_step: 1500
+  shock_guard_end_step: 1750
+  shock_guard_loss_ratio: 1.020
+  shock_guard_loss_delta: 0.040
   shock_guard_grad_norm: 0.18
-  shock_guard_update_scale: 0.006
+  shock_guard_update_scale: 0.010
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
   # high-entropy examples visible in metrics while preventing them from
   # dominating the optimizer step.
   robust_micro_loss_guard_enabled: true
-  robust_micro_loss_guard_start_step: 2000
-  robust_micro_loss_guard_end_step: 2500
-  robust_micro_loss_guard_ratio: 1.018
-  robust_micro_loss_guard_delta: 0.020
+  robust_micro_loss_guard_start_step: 1500
+  robust_micro_loss_guard_end_step: 1750
+  robust_micro_loss_guard_ratio: 1.020
+  robust_micro_loss_guard_delta: 0.018
   robust_micro_loss_guard_min_scale: 0.08
   precision: bf16
   device: cuda
@@ -298,7 +308,7 @@ complexity:
 
 adaptive_training:
   enabled: true
-  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_02000_bpb_cliff.json
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_revealed_context.json
   # Checkpoint-level controller only: updates after eval windows, never per
   # microbatch.  It keeps the architecture and optimizer state fixed while
   # gently tuning the three controls identified by the 23.25k rollback analysis.
@@ -383,17 +393,16 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_valmix_curvature_damped_1500_2000
+    - name: bpb_revealed_context_entry_1500_1600
       start_step: 1500
-      end_step: 2000
-      # Step-2000 review: the 0.18/0.18 retry gave a slightly lower raw train
-      # BPB but worse known validation behavior, worse branch/answer BPB, and
-      # a clear first/second-derivative bounce around 1700-1800.  Roll back to
-      # the step-1500 checkpoint, restore validation-like medium exposure, and
-      # lower only the optimizer scale so the next gate estimates a smoother
-      # validation-aligned descent direction.
-      lr_multiplier: 0.12
-      grad_clip_norm: 0.40
+      end_step: 1600
+      # Step-2250 watcher review: the step-2000 retry moved into a high-BPB
+      # basin, so recover from the aligned step-1500 checkpoint.  The new
+      # revealed-context prior supplies a legal prequential compression signal;
+      # keep optimizer motion conservative until the prior and neural residual
+      # agree on a descent direction.
+      lr_multiplier: 0.150
+      grad_clip_norm: 0.30
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
@@ -406,6 +415,52 @@ phase_curriculum:
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.00003
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_revealed_context_capture_1600_1700
+      start_step: 1600
+      end_step: 1700
+      # Prior basin runs reached their first strong low near 1690 before
+      # positive curvature appeared.  This phase lowers the scalar step and
+      # keeps all reasoning auxiliaries diagnostic-only so byte likelihood and
+      # legal revealed-context coding own the gradient direction.
+      lr_multiplier: 0.105
+      grad_clip_norm: 0.22
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.35
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.000005
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
+      contrastive_loss_weight: 0.00001
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_revealed_context_rebound_guard_1700_1750
+      start_step: 1700
+      end_step: 1750
+      # Fallback only.  The watcher should pause at 1700; if it does not,
+      # heavily damp the update through the historical rebound band.
+      lr_multiplier: 0.060
+      grad_clip_norm: 0.16
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.30
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      graphcg_loss_weight: 0.000005
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
+      contrastive_loss_weight: 0.0
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
