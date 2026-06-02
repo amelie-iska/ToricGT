@@ -9125,3 +9125,36 @@ propagate the loop variables into the watcher environment so restarts preserve
 the same objective.  The loop remains BPB-first: Toric BGG and other structural
 metrics stay diagnostic-only until they improve BPB or a later gate explicitly
 activates them.
+
+### Review 1 Decision: Better BPB Surface Required
+
+The first loop review analyzed
+`checkpoints/parameter_golf_oai_dense/random_order_step_00002150.pt` from
+`outputs/post_resume_analysis/oai-bpb-revealed-context-02125-20260602T200545Z/step-00002150`.
+The result is not promotable:
+
+```text
+checkpoint train_bpb: 4.052447
+checkpoint best_val_bpb: 4.696106
+geometry mean_bpb: 4.824010
+geometry best_bpb: 4.055717
+geometry best_answer_bpb: 3.622722
+```
+
+The core metric plot shows BPB, loss, and gradient norm rising together through
+the measured window, despite the byte-only trust-region replay.  The simplex
+plot does not show a branch allocation near the requested BPB regime either.
+The correct action is therefore `EDIT_AND_RESTART`, but not another ordinary
+hard-shard cliff replay.  The requested `<=1.2` target is the Parameter-Golf
+FineWeb BPB regime; the current hard ToricGT validation BPB is an auxiliary
+reasoning difficulty metric and is not comparable to the leaderboard target.
+
+The better-strategy sentinel has been written to:
+
+```text
+outputs/bpb_codex_loop_stop
+```
+
+Next action: start the official-style FineWeb BPB scaffold, log `val_bpb`
+periodically, and use that as the primary BPB gate while keeping the ToricGT hard
+reasoning diagnostics as a secondary gate.
