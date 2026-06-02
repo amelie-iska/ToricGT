@@ -75,6 +75,13 @@ def main() -> None:
                             "fineweb/target_bpb": args.target_bpb,
                             "fineweb/target_reached": float(best_bpb <= args.target_bpb),
                             "fineweb/train_time_ms": float(val.group("ms")),
+                            # Generic aliases keep normal BPB dashboards useful.
+                            "val/loss": float(val.group("loss")),
+                            "val/bpb": bpb,
+                            "bpb/val": bpb,
+                            "bpb/best": best_bpb,
+                            "bpb/target": args.target_bpb,
+                            "bpb/target_reached": float(best_bpb <= args.target_bpb),
                         },
                         step=step,
                     )
@@ -91,6 +98,7 @@ def main() -> None:
                         {
                             "fineweb/train_loss": float(train.group("loss")),
                             "fineweb/train_time_ms": float(train.group("ms")),
+                            "train/loss": float(train.group("loss")),
                         },
                         step=step,
                     )
