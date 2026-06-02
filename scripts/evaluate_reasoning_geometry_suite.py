@@ -1258,11 +1258,32 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
     fig, ax = plt.subplots(figsize=(8.2, 7), facecolor="#030712")
     ax.set_facecolor("#030712")
     if len(xs) > 12:
-        tri = mtri.Triangulation(xs, ys)
-        tri.set_mask(_triangle_long_edge_mask(tri.triangles, xs, ys, edge_quantile=0.82))
-        contour = ax.tricontourf(tri, zs, levels=28, cmap="magma", alpha=0.92)
-        ax.tricontour(tri, zs, levels=9, colors="#dff8ff", linewidths=0.22, alpha=0.35)
-        cbar = fig.colorbar(contour, ax=ax, fraction=0.04, pad=0.02)
+        x_arr = np.asarray(xs, dtype=float)
+        y_arr = np.asarray(ys, dtype=float)
+        z_arr = np.asarray(zs, dtype=float)
+        bins = 96
+        z_sum, x_edges, y_edges = np.histogram2d(x_arr, y_arr, bins=bins, weights=z_arr)
+        counts, _, _ = np.histogram2d(x_arr, y_arr, bins=(x_edges, y_edges))
+        z_mean = np.divide(z_sum, counts, out=np.full_like(z_sum, np.nan), where=counts > 0)
+        image = ax.imshow(
+            np.ma.masked_invalid(z_mean.T),
+            origin="lower",
+            extent=[float(x_edges[0]), float(x_edges[-1]), float(y_edges[0]), float(y_edges[-1])],
+            cmap="magma",
+            interpolation="bilinear",
+            alpha=0.90,
+            aspect="auto",
+        )
+        ax.contour(
+            0.5 * (x_edges[:-1] + x_edges[1:]),
+            0.5 * (y_edges[:-1] + y_edges[1:]),
+            np.ma.masked_invalid(z_mean.T),
+            levels=8,
+            colors="#dff8ff",
+            linewidths=0.25,
+            alpha=0.38,
+        )
+        cbar = fig.colorbar(image, ax=ax, fraction=0.04, pad=0.02)
     else:
         scatter = ax.scatter(xs, ys, c=zs, cmap="magma", s=8)
         cbar = fig.colorbar(scatter, ax=ax, fraction=0.04, pad=0.02)
@@ -1273,14 +1294,14 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
         path = branch["projected_path"]
         step = max(1, path.shape[0] // 160)
         focused_path = _focus_project(path[::step, :2], focus_center, focus_scale)
-        ax.plot(focused_path[:, 0], focused_path[:, 1], color="#6df6ff", alpha=0.28, linewidth=0.8)
+        ax.plot(focused_path[:, 0], focused_path[:, 1], color="#6df6ff", alpha=0.18, linewidth=0.65)
     ax.set_xlabel("focused PC1", color="white")
     ax.set_ylabel("focused PC2", color="white")
     ax.set_title(f"Embedding energy landscape R{record_meta['record_index']}", color="white")
     ax.text(
         0.015,
         0.02,
-        "asinh-focused projection; long Delaunay edges masked",
+        "asinh-focused projection; binned local-NLL heatmap",
         transform=ax.transAxes,
         color="#e8fbff",
         fontsize=8,
@@ -1367,7 +1388,7 @@ def write_interactive_energy_landscape(
     try:
         tri = mtri.Triangulation(xs, ys)
         triangles = np.asarray(tri.triangles, dtype=int)
-        tri_mask = _triangle_long_edge_mask(triangles, xs, ys, edge_quantile=0.82)
+        tri_mask = _triangle_long_edge_mask(triangles, xs, ys, edge_quantile=0.68)
         triangles = triangles[~tri_mask]
         if triangles.size:
             mesh_trace = {
@@ -1453,6 +1474,7 @@ def write_interactive_energy_landscape(
                     name_prefix="energy toric/tropical",
                 )
             )
+            traces.extend(_newton_polytope_shadow_traces(best_branch.get("toric_shadow"), best_points, name_prefix="energy toric"))
             traces.append(
                 {
                     "type": "scatter3d",
@@ -1854,6 +1876,16 @@ def _projected_chamber_traces(
         margin = np.resize(margin, points.shape[0])
     lifted = points.copy()
     lifted[:, 2] = lifted[:, 2] + z_offset
+    palette = ["#2de2e6", "#ff4fd8", "#ffd166", "#8cff6a", "#ad7cff", "#ff7a45", "#7bdff2", "#f15bb5", "#b9fbc0", "#fee440"]
+    face_centroids: dict[int, np.ndarray] = {}
+    face_counts: dict[int, int] = {}
+    for face in np.unique(active):
+        face_int = int(face)
+        mask = active == face_int
+        count = int(np.count_nonzero(mask))
+        if count:
+            face_centroids[face_int] = lifted[mask].mean(axis=0)
+            face_counts[face_int] = count
     transitions = np.flatnonzero(np.diff(active) != 0) + 1 if active.size > 1 else np.asarray([], dtype=int)
     if transitions.size:
         trans = lifted[transitions]
@@ -1873,6 +1905,60 @@ def _projected_chamber_traces(
                 "hoverinfo": "text",
             }
         )
+        extent = float(np.linalg.norm(np.ptp(lifted, axis=0))) if lifted.size else 1.0
+        wall_radius = max(0.055, min(0.42, 0.050 * extent))
+        wall_positions = transitions
+        if wall_positions.size > 18:
+            wall_positions = wall_positions[np.linspace(0, wall_positions.size - 1, num=18).round().astype(int)]
+        for wall_rank, pos in enumerate(wall_positions.tolist()):
+            prev_face = int(active[max(0, pos - 1)])
+            next_face = int(active[pos])
+            center = 0.5 * (lifted[max(0, pos - 1)] + lifted[pos])
+            normal = face_centroids.get(next_face, lifted[pos]) - face_centroids.get(prev_face, lifted[max(0, pos - 1)])
+            normal_norm = float(np.linalg.norm(normal))
+            if normal_norm < 1e-8:
+                normal = lifted[pos] - lifted[max(0, pos - 1)]
+                normal_norm = float(np.linalg.norm(normal))
+            if normal_norm < 1e-8:
+                continue
+            normal = normal / normal_norm
+            ref = np.asarray([0.0, 0.0, 1.0], dtype=float)
+            if abs(float(np.dot(normal, ref))) > 0.90:
+                ref = np.asarray([0.0, 1.0, 0.0], dtype=float)
+            u = np.cross(normal, ref)
+            u = u / max(float(np.linalg.norm(u)), 1e-8)
+            v = np.cross(normal, u)
+            v = v / max(float(np.linalg.norm(v)), 1e-8)
+            corners = np.stack(
+                [
+                    center - wall_radius * u - wall_radius * v,
+                    center + wall_radius * u - wall_radius * v,
+                    center + wall_radius * u + wall_radius * v,
+                    center - wall_radius * u + wall_radius * v,
+                ],
+                axis=0,
+            )
+            traces.append(
+                {
+                    "type": "mesh3d",
+                    "x": corners[:, 0].tolist(),
+                    "y": corners[:, 1].tolist(),
+                    "z": corners[:, 2].tolist(),
+                    "i": [0, 0],
+                    "j": [1, 2],
+                    "k": [2, 3],
+                    "color": "#ffd166" if wall_rank % 2 == 0 else "#ff4fd8",
+                    "opacity": 0.18,
+                    "name": f"{name_prefix} fitted wall {prev_face}->{next_face}",
+                    "hovertext": (
+                        f"empirical wall patch<br>step {int(idx[pos])}<br>"
+                        f"active face {prev_face} → {next_face}<br>"
+                        f"margin={float(margin[pos]):.4f}"
+                    ),
+                    "hoverinfo": "text",
+                    "showlegend": wall_rank < 3,
+                }
+            )
     finite_margin = margin[np.isfinite(margin)]
     if finite_margin.size:
         low_threshold = float(np.quantile(finite_margin, 0.12))
@@ -1895,6 +1981,34 @@ def _projected_chamber_traces(
                     "hoverinfo": "text",
                 }
             )
+    ranked_faces = sorted(face_counts, key=lambda face: face_counts[face], reverse=True)[:8]
+    for face_rank, face in enumerate(ranked_faces):
+        mask = active == int(face)
+        if int(np.count_nonzero(mask)) < 4:
+            continue
+        cluster = lifted[mask]
+        if cluster.shape[0] > 120:
+            select = np.linspace(0, cluster.shape[0] - 1, num=120).round().astype(int)
+            cluster = cluster[select]
+        traces.append(
+            {
+                "type": "mesh3d",
+                "x": cluster[:, 0].tolist(),
+                "y": cluster[:, 1].tolist(),
+                "z": cluster[:, 2].tolist(),
+                "alphahull": 0,
+                "color": palette[face_rank % len(palette)],
+                "opacity": 0.105,
+                "name": f"{name_prefix} chamber polytope face {int(face)}",
+                "hovertext": (
+                    f"empirical chamber polytope<br>active face={int(face)}<br>"
+                    f"states={face_counts[int(face)]}<br>"
+                    f"mean margin={float(np.mean(margin[mask])):.4f}"
+                ),
+                "hoverinfo": "text",
+                "showlegend": face_rank < 6,
+            }
+        )
     centroid = lifted.mean(axis=0)
     ray_x: list[float | None] = []
     ray_y: list[float | None] = []
@@ -1950,6 +2064,75 @@ def _projected_chamber_traces(
                 "hoverinfo": "text",
             }
         )
+    return traces
+
+
+def _newton_polytope_shadow_traces(
+    shadow: dict[str, Any] | None,
+    plotted: np.ndarray,
+    *,
+    name_prefix: str = "toric",
+) -> list[dict[str, Any]]:
+    """Create a compact Newton-polytope shadow from toric audit exponents."""
+
+    if not shadow or plotted.ndim != 2 or plotted.shape[1] < 3:
+        return []
+    exponents = np.asarray(shadow.get("pseudo_exponents", []), dtype=float)
+    if exponents.ndim != 2 or exponents.shape[0] < 4:
+        return []
+    exponents = exponents - exponents.mean(axis=0, keepdims=True)
+    try:
+        _, _, vh = np.linalg.svd(exponents, full_matrices=False)
+        coords = exponents @ vh[:3].T
+    except np.linalg.LinAlgError:
+        coords = exponents[:, :3]
+        if coords.shape[1] < 3:
+            coords = np.pad(coords, ((0, 0), (0, 3 - coords.shape[1])))
+    coords = coords - coords.mean(axis=0, keepdims=True)
+    norm = float(np.max(np.linalg.norm(coords, axis=1))) if coords.size else 1.0
+    coords = coords / max(norm, 1e-8)
+    span = np.ptp(plotted, axis=0)
+    scale = max(0.20, min(0.65, 0.16 * float(np.linalg.norm(span))))
+    anchor = np.asarray(
+        [
+            float(np.nanmin(plotted[:, 0]) + 0.14 * max(span[0], 1e-6)),
+            float(np.nanmax(plotted[:, 1]) - 0.14 * max(span[1], 1e-6)),
+            float(np.nanmax(plotted[:, 2]) - 0.10 * max(span[2], 1e-6)),
+        ],
+        dtype=float,
+    )
+    coords = anchor[None, :] + scale * coords
+    traces: list[dict[str, Any]] = [
+        {
+            "type": "mesh3d",
+            "x": coords[:, 0].tolist(),
+            "y": coords[:, 1].tolist(),
+            "z": coords[:, 2].tolist(),
+            "alphahull": 0,
+            "color": "#2de2e6",
+            "opacity": 0.16,
+            "name": f"{name_prefix} Newton-polytope shadow",
+            "hovertext": (
+                "Newton-polytope shadow<br>"
+                "vertices are deterministic pseudo-exponents used by the empirical toric fan audit"
+            ),
+            "hoverinfo": "text",
+        },
+        {
+            "type": "scatter3d",
+            "mode": "markers+text",
+            "x": coords[:, 0].tolist(),
+            "y": coords[:, 1].tolist(),
+            "z": coords[:, 2].tolist(),
+            "marker": {"size": 5, "color": "#ffd166", "line": {"color": "white", "width": 0.5}},
+            "text": [f"m{j}" for j in range(coords.shape[0])],
+            "textfont": {"color": "#e8fbff", "size": 8},
+            "textposition": "top center",
+            "name": f"{name_prefix} pseudo-exponent vertices",
+            "hoverinfo": "text",
+            "hovertext": [f"pseudo-exponent m{j}" for j in range(coords.shape[0])],
+        },
+    ]
     return traces
 
 
@@ -2041,6 +2224,7 @@ def write_interactive_projected_simplicial_toric_geometry(
             name_prefix="projected toric/tropical",
         )
     )
+    traces.extend(_newton_polytope_shadow_traces(best.get("toric_shadow"), plotted, name_prefix="projected toric"))
 
     margin_lo = float(np.nanmin(plotted_chart_margin)) if plotted_chart_margin.size else 0.0
     margin_hi = float(np.nanmax(plotted_chart_margin)) if plotted_chart_margin.size else 1.0
@@ -2105,8 +2289,8 @@ def write_interactive_projected_simplicial_toric_geometry(
     )
     subtitle = (
         "Focused hidden-state coordinates use asinh((PC-median)/robust-scale). Translucent triangles and cyan edges "
-        "are local step-level Vietoris-Rips complexes; vertex colors are empirical toric active faces; gold markers "
-        "are chamber crossings."
+        "are local step-level Vietoris-Rips complexes; translucent chamber hulls are empirical active-face polytopes; "
+        "gold/magenta sheets are fitted wall patches; the inset hull is the Newton-polytope shadow used by the fan audit."
     )
     density_menu = _simplicial_density_menu(traces)
     html_text = f"""<!doctype html>
@@ -2179,16 +2363,16 @@ def plot_toric_phase_simplicial_trajectory(
     diffs = plotted[:, None, :] - plotted[None, :, :]
     chord = np.linalg.norm(diffs, axis=-1)
     local_edges: list[tuple[int, int]] = []
-    window = min(14, max(6, plotted.shape[0] // 10))
+    window = min(10, max(5, plotted.shape[0] // 14))
     for start in range(0, plotted.shape[0], max(4, window // 2)):
         stop = min(plotted.shape[0], start + window)
         sub = chord[start:stop, start:stop]
         if sub.shape[0] < 4:
             continue
-        threshold = float(np.quantile(sub[sub > 1e-8], 0.10)) if np.any(sub > 1e-8) else 0.0
+        threshold = float(np.quantile(sub[sub > 1e-8], 0.035)) if np.any(sub > 1e-8) else 0.0
         for i in range(start, stop):
             for j in range(i + 1, stop):
-                if chord[i, j] <= threshold and len(local_edges) < 100:
+                if chord[i, j] <= threshold and len(local_edges) < 42:
                     local_edges.append((i, j))
     for i, j in local_edges:
         ax.plot(
@@ -2196,8 +2380,8 @@ def plot_toric_phase_simplicial_trajectory(
             [plotted[i, 1], plotted[j, 1]],
             [plotted[i, 2], plotted[j, 2]],
             color="#6df6ff",
-            alpha=0.14,
-            linewidth=0.55,
+            alpha=0.08,
+            linewidth=0.32,
         )
 
     for start in range(0, plotted.shape[0] - window, max(6, window)):
@@ -2355,14 +2539,14 @@ def write_interactive_toric_phase_simplicial_trajectory(
     edge_y: list[float | None] = []
     edge_z: list[float | None] = []
     local_edges: list[tuple[int, int]] = []
-    window = min(14, max(6, plotted.shape[0] // 10))
+    window = min(10, max(5, plotted.shape[0] // 14))
     default_level = str(best.get("simplicial_default_level", "sparse"))
     if default_level not in {"sparse", "default", "dense"}:
         default_level = "sparse"
     for level_label, edge_quantile, max_edges, opacity in (
-        ("sparse", 0.07, 80, 0.16),
-        ("default", 0.11, 130, 0.20),
-        ("dense", 0.17, 220, 0.24),
+        ("sparse", 0.035, 42, 0.10),
+        ("default", 0.075, 80, 0.14),
+        ("dense", 0.13, 145, 0.18),
     ):
         edge_x = []
         edge_y = []
@@ -2646,20 +2830,20 @@ def plot_toric_phase_winding_collection(
     periodic_delta = np.minimum(delta, 1.0 - delta)
     phase_chord = np.linalg.norm(periodic_delta, axis=-1)
     local_edges: list[tuple[int, int]] = []
-    window = min(14, max(6, phase_points.shape[0] // 10))
+    window = min(10, max(5, phase_points.shape[0] // 14))
     for start in range(0, phase_points.shape[0], max(4, window // 2)):
         stop = min(phase_points.shape[0], start + window)
         sub = phase_chord[start:stop, start:stop]
         if sub.shape[0] < 4:
             continue
-        threshold = float(np.quantile(sub[sub > 1e-8], 0.10)) if np.any(sub > 1e-8) else 0.0
+        threshold = float(np.quantile(sub[sub > 1e-8], 0.035)) if np.any(sub > 1e-8) else 0.0
         for i in range(start, stop):
             for j in range(i + 1, stop):
-                if phase_chord[i, j] <= threshold and len(local_edges) < 100:
+                if phase_chord[i, j] <= threshold and len(local_edges) < 42:
                     local_edges.append((i, j))
     for i, j in local_edges:
         if abs(u_best[i] - u_best[j]) <= 0.5 and abs(v_best[i] - v_best[j]) <= 0.5:
-            ax_flat.plot([u_best[i], u_best[j]], [v_best[i], v_best[j]], color="#b8fbff", alpha=0.10, linewidth=0.45)
+            ax_flat.plot([u_best[i], u_best[j]], [v_best[i], v_best[j]], color="#b8fbff", alpha=0.08, linewidth=0.28)
 
     ax_flat.scatter(u_best, v_best, c=energy_best, s=18, cmap="magma", alpha=0.90, edgecolor="#06111f", linewidth=0.15)
     ax_flat.scatter(u_best[0], v_best[0], s=72, color="#6df6ff", edgecolor="white", linewidth=0.8, zorder=5)
@@ -2693,8 +2877,8 @@ def plot_toric_phase_winding_collection(
             [torus_best[i, 1], torus_best[j, 1]],
             [torus_best[i, 2], torus_best[j, 2]],
             color="#6df6ff",
-            alpha=0.10,
-            linewidth=0.45,
+            alpha=0.08,
+            linewidth=0.28,
         )
     for start in range(0, torus_best.shape[0] - window, max(6, window)):
         source = torus_best[start : start + window]

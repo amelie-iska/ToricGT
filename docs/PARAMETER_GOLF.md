@@ -239,13 +239,38 @@ The projected hidden-space companion,
 `*_projected_simplicial_toric_geometry.html`, keeps the actual reasoning
 trajectory in 3D PCA coordinates, overlays the step-level Vietoris-Rips
 1-skeleton and translucent 2-simplices, colors vertices by empirical toric
-active face, marks chamber crossings, and draws empirical normal-fan rays from
-the trajectory centroid to occupied fan cells. Both hidden-space HTML views now
-include sparse/default/dense buttons for the local simplicial radius parameter.
+active face, marks chamber crossings, draws empirical normal-fan rays from
+the trajectory centroid to occupied fan cells, renders translucent active-face
+chamber polytopes, fits local wall sheets at observed active-face crossings,
+and includes an inset Newton-polytope shadow from the pseudo-exponents used by
+the empirical fan audit. Both hidden-space HTML views now include
+sparse/default/dense buttons for the local simplicial radius parameter, while
+Plotly legend toggles control branches, chambers, walls, polytopes, and local
+complex layers.
 The periodic analysis defaults are controlled by
 `--simplicial-radius-quantiles`, `--simplicial-default-level`,
 `--simplicial-windows`, `--simplicial-max-edges-per-window`, and
 `--simplicial-max-triangles-per-window`.
+
+## Anticipative Trajectory Memory
+
+The current `oai` branch includes a training-ready trajectory-memory layer for
+later graph-heavy phases. Completed graph-of-thought paths are summarized into
+compact keys containing pooled hidden state, endpoint displacement,
+speed/curvature, local Vietoris-Rips density, toric phase moments, and a
+quality proxy. `TrajectoryMemoryIndex` stores those keys in JSONL and performs
+cosine retrieval. `TrajectoryRetrievalHead` learns an in-batch retrieval score
+whose teacher favors trajectories with aligned GraphCG charts, coherent toric
+phase shadows, similar local topology, and lower local NLL.
+
+The active config enables the head but keeps `trajectory_memory_loss_weight` at
+zero during likelihood-first recovery. Later GFlowNet/GraphCG/topology phases
+turn on a small auxiliary weight. W&B logs
+`train/trajectory_memory_loss`, `train/trajectory_memory_ce`,
+`train/trajectory_memory_distill_loss`, `train/trajectory_memory_quality_loss`,
+`train/trajectory_memory_recall1`, `train/trajectory_memory_entropy`, and
+`train/trajectory_memory_score_gap`. The staged implementation plan is recorded
+in `planning/TRAJECTORY-MEMORY-RETRIEVAL.md`.
 
 The same window hierarchy now includes DEC-style conservative flow diagnostics
 adapted from Mohamed, Hirani, and Samtaney's DEC discretization of

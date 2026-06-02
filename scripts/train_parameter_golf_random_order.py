@@ -510,6 +510,7 @@ PHASE_CONTROL_KEYS = {
     "analogy_lattice_loss_weight",
     "koszul_persistence_loss_weight",
     "trajectory_flow_loss_weight",
+    "trajectory_memory_loss_weight",
     "contrastive_loss_weight",
     "mtp_loss_weight",
     "toric_geometry_loss_weight",
@@ -1200,7 +1201,7 @@ def load_state_dict_with_optional_position_resize(
         else:
             del state_dict[key]
     incompatible = model.load_state_dict(state_dict, strict=False)
-    allowed_missing_prefixes = ("graphcg_", "toric_geometry_probe.")
+    allowed_missing_prefixes = ("graphcg_", "toric_geometry_probe.", "trajectory_memory_head.")
     bad_missing = [key for key in incompatible.missing_keys if not key.startswith(allowed_missing_prefixes)]
     bad_unexpected = list(incompatible.unexpected_keys)
     if bad_missing or bad_unexpected:
@@ -1895,6 +1896,20 @@ def main() -> None:
         koszul_rank_temperature=config_get(file_config, "model", "koszul_rank_temperature", 0.05),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
+        use_trajectory_memory_head=config_get(file_config, "model", "use_trajectory_memory_head", False),
+        trajectory_memory_projection_dim=config_get(file_config, "model", "trajectory_memory_projection_dim", 128),
+        trajectory_memory_teacher_temperature=config_get(file_config, "model", "trajectory_memory_teacher_temperature", 0.20),
+        trajectory_memory_retrieval_temperature=config_get(
+            file_config,
+            "model",
+            "trajectory_memory_retrieval_temperature",
+            0.20,
+        ),
+        trajectory_memory_distill_weight=config_get(file_config, "model", "trajectory_memory_distill_weight", 0.25),
+        trajectory_memory_quality_weight=config_get(file_config, "model", "trajectory_memory_quality_weight", 0.10),
+        trajectory_memory_topology_weight=config_get(file_config, "model", "trajectory_memory_topology_weight", 0.20),
+        trajectory_memory_graphcg_weight=config_get(file_config, "model", "trajectory_memory_graphcg_weight", 0.30),
+        trajectory_memory_toric_weight=config_get(file_config, "model", "trajectory_memory_toric_weight", 0.20),
         aux_mtp_offsets=args.aux_mtp_offsets
         if args.aux_mtp_offsets is not None
         else config_get(file_config, "model", "aux_mtp_offsets", 2),
@@ -2025,6 +2040,7 @@ def main() -> None:
         if args.trajectory_flow_loss_weight is not None
         else config_get(file_config, "training", "trajectory_flow_loss_weight", 0.002)
     )
+    trajectory_memory_loss_weight = config_get(file_config, "training", "trajectory_memory_loss_weight", 0.0)
     trajectory_flow_target = (
         args.trajectory_flow_target
         if args.trajectory_flow_target is not None
@@ -2533,6 +2549,8 @@ def main() -> None:
                     "contrastive_loss_weight": contrastive_loss_weight,
                     "trajectory_flow_loss_weight": trajectory_flow_loss_weight,
                     "trajectory_flow_target": trajectory_flow_target,
+                    "trajectory_memory_loss_weight": trajectory_memory_loss_weight,
+                    "use_trajectory_memory_head": model_config.use_trajectory_memory_head,
                     "eval_score_first_bias_lr": eval_score_first_bias_lr,
                     "eval_score_first_bias_decay": eval_score_first_bias_decay,
                     "eval_score_first_bias_clip": eval_score_first_bias_clip,
@@ -2688,6 +2706,8 @@ def main() -> None:
             "toric_geometry_loss_weight": toric_geometry_loss_weight,
             "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
             "trajectory_flow_target": trajectory_flow_target,
+            "trajectory_memory_loss_weight": trajectory_memory_loss_weight,
+            "use_trajectory_memory_head": model_config.use_trajectory_memory_head,
             "qat_start_step": qat_start_step,
             "qat_warmup_steps": qat_warmup_steps,
             "complex_mix_ratio": complex_mix_ratio,
@@ -2778,6 +2798,14 @@ def main() -> None:
         step_trajectory_flow_penalty = 0.0
         step_trajectory_kinetic = 0.0
         step_trajectory_viscous = 0.0
+        step_trajectory_memory_loss = 0.0
+        step_trajectory_memory_ce = 0.0
+        step_trajectory_memory_distill_loss = 0.0
+        step_trajectory_memory_quality_loss = 0.0
+        step_trajectory_memory_recall1 = 0.0
+        step_trajectory_memory_entropy = 0.0
+        step_trajectory_memory_score_gap = 0.0
+        step_trajectory_memory_teacher_diag_prob = 0.0
         step_smear_temperature = 0.0
         step_toric_memory_entropy = 0.0
         step_toric_entropy_loss = 0.0
@@ -2925,6 +2953,10 @@ def main() -> None:
             0.0,
             control_float(phase_controls, "trajectory_flow_loss_weight", trajectory_flow_loss_weight),
         )
+        effective_trajectory_memory_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "trajectory_memory_loss_weight", trajectory_memory_loss_weight),
+        )
         effective_toric_entropy_loss_weight = max(
             0.0,
             control_float(phase_controls, "toric_entropy_loss_weight", toric_entropy_loss_weight),
@@ -2992,6 +3024,7 @@ def main() -> None:
                 )
                 contrastive_loss = out.get("contrastive_loss", torch.zeros((), device=device))
                 trajectory_flow_loss = out.get("trajectory_flow_loss", torch.zeros((), device=device))
+                trajectory_memory_loss = out.get("trajectory_memory_loss", torch.zeros((), device=device))
                 if float(trajectory_flow_target) > 0:
                     trajectory_flow_penalty = torch.relu(trajectory_flow_loss - float(trajectory_flow_target)).pow(2)
                 else:
@@ -3014,6 +3047,7 @@ def main() -> None:
                     + effective_qat_loss_weight * qat_loss
                     + effective_contrastive_loss_weight * contrastive_loss
                     + effective_trajectory_flow_loss_weight * trajectory_flow_penalty
+                    + effective_trajectory_memory_loss_weight * trajectory_memory_loss
                     + effective_toric_entropy_loss_weight * toric_entropy_loss
                 )
                 micro_guard_scale = 1.0
@@ -3253,6 +3287,20 @@ def main() -> None:
             step_trajectory_flow_penalty += float(trajectory_flow_penalty.detach().cpu())
             step_trajectory_kinetic += float(out.get("trajectory_kinetic_energy", torch.zeros(())).detach().cpu())
             step_trajectory_viscous += float(out.get("trajectory_viscous_dissipation", torch.zeros(())).detach().cpu())
+            step_trajectory_memory_loss += float(trajectory_memory_loss.detach().cpu())
+            step_trajectory_memory_ce += float(out.get("trajectory_memory_ce", torch.zeros(())).detach().cpu())
+            step_trajectory_memory_distill_loss += float(
+                out.get("trajectory_memory_distill_loss", torch.zeros(())).detach().cpu()
+            )
+            step_trajectory_memory_quality_loss += float(
+                out.get("trajectory_memory_quality_loss", torch.zeros(())).detach().cpu()
+            )
+            step_trajectory_memory_recall1 += float(out.get("trajectory_memory_recall1", torch.zeros(())).detach().cpu())
+            step_trajectory_memory_entropy += float(out.get("trajectory_memory_entropy", torch.zeros(())).detach().cpu())
+            step_trajectory_memory_score_gap += float(out.get("trajectory_memory_score_gap", torch.zeros(())).detach().cpu())
+            step_trajectory_memory_teacher_diag_prob += float(
+                out.get("trajectory_memory_teacher_diag_prob", torch.zeros(())).detach().cpu()
+            )
             step_smear_temperature += float(out.get("smear_temperature", torch.zeros(())).detach().cpu())
             step_toric_memory_entropy += float(out.get("toric_memory_entropy", torch.zeros(())).detach().cpu())
             step_toric_entropy_loss += float(toric_entropy_loss.detach().cpu())
@@ -3336,6 +3384,14 @@ def main() -> None:
         step_trajectory_flow_penalty /= grad_accum
         step_trajectory_kinetic /= grad_accum
         step_trajectory_viscous /= grad_accum
+        step_trajectory_memory_loss /= grad_accum
+        step_trajectory_memory_ce /= grad_accum
+        step_trajectory_memory_distill_loss /= grad_accum
+        step_trajectory_memory_quality_loss /= grad_accum
+        step_trajectory_memory_recall1 /= grad_accum
+        step_trajectory_memory_entropy /= grad_accum
+        step_trajectory_memory_score_gap /= grad_accum
+        step_trajectory_memory_teacher_diag_prob /= grad_accum
         step_smear_temperature /= grad_accum
         step_toric_memory_entropy /= grad_accum
         step_toric_entropy_loss /= grad_accum
@@ -3527,6 +3583,15 @@ def main() -> None:
                 "train/trajectory_flow_loss_weight": effective_trajectory_flow_loss_weight,
                 "train/trajectory_kinetic_energy": step_trajectory_kinetic,
                 "train/trajectory_viscous_dissipation": step_trajectory_viscous,
+                "train/trajectory_memory_loss": step_trajectory_memory_loss,
+                "train/trajectory_memory_ce": step_trajectory_memory_ce,
+                "train/trajectory_memory_distill_loss": step_trajectory_memory_distill_loss,
+                "train/trajectory_memory_quality_loss": step_trajectory_memory_quality_loss,
+                "train/trajectory_memory_recall1": step_trajectory_memory_recall1,
+                "train/trajectory_memory_entropy": step_trajectory_memory_entropy,
+                "train/trajectory_memory_score_gap": step_trajectory_memory_score_gap,
+                "train/trajectory_memory_teacher_diag_prob": step_trajectory_memory_teacher_diag_prob,
+                "train/trajectory_memory_loss_weight": effective_trajectory_memory_loss_weight,
                 "train/smear_temperature": step_smear_temperature,
                 "train/toric_memory_entropy": step_toric_memory_entropy,
                 "train/toric_entropy_floor": float(toric_entropy_floor),

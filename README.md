@@ -652,9 +652,12 @@ irrational rotation-algebra phase path onto a torus, overlays local
 Vietoris-Rips edges, and draws the soft analogical maps between reasoning
 windows. The companion `*_projected_simplicial_toric_geometry.html` hidden-space
 plot adds actual step-level Vietoris-Rips 1/2-simplices, toric active-face
-coloring, chamber crossings, and empirical normal-fan rays. The interactive
+coloring, chamber crossings, empirical normal-fan rays, translucent chamber
+polytopes, fitted tropical/toric wall sheets, and an inset Newton-polytope
+shadow from the same pseudo-exponents used by the fan audit. The interactive
 HTML plots include sparse/default/dense buttons for the radius-quantile
-parameter of the local simplicial complex; periodic runs can set defaults with
+parameter of the local simplicial complex; individual chamber, wall, polytope,
+and branch layers can also be toggled from the Plotly legend. Periodic runs can set defaults with
 `--simplicial-radius-quantiles`, `--simplicial-default-level`,
 `--simplicial-windows`, `--simplicial-max-edges-per-window`, and
 `--simplicial-max-triangles-per-window`. These plots sit
@@ -687,7 +690,23 @@ probe is excluded from Parameter-Golf artifact export, so it can shape training
 without increasing deploy bytes. W&B reports `train/toric_geometry_loss`,
 `train/toric_active_face_margin`, `train/toric_bend_magnitude`,
 `train/toric_binomial_residual`, `train/toric_coxeter_loss`,
-`train/toric_braid_loss`, and `train/toric_leaf_residual`. The geometry suite
+`train/toric_braid_loss`, and `train/toric_leaf_residual`.
+
+The `oai` branch now includes an optional anticipative reasoning-trajectory
+memory head. Completed graph-of-thought trajectories are summarized by pooled
+hidden states, endpoint displacement, local speed/curvature, Vietoris-Rips
+density, toric phase moments, and trajectory quality. A compact JSONL index
+(`TrajectoryMemoryIndex`) supports cosine search over those keys, while the
+training head (`TrajectoryRetrievalHead`) learns in-batch retrieval targets
+using GraphCG chart similarity, toric phase similarity, topology similarity,
+and low local NLL. The active training config enables the head for checkpoint
+compatibility but keeps `trajectory_memory_loss_weight: 0.0` through
+likelihood-first recovery; later GFlowNet/GraphCG/topology phases turn on a
+small weight. W&B reports `train/trajectory_memory_loss`,
+`train/trajectory_memory_recall1`, `train/trajectory_memory_entropy`,
+`train/trajectory_memory_score_gap`, and the CE/distillation/quality
+sub-losses. The detailed staged plan is in
+[planning/TRAJECTORY-MEMORY-RETRIEVAL.md](/home/iska/Documents/amelie/bio/ToricGT/planning/TRAJECTORY-MEMORY-RETRIEVAL.md).
 adds `*_toric_shadow_audit.png`, showing occupied fan cells, active-face
 margins, bend magnitudes, branch fan coverage, and phase-leaf residuals.
 It also writes `*_toric_slepian_audit.png`, a finite PSWF/Slepian diagnostic
@@ -959,13 +978,17 @@ Ramachandran-style reasoning torsion plots, and energy/fitness landscapes
 whose low-energy basins represent high-quality terminal reasoning states.  The
 analysis suite also emits `*_energy_landscape.html` files: rotatable 3D
 Plotly meshes where PC1/PC2 are the hidden-state projection, height is local
-NLL energy, branch paths are lifted onto the surface, and green markers flag
-low-energy basin samples. The same pass emits
+NLL energy, branch paths are lifted onto the surface, green markers flag
+low-energy basin samples, and toric chamber polytopes/walls are lifted over
+the same surface. The same pass emits
 `*_projected_simplicial_toric_geometry.html`, a rotatable 3D hidden-space
 plot with the actual reasoning-step simplicial complex and toric chamber/fan
-diagnostics attached to the trajectory vertices. Both interactive hidden-space
+diagnostics attached to the trajectory vertices. It now renders empirical
+active-face chamber polytopes, fitted tropical/toric wall sheets, and the
+Newton-polytope shadow used by the fan audit. Both interactive hidden-space
 views expose sparse/default/dense local-complex buttons, so the radius
-parameter can be adjusted without rerunning the analysis.
+parameter can be adjusted without rerunning the analysis; chamber, wall,
+polytope, and branch layers can be toggled from the legend.
 
 ## Toric Music
 

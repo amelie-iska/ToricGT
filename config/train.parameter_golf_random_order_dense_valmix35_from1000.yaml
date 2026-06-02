@@ -121,6 +121,19 @@ model:
   koszul_rank_temperature: 0.05
   contrastive_temperature: 0.2
   trajectory_flow_viscosity: 0.05
+  # Anticipative trajectory memory learns to predict which stored
+  # graph-of-thought trajectory would help a new problem.  The head is present
+  # for resume compatibility and late-phase training; its loss is zero during
+  # the likelihood-first warmup below.
+  use_trajectory_memory_head: true
+  trajectory_memory_projection_dim: 128
+  trajectory_memory_teacher_temperature: 0.20
+  trajectory_memory_retrieval_temperature: 0.20
+  trajectory_memory_distill_weight: 0.25
+  trajectory_memory_quality_weight: 0.10
+  trajectory_memory_topology_weight: 0.20
+  trajectory_memory_graphcg_weight: 0.30
+  trajectory_memory_toric_weight: 0.20
   aux_mtp_offsets: 2
   target_artifact_bytes: 15600000
 
@@ -262,6 +275,7 @@ training:
   qat_warmup_steps: 5000
   contrastive_loss_weight: 0.001
   trajectory_flow_loss_weight: 0.0001
+  trajectory_memory_loss_weight: 0.0
   trajectory_flow_target: 0.075
   eval_score_first_bias_lr: 0.025
   eval_score_first_bias_decay: 0.98
@@ -341,6 +355,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.00010
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
@@ -357,6 +372,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.0005
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
@@ -382,6 +398,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.00003
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
@@ -410,6 +427,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.00008
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
@@ -437,6 +455,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.00006
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
@@ -457,6 +476,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.00008
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
@@ -476,6 +496,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.00008
       koszul_persistence_loss_weight: 0.00001
       trajectory_flow_loss_weight: 0.0001
+      trajectory_memory_loss_weight: 0.00005
       contrastive_loss_weight: 0.0015
       mtp_loss_weight: 0.015
       toric_entropy_loss_weight: 0.00025
@@ -492,6 +513,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.00012
       koszul_persistence_loss_weight: 0.00002
       trajectory_flow_loss_weight: 0.00025
+      trajectory_memory_loss_weight: 0.00008
       contrastive_loss_weight: 0.002
       mtp_loss_weight: 0.02
       toric_entropy_loss_weight: 0.0005
@@ -549,6 +571,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.00010
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
@@ -565,6 +588,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.00015
       koszul_persistence_loss_weight: 0.00002
       trajectory_flow_loss_weight: 0.0004
+      trajectory_memory_loss_weight: 0.00012
       contrastive_loss_weight: 0.003
       mtp_loss_weight: 0.03
       toric_entropy_loss_weight: 0.001

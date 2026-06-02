@@ -25,6 +25,7 @@ from .koszul_persistence import KoszulPersistenceConfig, koszul_persistence_loss
 from .tropical_attention import TransformerBlock
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
 from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
+from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryRetrievalHead
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,15 @@ class RandomOrderLMConfig:
     aux_mtp_offsets: int = 2
     contrastive_temperature: float = 0.2
     trajectory_flow_viscosity: float = 0.05
+    use_trajectory_memory_head: bool = False
+    trajectory_memory_projection_dim: int = 128
+    trajectory_memory_teacher_temperature: float = 0.20
+    trajectory_memory_retrieval_temperature: float = 0.20
+    trajectory_memory_distill_weight: float = 0.25
+    trajectory_memory_quality_weight: float = 0.10
+    trajectory_memory_topology_weight: float = 0.20
+    trajectory_memory_graphcg_weight: float = 0.30
+    trajectory_memory_toric_weight: float = 0.20
     target_artifact_bytes: int = 15_600_000
     byte_offset: int = 4
     pad_token_id: int = 0
@@ -319,6 +329,23 @@ class DenseRandomOrderToricLM(nn.Module):
             self.output_bias = None
         self.aux_mtp_heads = nn.ModuleList(
             [nn.Linear(config.d_model, config.vocab_size) for _ in range(max(0, config.aux_mtp_offsets))]
+        )
+        self.trajectory_memory_head = (
+            TrajectoryRetrievalHead(
+                config.d_model,
+                TrajectoryMemoryConfig(
+                    projection_dim=config.trajectory_memory_projection_dim,
+                    teacher_temperature=config.trajectory_memory_teacher_temperature,
+                    retrieval_temperature=config.trajectory_memory_retrieval_temperature,
+                    distill_weight=config.trajectory_memory_distill_weight,
+                    quality_weight=config.trajectory_memory_quality_weight,
+                    topology_weight=config.trajectory_memory_topology_weight,
+                    graphcg_weight=config.trajectory_memory_graphcg_weight,
+                    toric_weight=config.trajectory_memory_toric_weight,
+                ),
+            )
+            if config.use_trajectory_memory_head
+            else None
         )
         self.toric_geometry_probe = (
             LowRankToricGeometryProbe(
@@ -1223,6 +1250,15 @@ class DenseRandomOrderToricLM(nn.Module):
             out.update(self._analogy_lattice_losses(hidden, target_tokens))
             if self.toric_geometry_probe is not None and target_positions is not None:
                 out.update(self.toric_geometry_probe(hidden, target_positions, target_tokens))
+            if self.trajectory_memory_head is not None:
+                out.update(
+                    self.trajectory_memory_head(
+                        hidden,
+                        target_positions,
+                        per_token_nll,
+                        graphcg_basis=self.graphcg_direction_basis,
+                    )
+                )
             if bool(self.config.use_koszul_persistence):
                 out.update(
                     koszul_persistence_loss(
@@ -1478,7 +1514,7 @@ class DenseRandomOrderToricLM(nn.Module):
 def estimate_uncompressed_quantized_bytes(
     model: nn.Module,
     bits: Literal[4, 6, 8] = 8,
-    exclude_prefixes: tuple[str, ...] = ("aux_", "graphcg_direction_basis", "toric_geometry_probe."),
+    exclude_prefixes: tuple[str, ...] = ("aux_", "graphcg_direction_basis", "toric_geometry_probe.", "trajectory_memory_head."),
 ) -> int:
     """Conservative tensor-only byte estimate before zip compression."""
 

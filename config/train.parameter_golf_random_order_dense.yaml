@@ -121,6 +121,15 @@ model:
   koszul_rank_temperature: 0.05
   contrastive_temperature: 0.2
   trajectory_flow_viscosity: 0.05
+  use_trajectory_memory_head: true
+  trajectory_memory_projection_dim: 128
+  trajectory_memory_teacher_temperature: 0.20
+  trajectory_memory_retrieval_temperature: 0.20
+  trajectory_memory_distill_weight: 0.25
+  trajectory_memory_quality_weight: 0.10
+  trajectory_memory_topology_weight: 0.20
+  trajectory_memory_graphcg_weight: 0.30
+  trajectory_memory_toric_weight: 0.20
   aux_mtp_offsets: 2
   target_artifact_bytes: 15600000
 
@@ -265,6 +274,7 @@ training:
   qat_warmup_steps: 5000
   contrastive_loss_weight: 0.001
   trajectory_flow_loss_weight: 0.0001
+  trajectory_memory_loss_weight: 0.0
   trajectory_flow_target: 0.075
   eval_score_first_bias_lr: 0.025
   eval_score_first_bias_decay: 0.98

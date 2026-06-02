@@ -962,6 +962,8 @@ Polar cache residual & $\norm{K-\widehat K}$, $\norm{V-\widehat V}$, argmax pres
   \label{fig:viz-dashboard}
 \end{figure}
 
+The \texttt{oai} analysis suite implements this contract with interactive 3D diagnostics.  For each sampled graph-of-thought branch it plots focused hidden-state coordinates, local Vietoris--Rips 1/2-complexes, toric active-face colors, chamber-crossing markers, empirical normal-fan rays, convex chamber-polytopes for occupied active faces, fitted wall sheets at observed tropical/toric crossings, and a small Newton-polytope shadow built from the pseudo-exponents used by the empirical fan audit.  The energy-landscape companion lifts local NLL to the vertical axis and overlays the same chamber and wall geometry.  Sparse/default/dense controls adjust the local simplicial radius; Plotly legend toggles isolate branches, complexes, chambers, walls, and polytopes.
+
 \begin{proposition}[Visualization invariance]
 Suppose diagnostic functions are defined from graph-invariant quantities or equivariant token quantities followed by canonical graph rendering.  Then relabeling the input graph changes only node/edge labels in the visualization, not the diagnostic values.
 \end{proposition}
@@ -1008,6 +1010,61 @@ A useful ToricGT reward is
   R(x)=\exp\left(\frac{\lambda_c C(x)+\lambda_n N(x)-\lambda_eE_{\mathrm{eq}}(x)+\lambda_t\Delta_{\mathrm{trop}}(x)-\lambda_H H(x)-\lambda_\Theta E_\Theta(x)}{\tau}\right),
 \end{equation}
 where $C$ is correctness, $N$ is novelty, $E_{\mathrm{eq}}$ is equivariance error, $\Delta_{\mathrm{trop}}$ is tropical margin, $H$ is complexity, and $E_\Theta$ is toric commutator error.
+
+\section{Anticipative reasoning-trajectory memory}
+
+Long-context tropical ring attention makes it practical to place retrieved reasoning traces in the context window, but the model still needs to learn which traces are worth consulting.  ToricGT therefore uses a small anticipative memory layer.  It stores completed graph-of-thought trajectories and trains a retrieval head that predicts helpful trajectories before the expensive search roll-out begins.
+
+\begin{definition}[Trajectory-memory record]
+For a completed trajectory $\tau=(h_1,\ldots,h_T)$ with hidden states $h_t\in\R^d$, define a memory record
+\begin{equation}
+  \mathcal M_i=(k_i,v_i,\mu_i,q_i),
+\end{equation}
+where $k_i$ is a compact key, $v_i$ is a value payload such as a serialized graph trace or solution span, $\mu_i$ contains metadata and split information, and $q_i$ is a quality score such as verifier reward, negative answer BPB, or negative local NLL.
+\end{definition}
+
+The implemented key is
+\begin{equation}
+  k(\tau)=\operatorname{norm}\big[
+  \bar h,\; h_T-h_1,\; \bar v,\;\sigma_v,\;\kappa,\;\rho_{\mathrm{VR}},\;
+  \phi_\theta,\;\phi_\beta,\;q(\tau)
+  \big],
+\end{equation}
+where $\bar h$ is the mean hidden state, $h_T-h_1$ is endpoint displacement, $\bar v$ and $\sigma_v$ summarize hidden-step speed, $\kappa$ is a curvature proxy, $\rho_{\mathrm{VR}}$ is a Vietoris--Rips radius/density summary, and $\phi_\theta,\phi_\beta$ are noncommutative-toric phase-shadow moments.
+
+\begin{definition}[Anticipative retrieval head]
+Given a current state summary $s$ and a memory key $k_i$, the retrieval head scores
+\begin{equation}
+  r_\psi(s,i)=\frac{\ip{Q_\psi(s)}{K_\psi(k_i)}}{\tau_r}.
+\end{equation}
+During training, an in-batch teacher score is
+\begin{equation}
+  \widetilde r(s,i)=
+  \lambda_G\ip{g_s}{g_i}
+  +\lambda_\Theta\ip{\phi_s}{\phi_i}
+  -\lambda_T d_{\mathrm{top}}(s,i)+q_i,
+\end{equation}
+where $g$ is the GraphCG chart coordinate, $\phi$ is the toric phase summary, and $d_{\mathrm{top}}$ is a local-topology distance.
+\end{definition}
+
+The auxiliary objective is
+\begin{equation}
+  \mathcal L_{\mathrm{mem}}
+  =\operatorname{CE}\left(\softmax r_\psi,\argmax_i\widetilde r(s,i)\right)
+  +\eta\,\operatorname{KL}\left(\softmax\widetilde r\;\Vert\;\softmax r_\psi\right)
+  +\xi\norm{\widehat q-q}_2^2.
+\end{equation}
+This objective is intentionally small and late-phase.  It teaches the model a retrieval geometry before the full offline library is inserted into long contexts.
+
+\begin{proposition}[Score-first safety of trajectory memory]
+If every retrieved memory item is generated from completed training trajectories, a fixed prevalidation library, or legal score-before-update online state, then adding retrieved trajectory payloads to the context does not violate prequential byte scoring.
+\end{proposition}
+
+\begin{proof}
+At scoring step $t$, the predictive distribution may depend on fixed model parameters, public metadata, the strict prefix, and any auxiliary state that is a function only of already scored data.  Completed training trajectories and fixed libraries are independent of the unscored validation suffix.  Score-before-update online memories are, by induction, functions only of previously scored bytes.  Therefore a retrieval function over such items cannot depend on $b_t$ or $b_{>t}$ before the loss term for $b_t$ is recorded.  The prequential log score remains valid.
+\end{proof}
+
+In the current implementation, \texttt{TrajectoryMemoryIndex} stores CPU JSONL memory records and cosine-searches compact keys.  \texttt{TrajectoryRetrievalHead} trains the in-batch score and logs recall, entropy, score gap, cross-entropy, distillation, and quality-regression metrics to W\&B.  The active \texttt{oai} configuration instantiates the head but keeps its weight at zero during BPB-first recovery, then activates a small loss in later GFlowNet/GraphCG/topology phases.
 
 \section{Interleaving PolarQuant with ToricGT ring attention}
 
