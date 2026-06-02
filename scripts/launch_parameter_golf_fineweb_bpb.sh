@@ -21,7 +21,18 @@ RUN_ID="${RUN_ID:-toricgt-fineweb-bpb-${STAMP}}"
 SESSION="${SESSION:-toricgt_fineweb_bpb_${STAMP}}"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs/training}"
 RUN_LOG="${LOG_DIR}/${RUN_ID}.log"
+MONITOR_LOG="${LOG_DIR}/${RUN_ID}.monitor.log"
+WANDB_LOG="${LOG_DIR}/${RUN_ID}.wandb.log"
 COMMAND_FILE="${LOG_DIR}/${RUN_ID}.command.sh"
+MONITOR_COMMAND_FILE="${LOG_DIR}/${RUN_ID}.monitor.command.sh"
+WANDB_COMMAND_FILE="${LOG_DIR}/${RUN_ID}.wandb.command.sh"
+MONITOR_SESSION="${MONITOR_SESSION:-${SESSION}_monitor}"
+WANDB_SESSION="${WANDB_SESSION:-${SESSION}_wandb}"
+BPB_TARGET="${BPB_TARGET:-1.2}"
+BPB_STATE="${BPB_STATE:-$REPO_ROOT/outputs/bpb_codex_loop_state.json}"
+BPB_STATUS="${BPB_STATUS:-$REPO_ROOT/outputs/fineweb_bpb_status.json}"
+BPB_REPORT="${BPB_REPORT:-$REPO_ROOT/outputs/fineweb_bpb_status.md}"
+FINEWEB_STOP_FILE="${FINEWEB_STOP_FILE:-$REPO_ROOT/outputs/fineweb_bpb_monitor_stop}"
 
 case "$VARIANT" in
   sp1024)
@@ -53,6 +64,14 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "tmux session already exists: $SESSION" >&2
   exit 1
 fi
+if tmux has-session -t "$MONITOR_SESSION" 2>/dev/null; then
+  echo "monitor tmux already exists: $MONITOR_SESSION" >&2
+  exit 1
+fi
+if tmux has-session -t "$WANDB_SESSION" 2>/dev/null; then
+  echo "wandb tmux already exists: $WANDB_SESSION" >&2
+  exit 1
+fi
 
 mkdir -p "$LOG_DIR"
 cat > "$COMMAND_FILE" <<EOF
@@ -75,16 +94,52 @@ conda run --no-capture-output -n tokengt torchrun --standalone --nproc_per_node=
 EOF
 chmod 700 "$COMMAND_FILE"
 
+cat > "$MONITOR_COMMAND_FILE" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd '$REPO_ROOT'
+python3 scripts/watch_fineweb_bpb_log.py \\
+  --log '$RUN_LOG' \\
+  --run-id '$RUN_ID' \\
+  --target-bpb '$BPB_TARGET' \\
+  --state '$BPB_STATE' \\
+  --status '$BPB_STATUS' \\
+  --report '$BPB_REPORT' \\
+  --stop-file '$FINEWEB_STOP_FILE' \\
+  --poll-seconds 30
+EOF
+chmod 700 "$MONITOR_COMMAND_FILE"
+
+cat > "$WANDB_COMMAND_FILE" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd '$REPO_ROOT'
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \\
+  python scripts/mirror_fineweb_log_to_wandb.py \\
+  --log '$RUN_LOG' \\
+  --run-id '$RUN_ID' \\
+  --run-name '$RUN_ID' \\
+  --target-bpb '$BPB_TARGET'
+EOF
+chmod 700 "$WANDB_COMMAND_FILE"
+
 tmux new-session -d -s "$SESSION" "bash '$COMMAND_FILE' 2>&1 | tee '$RUN_LOG'"
+tmux new-session -d -s "$MONITOR_SESSION" "bash '$MONITOR_COMMAND_FILE' 2>&1 | tee '$MONITOR_LOG'"
+tmux new-session -d -s "$WANDB_SESSION" "bash '$WANDB_COMMAND_FILE' 2>&1 | tee '$WANDB_LOG'"
 
 cat <<EOF
 started Parameter-Golf FineWeb BPB run
 tmux:       $SESSION
+monitor:    $MONITOR_SESSION
+wandb:      $WANDB_SESSION
 run id:     $RUN_ID
 variant:    $VARIANT
 train shards: $TRAIN_SHARDS
 iterations: $ITERATIONS
 val every:  $VAL_LOSS_EVERY
+target bpb: $BPB_TARGET
 log:        $RUN_LOG
+monitor log:$MONITOR_LOG
+wandb log:  $WANDB_LOG
 command:    $COMMAND_FILE
 EOF
