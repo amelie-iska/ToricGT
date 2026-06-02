@@ -96,9 +96,10 @@ read -r -d '' PROMPT <<EOF || true
 Automated ToricGT training-analysis handoff.
 
 The post-resume analysis watcher just completed. Please review the metrics,
-statistics, and generated plots, then decide whether the currently running
-training should continue or be restarted from a better checkpoint with adjusted
-hyperparameters.
+statistics, and generated plots, then make an explicit resume decision.  The
+watcher pauses the training tmux before analysis, so a "continue" decision must
+actively resume from the analyzed checkpoint or another selected checkpoint; do
+not assume the prior training process is still advancing.
 
 Context:
 - Repository: $REPO_ROOT
@@ -112,6 +113,7 @@ Context:
 - Metric categories: $METRICS_SUMMARY
 - Reasoning simplex summary: $SIMPLEX_SUMMARY
 - Reasoning geometry summary: $GEOMETRY_SUMMARY
+- BPB cliff plan: $REPO_ROOT/planning/BPB-CLIFF-RECOVERY.md
 
 Requested work:
 1. Inspect the W&B metrics export and all analysis summaries.
@@ -134,19 +136,25 @@ Requested work:
    attention, toric memory, dense contest weights, embedding-space GFlowNet
    graph-of-thought, and Kolmogorov diagnostics unless the data gives a clear
    reason to alter a scalar control.
-6. If a restart is warranted, pause $TRAINING_TMUX, choose the best checkpoint
-   from the evidence. Prefer the last checkpoint before the first derivative
-   turns positive or before the second derivative/Hessian sharpness indicates
-   a floor-bounce basin. Resume training in tmux and report the new tmux and
-   W&B details. If continuation is better, leave training running and document
-   why.
-7. After any restart or explicit continuation decision, schedule the next
-   interrupting analysis approximately 500 steps later. Use
-   scripts/watch_training_analysis.py with --target-step, --pause-training-before-analysis,
-   --device cuda, --precision bf16, --codex-review-hook
-   scripts/codex_training_review_resume.sh, and --codex-review-tmux-prefix
-   toricgt_codex_review. Use a fresh --min-mtime-unix captured at the restart
-   time so old checkpoint filenames are ignored.
+6. Choose exactly one action:
+   - CONTINUE: resume from the analyzed checkpoint with the same config.
+   - ROLLBACK: resume from the last dense checkpoint before the first positive
+     first derivative or before second-difference/Hessian evidence indicates a
+     floor-bounce basin.
+   - EDIT_AND_RESTART: make minimal scalar/config changes, then resume from the
+     selected checkpoint.
+   In all three cases, start a fresh training tmux and report the tmux, log,
+   checkpoint, and W&B details.  Do not leave the paused tmux as the active run.
+7. After the resume/restart decision, schedule the next interrupting analysis.
+   Use a target about 250 steps later while the run is still inside the
+   2000--2500 BPB-cliff window, otherwise about 500--600 steps later.  The next
+   watcher must use scripts/watch_training_analysis.py with --target-step,
+   --pause-training-before-analysis, --device cuda, --precision bf16,
+   --codex-review-hook scripts/codex_training_review_resume.sh, and
+   --codex-review-tmux-prefix toricgt_codex_review. Use a fresh
+   --min-mtime-unix captured at the restart time so old checkpoint filenames are
+   ignored.  This creates the periodic pause -> analysis -> Codex review ->
+   adjustment -> restart loop requested by the user.
 8. Update planning/METRICS.md with the analysis and decision. Push branch oai
    if code, config, docs, or planning files change.
 

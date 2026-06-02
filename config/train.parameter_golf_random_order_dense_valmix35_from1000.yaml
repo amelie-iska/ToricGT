@@ -157,10 +157,11 @@ data:
   # A rollback should not replay the identical data order.  The seed is offset
   # by the checkpoint step after loading, while validation remains fixed.
   resume_aware_stream_seed: true
-  # Step-1000 replay config.  This keeps the valmix35 likelihood-first controls
-  # active immediately after the early checkpoint while rotating the data stream
-  # from the replay step.  The original late-run config remains unchanged.
-  stream_origin_step: 1000
+  # BPB-cliff replay config.  The current recovery starts from the robust
+  # step-2000 checkpoint, just before the first sharp BPB floor around
+  # 2160--2210.  Use the checkpoint step as the data-stream seed offset so a
+  # rollback does not replay the exact same row order that produced the rebound.
+  stream_origin_step: 2000
   stream_burnin_steps: 0
   document_separator: "\n\n"
   # Explicit easy -> medium -> hard curriculum.  A shard sample on 2026-05-29
@@ -225,29 +226,28 @@ training:
   weight_decay: 0.03
   warmup_steps: 4500
   grad_clip_norm: 1.0
-  # Step-2000 shock-guard analysis reproduced the same sharp BPB impulse:
-  # local minimum at ~1690, then a large positive first/second difference at
-  # 1710.  The first guard fired but the update was still too permissive, so
-  # this retry makes detected shock updates nearly no-op.  It does not skip
-  # examples or change the objective.
+  # BPB-cliff guard: the useful early basin is narrow.  When a micro-window
+  # has already found a low byte-loss direction, high-loss impulses should be
+  # observed in metrics but should not be allowed to kick Adam out of the
+  # basin.  This is a stochastic line-search surrogate, not data deletion.
   shock_guard_enabled: true
-  shock_guard_start_step: 1000
-  shock_guard_end_step: 40750
-  shock_guard_loss_ratio: 1.025
-  shock_guard_loss_delta: 0.06
-  shock_guard_grad_norm: 0.28
-  shock_guard_update_scale: 0.010
+  shock_guard_start_step: 2000
+  shock_guard_end_step: 2500
+  shock_guard_loss_ratio: 1.018
+  shock_guard_loss_delta: 0.045
+  shock_guard_grad_norm: 0.18
+  shock_guard_update_scale: 0.006
   # Robust microbatch guard: log raw BPB unchanged, but scale the gradient from
   # high-loss microbatches in the early capture window.  This is a Huber-style
   # stochastic-gradient estimator, not a data deletion path, and it keeps the
   # high-entropy examples visible in metrics while preventing them from
   # dominating the optimizer step.
   robust_micro_loss_guard_enabled: true
-  robust_micro_loss_guard_start_step: 1000
-  robust_micro_loss_guard_end_step: 40750
-  robust_micro_loss_guard_ratio: 1.030
-  robust_micro_loss_guard_delta: 0.032
-  robust_micro_loss_guard_min_scale: 0.12
+  robust_micro_loss_guard_start_step: 2000
+  robust_micro_loss_guard_end_step: 2500
+  robust_micro_loss_guard_ratio: 1.018
+  robust_micro_loss_guard_delta: 0.020
+  robust_micro_loss_guard_min_scale: 0.08
   precision: bf16
   device: cuda
   seed: 17
@@ -284,7 +284,9 @@ training:
   resize_position_embedding: true
   # Retain dense resume points frequently. The model is small enough that
   # keeping historical optimizer checkpoints is useful for curriculum rollbacks.
-  ckpt_interval: 50
+  # Save densely through the 2160--2210 danger window so the watcher/Codex
+  # review can roll back to the last checkpoint before positive curvature.
+  ckpt_interval: 25
 
 complexity:
   enabled: true
@@ -296,7 +298,7 @@ complexity:
 
 adaptive_training:
   enabled: true
-  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01000_valmix35.json
+  state_path: checkpoints/parameter_golf_oai_dense/adaptive_controller_state_02000_bpb_cliff.json
   # Checkpoint-level controller only: updates after eval windows, never per
   # microbatch.  It keeps the architecture and optimizer state fixed while
   # gently tuning the three controls identified by the 23.25k rollback analysis.
@@ -307,7 +309,7 @@ adaptive_training:
   # GFlowNet back to 1e-3 during the BPB likelihood-capture hold.  In this
   # regime GFlowNet remains active, but the byte likelihood objective must own
   # the optimizer direction.
-  gflownet_loss_max: 0.000001
+  gflownet_loss_max: 0.0
   gflownet_gap_step: 0.0
   gflownet_relax_step: 0.0
   complex_mix_min: 0.00
@@ -407,32 +409,79 @@ phase_curriculum:
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
-    - name: bpb_postbounce_valmix_hold_2000_2500
+    - name: bpb_cliff_entry_2000_2160
       start_step: 2000
-      end_step: 2500
-      # Step-2250 review: train BPB/loss slope is negative but flattening after
-      # a 2240-2290 bounce, while GraphCG covariance and analogical-map losses
-      # drift because the active phase was diagnostic-only.  Resume from the
-      # fresh step-2250 checkpoint with small real GraphCG and GFlowNet terms
-      # plus a slightly stronger optimizer scale.  Branch search already finds
-      # lower-BPB terminals than the mean branch, so GFlowNet is promoted
-      # gently.  Keep heavier toric/Koszul objectives off until the next
-      # analysis gate verifies that BPB and branch quality move together.
-      lr_multiplier: 0.16
-      grad_clip_norm: 0.42
+      end_step: 2160
+      # Re-enter the first strong likelihood basin from the step-2000
+      # checkpoint.  Keep the validation-like medium mix that preceded the
+      # 2189 low point, but quarantine all reasoning auxiliaries except a tiny
+      # GraphCG/contrastive frame anchor.  Effective LR is chosen to match the
+      # observed descent band while the shock guards suppress high-loss kicks.
+      lr_multiplier: 0.140
+      grad_clip_norm: 0.30
       complex_mix_ratio: 0.0
       medium_mix_ratio: 0.35
       hard_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00025
-      gflownet_entropy_weight: 0.00005
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.00006
-      analogy_lattice_loss_weight: 0.00001
+      graphcg_loss_weight: 0.00001
+      analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00008
+      contrastive_loss_weight: 0.00004
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_cliff_floor_capture_2160_2225
+      start_step: 2160
+      end_step: 2225
+      # The historical floor appears here, with the minimum around 2189 and
+      # positive curvature shortly afterward.  Damp the scalar step while
+      # preserving random-order decoding and row diversity.  Auxiliaries remain
+      # diagnostic-only so the BPB gradient owns the update direction.
+      lr_multiplier: 0.110
+      grad_clip_norm: 0.22
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.35
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.000005
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
+      contrastive_loss_weight: 0.00001
+      mtp_loss_weight: 0.0
+      toric_entropy_loss_weight: 0.0
+      qat_loss_weight: 0.0
+    - name: bpb_cliff_consolidation_2225_2500
+      start_step: 2225
+      end_step: 2500
+      # After the first floor, stop trying to discover a new task structure and
+      # instead consolidate the byte-likelihood basin.  The watcher pauses at
+      # 2250 and launches a Codex review; these values are only the fallback if
+      # continuation is selected by the evidence.
+      lr_multiplier: 0.075
+      grad_clip_norm: 0.18
+      complex_mix_ratio: 0.0
+      medium_mix_ratio: 0.30
+      hard_mix_ratio: 0.0
+      gflownet_loss_weight: 0.0
+      gflownet_entropy_weight: 0.0
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.000005
+      analogy_lattice_loss_weight: 0.0
+      toric_geometry_loss_weight: 0.0
+      koszul_persistence_loss_weight: 0.0
+      trajectory_flow_loss_weight: 0.0
+      trajectory_memory_loss_weight: 0.0
+      contrastive_loss_weight: 0.0
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
