@@ -35,6 +35,11 @@ RUN_ID="${RUN_ID:-oai-revealed-${STAMP//[^0-9A-Za-z]/}}"
 TRAIN_TMUX="${TRAIN_TMUX:-toricgt_oai_bpb_revealed_${START_TAG}_${STAMP}}"
 WATCH_TMUX="${WATCH_TMUX:-toricgt_watch_bpb_revealed_${START_TAG}_${STAMP}}"
 CODEX_PREFIX="${CODEX_PREFIX:-toricgt_codex_review_bpb_cliff}"
+BPB_TARGET="${BPB_TARGET:-1.2}"
+BPB_MAX_REVIEW_ITERATIONS="${BPB_MAX_REVIEW_ITERATIONS:-100}"
+BPB_LOOP_STATE="${BPB_LOOP_STATE:-outputs/bpb_codex_loop_state.json}"
+BPB_LOOP_STOP_FILE="${BPB_LOOP_STOP_FILE:-outputs/bpb_codex_loop_stop}"
+BPB_LOOP_NAME="${BPB_LOOP_NAME:-parameter_golf_bpb_target}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/post_resume_analysis/${RUN_NAME}}"
 LOG_DIR="${LOG_DIR:-logs/training}"
 TRAIN_LOG="${LOG_DIR}/${RUN_NAME}.log"
@@ -90,6 +95,11 @@ fi
 WATCH_CMD=(
   conda run --no-capture-output -n tokengt env
   "PYTHONPATH=src"
+  "BPB_TARGET=${BPB_TARGET}"
+  "BPB_MAX_REVIEW_ITERATIONS=${BPB_MAX_REVIEW_ITERATIONS}"
+  "BPB_LOOP_STATE=${BPB_LOOP_STATE}"
+  "BPB_LOOP_STOP_FILE=${BPB_LOOP_STOP_FILE}"
+  "BPB_LOOP_NAME=${BPB_LOOP_NAME}"
   python scripts/watch_training_analysis.py
   --checkpoint-dir checkpoints/parameter_golf_oai_dense
   --start-step "$START_STEP"
@@ -128,6 +138,9 @@ run name:      $RUN_NAME
 resume ckpt:   $RESUME_CKPT
 reset opt:     $RESET_OPTIMIZER
 target step:   $TARGET_STEP
+BPB target:    $BPB_TARGET
+review cap:    $BPB_MAX_REVIEW_ITERATIONS
+loop state:    $BPB_LOOP_STATE
 wandb path:    ${ENTITY}/${PROJECT}/${RUN_ID}
 training log:  $TRAIN_LOG
 watcher log:   $WATCH_LOG

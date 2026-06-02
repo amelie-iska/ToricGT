@@ -9103,3 +9103,25 @@ Acceptance criteria:
    push through this cliff with the current data order;
 3. do not activate Toric BGG, toric geometry, topology, GraphCG, memory, QAT,
    or GFlowNet losses in this band.
+
+## 2026-06-02 Periodic BPB Codex Loop Activation
+
+The training review process is now an explicit BPB optimization loop rather than
+an ad hoc watcher handoff.  `scripts/codex_training_review_resume.sh` records a
+persistent loop state, increments one review iteration for every completed
+analysis gate, and launches Codex reviews until one of these conditions holds:
+
+```text
+BPB target: <= 1.2
+maximum review iterations: 100
+better-strategy sentinel: outputs/bpb_codex_loop_stop
+state file: outputs/bpb_codex_loop_state.json
+```
+
+Every review prompt now includes the current primary BPB signal, the best BPB
+seen in the loop, the iteration count, and the same resume/restart/reset action
+contract.  Future launches through `scripts/launch_oai_bpb_cliff_recovery.sh`
+propagate the loop variables into the watcher environment so restarts preserve
+the same objective.  The loop remains BPB-first: Toric BGG and other structural
+metrics stay diagnostic-only until they improve BPB or a later gate explicitly
+activates them.
