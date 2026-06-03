@@ -9390,3 +9390,135 @@ training tmux: toricgt_all_phases_continue_1000_20260603T004919Z
 watcher tmux: toricgt_all_phases_continue_1000_20260603T004919Z_watcher
 next gate: 1500
 ```
+
+## 2026-06-03 FineWeb Full-Rank GraphCG Step-500 Review
+
+Run:
+
+```text
+wandb: amelie-iska-math/toricgt-parameter-golf/toricgt-fineweb-fullrank-graphcg-from0-20260603T023620Z
+checkpoint: checkpoints/parameter_golf_all_phases_fineweb_from0/random_order_step_00000500.pt
+analysis: outputs/post_resume_analysis/toricgt-fineweb-fullrank-graphcg-from0-20260603T023620Z/step-00000500
+loop: fineweb_fullrank_graphcg_from0_nonblocking, iteration 2 / 100, target BPB <= 1.2
+```
+
+Status:
+
+```text
+checkpoint train_bpb: 4.8141105017623
+checkpoint train_loss: 3.3368871212005615
+checkpoint best_val_bpb: 5.852094936744996
+official-style OAI/FineWeb BPB: 4.734427155999241
+official-style OAI/FineWeb loss: 3.2816548347473145
+metric categories: desired=391, weak/slow=161, undesirable=222
+geometry records: 4 selected records, 24 branches
+geometry mean_bpb: 6.496695836385091
+geometry best_bpb: 4.983981132507324
+geometry best_answer_bpb: 4.9085289770859815
+mean MST efficiency: 0.20736046289367974
+mean path smoothness: 0.4451148548712142
+```
+
+Two-gate read:
+
+- Desired: FineWeb/OAI BPB improved from `5.60212` at step 250 to `4.73566`
+  at step 500, curated validation BPB improved from `6.24077` to `5.85209`,
+  train BPB fell from `8.14068` at step 5 to `4.81411` at step 500, and the
+  latest checkpoint finite difference for train BPB is still negative
+  (`d1=-0.04883`, `d2=-0.03018`).  This is not a floor-bounce signal.
+- Desired but too weak or slow: validation has only two samples, so no
+  reliable second-difference test exists yet; OAI eval used only 8 batches;
+  complexity validation BPB remains `5.47885`; Argmax byte accuracy is only
+  `0.173828`; GraphCG is stable but barely moving (`graphcg_loss` slope about
+  `-0.00591` per 1k steps, lattice margin down to `0.01452`); simplex records
+  are all high BPB (`9.36--9.46`) with only modest MST efficiency
+  (`0.205--0.241`).
+- Undesirable: GFlowNet entropy fell from `2.37496` to `1.43440`, action
+  diversity fell from `0.94055` to `0.52161`, toric memory entropy fell from
+  `0.92286` to `0.70924`, active-face entropy fell from `0.64972` to
+  `0.32966`, active-face margin worsened to about `-3.49`, BGG standard
+  leakage rose to `0.46325`, and BGG resolution consistency slipped to
+  `0.95309`.
+
+Mathematical/statistical interpretation:
+
+- The BPB gate is improving on both calibration streams.  In bits per byte,
+  the FineWeb delta over steps 250--500 is `-0.86647`, or about `-3.47` BPB
+  per 1k steps, while curated validation changes by `-0.38868`, or about
+  `-1.55` BPB per 1k steps.  Both first derivatives are negative.  The train
+  second difference is also negative at step 500, so there is no evidence yet
+  for positive-curvature floor bounce.
+- The reasoning gate is partially present but not strong.  Branch replay has a
+  useful mean-vs-best gap (`mean_bpb - best_bpb ~= 1.5127`), but the GFlowNet
+  policy is collapsing in entropy/diversity while the branch search itself is
+  still only reaching `4.98` best branch BPB.  This supports continued branch
+  diagnostics and later tiny GFlowNet training, not a step-500 restart.
+- Kolmogorov proxies improved on validation NCD: prediction-target NCD fell to
+  `0.92453` with lzma and `1.00867` with zlib, but zlib is still above 1.0 and
+  byte accuracy is low.  The relative-K gains are therefore weak compression
+  evidence, not a promotion signal.
+- GraphCG basis behavior is valid and full-rank but undertrained.  Axis entropy
+  remains near `0.99781`, basis coherence is low and stable, but basis loss and
+  lattice margin do not yet show strong alignment.  Keeping the existing tiny
+  `graphcg_loss_weight=5e-5` is enough for this early BPB-first phase.
+- Persistence/simplex/Koszul topology is coherent but not decisive.  Koszul
+  exactness residual improved to `0.01225`; chart coverage is `1.0`; directed
+  cycle flux is numerically zero; HDBSCAN stability is about `0.53` in W&B and
+  `0.745` in the branch geometry suite.  Persistence loss and topology losses
+  are too high to activate as primary gradients.
+- Toric BGG diagnostics are mixed: `d2_residual=0.04923`,
+  `gale_dual_consistency=0.08107`, `koszul_linearity_residual=0`, and
+  signature smoothness is low, but standard leakage is high.  BGG remains a
+  diagnostic, not a training loss, until BPB is closer to the target.
+- The phase/energy/trajectory plots are nonblank and structurally valid.  All
+  70 PNG plots decoded with non-flat pixel variance.  The inspected bundle
+  includes metrics plots, simplex triangles/tetrahedra, 3D trajectories,
+  Ramachandran-style phase-energy and winding views, energy landscapes, and
+  topology audits.  Trajectory length is still large (`mean path_length
+  ~= 2906`, `trajectory_tokens=2048`), smoothness is moderate, and MST
+  efficiency remains low; this is usable geometry, not yet efficient reasoning.
+- No OOD transfer claim is warranted for this run.  Phase 0 has
+  `fineweb_mix_ratio=1.0`, so a good FineWeb result here is mostly direct
+  FineWeb exposure.  Any future OOD-transfer claim must control against
+  tokenizer convention, n-gram/context-tree baselines, dataset easiness, and
+  equal-budget FineWeb-only versus hard-data-only ablations.
+- Hessian sharpness did not provide rollback evidence.  `probe_loss` improved
+  from `4.01434` at step 250 to `3.36377` at step 500, while trace and dominant
+  curvature returned NaN, so there is no measured sharp basin or positive
+  curvature alarm.
+
+The adjustment proposal from `scripts/propose_training_adjustments.py` was run
+on the analysis directory.  It recommended tiny GraphCG/GFlowNet activation
+because branch replay has a clear gap and GraphCG is slow, while also warning
+that BPB/loss have strong negative slopes and large resets should be avoided.
+I treat that as evidence for the next review, not as authority for an immediate
+restart: at step 500 the BPB gate is still descending, and activating new
+gradient terms would trade a live negative BPB derivative for a speculative
+reasoning repair.
+
+Decision: `CONTINUE`.
+
+No code or config scalar was changed.  The better-strategy stop sentinel was
+not written.  Training was explicitly unpaused with `SIGCONT` and handed back to
+the active supervisor.  The live process had already advanced beyond the
+analyzed checkpoint, preserving optimizer state and W&B continuity.
+
+Operational handoff:
+
+```text
+supervisor tmux: toricgt_supervisor_fineweb_fullrank_graphcg
+training tmux: toricgt_fineweb_fullrank_graphcg_live
+requested training tmux alias from prompt: toricgt_pg_oai was not present
+training log: logs/parameter_golf_all_phases/toricgt-fineweb-fullrank-graphcg-from0-20260603T023620Z/resume_00000250_20260603T031530Z/train.log
+active W&B run path: amelie-iska-math/toricgt-parameter-golf/toricgt-fineweb-fullrank-graphcg-from0-20260603T023620Z
+checkpoint selected for decision: checkpoints/parameter_golf_all_phases_fineweb_from0/random_order_step_00000500.pt
+next watcher tmux: toricgt_fineweb_fullrank_graphcg_watcher
+next watcher target: 750
+next watcher device/precision: cpu / fp32
+next watcher log: logs/parameter_golf_all_phases/toricgt-fineweb-fullrank-graphcg-from0-20260603T023620Z/supervisor/analysis_target_00000750_20260603T035310Z/watcher.log
+next watcher pause behavior: non-interrupting; no --pause-training-before-analysis
+loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
+          BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/bpb_codex_loop_state_fineweb_fullrank_graphcg_from0.json,
+          BPB_LOOP_STOP_FILE=outputs/bpb_codex_loop_stop_fineweb_fullrank_graphcg_from0,
+          BPB_LOOP_NAME=fineweb_fullrank_graphcg_from0_nonblocking
+```
