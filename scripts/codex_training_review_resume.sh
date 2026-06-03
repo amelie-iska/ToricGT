@@ -464,7 +464,10 @@ EOF
 if [[ -n "$SESSION_ID" ]]; then
   CODEX_CMD=(codex exec -C "$REPO_ROOT" --dangerously-bypass-approvals-and-sandbox resume "$SESSION_ID" "$PROMPT")
 else
-  CODEX_CMD=(codex exec -C "$REPO_ROOT" --dangerously-bypass-approvals-and-sandbox resume --last "$PROMPT")
+  # The prompt is self-contained.  Starting a fresh non-interactive exec avoids
+  # depending on whichever interactive session happens to be "last", which can
+  # be locked, stale, or unrelated on long-running training hosts.
+  CODEX_CMD=(codex exec -C "$REPO_ROOT" --dangerously-bypass-approvals-and-sandbox "$PROMPT")
 fi
 
 {
@@ -485,7 +488,8 @@ if [[ -n "$TMUX_SESSION" ]]; then
     echo "tmux session already exists: $TMUX_SESSION" >&2
     exit 1
   fi
-  tmux new-session -d -s "$TMUX_SESSION" "cd '$REPO_ROOT' && exec '$HOOK_LOG_DIR/codex_resume_command.sh'"
+  tmux new-session -d -s "$TMUX_SESSION" \
+    "cd '$REPO_ROOT' && exec '$HOOK_LOG_DIR/codex_resume_command.sh' > '$HOOK_LOG_DIR/codex_review_tmux.log' 2>&1"
   echo "launched Codex review tmux: $TMUX_SESSION"
 else
   exec "${CODEX_CMD[@]}"
