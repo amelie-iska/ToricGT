@@ -19,7 +19,7 @@ import shlex
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,7 +29,10 @@ VAL_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+val_loss:(?P<loss>[0-9.eE+-]+)"
     r"\s+val_bpb:(?P<bpb>[0-9.eE+-]+)"
 )
-TRAIN_RE = re.compile(r"step:(?P<step>\d+)/(?P<total>\d+)\s+train_loss:(?P<loss>[0-9.eE+-]+)")
+TRAIN_RE = re.compile(
+    r"step:(?P<step>\d+)/(?P<total>\d+)\s+train_loss:(?P<loss>[0-9.eE+-]+)"
+    r"(?:.*?\btrain_bpb:(?P<bpb>[0-9.eE+-]+))?"
+)
 CHECKPOINT_RE_TEMPLATE = "{run_id}_step_{step:06d}.pt"
 
 
@@ -46,6 +49,7 @@ class TrainRow:
     step: int
     total: int
     train_loss: float
+    train_bpb: float = float("nan")
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,36 @@ class PreemptiveGateRisk:
     target_bpb: float
 
 
+@dataclass(frozen=True)
+class RecoveryControls:
+    train_batch_tokens: int
+    tied_embed_lr: float
+    matrix_lr: float
+    scalar_lr: float
+    muon_momentum: float
+    muon_momentum_warmup_steps: int
+    muon_momentum_warmup_start: float
+    grad_clip_norm: float | None
+    policy: str = "base_controls"
+    advanced_metric_policy: str = "primary_bpb_clean"
+    rationale: tuple[str, ...] = ()
+
+    def launch_dict(self) -> dict[str, Any]:
+        return {
+            "train_batch_tokens": int(self.train_batch_tokens),
+            "tied_embed_lr": float(self.tied_embed_lr),
+            "matrix_lr": float(self.matrix_lr),
+            "scalar_lr": float(self.scalar_lr),
+            "muon_momentum": float(self.muon_momentum),
+            "muon_momentum_warmup_steps": int(self.muon_momentum_warmup_steps),
+            "muon_momentum_warmup_start": float(self.muon_momentum_warmup_start),
+            "grad_clip_norm": None if self.grad_clip_norm is None else float(self.grad_clip_norm),
+            "policy": self.policy,
+            "advanced_metric_policy": self.advanced_metric_policy,
+            "rationale": list(self.rationale),
+        }
+
+
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -84,6 +118,21 @@ def utc_stamp() -> str:
 def sanitize_tmux_name(value: str, limit: int = 96) -> str:
     clean = re.sub(r"[^A-Za-z0-9_.:-]+", "_", value)
     return clean[:limit].rstrip("_") or "toricgt_4k_recovery"
+
+
+def build_recovery_run_id(parent_run_id: str, restart_index: int, stamp: str, max_len: int = 95) -> str:
+    """Build a compact W&B-safe id instead of recursively appending parents."""
+
+    parent = str(parent_run_id or "")
+    if "seq4096" in parent:
+        stem = "toricgt_seq4096"
+    else:
+        stem = parent.split("_4k_recovery_r", 1)[0] or "toricgt"
+        stem = re.sub(r"[^A-Za-z0-9_.:-]+", "_", stem).strip("_") or "toricgt"
+        stem = stem[:40].rstrip("_") or "toricgt"
+    suffix = f"_4k_recovery_r{int(restart_index)}_{stamp}"
+    budget = max(8, int(max_len) - len(suffix))
+    return f"{stem[:budget].rstrip('_')}{suffix}"
 
 
 def parse_seq4096_log(path: Path | str) -> ParsedLog:
@@ -110,6 +159,7 @@ def parse_seq4096_log(path: Path | str) -> ParsedLog:
                 step=step,
                 total=int(train_match.group("total")),
                 train_loss=float(train_match.group("loss")),
+                train_bpb=finite_float(train_match.group("bpb")),
             )
     return ParsedLog(
         train_rows=[train[key] for key in sorted(train)],
@@ -237,6 +287,122 @@ def load_preemptive_gate_risk(
 
 def should_preempt_for_gate_risk(risk: PreemptiveGateRisk | None) -> bool:
     return bool(risk and risk.missed_projection_count >= risk.required_patience)
+
+
+def round_up_to_multiple(value: float, multiple: int) -> int:
+    if multiple <= 0:
+        return int(math.ceil(value))
+    return int(math.ceil(float(value) / float(multiple)) * multiple)
+
+
+def latest_train_bpb_at_or_before(parsed: ParsedLog, step: int) -> float:
+    candidates = [
+        row.train_bpb
+        for row in parsed.train_rows
+        if row.step <= int(step) and math.isfinite(row.train_bpb)
+    ]
+    return candidates[-1] if candidates else float("nan")
+
+
+def plan_metric_driven_recovery_controls(
+    base: RecoveryControls,
+    *,
+    parsed: ParsedLog,
+    target_bpb: float,
+    gate_step: int,
+    projected_target_step: float = float("nan"),
+    max_train_batch_tokens: int | None = None,
+    validation_gap_threshold: float = 0.04,
+    low_train_bpb_margin: float = 0.0,
+    enabled: bool = True,
+) -> RecoveryControls:
+    """Adapt the next recovery launch to BPB and structural-analysis signals.
+
+    The Seq4096 competition runner does not carry the richer GraphCG/Slepian
+    losses.  When the analyses indicate structural pressure, the safe action
+    for the primary BPB run is to keep that runner BPB-clean while using its
+    train/validation geometry to choose optimizer controls.
+    """
+
+    if not enabled:
+        return replace(base, policy="base_controls", rationale=("advanced metric controls disabled",))
+
+    latest_val = parsed.val_rows[-1] if parsed.val_rows else None
+    if latest_val is None:
+        return replace(base, policy="base_controls", rationale=("waiting for validation BPB",))
+
+    train_bpb = latest_train_bpb_at_or_before(parsed, latest_val.step)
+    validation_gap = (
+        latest_val.val_bpb - train_bpb if math.isfinite(train_bpb) else float("nan")
+    )
+    projected_miss = (
+        math.isfinite(projected_target_step)
+        and projected_target_step > float(gate_step)
+        and latest_val.step < int(gate_step)
+        and latest_val.val_bpb > float(target_bpb)
+    )
+    train_already_low = (
+        math.isfinite(train_bpb)
+        and train_bpb <= float(target_bpb) + float(low_train_bpb_margin)
+    )
+    validation_lagging = (
+        math.isfinite(validation_gap)
+        and validation_gap >= float(validation_gap_threshold)
+        and latest_val.val_bpb > float(target_bpb)
+    )
+
+    if train_already_low and validation_lagging:
+        batch_cap = (
+            int(max_train_batch_tokens)
+            if max_train_batch_tokens is not None and int(max_train_batch_tokens) > 0
+            else int(base.train_batch_tokens)
+        )
+        raised_batch = round_up_to_multiple(base.train_batch_tokens * 1.07, 65_536)
+        return replace(
+            base,
+            train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
+            tied_embed_lr=round(max(0.028, base.tied_embed_lr * 0.875), 6),
+            matrix_lr=round(max(0.017, base.matrix_lr * 0.90), 6),
+            scalar_lr=round(max(0.017, base.scalar_lr * 0.90), 6),
+            muon_momentum_warmup_steps=max(base.muon_momentum_warmup_steps, 500),
+            policy="validation_gap_recapture",
+            advanced_metric_policy="graphcg_slepian_sidecar_primary_bpb_clean",
+            rationale=(
+                f"train BPB {train_bpb:.4f} is already at/below target while validation BPB "
+                f"{latest_val.val_bpb:.4f} lags by {validation_gap:.4f}",
+                "increase effective batch for steadier validation transfer",
+                "lower tied/matrix/scalar learning rates instead of pushing train BPB harder",
+                "keep GraphCG/Slepian/topology losses in sidecar transfer until the competition checkpoint is preserved",
+            ),
+        )
+
+    if projected_miss:
+        batch_cap = (
+            int(max_train_batch_tokens)
+            if max_train_batch_tokens is not None and int(max_train_batch_tokens) > 0
+            else int(base.train_batch_tokens)
+        )
+        raised_batch = round_up_to_multiple(base.train_batch_tokens * 1.07, 65_536)
+        return replace(
+            base,
+            train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
+            tied_embed_lr=round(min(0.040, base.tied_embed_lr * 1.05), 6),
+            policy="bpb_velocity_recapture",
+            advanced_metric_policy="proposal_guided_bpb_recapture_structural_sidecars",
+            rationale=(
+                f"validation projects target at step {projected_target_step:.1f}, beyond gate {gate_step}",
+                "increase effective batch and tied-embedding LR to accelerate validation BPB",
+                "hold matrix/scalar LR to avoid disrupting the current basin",
+                "use GraphCG/Slepian/topology diagnostics as sidecar transfer signals, not heavy primary losses",
+            ),
+        )
+
+    return replace(
+        base,
+        policy="base_controls",
+        advanced_metric_policy="monitor_structural_sidecars",
+        rationale=("no metric-driven recovery-control change selected",),
+    )
 
 
 def shell_env(env: dict[str, Any]) -> str:
@@ -432,6 +598,10 @@ def build_gate_shell(
     preempt_on_projected_miss: bool,
     preempt_min_step: int,
     preempt_patience: int,
+    advanced_metric_controls: bool,
+    recovery_max_train_batch_tokens: int,
+    validation_gap_threshold: float,
+    low_train_bpb_margin: float,
     python: str,
 ) -> str:
     gate_log = repo_root / "logs" / f"{run_id}.4k_gate.txt"
@@ -446,6 +616,11 @@ def build_gate_shell(
         f"--preempt-patience {int(preempt_patience)} "
         if preempt_on_projected_miss
         else ""
+    )
+    advanced_metric_arg = (
+        ""
+        if advanced_metric_controls
+        else "--no-advanced-metric-controls "
     )
     return (
         f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src && "
@@ -464,6 +639,10 @@ def build_gate_shell(
         f"--recovery-muon-momentum-warmup-start {float(recovery_muon_momentum_warmup_start)} "
         f"{grad_clip_arg}"
         f"{preempt_arg}"
+        f"{advanced_metric_arg}"
+        f"--recovery-max-train-batch-tokens {int(recovery_max_train_batch_tokens)} "
+        f"--validation-gap-threshold {float(validation_gap_threshold)} "
+        f"--low-train-bpb-margin {float(low_train_bpb_margin)} "
         f"--state {shlex.quote(str(state_path))} "
         f"2>&1 | tee -a {shlex.quote(str(gate_log))}"
     )
@@ -500,6 +679,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preempt-on-projected-miss", action="store_true")
     parser.add_argument("--preempt-min-step", type=int, default=2500)
     parser.add_argument("--preempt-patience", type=int, default=2)
+    parser.add_argument("--no-advanced-metric-controls", action="store_true")
+    parser.add_argument("--recovery-max-train-batch-tokens", type=int, default=983_040)
+    parser.add_argument("--validation-gap-threshold", type=float, default=0.04)
+    parser.add_argument("--low-train-bpb-margin", type=float, default=0.0)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -542,6 +725,32 @@ def main() -> None:
             and latest_val.step < int(args.gate_step)
             and should_preempt_for_gate_risk(preemptive_risk)
         )
+        base_controls = RecoveryControls(
+            train_batch_tokens=args.recovery_train_batch_tokens,
+            tied_embed_lr=args.recovery_tied_embed_lr,
+            matrix_lr=args.recovery_matrix_lr,
+            scalar_lr=args.recovery_scalar_lr,
+            muon_momentum=args.recovery_muon_momentum,
+            muon_momentum_warmup_steps=args.recovery_muon_momentum_warmup_steps,
+            muon_momentum_warmup_start=args.recovery_muon_momentum_warmup_start,
+            grad_clip_norm=args.recovery_grad_clip_norm,
+        )
+        projected_target_step = (
+            float("nan")
+            if preemptive_risk is None
+            else preemptive_risk.latest_projected_target_step
+        )
+        recovery_controls = plan_metric_driven_recovery_controls(
+            base_controls,
+            parsed=parsed,
+            target_bpb=args.target_bpb,
+            gate_step=args.gate_step,
+            projected_target_step=projected_target_step,
+            max_train_batch_tokens=args.recovery_max_train_batch_tokens,
+            validation_gap_threshold=args.validation_gap_threshold,
+            low_train_bpb_margin=args.low_train_bpb_margin,
+            enabled=not args.no_advanced_metric_controls,
+        )
         status: dict[str, Any] = {
             "run_id": args.run_id,
             "log": str(log_path),
@@ -556,16 +765,12 @@ def main() -> None:
             "min_recovery_runway_steps": args.min_recovery_runway_steps,
             "preempt_on_projected_miss": bool(args.preempt_on_projected_miss),
             "preemptive_gate_risk": None if preemptive_risk is None else preemptive_risk.__dict__,
-            "recovery_launch_controls": {
-                "train_batch_tokens": args.recovery_train_batch_tokens,
-                "tied_embed_lr": args.recovery_tied_embed_lr,
-                "matrix_lr": args.recovery_matrix_lr,
-                "scalar_lr": args.recovery_scalar_lr,
-                "muon_momentum": args.recovery_muon_momentum,
-                "muon_momentum_warmup_steps": args.recovery_muon_momentum_warmup_steps,
-                "muon_momentum_warmup_start": args.recovery_muon_momentum_warmup_start,
-                "grad_clip_norm": args.recovery_grad_clip_norm,
-            },
+            "base_recovery_launch_controls": base_controls.launch_dict(),
+            "recovery_launch_controls": recovery_controls.launch_dict(),
+            "advanced_metric_controls_enabled": not args.no_advanced_metric_controls,
+            "recovery_max_train_batch_tokens": args.recovery_max_train_batch_tokens,
+            "validation_gap_threshold": args.validation_gap_threshold,
+            "low_train_bpb_margin": args.low_train_bpb_margin,
             "updated_unix": time.time(),
         }
         rendered = json.dumps(status, sort_keys=True)
@@ -618,7 +823,7 @@ def main() -> None:
 
         stamp = utc_stamp()
         next_index = args.restart_index + 1
-        recovery_run_id = f"{args.run_id}_4k_recovery_r{next_index}_{stamp}"
+        recovery_run_id = build_recovery_run_id(args.run_id, next_index, stamp)
         recovery_train_tmux = sanitize_tmux_name(f"toricgt_seq4096_4k_recovery_r{next_index}_{stamp}")
         recovery_checkpoint_dir = parameter_golf_root / "checkpoints" / recovery_run_id
         recovery_log = parameter_golf_root / "logs" / f"{recovery_run_id}.txt"
@@ -632,14 +837,14 @@ def main() -> None:
             seed=args.seed + next_index,
             target_bpb=args.target_bpb,
             python=args.python,
-            train_batch_tokens=args.recovery_train_batch_tokens,
-            tied_embed_lr=args.recovery_tied_embed_lr,
-            matrix_lr=args.recovery_matrix_lr,
-            scalar_lr=args.recovery_scalar_lr,
-            muon_momentum=args.recovery_muon_momentum,
-            muon_momentum_warmup_steps=args.recovery_muon_momentum_warmup_steps,
-            muon_momentum_warmup_start=args.recovery_muon_momentum_warmup_start,
-            grad_clip_norm=args.recovery_grad_clip_norm,
+            train_batch_tokens=recovery_controls.train_batch_tokens,
+            tied_embed_lr=recovery_controls.tied_embed_lr,
+            matrix_lr=recovery_controls.matrix_lr,
+            scalar_lr=recovery_controls.scalar_lr,
+            muon_momentum=recovery_controls.muon_momentum,
+            muon_momentum_warmup_steps=recovery_controls.muon_momentum_warmup_steps,
+            muon_momentum_warmup_start=recovery_controls.muon_momentum_warmup_start,
+            grad_clip_norm=recovery_controls.grad_clip_norm,
             wandb_project=args.wandb_project,
             wandb_entity=args.wandb_entity,
         )
@@ -684,17 +889,21 @@ def main() -> None:
             restart_index=next_index,
             max_restarts=args.max_restarts,
             min_recovery_runway_steps=args.min_recovery_runway_steps,
-            recovery_train_batch_tokens=args.recovery_train_batch_tokens,
-            recovery_tied_embed_lr=args.recovery_tied_embed_lr,
-            recovery_matrix_lr=args.recovery_matrix_lr,
-            recovery_scalar_lr=args.recovery_scalar_lr,
-            recovery_muon_momentum=args.recovery_muon_momentum,
-            recovery_muon_momentum_warmup_steps=args.recovery_muon_momentum_warmup_steps,
-            recovery_muon_momentum_warmup_start=args.recovery_muon_momentum_warmup_start,
-            recovery_grad_clip_norm=args.recovery_grad_clip_norm,
+            recovery_train_batch_tokens=recovery_controls.train_batch_tokens,
+            recovery_tied_embed_lr=recovery_controls.tied_embed_lr,
+            recovery_matrix_lr=recovery_controls.matrix_lr,
+            recovery_scalar_lr=recovery_controls.scalar_lr,
+            recovery_muon_momentum=recovery_controls.muon_momentum,
+            recovery_muon_momentum_warmup_steps=recovery_controls.muon_momentum_warmup_steps,
+            recovery_muon_momentum_warmup_start=recovery_controls.muon_momentum_warmup_start,
+            recovery_grad_clip_norm=recovery_controls.grad_clip_norm,
             preempt_on_projected_miss=args.preempt_on_projected_miss,
             preempt_min_step=args.preempt_min_step,
             preempt_patience=args.preempt_patience,
+            advanced_metric_controls=not args.no_advanced_metric_controls,
+            recovery_max_train_batch_tokens=args.recovery_max_train_batch_tokens,
+            validation_gap_threshold=args.validation_gap_threshold,
+            low_train_bpb_margin=args.low_train_bpb_margin,
             python=args.python,
         )
         (command_dir / "analysis_command.sh").write_text(analysis_shell + "\n", encoding="utf-8")
@@ -714,6 +923,7 @@ def main() -> None:
                 "recovery_log": str(recovery_log),
                 "recovery_checkpoint_dir": str(recovery_checkpoint_dir),
                 "command_dir": str(command_dir),
+                "applied_recovery_launch_controls": recovery_controls.launch_dict(),
             }
         )
         write_state(state_path, status)

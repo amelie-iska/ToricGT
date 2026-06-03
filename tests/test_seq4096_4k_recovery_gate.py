@@ -1,9 +1,12 @@
 from pathlib import Path
 
 from scripts.watch_seq4096_4k_recovery import (
+    RecoveryControls,
     build_recovery_launch,
+    build_recovery_run_id,
     checkpoint_for_step,
     load_preemptive_gate_risk,
+    plan_metric_driven_recovery_controls,
     parse_seq4096_log,
     should_preempt_for_gate_risk,
     select_recovery_validation,
@@ -124,6 +127,21 @@ def test_4k_recovery_can_hold_back_best_checkpoint_for_minimum_runway(tmp_path: 
     assert longer_runway_recovery.step == 3000
 
 
+def test_recovery_run_id_stays_compact_for_wandb_resume():
+    parent = (
+        "toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z"
+        "_4k_recovery_r7_20260603T212821Z"
+        "_4k_recovery_r8_20260603T230843Z"
+    )
+
+    run_id = build_recovery_run_id(parent, restart_index=9, stamp="20260603T233419Z")
+
+    assert run_id == "toricgt_seq4096_4k_recovery_r9_20260603T233419Z"
+    assert len(run_id) < 96
+    assert "_4k_recovery_r7_" not in run_id
+    assert "_4k_recovery_r8_" not in run_id
+
+
 def test_preemptive_gate_risk_requires_repeated_projected_miss(tmp_path: Path):
     analysis_root = tmp_path / "analysis"
     for step, projected in ((2500, 4136.6), (2750, 4188.2)):
@@ -186,3 +204,142 @@ def test_preemptive_gate_risk_ignores_single_noisy_projected_miss(tmp_path: Path
     assert risk is not None
     assert risk.missed_projection_count == 1
     assert not should_preempt_for_gate_risk(risk)
+
+
+def test_seq4096_log_parses_train_bpb_for_validation_gap_controls(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 train_loss:1.9942 train_time:1ms step_avg:1ms train_bpb:1.1432",
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    parsed = parse_seq4096_log(log)
+
+    assert parsed.train_rows[-1].train_bpb == 1.1432
+
+
+def test_metric_controls_recapture_validation_gap_without_pushing_lr(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:2750/20000 val_loss:2.1128 val_bpb:1.2513 train_time:1ms step_avg:1ms",
+                "step:3000/20000 train_loss:1.9942 train_time:1ms step_avg:1ms train_bpb:1.1432",
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_seq4096_log(log)
+    base = RecoveryControls(
+        train_batch_tokens=917_504,
+        tied_embed_lr=0.0352,
+        matrix_lr=0.020,
+        scalar_lr=0.020,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=400,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+    )
+
+    planned = plan_metric_driven_recovery_controls(
+        base,
+        parsed=parsed,
+        target_bpb=1.2,
+        gate_step=4000,
+        projected_target_step=4923.7,
+        max_train_batch_tokens=983_040,
+    )
+
+    assert planned.policy == "validation_gap_recapture"
+    assert planned.train_batch_tokens == 983_040
+    assert planned.tied_embed_lr < base.tied_embed_lr
+    assert planned.matrix_lr < base.matrix_lr
+    assert planned.scalar_lr < base.scalar_lr
+    assert planned.advanced_metric_policy == "graphcg_slepian_sidecar_primary_bpb_clean"
+
+
+def test_metric_controls_accelerate_projected_miss_without_heavy_structural_losses(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 train_loss:2.0296 train_time:1ms step_avg:1ms train_bpb:1.2206",
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_seq4096_log(log)
+    base = RecoveryControls(
+        train_batch_tokens=917_504,
+        tied_embed_lr=0.0352,
+        matrix_lr=0.020,
+        scalar_lr=0.020,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=400,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+    )
+
+    planned = plan_metric_driven_recovery_controls(
+        base,
+        parsed=parsed,
+        target_bpb=1.2,
+        gate_step=4000,
+        projected_target_step=4923.7,
+        max_train_batch_tokens=983_040,
+    )
+
+    assert planned.policy == "bpb_velocity_recapture"
+    assert planned.train_batch_tokens == 983_040
+    assert planned.tied_embed_lr > base.tied_embed_lr
+    assert planned.matrix_lr == base.matrix_lr
+    assert planned.scalar_lr == base.scalar_lr
+    assert planned.advanced_metric_policy == "proposal_guided_bpb_recapture_structural_sidecars"
+
+
+def test_metric_controls_hold_when_projection_is_on_track(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 train_loss:2.2500 train_time:1ms step_avg:1ms train_bpb:1.3100",
+                "step:3000/20000 val_loss:2.3000 val_bpb:1.3300 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_seq4096_log(log)
+    base = RecoveryControls(
+        train_batch_tokens=917_504,
+        tied_embed_lr=0.0352,
+        matrix_lr=0.020,
+        scalar_lr=0.020,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=400,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+    )
+
+    planned = plan_metric_driven_recovery_controls(
+        base,
+        parsed=parsed,
+        target_bpb=1.2,
+        gate_step=4000,
+        projected_target_step=3900.0,
+        max_train_batch_tokens=983_040,
+    )
+
+    assert planned.policy == "base_controls"
+    assert planned.train_batch_tokens == base.train_batch_tokens
+    assert planned.tied_embed_lr == base.tied_embed_lr

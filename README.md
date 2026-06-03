@@ -25,8 +25,27 @@ Current validated status:
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
-  `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z`.
-  The tested pre-gate ETA trigger launched it from the R7 step-2750 checkpoint after two consecutive projected misses of the step-4000 target. R8 resumes from validation BPB `1.2513` with reset optimizer/RNG/loader, larger batch tokens, higher tied-embedding LR, dense W&B aliases, and periodic analysis sidecars.
+  `toricgt_seq4096_4k_recovery_r9_20260603T233614Z`.
+  It is a compact-id, W&B-reporting BPB-velocity recapture from the R8
+  step-3000 checkpoint after the step-3000 analysis projected the validation
+  target crossing at about step `4923.7`, beyond the step-4000 gate. R9 resumes
+  from validation BPB `1.2453678313891468`, resets optimizer/RNG/loader, uses
+  `983040` train tokens per step, `TIED_EMBED_LR=0.03696`, matrix/scalar LR
+  held at `0.02`, Muon momentum `0.985`, and gradient clipping `1.0`. Its W&B
+  run is <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r9_20260603T233614Z>.
+  Latest confirmed W&B summary while this README was refreshed: trainer step
+  `3025`, train BPB `1.2934333534767184`, validation/OpenAI BPB
+  `1.2453678313891468`, target gap `0.04536783138914679`, target not yet
+  reached.
+- Seq4096 recovery automation now uses metric-driven launch controls. Repeated
+  validation ETA misses trigger pre-gate recovery; projected-miss cases use a
+  small tied-embedding LR lift plus higher effective batch, while train-low /
+  validation-lag cases lower LR and keep the competition BPB runner clean.
+  GraphCG, Slepian/Pollak, topology, toric, BGG Category O, Koszul, tropical,
+  complexity, and persistent-homology signals are used as sidecar transfer and
+  decision diagnostics until the <1.2 BPB competition checkpoint is preserved.
+  Recovery run ids are compacted to avoid W&B `CommError` failures from
+  recursively long names.
 - Advanced reasoning/memory branch: the live auxiliary run is
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   It trains the random-order ToricGT adapter with explicit graph-of-thought,
