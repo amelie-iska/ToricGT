@@ -50,3 +50,19 @@ def test_bigram_bias_lowers_loss_for_matching_previous_token():
     biased_loss = model(input_ids, target_ids)
 
     assert biased_loss < base_loss
+
+
+def test_bigram_logit_bias_from_tokens_prefers_observed_transition():
+    module = load_seq4096_module()
+    tokens = torch.tensor([1, 2, 1, 2, 1, 3, 4], dtype=torch.long)
+
+    bias = module.build_bigram_logit_bias_from_tokens(
+        tokens,
+        vocab_size=5,
+        alpha=0.1,
+        strength=1.0,
+    )
+
+    assert bias.shape == (5, 5)
+    assert bias[1, 2] > bias[1, 3]
+    assert bias[1, 3] > bias[1, 4]
