@@ -10,6 +10,7 @@ import pytest
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "watch_seq4096_analysis.py"
 FULL_DIAG_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "mirror_fineweb_full_diagnostics_to_wandb.py"
+LOG_MIRROR_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "mirror_fineweb_log_to_wandb.py"
 
 
 def load_module():
@@ -27,6 +28,15 @@ def load_full_diag_module():
     if src_path not in sys.path:
         sys.path.insert(0, src_path)
     spec = importlib.util.spec_from_file_location("mirror_fineweb_full_diagnostics_to_wandb", FULL_DIAG_SCRIPT_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_log_mirror_module():
+    assert LOG_MIRROR_SCRIPT_PATH.exists(), "FineWeb W&B mirror script should exist"
+    spec = importlib.util.spec_from_file_location("mirror_fineweb_log_to_wandb", LOG_MIRROR_SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -172,3 +182,37 @@ def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
     assert payload["diagnostics/families/slepian_pollak_prolate_available"] == 1.0
     assert payload["tropical/bpb_best_so_far"] == pytest.approx(1.3641)
     assert payload["metrics_status/fineweb_curve_diagnostics_available"] == 1.0
+
+
+def test_dense_wandb_mirror_loads_train_bpb_and_diagnostic_aliases(tmp_path: Path) -> None:
+    module = load_log_mirror_module()
+    train_match = module.TRAIN_RE.search(
+        "step:2200/20000 train_loss:2.2024 train_time:3089227ms step_avg:1404.19ms train_bpb:1.2833"
+    )
+    assert train_match is not None
+    assert float(train_match.group("bpb")) == pytest.approx(1.2833)
+
+    diagnostics_json = tmp_path / "latest.json"
+    diagnostics_json.write_text(
+        json.dumps(
+            {
+                "trainer/step": 2100,
+                "diagnostics/latest/topology_loss": 0.8,
+                "diagnostics/latest/bpb_intervention_pressure": 0.12,
+                "diagnostics/families/slepian_pollak_prolate_available": 1.0,
+                "fineweb_curve/latest_train_bpb": 1.2821,
+                "toric/shadow_fan_cell_entropy": 0.75,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    aliases = module.latest_diagnostics_aliases(diagnostics_json, step=2200)
+
+    assert aliases["diagnostics/latest/topology_loss"] == pytest.approx(0.8)
+    assert aliases["diagnostics/latest/bpb_intervention_pressure"] == pytest.approx(0.12)
+    assert aliases["diagnostics/families/slepian_pollak_prolate_available"] == 1.0
+    assert aliases["fineweb_curve/latest_train_bpb"] == pytest.approx(1.2821)
+    assert aliases["diagnostics/latest_full_metrics_step"] == pytest.approx(2100)
+    assert aliases["diagnostics/latest/staleness_steps"] == pytest.approx(100)
+    assert "toric/shadow_fan_cell_entropy" not in aliases

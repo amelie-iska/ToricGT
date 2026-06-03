@@ -9,6 +9,7 @@ logs them to W&B under a separate monitoring run without touching the trainer.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import re
@@ -19,6 +20,7 @@ from pathlib import Path
 TRAIN_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+train_loss:(?P<loss>[0-9.]+)"
     r"\s+train_time:(?P<ms>[0-9.]+)ms\s+step_avg:(?P<avg>[0-9.]+)ms"
+    r"(?:\s+train_bpb:(?P<bpb>[0-9.]+))?"
 )
 VAL_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+val_loss:(?P<loss>[0-9.]+)"
@@ -36,7 +38,48 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-name", default="")
     parser.add_argument("--poll-seconds", type=float, default=15.0)
     parser.add_argument("--target-bpb", type=float, default=1.2)
+    parser.add_argument(
+        "--diagnostics-json",
+        default="",
+        help="Optional latest full-diagnostics JSON to mirror into dense W&B rows.",
+    )
     return parser.parse_args()
+
+
+def default_diagnostics_json(log_path: Path) -> Path:
+    return Path("logs") / f"{log_path.stem}.full_diag.latest.json"
+
+
+def latest_diagnostics_aliases(path: Path, step: int) -> dict[str, float]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    aliases: dict[str, float] = {}
+    for key, value in payload.items():
+        if not (
+            key.startswith("diagnostics/latest/")
+            or key.startswith("diagnostics/families/")
+            or key.startswith("fineweb_curve/")
+        ):
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(numeric):
+            aliases[key] = numeric
+    diag_step = payload.get("trainer/step")
+    try:
+        diag_step_value = float(diag_step)
+    except (TypeError, ValueError):
+        diag_step_value = float("nan")
+    if math.isfinite(diag_step_value):
+        aliases["diagnostics/latest_full_metrics_step"] = diag_step_value
+        aliases["diagnostics/latest/staleness_steps"] = max(0.0, float(step) - diag_step_value)
+    return aliases
 
 
 def main() -> None:
@@ -57,6 +100,7 @@ def main() -> None:
     )
     wandb.define_metric("*", step_metric="trainer/step")
     path = Path(args.log)
+    diagnostics_json = Path(args.diagnostics_json) if args.diagnostics_json else default_diagnostics_json(path)
     seen: set[tuple[str, int]] = set()
     best_bpb: float | None = None
     initial_bpb: float | None = None
@@ -120,28 +164,30 @@ def main() -> None:
                         "openai_parameter_golf/target_bpb": args.target_bpb,
                         "openai_parameter_golf/gap_to_target": target_gap,
                     }
+                    diagnostic_payload = latest_diagnostics_aliases(diagnostics_json, step)
+                    payload.update(diagnostic_payload)
                     wandb.log(payload)
-                    run.summary.update(
-                        {
-                            "fineweb/val_bpb": bpb,
-                            "fineweb/best_val_bpb": best_bpb,
-                            "fineweb/target_bpb": args.target_bpb,
-                            "val/bpb": bpb,
-                            "val/loss": val_loss,
-                            "val_bpb": bpb,
-                            "bpb": bpb,
-                            "bpb/val": bpb,
-                            "bpb/best": best_bpb,
-                            "bpb/target": args.target_bpb,
-                            "bpb/gap_to_target": target_gap,
-                            "openai_parameter_golf/bpb": bpb,
-                            "openai_parameter_golf/best_bpb": best_bpb,
-                            "openai_parameter_golf/target_bpb": args.target_bpb,
-                            "openai_parameter_golf/gap_to_target": target_gap,
-                            "progress/step": step,
-                            "progress/fraction": step / max(total, 1),
-                        }
-                    )
+                    summary_payload = {
+                        "fineweb/val_bpb": bpb,
+                        "fineweb/best_val_bpb": best_bpb,
+                        "fineweb/target_bpb": args.target_bpb,
+                        "val/bpb": bpb,
+                        "val/loss": val_loss,
+                        "val_bpb": bpb,
+                        "bpb": bpb,
+                        "bpb/val": bpb,
+                        "bpb/best": best_bpb,
+                        "bpb/target": args.target_bpb,
+                        "bpb/gap_to_target": target_gap,
+                        "openai_parameter_golf/bpb": bpb,
+                        "openai_parameter_golf/best_bpb": best_bpb,
+                        "openai_parameter_golf/target_bpb": args.target_bpb,
+                        "openai_parameter_golf/gap_to_target": target_gap,
+                        "progress/step": step,
+                        "progress/fraction": step / max(total, 1),
+                    }
+                    summary_payload.update(diagnostic_payload)
+                    run.summary.update(summary_payload)
                     print(f"wandb_val step={step} val_bpb={bpb:.4f} best={best_bpb:.4f}", flush=True)
                     continue
                 train = TRAIN_RE.search(line)
@@ -153,6 +199,7 @@ def main() -> None:
                     seen.add(key)
                     total = int(train.group("total"))
                     train_loss = float(train.group("loss"))
+                    train_bpb = float(train.group("bpb")) if train.group("bpb") is not None else None
                     train_time_ms = float(train.group("ms"))
                     step_avg_ms = float(train.group("avg"))
                     payload = {
@@ -172,15 +219,37 @@ def main() -> None:
                         "train/loss": train_loss,
                         "train/perplexity": math.exp(min(train_loss, 20.0)),
                     }
+                    if train_bpb is not None:
+                        payload.update(
+                            {
+                                "fineweb/train_bpb": train_bpb,
+                                "train/bpb": train_bpb,
+                                "train_bpb": train_bpb,
+                                "bpb/train": train_bpb,
+                                "openai_parameter_golf/train_bpb": train_bpb,
+                            }
+                        )
+                    diagnostic_payload = latest_diagnostics_aliases(diagnostics_json, step)
+                    payload.update(diagnostic_payload)
                     wandb.log(payload)
-                    run.summary.update(
-                        {
-                            "fineweb/train_loss": train_loss,
-                            "train/loss": train_loss,
-                            "progress/step": step,
-                            "progress/fraction": step / max(total, 1),
-                        }
-                    )
+                    summary_payload = {
+                        "fineweb/train_loss": train_loss,
+                        "train/loss": train_loss,
+                        "progress/step": step,
+                        "progress/fraction": step / max(total, 1),
+                    }
+                    if train_bpb is not None:
+                        summary_payload.update(
+                            {
+                                "fineweb/train_bpb": train_bpb,
+                                "train/bpb": train_bpb,
+                                "train_bpb": train_bpb,
+                                "bpb/train": train_bpb,
+                                "openai_parameter_golf/train_bpb": train_bpb,
+                            }
+                        )
+                    summary_payload.update(diagnostic_payload)
+                    run.summary.update(summary_payload)
             stop_requested = any(
                 marker in text_tail
                 for marker in ("final_int8_zlib_roundtrip", "Traceback", "RuntimeError")
