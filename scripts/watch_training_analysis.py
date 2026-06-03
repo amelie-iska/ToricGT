@@ -42,6 +42,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 CHECKPOINT_PATTERN = re.compile(r"random_order_step_(\d+)\.pt$")
 
@@ -75,6 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=10017)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--precision", default="fp32", choices=["bf16", "fp16", "fp32"])
+    parser.add_argument("--skip-oai-competition-eval", action="store_true")
     parser.add_argument(
         "--codex-review-hook",
         default="",
@@ -130,6 +133,18 @@ def run_command(command: list[str], cwd: Path, log_path: Path) -> None:
         subprocess.run(command, cwd=str(cwd), env=env, stdout=handle, stderr=subprocess.STDOUT, check=True)
 
 
+def run_optional_command(command: list[str], cwd: Path, log_path: Path) -> bool:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"src:{env.get('PYTHONPATH', '')}"
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write("$ " + " ".join(command) + "\n\n")
+        handle.flush()
+        result = subprocess.run(command, cwd=str(cwd), env=env, stdout=handle, stderr=subprocess.STDOUT, check=False)
+        handle.write(f"\nexit_code={result.returncode}\n")
+        return result.returncode == 0
+
+
 def pause_training_session(tmux_session: str, wait_seconds: float, log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as handle:
@@ -170,13 +185,23 @@ def load_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def load_yaml(path: str | Path) -> dict[str, Any]:
+    try:
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Path:
     metrics_dir = base / "metrics"
     simplex_dir = base / "simplex"
     geometry_dir = base / "geometry"
+    oai_dir = base / "oai_competition"
     category = load_json(metrics_dir / "category_summary.json")
     geometry = load_json(geometry_dir / "reasoning_geometry_summary.json")
     simplex = load_json(simplex_dir / "reasoning_simplex_summary.json")
+    oai = load_json(oai_dir / "summary.json")
     checkpoint_meta = load_json(metrics_dir / "checkpoint_meta.json")
     lines = [
         "# Post-Resume Analysis Synopsis",
@@ -205,6 +230,17 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
                     f"- `val_bpb`: {metrics.get('val_bpb', 'n/a')}",
                 ]
             )
+    if oai:
+        lines.extend(
+            [
+                "",
+                "## OAI Competition BPB",
+                f"- Source: `{oai.get('source', 'n/a')}`",
+                f"- `oai_competition/bpb`: {oai.get('oai_competition/bpb', 'n/a')}",
+                f"- `oai_competition/loss`: {oai.get('oai_competition/loss', 'n/a')}",
+                f"- Eval batches: `{oai.get('oai_competition/eval_batches', 'n/a')}`",
+            ]
+        )
     lines.extend(
         [
             "",
@@ -312,6 +348,32 @@ def main() -> None:
             ],
             cwd=repo,
             log_path=base / "logs" / "metrics.log",
+        )
+    config = load_yaml(args.config)
+    oai_config = config.get("oai_competition", {}) if isinstance(config.get("oai_competition", {}), dict) else {}
+    if bool(oai_config.get("enabled", False)) and not args.skip_oai_competition_eval:
+        command = [
+            "python",
+            "scripts/evaluate_oai_competition_bpb.py",
+            "--checkpoint",
+            str(checkpoint),
+            "--config",
+            args.config,
+            "--output-json",
+            str(base / "oai_competition" / "summary.json"),
+            "--device",
+            args.device,
+            "--precision",
+            args.precision,
+            "--seed",
+            str(args.seed),
+        ]
+        if args.run_path:
+            command.extend(["--wandb-run-path", args.run_path])
+        run_optional_command(
+            command,
+            cwd=repo,
+            log_path=base / "logs" / "oai_competition.log",
         )
     run_command(
         [

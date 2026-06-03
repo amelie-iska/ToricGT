@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pyarrow.parquet as pq
 import torch
 import yaml
@@ -381,6 +382,101 @@ class SyntheticByteChunkDataset(IterableDataset):
             counter += 1
 
 
+def load_competition_token_shard(path: str | Path) -> np.ndarray:
+    """Read a Parameter-Golf challenge-format uint16 token shard."""
+
+    file_path = Path(path)
+    header_bytes = 256 * np.dtype("<i4").itemsize
+    token_bytes = np.dtype("<u2").itemsize
+    header = np.fromfile(file_path, dtype="<i4", count=256)
+    if header.size != 256 or int(header[0]) != 20240520 or int(header[1]) != 1:
+        raise ValueError(f"unexpected challenge shard header for {file_path}")
+    num_tokens = int(header[2])
+    expected_size = header_bytes + num_tokens * token_bytes
+    if file_path.stat().st_size != expected_size:
+        raise ValueError(f"challenge shard size mismatch for {file_path}: expected {expected_size} bytes")
+    tokens = np.fromfile(file_path, dtype="<u2", count=num_tokens, offset=header_bytes)
+    if int(tokens.size) != num_tokens:
+        raise ValueError(f"short read for challenge shard {file_path}")
+    return tokens.astype(np.int32, copy=False)
+
+
+class SentencePieceShardByteDataset(IterableDataset):
+    """Decode local OAI competition SentencePiece shards and stream byte chunks.
+
+    The native ToricGT Parameter-Golf model is byte-level, while the locally
+    cached competition validation shard is the ``sp1024`` SentencePiece export.
+    This dataset decodes that exact validation source back to text and scores
+    the byte model on the resulting UTF-8 bytes.  Metrics are intentionally
+    named ``oai_competition/*`` rather than ``fineweb/*`` to avoid confusing
+    this native checkpoint evaluation with the separate FineWeb scaffold run.
+    """
+
+    def __init__(
+        self,
+        token_glob: str,
+        tokenizer_path: str,
+        seq_len: int,
+        byte_offset: int,
+        sp_tokens_per_decode: int = 4096,
+        seed: int = 17,
+        repeat: bool = False,
+        shuffle_files: bool = False,
+    ) -> None:
+        super().__init__()
+        self.files = sorted(glob.glob(token_glob))
+        self.tokenizer_path = str(tokenizer_path)
+        self.seq_len = int(seq_len)
+        self.byte_offset = int(byte_offset)
+        self.sp_tokens_per_decode = max(1, int(sp_tokens_per_decode))
+        self.seed = int(seed)
+        self.repeat = bool(repeat)
+        self.shuffle_files = bool(shuffle_files)
+        if not self.files:
+            raise FileNotFoundError(f"no OAI competition token shards matched: {token_glob}")
+        if not Path(self.tokenizer_path).is_file():
+            raise FileNotFoundError(f"OAI competition tokenizer not found: {self.tokenizer_path}")
+
+    def __iter__(self):
+        try:
+            import sentencepiece as spm
+        except ImportError as exc:
+            raise RuntimeError("sentencepiece is required for OAI competition shard decoding") from exc
+
+        worker = get_worker_info()
+        worker_id = worker.id if worker is not None else 0
+        num_workers = worker.num_workers if worker is not None else 1
+        files = [path for index, path in enumerate(self.files) if index % num_workers == worker_id]
+        rng = random.Random(self.seed + worker_id)
+        processor = spm.SentencePieceProcessor(model_file=self.tokenizer_path)
+        counter = worker_id * 10**12
+        epoch = 0
+        while True:
+            if self.shuffle_files:
+                rng.shuffle(files)
+            buffer: list[int] = []
+            for file_path in files:
+                shard_tokens = load_competition_token_shard(file_path)
+                for start in range(0, int(shard_tokens.size), self.sp_tokens_per_decode):
+                    piece_ids = [int(x) for x in shard_tokens[start : start + self.sp_tokens_per_decode]]
+                    text = processor.decode(piece_ids)
+                    if not text:
+                        continue
+                    buffer.extend(byte_encode(text, byte_offset=self.byte_offset))
+                    while len(buffer) >= self.seq_len:
+                        chunk = buffer[: self.seq_len]
+                        del buffer[: self.seq_len]
+                        yield {
+                            "tokens": torch.tensor(chunk, dtype=torch.long),
+                            "sample_id": torch.tensor(counter, dtype=torch.long),
+                        }
+                        counter += 1
+            epoch += 1
+            if not self.repeat:
+                break
+            counter += 10**9 + epoch
+
+
 def collate_chunks(items: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     return {
         "tokens": torch.stack([item["tokens"] for item in items], dim=0),
@@ -434,6 +530,36 @@ def build_loader(
         dataset,
         batch_size=batch_size,
         num_workers=workers,
+        pin_memory=torch.cuda.is_available(),
+        collate_fn=collate_chunks,
+    )
+
+
+def build_oai_competition_loader(
+    token_glob: str,
+    tokenizer_path: str,
+    batch_size: int,
+    seq_len: int,
+    byte_offset: int,
+    sp_tokens_per_decode: int,
+    seed: int,
+    workers: int,
+    repeat: bool = False,
+) -> DataLoader:
+    dataset = SentencePieceShardByteDataset(
+        token_glob=token_glob,
+        tokenizer_path=tokenizer_path,
+        seq_len=seq_len,
+        byte_offset=byte_offset,
+        sp_tokens_per_decode=sp_tokens_per_decode,
+        seed=seed,
+        repeat=repeat,
+        shuffle_files=repeat,
+    )
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=max(0, int(workers)),
         pin_memory=torch.cuda.is_available(),
         collate_fn=collate_chunks,
     )
@@ -1676,6 +1802,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-batches", type=int)
     parser.add_argument("--eval-order-samples", type=int)
     parser.add_argument("--eval-gflownet-samples", type=int)
+    parser.add_argument("--oai-competition-eval", action="store_true")
+    parser.add_argument("--no-oai-competition-eval", action="store_true")
+    parser.add_argument("--oai-competition-token-glob")
+    parser.add_argument("--oai-competition-tokenizer-path")
+    parser.add_argument("--oai-competition-eval-interval", type=int)
+    parser.add_argument("--oai-competition-eval-batches", type=int)
+    parser.add_argument("--oai-competition-sp-tokens-per-decode", type=int)
+    parser.add_argument("--oai-competition-workers", type=int)
     parser.add_argument("--ckpt-interval", type=int)
     parser.add_argument("--num-workers", type=int)
     parser.add_argument("--rows-per-batch", type=int)
@@ -2038,6 +2172,43 @@ def main() -> None:
         if args.eval_gflownet_samples is not None
         else config_get(file_config, "training", "eval_gflownet_samples", 2)
     )
+    oai_competition_eval_enabled = (
+        False
+        if args.no_oai_competition_eval
+        else bool(args.oai_competition_eval or config_get(file_config, "oai_competition", "enabled", False))
+    )
+    oai_competition_token_glob = args.oai_competition_token_glob or config_get(
+        file_config,
+        "oai_competition",
+        "val_token_glob",
+        "amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_val_*.bin",
+    )
+    oai_competition_tokenizer_path = args.oai_competition_tokenizer_path or config_get(
+        file_config,
+        "oai_competition",
+        "tokenizer_path",
+        "amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model",
+    )
+    oai_competition_eval_interval = (
+        args.oai_competition_eval_interval
+        if args.oai_competition_eval_interval is not None
+        else config_get(file_config, "oai_competition", "eval_interval", eval_interval)
+    )
+    oai_competition_eval_batches = (
+        args.oai_competition_eval_batches
+        if args.oai_competition_eval_batches is not None
+        else config_get(file_config, "oai_competition", "eval_batches", max(1, min(8, int(eval_batches))))
+    )
+    oai_competition_sp_tokens_per_decode = (
+        args.oai_competition_sp_tokens_per_decode
+        if args.oai_competition_sp_tokens_per_decode is not None
+        else config_get(file_config, "oai_competition", "sp_tokens_per_decode", 4096)
+    )
+    oai_competition_workers = (
+        args.oai_competition_workers
+        if args.oai_competition_workers is not None
+        else config_get(file_config, "oai_competition", "workers", 0)
+    )
     gflownet_loss_weight = (
         args.gflownet_loss_weight
         if args.gflownet_loss_weight is not None
@@ -2374,6 +2545,7 @@ def main() -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     start_step = 0
     best_val = float("inf")
+    best_oai_competition_bpb = float("inf")
     optimizer_state_loaded = False
     if args.resume:
         payload = torch.load(args.resume, map_location=device)
@@ -2444,6 +2616,12 @@ def main() -> None:
         start_step = int(payload.get("step", 0))
         resume_metrics = payload.get("metrics", {})
         best_val = float(resume_metrics.get("val_bpb", resume_metrics.get("best_val_bpb", best_val)))
+        best_oai_competition_bpb = float(
+            resume_metrics.get(
+                "oai_competition/best_bpb",
+                resume_metrics.get("best_oai_competition_bpb", best_oai_competition_bpb),
+            )
+        )
     if resume_aware_stream_seed:
         stream_origin_step = int(
             configured_stream_origin_step
@@ -2579,6 +2757,26 @@ def main() -> None:
         dataset_keywords=dataset_keywords,
         interleave_row_groups=interleave_row_groups,
     )
+    oai_competition_loader = None
+    oai_competition_available = False
+    oai_competition_error = ""
+    if oai_competition_eval_enabled:
+        try:
+            oai_competition_loader = build_oai_competition_loader(
+                token_glob=oai_competition_token_glob,
+                tokenizer_path=oai_competition_tokenizer_path,
+                batch_size=batch_size,
+                seq_len=model_config.max_seq_len,
+                byte_offset=model_config.byte_offset,
+                sp_tokens_per_decode=int(oai_competition_sp_tokens_per_decode),
+                seed=seed + 40_000,
+                workers=int(oai_competition_workers),
+                repeat=False,
+            )
+            oai_competition_available = True
+        except Exception as exc:
+            oai_competition_error = f"{type(exc).__name__}: {exc}"
+            print(json.dumps({"oai_competition_eval_error": oai_competition_error}))
 
     use_wandb = bool(args.wandb or config_get(file_config, "logging", "wandb", False)) and not args.no_wandb
     wandb_run = None
@@ -2649,6 +2847,19 @@ def main() -> None:
                     "max_parameters": hessian_max_parameters,
                     "role": "diagnostic_only",
                 },
+                "oai_competition": {
+                    "enabled": oai_competition_eval_enabled,
+                    "available": oai_competition_available,
+                    "val_token_glob": oai_competition_token_glob,
+                    "tokenizer_path": oai_competition_tokenizer_path,
+                    "eval_interval": oai_competition_eval_interval,
+                    "eval_batches": oai_competition_eval_batches,
+                    "sp_tokens_per_decode": oai_competition_sp_tokens_per_decode,
+                    "workers": oai_competition_workers,
+                    "metric_namespace": "oai_competition",
+                    "source": "local_fineweb10B_sp1024_validation_decoded_to_utf8_bytes",
+                    "error": oai_competition_error,
+                },
                 "checkpoint_publishing": {
                     "enabled": publish_best_to_hf,
                     "repo_id": hf_repo_id,
@@ -2710,6 +2921,14 @@ def main() -> None:
             id=os.environ.get("WANDB_RUN_ID") or None,
             resume=os.environ.get("WANDB_RESUME") or None,
         )
+        wandb_run.log(
+            {
+                "oai_competition/enabled": float(oai_competition_eval_enabled),
+                "oai_competition/available": float(oai_competition_available),
+                "oai_competition/source_sp1024_decoded_bytes": float(oai_competition_available),
+            },
+            step=start_step,
+        )
 
     print(json.dumps(
         {
@@ -2762,6 +2981,14 @@ def main() -> None:
             "complexity_eval_every": complexity_eval_every,
             "complexity_eval_samples": complexity_eval_samples,
             "complexity_compressors": list(complexity_compressors),
+            "oai_competition_eval_enabled": oai_competition_eval_enabled,
+            "oai_competition_available": oai_competition_available,
+            "oai_competition_token_glob": oai_competition_token_glob,
+            "oai_competition_tokenizer_path": oai_competition_tokenizer_path,
+            "oai_competition_eval_interval": oai_competition_eval_interval,
+            "oai_competition_eval_batches": oai_competition_eval_batches,
+            "oai_competition_sp_tokens_per_decode": oai_competition_sp_tokens_per_decode,
+            "oai_competition_error": oai_competition_error,
             "hessian_enabled": hessian_enabled,
             "hessian_eval_every": hessian_eval_every,
             "hessian_max_tokens": hessian_max_tokens,
@@ -3931,6 +4158,49 @@ def main() -> None:
             }
             if "bias_norm" in val_score_first:
                 metrics["val/score_first_bias_norm"] = val_score_first["bias_norm"]
+            oai_competition_due = (
+                oai_competition_loader is not None
+                and oai_competition_available
+                and int(oai_competition_eval_interval or 0) > 0
+                and (step % int(oai_competition_eval_interval) == 0 or step == steps)
+            )
+            if oai_competition_due:
+                try:
+                    oai_deterministic = evaluate(
+                        model,
+                        oai_competition_loader,
+                        device=device,
+                        batches=int(oai_competition_eval_batches),
+                        precision=precision,
+                        pass_id=seed + 40_000 + step,
+                        order_samples=1,
+                        gflownet_samples=1,
+                        score_first_bias_lr=0.0,
+                        score_first_bias_decay=eval_score_first_bias_decay,
+                        score_first_bias_clip=eval_score_first_bias_clip,
+                    )
+                    best_oai_competition_bpb = min(
+                        best_oai_competition_bpb,
+                        float(oai_deterministic["bpb"]),
+                    )
+                    metrics.update(
+                        {
+                            "oai_competition/loss": oai_deterministic["loss"],
+                            "oai_competition/bpb": oai_deterministic["bpb"],
+                            "oai_competition/deterministic_loss": oai_deterministic["loss"],
+                            "oai_competition/deterministic_bpb": oai_deterministic["bpb"],
+                            "oai_competition/best_bpb": best_oai_competition_bpb,
+                            "oai_competition/eval_batches": float(oai_competition_eval_batches),
+                            "oai_competition/available": 1.0,
+                            "oai_competition/source_sp1024_decoded_bytes": 1.0,
+                            "competition/oai_bpb": oai_deterministic["bpb"],
+                            "bpb/oai_competition": oai_deterministic["bpb"],
+                        }
+                    )
+                except Exception as exc:
+                    metrics["oai_competition/error"] = 1.0
+                    metrics["oai_competition/available"] = 0.0
+                    print(json.dumps({"step": step, "oai_competition_eval_error": f"{type(exc).__name__}: {exc}"}))
             if complexity_enabled and complexity_eval_samples > 0:
                 try:
                     val_batch = next(iter(val_loader))
@@ -4041,7 +4311,13 @@ def main() -> None:
                 step=step,
                 config=model_config,
                 args=args,
-                metrics={"train_loss": step_loss, "train_bpb": bpb, "best_val_bpb": best_val},
+                metrics={
+                    "train_loss": step_loss,
+                    "train_bpb": bpb,
+                    "best_val_bpb": best_val,
+                    "best_oai_competition_bpb": best_oai_competition_bpb,
+                    "oai_competition/best_bpb": best_oai_competition_bpb,
+                },
             )
 
     final_artifact = write_artifact(

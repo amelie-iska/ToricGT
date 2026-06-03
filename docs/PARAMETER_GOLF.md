@@ -385,7 +385,15 @@ marked with status flags, including
 `metrics_status/model_hidden_state_available=0` and
 `metrics_status/metric_scope_fineweb_curve_proxy=1`, until a native ToricGT
 trainer run is active.  When `scripts/train_parameter_golf_random_order.py`
-is used, these namespaces are emitted by the model path itself.
+is used, these namespaces are emitted by the model path itself.  Native
+all-phases checkpoints also log the local OAI competition validation source
+under `oai_competition/*`: the trainer decodes the cached
+`fineweb10B_sp1024/fineweb_val_*.bin` shard with
+`fineweb_1024_bpe.model`, converts it to UTF-8 byte tokens, and scores the
+same byte-level ToricGT checkpoint.  This metric is intentionally not named
+`fineweb/*`; that namespace is reserved for the external scaffold launcher.
+Dashboard aliases `competition/oai_bpb` and `bpb/oai_competition` point at the
+same native checkpoint score.
 
 Current operational guardrail: training should resume only after the full
 analysis suite finishes and all generated plot classes have been inspected.

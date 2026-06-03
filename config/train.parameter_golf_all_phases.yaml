@@ -176,6 +176,19 @@ data:
     - biomed
     - biochem
 
+oai_competition:
+  enabled: true
+  # Native ToricGT checkpoint metric: decode the local Parameter-Golf
+  # fineweb10B_sp1024 validation shard back to UTF-8 and score the byte model.
+  # This is intentionally logged as oai_competition/*, not fineweb/*; fineweb/*
+  # is reserved for the separate scaffold launcher.
+  val_token_glob: amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_val_*.bin
+  tokenizer_path: amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model
+  eval_interval: 250
+  eval_batches: 8
+  sp_tokens_per_decode: 4096
+  workers: 0
+
 training:
   checkpoint_dir: checkpoints/parameter_golf_all_phases
   max_steps: 60000

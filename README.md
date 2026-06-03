@@ -608,7 +608,12 @@ certificate audits, while status metrics such as
 `metrics_status/model_hidden_state_available=0` make clear that these are not
 live hidden-state losses from the external scaffold.  Native hidden-state
 topology, toric, tropical, complexity, and Toric BGG metrics come from
-`scripts/train_parameter_golf_random_order.py`.
+`scripts/train_parameter_golf_random_order.py`.  For native all-phases
+checkpoints, competition-validation BPB is logged as `oai_competition/bpb`,
+with aliases `competition/oai_bpb` and `bpb/oai_competition`.  The native
+trainer decodes the local `fineweb10B_sp1024` validation shard through
+`fineweb_1024_bpe.model` and then scores the byte model, so this metric should
+not be expected under the separate scaffold-only `fineweb/*` namespace.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
