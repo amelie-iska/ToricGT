@@ -167,6 +167,42 @@ def add_candidate(candidates, metric, value, source, priority):
     )
 
 
+def measured_bpb_priority(metric):
+    lowered = str(metric).lower()
+    normalized = lowered.replace("_", "/")
+    if "bpb" not in lowered:
+        return None
+    blocked_tokens = (
+        "target",
+        "gap",
+        "improvement",
+        "reached",
+        "train",
+        "bits/per/token",
+        "bytes/per/token",
+        "tokens/per/byte",
+    )
+    if any(token in normalized for token in blocked_tokens):
+        return None
+    competition_patterns = (
+        "competition/oai/bpb",
+        "oai/competition",
+        "openai/parameter/golf/bpb",
+        "openai_parameter_golf/bpb",
+    )
+    if any(pattern in normalized for pattern in competition_patterns):
+        return 0
+    if normalized in {"bpb", "bpb/best", "bpb/val", "val/bpb"}:
+        return 5
+    if "fineweb/best/val/bpb" in normalized or "fineweb/val/bpb" in normalized:
+        return 5
+    if "best/val/bpb" in normalized or normalized.endswith("/val/bpb"):
+        return 10
+    if "complexity/val/bpb" in normalized:
+        return 20
+    return None
+
+
 state = load_json(state_path)
 if not isinstance(state, dict):
     state = {}
@@ -182,18 +218,9 @@ checkpoint_metrics = checkpoint_meta.get("metrics", {})
 if isinstance(checkpoint_metrics, dict):
     for key, value in checkpoint_metrics.items():
         key_str = str(key)
-        if "bpb" not in key_str.lower():
+        priority = measured_bpb_priority(key_str)
+        if priority is None:
             continue
-        priority = 40
-        lowered = key_str.lower()
-        if "fineweb" in lowered:
-            priority = 0
-        elif "best_val" in lowered or lowered in {"val_bpb", "val/bpb"}:
-            priority = 10
-        elif "complexity/val" in lowered:
-            priority = 20
-        elif "train" in lowered:
-            priority = 30
         add_candidate(candidates, key_str, value, "checkpoint_meta", priority)
 
 stats = load_json(analysis_dir / "metrics" / "metric_stats.json")
@@ -202,25 +229,17 @@ if isinstance(stats, list):
         if not isinstance(row, dict):
             continue
         metric = str(row.get("metric", ""))
-        if "bpb" not in metric.lower():
+        priority = measured_bpb_priority(metric)
+        if priority is None:
             continue
+        # For sparse checkpoint-gated validation metrics, median windows can
+        # average the initial and current BPB.  The target gate should track
+        # the latest measured validation/competition value.
         value = (
-            row.get("last_median")
-            if row.get("last_median") is not None
-            else row.get("recent_median")
-            if row.get("recent_median") is not None
-            else row.get("last")
+            row.get("last_value")
+            if row.get("last_value") is not None
+            else row.get("last_median")
         )
-        lowered = metric.lower()
-        priority = 40
-        if "fineweb" in lowered:
-            priority = 0
-        elif lowered in {"val/bpb", "val_bpb"} or "best_val" in lowered:
-            priority = 10
-        elif "complexity/val" in lowered:
-            priority = 20
-        elif "train" in lowered:
-            priority = 30
         add_candidate(candidates, metric, value, "metric_stats", priority)
 
 history_csv = analysis_dir / "metrics" / "wandb_history.csv"
@@ -232,17 +251,10 @@ if history_csv.exists():
         if rows:
             last = rows[-1]
             for key, value in last.items():
-                if key and "bpb" in key.lower():
-                    lowered = key.lower()
-                    priority = 40
-                    if "fineweb" in lowered:
-                        priority = 0
-                    elif lowered in {"val/bpb", "val_bpb"} or "best_val" in lowered:
-                        priority = 10
-                    elif "complexity/val" in lowered:
-                        priority = 20
-                    elif "train" in lowered:
-                        priority = 30
+                if not key:
+                    continue
+                priority = measured_bpb_priority(key)
+                if priority is not None:
                     add_candidate(candidates, key, value, "wandb_history_last", priority)
     except Exception:
         pass
