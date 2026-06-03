@@ -120,6 +120,7 @@ log: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/logs/tor
 console log: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z.console.txt
 checkpoint dir: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z
 script: amelie-iska/parameter-golf/records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
+parameter-golf commit: a0f111f
 python: /home/iska/miniconda3/envs/tokengt/bin/python
 status at launch check: warmup started, GPU process alive
 ```
