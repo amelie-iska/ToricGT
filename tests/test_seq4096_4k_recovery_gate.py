@@ -49,3 +49,5 @@ def test_4k_recovery_selects_best_checkpoint_and_sets_resume_env(tmp_path: Path)
     assert str(best_checkpoint) in rendered
     assert "RUN_ID=unit_recovery" in rendered
     assert "CHECKPOINT_DIR=" in rendered
+    assert "RESET_OPTIMIZER_ON_RESUME=1" in rendered
+    assert "RESET_RNG_ON_RESUME=1" in rendered

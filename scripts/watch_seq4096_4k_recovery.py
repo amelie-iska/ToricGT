@@ -181,6 +181,8 @@ def build_recovery_launch(
         "SEED": seed,
         "WANDB_LOG_EVERY": 1,
         "RESUME_CHECKPOINT": resume_checkpoint,
+        "RESET_OPTIMIZER_ON_RESUME": 1,
+        "RESET_RNG_ON_RESUME": 1,
     }
     training_command = [f"{key}={value}" for key, value in env.items()] + [
         python,
