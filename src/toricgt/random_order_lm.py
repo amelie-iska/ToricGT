@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import asdict, dataclass
-from typing import Literal
+from typing import Literal, Mapping
 
 import torch
 from torch import nn
@@ -27,6 +27,56 @@ from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topol
 from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
 from .toric_bgg import ToricBGGConfig, ToricBGGProbe
 from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryRetrievalHead
+
+
+ADVANCED_REASONING_MEMORY_TOKENS: tuple[str, ...] = (
+    "<|got_begin|>",
+    "<|got_end|>",
+    "<|simplex_begin|>",
+    "<|simplex_end|>",
+    "<|reason_step_begin|>",
+    "<|reason_step_end|>",
+    "<|reason_edge|>",
+    "<|memory_begin|>",
+    "<|memory_end|>",
+    "<|memory_read|>",
+    "<|memory_write|>",
+    "<|memory_link|>",
+    "<|memory_consolidate|>",
+    "<|analogy_begin|>",
+    "<|analogy_end|>",
+)
+
+
+def advanced_special_token_map() -> dict[str, int]:
+    """Return the reserved structural token IDs for GoT/memory trajectories."""
+
+    return {token: index + 1 for index, token in enumerate(ADVANCED_REASONING_MEMORY_TOKENS)}
+
+
+def advanced_id_to_special_token_map() -> dict[int, str]:
+    return {token_id: token for token, token_id in advanced_special_token_map().items()}
+
+
+def advanced_byte_offset() -> int:
+    """First token ID used by UTF-8 bytes in advanced structural-token mode."""
+
+    return len(ADVANCED_REASONING_MEMORY_TOKENS) + 1
+
+
+def advanced_vocab_size(byte_vocab_size: int = 256) -> int:
+    """Vocabulary size covering pad, structural tokens, and all byte values."""
+
+    return advanced_byte_offset() + int(byte_vocab_size)
+
+
+def special_token_map_for_mode(mode: str | None) -> dict[str, int]:
+    normalized = str(mode or "none").strip().lower()
+    if normalized in ("", "none", "off", "false", "0"):
+        return {}
+    if normalized in ("reasoning_memory", "advanced_reasoning_memory"):
+        return advanced_special_token_map()
+    raise ValueError(f"unknown special_token_mode: {mode}")
 
 
 @dataclass(frozen=True)
@@ -158,11 +208,16 @@ class RandomOrderLMConfig:
     target_artifact_bytes: int = 15_600_000
     byte_offset: int = 4
     pad_token_id: int = 0
+    special_token_mode: str = "none"
     weight_tying: bool = True
 
     @property
     def bos_token_id(self) -> int:
         return self.vocab_size
+
+    @property
+    def special_token_ids(self) -> dict[str, int]:
+        return special_token_map_for_mode(self.special_token_mode)
 
 
 @dataclass(frozen=True)
@@ -261,6 +316,71 @@ def byte_decode(tokens: list[int] | torch.Tensor, byte_offset: int = 4) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def byte_encode_with_special_tokens(
+    text: str,
+    byte_offset: int | None = None,
+    special_token_map: Mapping[str, int] | None = None,
+) -> list[int]:
+    """Encode text while preserving known reasoning/memory markers as tokens."""
+
+    special_token_map = dict(special_token_map or advanced_special_token_map())
+    if byte_offset is None:
+        byte_offset = max(special_token_map.values(), default=0) + 1
+    if special_token_map and int(byte_offset) <= max(special_token_map.values()):
+        raise ValueError("byte_offset must be greater than every special token id")
+    markers = sorted(special_token_map, key=len, reverse=True)
+    encoded: list[int] = []
+    index = 0
+    while index < len(text):
+        match = None
+        for marker in markers:
+            if text.startswith(marker, index):
+                match = marker
+                break
+        if match is not None:
+            encoded.append(int(special_token_map[match]))
+            index += len(match)
+            continue
+        char = text[index]
+        encoded.extend(int(byte) + int(byte_offset) for byte in char.encode("utf-8", errors="replace"))
+        index += 1
+    return encoded
+
+
+def byte_decode_with_special_tokens(
+    tokens: list[int] | torch.Tensor,
+    byte_offset: int | None = None,
+    id_to_special_token: Mapping[int, str] | None = None,
+) -> str:
+    """Decode byte and structural-token streams back to marker-annotated text."""
+
+    id_to_special_token = dict(id_to_special_token or advanced_id_to_special_token_map())
+    if byte_offset is None:
+        byte_offset = max(id_to_special_token.keys(), default=0) + 1
+    if isinstance(tokens, torch.Tensor):
+        raw = tokens.detach().cpu().tolist()
+    else:
+        raw = tokens
+    parts: list[str] = []
+    byte_buffer = bytearray()
+
+    def flush_bytes() -> None:
+        if byte_buffer:
+            parts.append(bytes(byte_buffer).decode("utf-8", errors="replace"))
+            byte_buffer.clear()
+
+    for raw_token in raw:
+        token = int(raw_token)
+        marker = id_to_special_token.get(token)
+        if marker is not None:
+            flush_bytes()
+            parts.append(marker)
+        elif token >= int(byte_offset):
+            byte_buffer.append(max(0, min(255, token - int(byte_offset))))
+    flush_bytes()
+    return "".join(parts)
+
+
 class DenseRandomOrderToricLM(nn.Module):
     """Dense Parameter-Golf model with ToricGT random-order graph projection."""
 
@@ -270,6 +390,20 @@ class DenseRandomOrderToricLM(nn.Module):
             raise ValueError("Parameter-Golf random-order LM is dense by default; set use_soft_moe=False")
         if config.d_model % config.num_heads != 0:
             raise ValueError("d_model must be divisible by num_heads")
+        special_token_ids = config.special_token_ids
+        if special_token_ids:
+            max_special_id = max(special_token_ids.values())
+            if config.byte_offset <= max_special_id:
+                raise ValueError(
+                    "byte_offset must be greater than reserved reasoning/memory special token IDs; "
+                    f"use byte_offset >= {max_special_id + 1}"
+                )
+            min_vocab_size = int(config.byte_offset) + 256
+            if config.vocab_size < min_vocab_size:
+                raise ValueError(
+                    "vocab_size must cover reserved tokens plus all UTF-8 byte values; "
+                    f"use vocab_size >= {min_vocab_size}"
+                )
         self.config = config
         self.token_embedding = nn.Embedding(config.vocab_size + 1, config.d_model)
         self.position_embedding = nn.Embedding(config.max_seq_len, config.d_model)
@@ -841,6 +975,8 @@ class DenseRandomOrderToricLM(nn.Module):
         )
         cls = torch.where(punctuation, torch.full_like(cls, 6), cls)
         cls = torch.where(byte >= 128, torch.full_like(cls, 7), cls)
+        special = (tokens > int(self.config.pad_token_id)) & (tokens < int(self.config.byte_offset))
+        cls = torch.where(special, torch.full_like(cls, 9), cls)
         return cls
 
     def _analogy_lattice_losses(
@@ -1716,7 +1852,9 @@ class DenseRandomOrderToricLM(nn.Module):
         return generated.squeeze(0)
 
     def config_dict(self) -> dict[str, object]:
-        return asdict(self.config)
+        payload = asdict(self.config)
+        payload["special_token_ids"] = self.config.special_token_ids
+        return payload
 
 
 def estimate_uncompressed_quantized_bytes(

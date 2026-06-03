@@ -28,8 +28,12 @@ from toricgt.parameter_golf_export import PARAMETER_GOLF_BYTE_LIMIT, write_artif
 from toricgt.random_order_lm import (
     DenseRandomOrderToricLM,
     RandomOrderLMConfig,
+    advanced_byte_offset,
+    advanced_vocab_size,
     byte_encode,
+    byte_encode_with_special_tokens,
     estimate_uncompressed_quantized_bytes,
+    special_token_map_for_mode,
 )
 
 
@@ -173,6 +177,7 @@ class ParquetByteChunkDataset(IterableDataset):
         task_family_keywords: tuple[str, ...] = (),
         dataset_keywords: tuple[str, ...] = (),
         interleave_row_groups: bool = True,
+        special_token_mode: str = "none",
     ) -> None:
         super().__init__()
         self.files = sorted(glob.glob(parquet_glob))
@@ -191,7 +196,64 @@ class ParquetByteChunkDataset(IterableDataset):
         self.task_family_keywords = tuple(keyword.lower() for keyword in task_family_keywords if keyword)
         self.dataset_keywords = tuple(keyword.lower() for keyword in dataset_keywords if keyword)
         self.interleave_row_groups = bool(interleave_row_groups)
-        self._separator_bytes = byte_encode(document_separator, byte_offset=byte_offset) if document_separator else []
+        self.special_token_mode = str(special_token_mode or "none")
+        self.special_token_map = special_token_map_for_mode(self.special_token_mode)
+        if self.special_token_map and int(byte_offset) <= max(self.special_token_map.values()):
+            raise ValueError("byte_offset must be greater than reserved reasoning/memory special token IDs")
+        self._separator_bytes = self._encode_text(document_separator) if document_separator else []
+
+    def _encode_text(self, text: str) -> list[int]:
+        if self.special_token_map:
+            return byte_encode_with_special_tokens(
+                text,
+                byte_offset=self.byte_offset,
+                special_token_map=self.special_token_map,
+            )
+        return byte_encode(text, byte_offset=self.byte_offset)
+
+    def _advanced_tokens_enabled(self) -> bool:
+        return bool(self.special_token_map)
+
+    @staticmethod
+    def _has_any(haystack: str, needles: tuple[str, ...]) -> bool:
+        return any(needle in haystack for needle in needles)
+
+    def _is_reasoning_text(self, text: str) -> bool:
+        return self._has_any(
+            text.lower(),
+            ("reason", "step", "thought", "chain", "tree", "trajectory", "simplex", "proof", "inference"),
+        )
+
+    def _is_memory_text(self, text: str) -> bool:
+        return self._has_any(
+            text.lower(),
+            ("memory", "retriev", "recall", "read", "write", "store", "lookup", "prior", "consolidat"),
+        )
+
+    def _is_analogy_text(self, text: str) -> bool:
+        return self._has_any(text.lower(), ("analog", "analogy", "analogue", "analoga", "::"))
+
+    def _memory_marker(self, text: str) -> str:
+        lowered = text.lower()
+        if self._has_any(lowered, ("write", "store", "save", "update")):
+            return "<|memory_write|>"
+        if self._has_any(lowered, ("consolidat", "compress", "summar")):
+            return "<|memory_consolidate|>"
+        if self._has_any(lowered, ("link", "connect", "associat", "edge")):
+            return "<|memory_link|>"
+        return "<|memory_read|>"
+
+    def _wrap_structured_span(self, text: str, *, force_reasoning: bool = False) -> str:
+        if not self._advanced_tokens_enabled() or not text:
+            return text
+        lowered = text.lower()
+        if self._is_memory_text(lowered):
+            return f"<|memory_begin|>{self._memory_marker(lowered)} {text}<|memory_end|>"
+        if self._is_analogy_text(lowered):
+            return f"<|analogy_begin|>{text}<|analogy_end|>"
+        if force_reasoning or self._is_reasoning_text(lowered):
+            return f"<|reason_step_begin|>{text}<|reason_step_end|>"
+        return text
 
     def _stride_rows(self, rows: list[dict[str, Any]], epoch: int, worker_id: int) -> list[dict[str, Any]]:
         if not self.coprime_row_stride or len(rows) <= 2:
@@ -216,7 +278,8 @@ class ParquetByteChunkDataset(IterableDataset):
         nodes = payload.get("nodes", [])
         edges = payload.get("edges", [])
         targets = payload.get("targets", {})
-        parts = ["<graph>"]
+        advanced = self._advanced_tokens_enabled()
+        parts = ["<|got_begin|>", "<|simplex_begin|>"] if advanced else ["<graph>"]
         if isinstance(nodes, list):
             for node in nodes[:96]:
                 if not isinstance(node, dict):
@@ -224,7 +287,13 @@ class ParquetByteChunkDataset(IterableDataset):
                 node_id = str(node.get("id", ""))[:48]
                 node_type = str(node.get("type", ""))[:48]
                 node_text = str(node.get("text", node.get("label", node.get("payload", ""))))[:220]
-                parts.append(f"node id={node_id} type={node_type} text={node_text}")
+                line = f"node id={node_id} type={node_type} text={node_text}"
+                if advanced:
+                    line = self._wrap_structured_span(
+                        line,
+                        force_reasoning=self._is_reasoning_text(f"{node_id} {node_type}"),
+                    )
+                parts.append(line)
         if isinstance(edges, list):
             for edge in edges[:160]:
                 if not isinstance(edge, dict):
@@ -232,12 +301,30 @@ class ParquetByteChunkDataset(IterableDataset):
                 src = str(edge.get("source", edge.get("src", "")))[:48]
                 dst = str(edge.get("target", edge.get("dst", "")))[:48]
                 edge_type = str(edge.get("type", edge.get("label", "")))[:48]
-                parts.append(f"edge {src}->{dst} type={edge_type}")
+                line = f"edge {src}->{dst} type={edge_type}"
+                if advanced:
+                    edge_context = f"{src} {dst} {edge_type}"
+                    prefixes = ["<|reason_edge|>"]
+                    if self._is_memory_text(edge_context) or "link" in edge_context.lower():
+                        prefixes.append(self._memory_marker(edge_context))
+                    line = " ".join((*prefixes, line))
+                    if self._is_memory_text(edge_context):
+                        line = f"<|memory_begin|>{line}<|memory_end|>"
+                    if self._is_analogy_text(edge_context):
+                        line = f"<|analogy_begin|>{line}<|analogy_end|>"
+                parts.append(line)
         if isinstance(targets, dict) and targets:
             parts.append("targets " + json.dumps(targets, ensure_ascii=False, sort_keys=True)[:512])
         elif isinstance(targets, list) and targets:
             parts.append("targets " + json.dumps(targets[:16], ensure_ascii=False)[:512])
-        return "\n".join(parts)[: self.graph_projection_max_chars]
+        if not advanced:
+            return "\n".join(parts)[: self.graph_projection_max_chars]
+        suffix = "\n<|simplex_end|>\n<|got_end|>"
+        projected = "\n".join(parts) + suffix
+        if len(projected) <= self.graph_projection_max_chars:
+            return projected
+        keep = max(0, self.graph_projection_max_chars - len(suffix))
+        return projected[:keep] + suffix
 
     def _row_text(self, row: dict[str, Any]) -> str:
         domain_prefix = self._domain_prefix(row)
@@ -250,7 +337,10 @@ class ParquetByteChunkDataset(IterableDataset):
         for column in ("question", "reasoning", "solution", "answer"):
             value = row.get(column)
             if isinstance(value, str) and value.strip():
-                parts.append(value)
+                if column in ("reasoning", "solution"):
+                    parts.append(self._wrap_structured_span(value, force_reasoning=True))
+                else:
+                    parts.append(self._wrap_structured_span(value))
         if graph_text:
             parts.append(graph_text)
         if domain_prefix:
@@ -344,7 +434,7 @@ class ParquetByteChunkDataset(IterableDataset):
                             continue
                         if buffer and self._separator_bytes:
                             buffer.extend(self._separator_bytes)
-                        buffer.extend(byte_encode(text, byte_offset=self.byte_offset))
+                        buffer.extend(self._encode_text(text))
                         while len(buffer) >= self.seq_len:
                             chunk = buffer[: self.seq_len]
                             del buffer[: self.seq_len]
@@ -362,11 +452,12 @@ class ParquetByteChunkDataset(IterableDataset):
 class SyntheticByteChunkDataset(IterableDataset):
     """Fallback dataset for command and CUDA validation checks."""
 
-    def __init__(self, seq_len: int, vocab_size: int, seed: int = 17) -> None:
+    def __init__(self, seq_len: int, vocab_size: int, seed: int = 17, min_token_id: int = 4) -> None:
         super().__init__()
         self.seq_len = seq_len
         self.vocab_size = vocab_size
         self.seed = seed
+        self.min_token_id = max(1, min(int(min_token_id), max(1, int(vocab_size) - 1)))
 
     def __iter__(self):
         worker = get_worker_info()
@@ -376,7 +467,13 @@ class SyntheticByteChunkDataset(IterableDataset):
         counter = worker_id * 10**12
         while True:
             yield {
-                "tokens": torch.randint(4, self.vocab_size, (self.seq_len,), generator=generator, dtype=torch.long),
+                "tokens": torch.randint(
+                    self.min_token_id,
+                    self.vocab_size,
+                    (self.seq_len,),
+                    generator=generator,
+                    dtype=torch.long,
+                ),
                 "sample_id": torch.tensor(counter, dtype=torch.long),
             }
             counter += 1
@@ -504,9 +601,10 @@ def build_loader(
     task_family_keywords: tuple[str, ...] = (),
     dataset_keywords: tuple[str, ...] = (),
     interleave_row_groups: bool = True,
+    special_token_mode: str = "none",
 ) -> DataLoader:
     if synthetic or not glob.glob(parquet_glob):
-        dataset = SyntheticByteChunkDataset(seq_len=seq_len, vocab_size=vocab_size, seed=seed)
+        dataset = SyntheticByteChunkDataset(seq_len=seq_len, vocab_size=vocab_size, seed=seed, min_token_id=byte_offset)
     else:
         dataset = ParquetByteChunkDataset(
             parquet_glob=parquet_glob,
@@ -525,6 +623,7 @@ def build_loader(
             task_family_keywords=task_family_keywords,
             dataset_keywords=dataset_keywords,
             interleave_row_groups=interleave_row_groups,
+            special_token_mode=special_token_mode,
         )
     return DataLoader(
         dataset,
@@ -1838,6 +1937,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ring-block-size", type=int)
     parser.add_argument("--polarquant-kv-bits", type=int)
     parser.add_argument("--polarquant-train", action="store_true")
+    parser.add_argument("--special-token-mode", choices=["none", "reasoning_memory"])
+    parser.add_argument("--advanced-reasoning-tokens", action="store_true")
+    parser.add_argument("--no-advanced-reasoning-tokens", action="store_true")
     parser.add_argument("--use-gflownet-policy", action="store_true")
     parser.add_argument("--no-gflownet-policy", action="store_true")
     parser.add_argument("--gflownet-num-actions", type=int)
@@ -1846,7 +1948,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gflownet-loss-weight", type=float)
     parser.add_argument("--gflownet-entropy-weight", type=float)
     parser.add_argument("--gflownet-entropy-target", type=float)
+    parser.add_argument("--use-graphcg", action="store_true")
+    parser.add_argument("--no-graphcg", action="store_true")
     parser.add_argument("--graphcg-loss-weight", type=float)
+    parser.add_argument("--use-analogy-lattice", action="store_true")
+    parser.add_argument("--no-analogy-lattice", action="store_true")
     parser.add_argument("--analogy-lattice-loss-weight", type=float)
     parser.add_argument("--toric-geometry-loss-weight", type=float)
     parser.add_argument("--toric-entropy-floor", type=float)
@@ -1872,6 +1978,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--contrastive-loss-weight", type=float)
     parser.add_argument("--trajectory-flow-loss-weight", type=float)
     parser.add_argument("--trajectory-flow-target", type=float)
+    parser.add_argument("--use-trajectory-memory-head", action="store_true")
+    parser.add_argument("--no-trajectory-memory-head", action="store_true")
+    parser.add_argument("--trajectory-memory-loss-weight", type=float)
     parser.add_argument("--eval-score-first-bias-lr", type=float)
     parser.add_argument("--eval-score-first-bias-decay", type=float)
     parser.add_argument("--eval-score-first-bias-clip", type=float)
@@ -1923,6 +2032,26 @@ def main() -> None:
     random.seed(seed)
 
     configured_d_model = args.d_model if args.d_model is not None else config_get(file_config, "model", "d_model", 384)
+    if args.no_advanced_reasoning_tokens:
+        special_token_mode = "none"
+    elif args.advanced_reasoning_tokens:
+        special_token_mode = "reasoning_memory"
+    elif args.special_token_mode is not None:
+        special_token_mode = args.special_token_mode
+    else:
+        configured_special_token_mode = config_get(file_config, "model", "special_token_mode", None)
+        use_advanced_reasoning_tokens = bool(
+            config_get(file_config, "model", "use_advanced_reasoning_tokens", False)
+        )
+        special_token_mode = (
+            configured_special_token_mode
+            if configured_special_token_mode is not None
+            else ("reasoning_memory" if use_advanced_reasoning_tokens else "none")
+        )
+    special_token_ids = special_token_map_for_mode(special_token_mode)
+    advanced_structural_mode = bool(special_token_ids)
+    default_byte_offset = advanced_byte_offset() if advanced_structural_mode else 4
+    default_vocab_size = advanced_vocab_size() if advanced_structural_mode else 260
     configured_graphcg_max_codes = config_get(file_config, "model", "graphcg_max_codes", 256)
     configured_graphcg_directions = resolve_graphcg_num_directions(
         config_get(file_config, "model", "graphcg_num_directions", 12),
@@ -1931,7 +2060,7 @@ def main() -> None:
         max_codes=int(configured_graphcg_max_codes),
     )
     model_config = RandomOrderLMConfig(
-        vocab_size=config_get(file_config, "model", "vocab_size", 260),
+        vocab_size=config_get(file_config, "model", "vocab_size", default_vocab_size),
         max_seq_len=args.seq_len if args.seq_len is not None else config_get(file_config, "model", "max_seq_len", 1024),
         d_model=configured_d_model,
         num_heads=args.num_heads if args.num_heads is not None else config_get(file_config, "model", "num_heads", 6),
@@ -2024,7 +2153,11 @@ def main() -> None:
         toric_geometry_braid_weight=config_get(file_config, "model", "toric_geometry_braid_weight", 0.1),
         toric_geometry_leaf_weight=config_get(file_config, "model", "toric_geometry_leaf_weight", 0.25),
         toric_geometry_max_positions=config_get(file_config, "model", "toric_geometry_max_positions", 256),
-        use_graphcg=config_get(file_config, "model", "use_graphcg", False),
+        use_graphcg=(
+            False
+            if args.no_graphcg
+            else bool(args.use_graphcg or config_get(file_config, "model", "use_graphcg", advanced_structural_mode))
+        ),
         graphcg_num_directions=configured_graphcg_directions,
         graphcg_alpha=config_get(file_config, "model", "graphcg_alpha", 0.12),
         graphcg_temperature=config_get(file_config, "model", "graphcg_temperature", 0.2),
@@ -2032,7 +2165,14 @@ def main() -> None:
         graphcg_orthogonal_weight=config_get(file_config, "model", "graphcg_orthogonal_weight", 0.2),
         graphcg_covariance_weight=config_get(file_config, "model", "graphcg_covariance_weight", 0.05),
         graphcg_sparsity_weight=config_get(file_config, "model", "graphcg_sparsity_weight", 0.0001),
-        use_analogy_lattice=config_get(file_config, "model", "use_analogy_lattice", False),
+        use_analogy_lattice=(
+            False
+            if args.no_analogy_lattice
+            else bool(
+                args.use_analogy_lattice
+                or config_get(file_config, "model", "use_analogy_lattice", advanced_structural_mode)
+            )
+        ),
         analogy_lattice_max_pairs=config_get(file_config, "model", "analogy_lattice_max_pairs", 256),
         analogy_lattice_stride=config_get(file_config, "model", "analogy_lattice_stride", 1),
         analogy_lattice_temperature=config_get(file_config, "model", "analogy_lattice_temperature", 0.2),
@@ -2088,7 +2228,14 @@ def main() -> None:
         koszul_rank_temperature=config_get(file_config, "model", "koszul_rank_temperature", 0.05),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
-        use_trajectory_memory_head=config_get(file_config, "model", "use_trajectory_memory_head", False),
+        use_trajectory_memory_head=(
+            False
+            if args.no_trajectory_memory_head
+            else bool(
+                args.use_trajectory_memory_head
+                or config_get(file_config, "model", "use_trajectory_memory_head", advanced_structural_mode)
+            )
+        ),
         trajectory_memory_projection_dim=config_get(file_config, "model", "trajectory_memory_projection_dim", 128),
         trajectory_memory_teacher_temperature=config_get(file_config, "model", "trajectory_memory_teacher_temperature", 0.20),
         trajectory_memory_retrieval_temperature=config_get(
@@ -2116,7 +2263,8 @@ def main() -> None:
         if args.aux_mtp_offsets is not None
         else config_get(file_config, "model", "aux_mtp_offsets", 2),
         target_artifact_bytes=config_get(file_config, "model", "target_artifact_bytes", 15_600_000),
-        byte_offset=config_get(file_config, "model", "byte_offset", 4),
+        byte_offset=config_get(file_config, "model", "byte_offset", default_byte_offset),
+        special_token_mode=special_token_mode,
         use_soft_moe=False,
     )
 
@@ -2252,12 +2400,17 @@ def main() -> None:
     graphcg_loss_weight = (
         args.graphcg_loss_weight
         if args.graphcg_loss_weight is not None
-        else config_get(file_config, "training", "graphcg_loss_weight", 0.0)
+        else config_get(file_config, "training", "graphcg_loss_weight", 6e-5 if advanced_structural_mode else 0.0)
     )
     analogy_lattice_loss_weight = (
         args.analogy_lattice_loss_weight
         if args.analogy_lattice_loss_weight is not None
-        else config_get(file_config, "training", "analogy_lattice_loss_weight", 0.0)
+        else config_get(
+            file_config,
+            "training",
+            "analogy_lattice_loss_weight",
+            1e-4 if advanced_structural_mode else 0.0,
+        )
     )
     toric_geometry_loss_weight = (
         args.toric_geometry_loss_weight
@@ -2304,7 +2457,16 @@ def main() -> None:
         if args.trajectory_flow_loss_weight is not None
         else config_get(file_config, "training", "trajectory_flow_loss_weight", 0.002)
     )
-    trajectory_memory_loss_weight = config_get(file_config, "training", "trajectory_memory_loss_weight", 0.0)
+    trajectory_memory_loss_weight = (
+        args.trajectory_memory_loss_weight
+        if args.trajectory_memory_loss_weight is not None
+        else config_get(
+            file_config,
+            "training",
+            "trajectory_memory_loss_weight",
+            2e-5 if advanced_structural_mode else 0.0,
+        )
+    )
     trajectory_flow_target = (
         args.trajectory_flow_target
         if args.trajectory_flow_target is not None
@@ -2714,6 +2876,7 @@ def main() -> None:
         task_family_keywords=task_family_keywords,
         dataset_keywords=dataset_keywords,
         interleave_row_groups=interleave_row_groups,
+        special_token_mode=model_config.special_token_mode,
     )
     medium_train_loader = None
     if difficulty_curriculum_enabled and int(medium_start_step or 0) > 0:
@@ -2737,6 +2900,7 @@ def main() -> None:
             task_family_keywords=medium_task_family_keywords,
             dataset_keywords=medium_dataset_keywords,
             interleave_row_groups=interleave_row_groups,
+            special_token_mode=model_config.special_token_mode,
         )
     complex_train_loader = None
     if int(complex_start_step or 0) > 0:
@@ -2760,6 +2924,7 @@ def main() -> None:
             task_family_keywords=complex_task_family_keywords,
             dataset_keywords=complex_dataset_keywords,
             interleave_row_groups=interleave_row_groups,
+            special_token_mode=model_config.special_token_mode,
         )
     val_loader = build_loader(
         parquet_glob=val_glob,
@@ -2781,6 +2946,7 @@ def main() -> None:
         task_family_keywords=task_family_keywords,
         dataset_keywords=dataset_keywords,
         interleave_row_groups=interleave_row_groups,
+        special_token_mode=model_config.special_token_mode,
     )
     oai_competition_loader = None
     oai_competition_available = False
@@ -2833,6 +2999,8 @@ def main() -> None:
             name=args.wandb_run_name or config_get(file_config, "logging", "run_name", None),
             config={
                 "model": model.config_dict(),
+                "special_token_mode": model_config.special_token_mode,
+                "special_token_ids": model_config.special_token_ids,
                 "training": {
                     "batch_size": batch_size,
                     "grad_accum_steps": grad_accum,

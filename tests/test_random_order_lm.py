@@ -2,10 +2,16 @@ import torch
 
 from toricgt.koszul_persistence import KoszulPersistenceConfig, koszul_persistence_loss
 from toricgt.random_order_lm import (
+    ADVANCED_REASONING_MEMORY_TOKENS,
     DenseRandomOrderToricLM,
     RandomOrderLMConfig,
+    advanced_byte_offset,
+    advanced_special_token_map,
+    advanced_vocab_size,
     byte_decode,
     byte_encode,
+    byte_decode_with_special_tokens,
+    byte_encode_with_special_tokens,
     random_order_batch,
     random_order_permutation,
 )
@@ -310,3 +316,46 @@ def test_byte_roundtrip():
     text = "ToricGT \u05db\u05bc\u05b8\u05ea\u05b7\u05d1"
     tokens = byte_encode(text, byte_offset=4)
     assert byte_decode(tokens, byte_offset=4) == text
+
+
+def test_advanced_reasoning_memory_tokens_feed_gflownet_graphcg_memory_and_analogy():
+    special_ids = advanced_special_token_map()
+    assert tuple(special_ids) == ADVANCED_REASONING_MEMORY_TOKENS
+    assert advanced_byte_offset() == max(special_ids.values()) + 1
+
+    text = (
+        "<|got_begin|><|reason_step_begin|>A<|reason_step_end|>"
+        "<|memory_read|><|analogy_begin|>B<|analogy_end|><|got_end|>"
+    )
+    encoded = byte_encode_with_special_tokens(text, byte_offset=advanced_byte_offset(), special_token_map=special_ids)
+    assert byte_decode_with_special_tokens(encoded, byte_offset=advanced_byte_offset()) == text
+    assert special_ids["<|reason_step_begin|>"] in encoded
+    assert special_ids["<|memory_read|>"] in encoded
+    assert special_ids["<|analogy_begin|>"] in encoded
+    assert all(0 <= token < advanced_vocab_size() for token in encoded)
+
+    sequence = (encoded * 3)[:12]
+    cfg = tiny_config(
+        vocab_size=advanced_vocab_size(),
+        byte_offset=advanced_byte_offset(),
+        special_token_mode="reasoning_memory",
+        use_gflownet_policy=True,
+        gflownet_num_actions=4,
+        gflownet_hidden_dim=16,
+        use_graphcg=True,
+        graphcg_num_directions=8,
+        graphcg_max_codes=32,
+        use_trajectory_memory_head=True,
+        trajectory_memory_projection_dim=16,
+        use_analogy_lattice=True,
+        analogy_lattice_max_pairs=32,
+    )
+    model = DenseRandomOrderToricLM(cfg)
+    out = model(torch.tensor([sequence, sequence[::-1]], dtype=torch.long), sample_ids=torch.arange(2))
+    assert out["gflownet_loss"].isfinite()
+    assert out["graphcg_loss"].isfinite()
+    assert out["trajectory_memory_loss"].isfinite()
+    assert out["analogy_lattice_loss"].isfinite()
+    config_payload = model.config_dict()
+    assert config_payload["special_token_mode"] == "reasoning_memory"
+    assert config_payload["special_token_ids"]["<|memory_read|>"] == special_ids["<|memory_read|>"]

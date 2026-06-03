@@ -1,0 +1,76 @@
+model:
+  special_token_mode: reasoning_memory
+  use_advanced_reasoning_tokens: true
+  vocab_size: 272
+  byte_offset: 16
+  max_seq_len: 4096
+  attention: hybrid
+  ring_block_size: 256
+  use_gflownet_policy: true
+  gflownet_num_actions: 16
+  gflownet_hidden_dim: 128
+  gflownet_action_scale: 0.05
+  use_graphcg: true
+  graphcg_num_directions: auto
+  graphcg_min_directions: 16
+  graphcg_max_directions: 96
+  graphcg_max_codes: 256
+  graphcg_alpha: 0.12
+  graphcg_temperature: 0.2
+  use_trajectory_memory_head: true
+  trajectory_memory_projection_dim: 128
+  trajectory_memory_graphcg_weight: 0.35
+  trajectory_memory_topology_weight: 0.20
+  trajectory_memory_toric_weight: 0.20
+  use_analogy_lattice: true
+  analogy_lattice_max_pairs: 256
+  analogy_lattice_stride: 1
+  analogy_lattice_temperature: 0.2
+  analogy_topology_directed: true
+  analogy_hdbscan_enabled: true
+  use_koszul_persistence: true
+  use_toric_geometry_tasks: true
+  use_toric_bgg: true
+
+training:
+  graphcg_loss_weight: 0.00006
+  analogy_lattice_loss_weight: 0.00010
+  trajectory_memory_loss_weight: 0.00002
+  gflownet_loss_weight: 0.00025
+  gflownet_entropy_weight: 0.00005
+  gflownet_entropy_target: 2.0
+  trajectory_flow_loss_weight: 0.002
+  contrastive_loss_weight: 0.01
+  koszul_persistence_loss_weight: 0.00005
+  toric_geometry_loss_weight: 0.00005
+  toric_bgg_loss_weight: 0.00003
+
+data:
+  include_graph_projection: true
+  hard_include_graph_projection: true
+  task_family_keywords:
+    - got
+    - graph
+    - tree
+    - reasoning
+    - analogy
+    - memory
+
+phase_curriculum:
+  phases:
+    - name: bpb_stabilized_structural_warmup
+      start_step: 0
+      end_step: 2000
+      graphcg_loss_weight: 0.00003
+      analogy_lattice_loss_weight: 0.00005
+      trajectory_memory_loss_weight: 0.00001
+      gflownet_loss_weight: 0.00015
+    - name: graphcg_memory_analogy_full
+      start_step: 2000
+      graphcg_loss_weight: 0.00006
+      analogy_lattice_loss_weight: 0.00010
+      trajectory_memory_loss_weight: 0.00002
+      gflownet_loss_weight: 0.00025
+
+logging:
+  wandb: true
