@@ -872,6 +872,7 @@ def write_synopsis(
         "- `bpb/bpb_rockfall_dashboard.png`: combined intervention readout for deciding whether to leave the run alone or adjust scalar controls.",
         "- `bpb/bpb_phase_plane.png`: train BPB versus validation BPB trajectory.",
         "- `bpb/diagnostic_proxy_geometry.png`: topology, toric, Slepian, BGG, tropical, and complexity proxy readout.",
+        "- `training_adjustment_proposal.json` and `.md`: conservative intervention recommendation combining BPB trajectory, W&B metric statistics, and structural diagnostics.",
         "",
         "## Recommendations",
         "",
@@ -1041,6 +1042,21 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
         checkpoint_path=checkpoint,
         run_path=args.run_path,
         diagnostic_payload=diagnostic_payload,
+    )
+    proposal_cmd = [
+        args.python,
+        str(root / "scripts" / "propose_training_adjustments.py"),
+        "--analysis-dir",
+        str(output_dir),
+        "--target-bpb",
+        str(args.target_bpb),
+        "--gate-step",
+        "4000",
+    ]
+    command_status["training_adjustment_proposal"] = run_command(
+        proposal_cmd,
+        logs_dir / "training_adjustment_proposal.log",
+        env,
     )
     report["command_status"] = command_status
     write_json(output_dir / "analysis_status.json", report)
