@@ -3,7 +3,9 @@ from pathlib import Path
 from scripts.watch_seq4096_4k_recovery import (
     build_recovery_launch,
     checkpoint_for_step,
+    load_preemptive_gate_risk,
     parse_seq4096_log,
+    should_preempt_for_gate_risk,
     select_recovery_validation,
     select_best_validation,
 )
@@ -120,3 +122,67 @@ def test_4k_recovery_can_hold_back_best_checkpoint_for_minimum_runway(tmp_path: 
 
     assert longer_runway_recovery is not None
     assert longer_runway_recovery.step == 3000
+
+
+def test_preemptive_gate_risk_requires_repeated_projected_miss(tmp_path: Path):
+    analysis_root = tmp_path / "analysis"
+    for step, projected in ((2500, 4136.6), (2750, 4188.2)):
+        step_dir = analysis_root / f"step-{step:08d}"
+        step_dir.mkdir(parents=True)
+        (step_dir / "analysis_status.json").write_text(
+            (
+                "{"
+                f"\"checkpoint_step\": {step},"
+                "\"state\": \"near_target\","
+                "\"best_val_bpb\": 1.25,"
+                "\"target_bpb\": 1.2,"
+                "\"val_bpb_recent_slope_per_100_steps\": -0.003,"
+                f"\"projected_target_step_from_val\": {projected}"
+                "}"
+            ),
+            encoding="utf-8",
+        )
+
+    risk = load_preemptive_gate_risk(
+        analysis_root,
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=2500,
+        patience=2,
+    )
+
+    assert risk is not None
+    assert risk.latest_analysis_step == 2750
+    assert risk.missed_projection_count == 2
+    assert should_preempt_for_gate_risk(risk)
+
+
+def test_preemptive_gate_risk_ignores_single_noisy_projected_miss(tmp_path: Path):
+    analysis_root = tmp_path / "analysis"
+    step_dir = analysis_root / "step-00002500"
+    step_dir.mkdir(parents=True)
+    (step_dir / "analysis_status.json").write_text(
+        (
+            "{"
+            "\"checkpoint_step\": 2500,"
+            "\"state\": \"near_target\","
+            "\"best_val_bpb\": 1.2563,"
+            "\"target_bpb\": 1.2,"
+            "\"val_bpb_recent_slope_per_100_steps\": -0.0034,"
+            "\"projected_target_step_from_val\": 4136.6"
+            "}"
+        ),
+        encoding="utf-8",
+    )
+
+    risk = load_preemptive_gate_risk(
+        analysis_root,
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=2500,
+        patience=2,
+    )
+
+    assert risk is not None
+    assert risk.missed_projection_count == 1
+    assert not should_preempt_for_gate_risk(risk)

@@ -64,6 +64,19 @@ class RecoveryLaunch:
     training_shell: str
 
 
+@dataclass(frozen=True)
+class PreemptiveGateRisk:
+    analysis_root: str
+    latest_analysis_step: int
+    latest_projected_target_step: float
+    latest_best_val_bpb: float
+    latest_recent_val_slope: float
+    missed_projection_count: int
+    required_patience: int
+    gate_step: int
+    target_bpb: float
+
+
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -142,6 +155,88 @@ def checkpoint_for_step(checkpoint_dir: Path | str, run_id: str, step: int) -> P
         return exact.resolve()
     candidates = sorted(checkpoint_dir.glob(f"*_step_{int(step):06d}.pt"))
     return candidates[-1].resolve() if candidates else None
+
+
+def finite_float(value: Any, default: float = float("nan")) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    return out if math.isfinite(out) else default
+
+
+def analysis_step_from_path(path: Path, payload: dict[str, Any]) -> int:
+    for key in ("checkpoint_step", "latest_step"):
+        value = payload.get(key)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    match = re.search(r"step-(\d+)", str(path))
+    return int(match.group(1)) if match else 0
+
+
+def load_analysis_status(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_preemptive_gate_risk(
+    analysis_root: Path | str,
+    *,
+    gate_step: int,
+    target_bpb: float,
+    min_step: int,
+    patience: int,
+) -> PreemptiveGateRisk | None:
+    """Load repeated validation-ETA gate risk from completed analysis reports."""
+
+    root = Path(analysis_root)
+    if not root.exists():
+        return None
+    rows: list[tuple[int, dict[str, Any]]] = []
+    for status_path in sorted(root.glob("step-*/analysis_status.json")):
+        payload = load_analysis_status(status_path)
+        if not payload:
+            continue
+        step = analysis_step_from_path(status_path, payload)
+        if step >= int(min_step):
+            rows.append((step, payload))
+    if not rows:
+        return None
+    rows.sort(key=lambda item: item[0])
+    missed = 0
+    for step, payload in reversed(rows):
+        projected = finite_float(payload.get("projected_target_step_from_val"))
+        best_val = finite_float(payload.get("best_val_bpb"))
+        recent_slope = finite_float(payload.get("val_bpb_recent_slope_per_100_steps"))
+        is_risk = (
+            best_val > float(target_bpb)
+            and recent_slope < 0.0
+            and projected > float(gate_step)
+        )
+        if not is_risk:
+            break
+        missed += 1
+    latest_step, latest = rows[-1]
+    return PreemptiveGateRisk(
+        analysis_root=str(root),
+        latest_analysis_step=int(latest_step),
+        latest_projected_target_step=finite_float(latest.get("projected_target_step_from_val")),
+        latest_best_val_bpb=finite_float(latest.get("best_val_bpb")),
+        latest_recent_val_slope=finite_float(latest.get("val_bpb_recent_slope_per_100_steps")),
+        missed_projection_count=int(missed),
+        required_patience=max(1, int(patience)),
+        gate_step=int(gate_step),
+        target_bpb=float(target_bpb),
+    )
+
+
+def should_preempt_for_gate_risk(risk: PreemptiveGateRisk | None) -> bool:
+    return bool(risk and risk.missed_projection_count >= risk.required_patience)
 
 
 def shell_env(env: dict[str, Any]) -> str:
@@ -334,6 +429,9 @@ def build_gate_shell(
     recovery_muon_momentum_warmup_steps: int,
     recovery_muon_momentum_warmup_start: float,
     recovery_grad_clip_norm: float | None,
+    preempt_on_projected_miss: bool,
+    preempt_min_step: int,
+    preempt_patience: int,
     python: str,
 ) -> str:
     gate_log = repo_root / "logs" / f"{run_id}.4k_gate.txt"
@@ -342,6 +440,12 @@ def build_gate_shell(
         ""
         if recovery_grad_clip_norm is None
         else f"--recovery-grad-clip-norm {float(recovery_grad_clip_norm)} "
+    )
+    preempt_arg = (
+        f"--preempt-on-projected-miss --preempt-min-step {int(preempt_min_step)} "
+        f"--preempt-patience {int(preempt_patience)} "
+        if preempt_on_projected_miss
+        else ""
     )
     return (
         f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src && "
@@ -359,6 +463,7 @@ def build_gate_shell(
         f"--recovery-muon-momentum-warmup-steps {int(recovery_muon_momentum_warmup_steps)} "
         f"--recovery-muon-momentum-warmup-start {float(recovery_muon_momentum_warmup_start)} "
         f"{grad_clip_arg}"
+        f"{preempt_arg}"
         f"--state {shlex.quote(str(state_path))} "
         f"2>&1 | tee -a {shlex.quote(str(gate_log))}"
     )
@@ -391,6 +496,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recovery-muon-momentum-warmup-steps", type=int, default=600)
     parser.add_argument("--recovery-muon-momentum-warmup-start", type=float, default=0.90)
     parser.add_argument("--recovery-grad-clip-norm", type=float, default=None)
+    parser.add_argument("--analysis-root", default="")
+    parser.add_argument("--preempt-on-projected-miss", action="store_true")
+    parser.add_argument("--preempt-min-step", type=int, default=2500)
+    parser.add_argument("--preempt-patience", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -411,6 +520,28 @@ def main() -> None:
         latest_val = parsed.val_rows[-1] if parsed.val_rows else None
         best_val = select_best_validation(parsed.val_rows, args.gate_step)
         target_reached = bool(best_val and best_val.val_bpb <= args.target_bpb)
+        analysis_root = (
+            Path(args.analysis_root)
+            if args.analysis_root
+            else repo_root / "outputs" / "post_resume_analysis" / args.run_id
+        )
+        preemptive_risk = (
+            load_preemptive_gate_risk(
+                analysis_root,
+                gate_step=args.gate_step,
+                target_bpb=args.target_bpb,
+                min_step=args.preempt_min_step,
+                patience=args.preempt_patience,
+            )
+            if args.preempt_on_projected_miss
+            else None
+        )
+        preempt_for_gate_risk = (
+            bool(latest_val)
+            and latest_val.step >= int(args.preempt_min_step)
+            and latest_val.step < int(args.gate_step)
+            and should_preempt_for_gate_risk(preemptive_risk)
+        )
         status: dict[str, Any] = {
             "run_id": args.run_id,
             "log": str(log_path),
@@ -423,6 +554,8 @@ def main() -> None:
             "target_reached": target_reached,
             "restart_index": args.restart_index,
             "min_recovery_runway_steps": args.min_recovery_runway_steps,
+            "preempt_on_projected_miss": bool(args.preempt_on_projected_miss),
+            "preemptive_gate_risk": None if preemptive_risk is None else preemptive_risk.__dict__,
             "recovery_launch_controls": {
                 "train_batch_tokens": args.recovery_train_batch_tokens,
                 "tied_embed_lr": args.recovery_tied_embed_lr,
@@ -452,7 +585,7 @@ def main() -> None:
             write_state(state_path, status)
             return
 
-        if latest_val is None or latest_val.step < args.gate_step:
+        if latest_val is None or (latest_val.step < args.gate_step and not preempt_for_gate_risk):
             time.sleep(max(1.0, args.poll_seconds))
             continue
 
@@ -559,6 +692,9 @@ def main() -> None:
             recovery_muon_momentum_warmup_steps=args.recovery_muon_momentum_warmup_steps,
             recovery_muon_momentum_warmup_start=args.recovery_muon_momentum_warmup_start,
             recovery_grad_clip_norm=args.recovery_grad_clip_norm,
+            preempt_on_projected_miss=args.preempt_on_projected_miss,
+            preempt_min_step=args.preempt_min_step,
+            preempt_patience=args.preempt_patience,
             python=args.python,
         )
         (command_dir / "analysis_command.sh").write_text(analysis_shell + "\n", encoding="utf-8")
@@ -568,7 +704,9 @@ def main() -> None:
 
         status.update(
             {
-                "event": "launching_4k_recovery",
+                "event": "launching_preemptive_gate_risk_recovery"
+                if preempt_for_gate_risk
+                else "launching_4k_recovery",
                 "selected_recovery_validation": recovery_val.__dict__,
                 "resume_checkpoint": str(resume_checkpoint),
                 "recovery_run_id": recovery_run_id,
