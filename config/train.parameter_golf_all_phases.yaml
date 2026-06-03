@@ -47,9 +47,11 @@ model:
   toric_geometry_max_positions: 256
 
   use_graphcg: true
-  graphcg_num_directions: auto
-  graphcg_min_directions: 16
-  graphcg_max_directions: 256
+  # Full-rank GraphCG chart from step 0: d_model is 384, so this basis spans
+  # the whole hidden coordinate space instead of the previous capped auto rank.
+  graphcg_num_directions: 384
+  graphcg_min_directions: 384
+  graphcg_max_directions: 384
   graphcg_memory_fraction: 0.09
   graphcg_direction_safety: 0.90
   graphcg_alpha: 0.10
@@ -224,7 +226,7 @@ training:
   gflownet_loss_weight: 0.0
   gflownet_entropy_weight: 0.0
   gflownet_entropy_target: 2.0
-  graphcg_loss_weight: 0.0
+  graphcg_loss_weight: 0.00005
   analogy_lattice_loss_weight: 0.0
   toric_geometry_loss_weight: 0.0
   toric_bgg_loss_weight: 0.0
@@ -292,7 +294,7 @@ phase_curriculum:
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0
       gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.0
+      graphcg_loss_weight: 0.00005
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       toric_bgg_loss_weight: 0.0
