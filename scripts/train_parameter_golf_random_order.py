@@ -3249,6 +3249,7 @@ def main() -> None:
         )
         wandb_run.log(
             {
+                "trainer/step": float(start_step),
                 "metrics_status/all_metric_namespaces_always_on": 1.0,
                 "metrics_status/losses_follow_phase_curriculum": 1.0,
                 "metrics_status/topology_probe_instantiated": float(model_config.use_analogy_lattice),
@@ -4306,9 +4307,11 @@ def main() -> None:
                     prefix="complexity/train",
                 )
             )
+            complexity_metrics["trainer/step"] = float(step)
 
         if step % log_interval == 0:
             metrics = {
+                "trainer/step": float(step),
                 "train/loss": step_loss,
                 "train/neural_loss": step_neural_loss,
                 "train/total_loss": step_total_loss,
@@ -4710,6 +4713,7 @@ def main() -> None:
                 score_first_bias_clip=eval_score_first_bias_clip,
             )
             metrics = {
+                "trainer/step": float(step),
                 "val/loss": val_deterministic["loss"],
                 "val/bpb": val_deterministic["bpb"],
                 "val/deterministic_loss": val_deterministic["loss"],
@@ -4899,6 +4903,7 @@ def main() -> None:
     if wandb_run is not None:
         wandb_run.log(
             {
+                "trainer/step": float(steps),
                 "artifact/final_bytes": final_artifact.bytes_total,
                 "artifact/within_limit": float(final_artifact.within_limit),
                 "artifact/final_deployment_parameters": final_artifact.deployment_parameters,
