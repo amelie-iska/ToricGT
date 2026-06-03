@@ -201,14 +201,14 @@ training:
   precision: bf16
   device: cuda
   seed: 29
-  log_interval: 10
+  log_interval: 5
   eval_interval: 250
   eval_batches: 20
   eval_order_samples: 1
   eval_gflownet_samples: 2
-  ckpt_interval: 500
+  ckpt_interval: 250
   resize_position_embedding: true
-  causal_audit_interval: 1000
+  causal_audit_interval: 250
 
   # Conservative base weights. The phase curriculum controls all real ramping.
   gflownet_loss_weight: 0.0
@@ -250,15 +250,15 @@ training:
 
 complexity:
   enabled: true
-  eval_every: 50
-  eval_samples: 2
+  eval_every: 10
+  eval_samples: 4
   compressors:
     - zlib
     - lzma
 
 hessian:
   enabled: true
-  eval_every: 1000
+  eval_every: 250
   max_tokens: 128
   trace_samples: 1
   power_iters: 1
