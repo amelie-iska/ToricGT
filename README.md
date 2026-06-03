@@ -22,6 +22,7 @@ Current validated status:
 - CPU implementation validation: default Soft-MoE, tropical-ring attention, embedding-space GFlowNet trajectory balance, and finite rotation-algebra checks run without meaningful VRAM use.
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
+- Parameter-Golf BPB pivot: the supervised random-order FineWeb recovery run reached a best native OAI/FineWeb BPB near `4.5232` by step 5250, which is structurally far from the `<= 1.2` target.  The primary contest path is now a strict sequential FineWeb-first objective under the same artifact discipline; random-order ToricGT remains a research, diagnostics, and graph/reasoning auxiliary track.
 - The full curation job writes leakage-controlled train/validation/test Parquet splits under `data/curated/`; validate it with `scripts/inspect_curated_data.py` before launching long training.
 
 ## What Is Here
@@ -55,6 +56,7 @@ Local implementation:
 - `assets/toricgt_paper_pg_softmoe_final.pdf`: compiled paper.
 - `planning/IMPLEMENTATION-PLAN.md`: detailed implementation plan.
 - `planning/DATA.md`: dataset research, curation, and segmentation plan.
+- `planning/SEQUENTIAL-FINEWEB-PIVOT.md`: current Parameter-Golf BPB pivot record and launch policy for the sequential FineWeb-first branch.
 - `docs/PARAMETER_GOLF.md`: dense random-order Parameter-Golf adaptation notes.
 
 ## Setup
