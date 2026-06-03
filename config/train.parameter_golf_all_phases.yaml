@@ -223,17 +223,17 @@ training:
   causal_audit_interval: 250
 
   # Conservative base weights. The phase curriculum controls all real ramping.
-  gflownet_loss_weight: 0.0
-  gflownet_entropy_weight: 0.0
+  gflownet_loss_weight: 0.00025
+  gflownet_entropy_weight: 0.00005
   gflownet_entropy_target: 2.0
-  graphcg_loss_weight: 0.00005
-  analogy_lattice_loss_weight: 0.0
+  graphcg_loss_weight: 0.00008
+  analogy_lattice_loss_weight: 0.00001
   toric_geometry_loss_weight: 0.0
   toric_bgg_loss_weight: 0.0
   koszul_persistence_loss_weight: 0.0
   trajectory_memory_loss_weight: 0.0
   trajectory_flow_loss_weight: 0.0
-  contrastive_loss_weight: 0.00025
+  contrastive_loss_weight: 0.00040
   mtp_loss_weight: 0.0
   toric_entropy_floor: 0.20
   toric_entropy_loss_weight: 0.0
@@ -292,16 +292,17 @@ phase_curriculum:
       medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
-      gflownet_loss_weight: 0.0
-      gflownet_entropy_weight: 0.0
-      graphcg_loss_weight: 0.00005
-      analogy_lattice_loss_weight: 0.0
+      gflownet_loss_weight: 0.00025
+      gflownet_entropy_weight: 0.00005
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.00008
+      analogy_lattice_loss_weight: 0.00001
       toric_geometry_loss_weight: 0.0
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00025
+      contrastive_loss_weight: 0.00040
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0

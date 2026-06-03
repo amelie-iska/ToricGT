@@ -276,6 +276,9 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
     log_dir = Path(args.log_root) / f"analysis_target_{target_step:08d}_{stamp}"
     log_dir.mkdir(parents=True, exist_ok=True)
     run_path = f"{args.wandb_entity}/{args.wandb_project}/{args.run_id}"
+    loop_state = os.environ.get("BPB_LOOP_STATE", str(Path(args.log_root) / "bpb_codex_loop_state.json"))
+    loop_stop_file = os.environ.get("BPB_LOOP_STOP_FILE", str(Path(args.log_root) / "bpb_codex_loop_stop"))
+    loop_name = os.environ.get("BPB_LOOP_NAME", "all_phases_supervised_watchdog")
     command = [
         "conda",
         "run",
@@ -286,9 +289,9 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         "PYTHONPATH=src",
         f"BPB_TARGET={args.target_bpb}",
         f"BPB_MAX_REVIEW_ITERATIONS={args.max_analysis_iterations}",
-        f"BPB_LOOP_STATE={Path(args.log_root) / 'bpb_codex_loop_state.json'}",
-        f"BPB_LOOP_STOP_FILE={Path(args.log_root) / 'bpb_codex_loop_stop'}",
-        "BPB_LOOP_NAME=all_phases_supervised_watchdog",
+        f"BPB_LOOP_STATE={loop_state}",
+        f"BPB_LOOP_STOP_FILE={loop_stop_file}",
+        f"BPB_LOOP_NAME={loop_name}",
         "CODEX_REVIEW_FALLBACK_CONTINUE=0",
         "CODEX_REVIEW_TIMEOUT_SECONDS=1200",
         "python",
