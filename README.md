@@ -25,8 +25,8 @@ Current validated status:
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
-  `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
-  It restarted from the earlier step-1000 checkpoint with optimizer/RNG/loader reset, doubled batch tokens, dense W&B aliases, and periodic analysis sidecars. At step 2500 it reached native validation BPB `1.2563`, slightly better than the original run's step-4000 BPB `1.2569`, while being monitored against the `<= 1.2` gate before step 4000.
+  `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z`.
+  The tested pre-gate ETA trigger launched it from the R7 step-2750 checkpoint after two consecutive projected misses of the step-4000 target. R8 resumes from validation BPB `1.2513` with reset optimizer/RNG/loader, larger batch tokens, higher tied-embedding LR, dense W&B aliases, and periodic analysis sidecars.
 - Advanced reasoning/memory branch: the live auxiliary run is
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   It trains the random-order ToricGT adapter with explicit graph-of-thought,
@@ -580,25 +580,28 @@ uses `BPB_TARGET=1.2` and a 100-analysis cap.
 Current `oai` OpenAI Parameter-Golf recovery status:
 
 - Primary BPB run:
-  `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
+  `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z`.
 - W&B:
-  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z>.
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z>.
 - Training tmux:
-  `toricgt_seq4096_4k_recovery_r7_20260603T212821Z`.
+  `toricgt_seq4096_4k_recovery_r8_20260603T230843Z`.
 - Analysis tmux sidecars:
-  `toricgt_seq4096_4k_analysis_r7_20260603T212821Z`,
-  `toricgt_seq4096_4k_mirror_r7_20260603T212821Z`,
-  `toricgt_seq4096_4k_full_diag_r7_20260603T212821Z`, and
-  `toricgt_seq4096_4k_gate_r7_20260603T212821Z`.
+  `toricgt_seq4096_4k_analysis_r8_20260603T230843Z`,
+  `toricgt_seq4096_4k_mirror_r8_20260603T230843Z`,
+  `toricgt_seq4096_4k_full_diag_r8_20260603T230843Z`, and
+  `toricgt_seq4096_4k_gate_r8_20260603T230843Z`.
 - Checkpoint directory:
-  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
-- Step-2500 periodic analysis:
+  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z`.
+- Latest preempt-trigger analysis:
+  `outputs/post_resume_analysis/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z/step-00002750`.
+- Previous R7 step-2500 periodic analysis:
   `outputs/post_resume_analysis/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z/step-00002500`.
 
-Periodic analyses are part of the live training loop. The R7 sidecars produce
+Periodic analyses are part of the live training loop. The R8 sidecars produce
 W&B metric-history summaries, BPB descent plots, rockfall dashboards,
 target-zone plots, BPB phase planes, descent simplices, diagnostic proxy
-geometry, and full ToricGT geometry payloads. The step-2500 analysis wrote:
+geometry, full ToricGT geometry payloads, and structural BPB intervention
+proposals. The prior R7 step-2500 analysis wrote:
 
 ```text
 bpb/bpb_descent_timeseries.png
@@ -648,7 +651,9 @@ gate recovery controls are: `min_recovery_runway_steps=1000`,
 risk trigger: with `--preempt-on-projected-miss --preempt-min-step 2500
 --preempt-patience 2`, one projected miss is logged as a warning, while two
 consecutive validation-ETA misses can launch the same mid-run recovery before
-waiting for step 4000.
+waiting for step 4000. R8 was launched by that path from the R7 step-2750
+checkpoint after the step-2750 analysis projected a target crossing around
+step `4495`.
 
 The run restarted from the original step-1000 Seq4096 checkpoint rather than
 from the later step-3000 checkpoint. The reason is runway: after the step-3000
@@ -690,20 +695,17 @@ Observed validation trajectory:
 | R7 recovery | 2000 | `1.2735` |
 | R7 recovery | 2250 | `1.2632` |
 | R7 recovery | 2500 | `1.2563` |
+| R7 recovery | 2750 | `1.2513` |
+| R8 preemptive recovery | 2750 resume | `1.2513` |
 
-The step-2500 analysis classifies the run as `near_target`, with target gap
-`0.0563`, full validation slope about `-0.00680` BPB per 100 steps, and recent
-validation slope about `-0.00344` BPB per 100 steps. The patched validation-ETA
-report projects about `1636.6` additional steps to target, or a target crossing
-around step `4137`. The train BPB samples are noisy, but validation is ahead of
-the old trajectory; the current policy is to leave the live run alone while
-arming the gate watcher to restart from a mid-run best checkpoint if the 4K
-threshold is missed or if two consecutive periodic analyses project a target
-crossing after the gate. Immediately after the step-2500 analysis, the live
-pre-gate watcher reports `missed_projection_count=1` with
-`required_patience=2`, so it is armed but has not preempted the primary run.
-If BPB is not on track for `<=1.2`, `scripts/watch_seq4096_4k_recovery.py` can
-restart from the best checkpoint with the same recovery-control environment.
+The R7 step-2750 analysis classified the run as `near_target`, with validation
+BPB `1.2513`, target gap `0.0513`, recent validation slope about `-0.00294`
+BPB per 100 steps, and a validation-ETA target crossing around step `4495`.
+That was the second consecutive projected miss after the step-2500 `4137`
+projection, so the tested pre-gate watcher launched R8 from the step-2750
+checkpoint. R8 is the active BPB run; it has W&B `trainer/step`, train BPB,
+validation BPB, OpenAI Parameter-Golf BPB, best BPB, and target-gap aliases
+reporting from the new run id.
 
 The current launch path for this family is:
 
@@ -1305,8 +1307,11 @@ Recent `oai` implementation commits:
 Active live training:
 
 - Primary BPB recovery: `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
-  Latest checked validation: step 2500, BPB `1.2563`; state `near_target`,
-  gate-risk recovery armed for a mid-run restart if step 4000 misses `1.2`.
+  Preempted at step 2750, BPB `1.2513`, after two projected 4K misses.
+- Active BPB recovery: `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z`.
+  Latest checked validation: step 2750 resume, BPB `1.2513`; W&B reports
+  `trainer/step`, `train/bpb`, `val/bpb`, `openai_parameter_golf/bpb`,
+  `bpb/best`, and `bpb/gap_to_target`.
 - Advanced reasoning/memory transfer:
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   W&B confirms `trainer/step`, `train/bpb`, phase index, GraphCG weight, and
