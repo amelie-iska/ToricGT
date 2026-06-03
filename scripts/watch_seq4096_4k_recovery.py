@@ -168,6 +168,7 @@ def build_recovery_launch(
     muon_momentum: float = 0.985,
     muon_momentum_warmup_steps: int = 600,
     muon_momentum_warmup_start: float = 0.90,
+    grad_clip_norm: float | None = None,
     warmdown_iters: int = 2500,
     val_loss_every: int = 250,
     train_log_every: int = 50,
@@ -209,6 +210,8 @@ def build_recovery_launch(
         "RESET_RNG_ON_RESUME": 1,
         "RESET_LOADER_ON_RESUME": 1,
     }
+    if grad_clip_norm is not None:
+        env["GRAD_CLIP_NORM"] = grad_clip_norm
     training_command = [f"{key}={value}" for key, value in env.items()] + [
         python,
         "-u",
@@ -323,10 +326,23 @@ def build_gate_shell(
     restart_index: int,
     max_restarts: int,
     min_recovery_runway_steps: int,
+    recovery_train_batch_tokens: int,
+    recovery_tied_embed_lr: float,
+    recovery_matrix_lr: float,
+    recovery_scalar_lr: float,
+    recovery_muon_momentum: float,
+    recovery_muon_momentum_warmup_steps: int,
+    recovery_muon_momentum_warmup_start: float,
+    recovery_grad_clip_norm: float | None,
     python: str,
 ) -> str:
     gate_log = repo_root / "logs" / f"{run_id}.4k_gate.txt"
     state_path = repo_root / "outputs" / f"{run_id}.4k_recovery_state.json"
+    grad_clip_arg = (
+        ""
+        if recovery_grad_clip_norm is None
+        else f"--recovery-grad-clip-norm {float(recovery_grad_clip_norm)} "
+    )
     return (
         f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src && "
         f"{shlex.quote(str(python))} scripts/watch_seq4096_4k_recovery.py "
@@ -335,6 +351,14 @@ def build_gate_shell(
         f"--target-bpb {float(target_bpb)} --gate-step {int(gate_step)} "
         f"--restart-index {int(restart_index)} --max-restarts {int(max_restarts)} "
         f"--min-recovery-runway-steps {int(min_recovery_runway_steps)} "
+        f"--recovery-train-batch-tokens {int(recovery_train_batch_tokens)} "
+        f"--recovery-tied-embed-lr {float(recovery_tied_embed_lr)} "
+        f"--recovery-matrix-lr {float(recovery_matrix_lr)} "
+        f"--recovery-scalar-lr {float(recovery_scalar_lr)} "
+        f"--recovery-muon-momentum {float(recovery_muon_momentum)} "
+        f"--recovery-muon-momentum-warmup-steps {int(recovery_muon_momentum_warmup_steps)} "
+        f"--recovery-muon-momentum-warmup-start {float(recovery_muon_momentum_warmup_start)} "
+        f"{grad_clip_arg}"
         f"--state {shlex.quote(str(state_path))} "
         f"2>&1 | tee -a {shlex.quote(str(gate_log))}"
     )
@@ -359,6 +383,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wandb-project", default=os.environ.get("WANDB_PROJECT", "toricgt-parameter-golf"))
     parser.add_argument("--wandb-entity", default=os.environ.get("WANDB_ENTITY", "amelie-iska-math"))
     parser.add_argument("--seed", type=int, default=7331)
+    parser.add_argument("--recovery-train-batch-tokens", type=int, default=393_216)
+    parser.add_argument("--recovery-tied-embed-lr", type=float, default=0.032)
+    parser.add_argument("--recovery-matrix-lr", type=float, default=0.018)
+    parser.add_argument("--recovery-scalar-lr", type=float, default=0.018)
+    parser.add_argument("--recovery-muon-momentum", type=float, default=0.985)
+    parser.add_argument("--recovery-muon-momentum-warmup-steps", type=int, default=600)
+    parser.add_argument("--recovery-muon-momentum-warmup-start", type=float, default=0.90)
+    parser.add_argument("--recovery-grad-clip-norm", type=float, default=None)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -391,6 +423,16 @@ def main() -> None:
             "target_reached": target_reached,
             "restart_index": args.restart_index,
             "min_recovery_runway_steps": args.min_recovery_runway_steps,
+            "recovery_launch_controls": {
+                "train_batch_tokens": args.recovery_train_batch_tokens,
+                "tied_embed_lr": args.recovery_tied_embed_lr,
+                "matrix_lr": args.recovery_matrix_lr,
+                "scalar_lr": args.recovery_scalar_lr,
+                "muon_momentum": args.recovery_muon_momentum,
+                "muon_momentum_warmup_steps": args.recovery_muon_momentum_warmup_steps,
+                "muon_momentum_warmup_start": args.recovery_muon_momentum_warmup_start,
+                "grad_clip_norm": args.recovery_grad_clip_norm,
+            },
             "updated_unix": time.time(),
         }
         rendered = json.dumps(status, sort_keys=True)
@@ -457,6 +499,14 @@ def main() -> None:
             seed=args.seed + next_index,
             target_bpb=args.target_bpb,
             python=args.python,
+            train_batch_tokens=args.recovery_train_batch_tokens,
+            tied_embed_lr=args.recovery_tied_embed_lr,
+            matrix_lr=args.recovery_matrix_lr,
+            scalar_lr=args.recovery_scalar_lr,
+            muon_momentum=args.recovery_muon_momentum,
+            muon_momentum_warmup_steps=args.recovery_muon_momentum_warmup_steps,
+            muon_momentum_warmup_start=args.recovery_muon_momentum_warmup_start,
+            grad_clip_norm=args.recovery_grad_clip_norm,
             wandb_project=args.wandb_project,
             wandb_entity=args.wandb_entity,
         )
@@ -501,6 +551,14 @@ def main() -> None:
             restart_index=next_index,
             max_restarts=args.max_restarts,
             min_recovery_runway_steps=args.min_recovery_runway_steps,
+            recovery_train_batch_tokens=args.recovery_train_batch_tokens,
+            recovery_tied_embed_lr=args.recovery_tied_embed_lr,
+            recovery_matrix_lr=args.recovery_matrix_lr,
+            recovery_scalar_lr=args.recovery_scalar_lr,
+            recovery_muon_momentum=args.recovery_muon_momentum,
+            recovery_muon_momentum_warmup_steps=args.recovery_muon_momentum_warmup_steps,
+            recovery_muon_momentum_warmup_start=args.recovery_muon_momentum_warmup_start,
+            recovery_grad_clip_norm=args.recovery_grad_clip_norm,
             python=args.python,
         )
         (command_dir / "analysis_command.sh").write_text(analysis_shell + "\n", encoding="utf-8")

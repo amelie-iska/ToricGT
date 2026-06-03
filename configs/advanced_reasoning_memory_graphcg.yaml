@@ -29,21 +29,45 @@ model:
   analogy_topology_directed: true
   analogy_hdbscan_enabled: true
   use_koszul_persistence: true
+  use_slepian_pollak: true
+  slepian_pollak_max_positions: 192
+  slepian_pollak_modes: 8
+  slepian_pollak_bandwidth: 0.075
+  slepian_pollak_target_concentration: 0.70
   use_toric_geometry_tasks: true
   use_toric_bgg: true
 
 training:
-  graphcg_loss_weight: 0.00006
-  analogy_lattice_loss_weight: 0.00010
-  trajectory_memory_loss_weight: 0.00002
-  gflownet_loss_weight: 0.00025
+  max_steps: 12000
+  batch_size: 1
+  grad_accum_steps: 12
+  lr: 0.00022
+  weight_decay: 0.04
+  warmup_steps: 250
+  log_interval: 10
+  eval_interval: 250
+  eval_batches: 8
+  eval_order_samples: 2
+  eval_gflownet_samples: 2
+  ckpt_interval: 250
+  graphcg_loss_weight: 0.00012
+  analogy_lattice_loss_weight: 0.00014
+  trajectory_memory_loss_weight: 0.00004
+  gflownet_loss_weight: 0.00035
   gflownet_entropy_weight: 0.00005
   gflownet_entropy_target: 2.0
   trajectory_flow_loss_weight: 0.002
   contrastive_loss_weight: 0.01
-  koszul_persistence_loss_weight: 0.00005
-  toric_geometry_loss_weight: 0.00005
-  toric_bgg_loss_weight: 0.00003
+  koszul_persistence_loss_weight: 0.00008
+  toric_geometry_loss_weight: 0.00008
+  toric_bgg_loss_weight: 0.00005
+  slepian_pollak_loss_weight: 0.00004
+  robust_micro_loss_guard_enabled: true
+  robust_micro_loss_guard_start_step: 20
+  robust_micro_loss_guard_end_step: 1200
+  robust_micro_loss_guard_ratio: 1.08
+  robust_micro_loss_guard_delta: 0.18
+  robust_micro_loss_guard_min_scale: 0.20
 
 data:
   include_graph_projection: true
@@ -56,21 +80,81 @@ data:
     - analogy
     - memory
 
+oai_competition:
+  enabled: true
+  eval_interval: 250
+  eval_batches: 4
+  workers: 0
+
+fineweb_calibration:
+  enabled: true
+  mix_ratio: 0.10
+  workers: 0
+
+complexity:
+  enabled: true
+  eval_every: 100
+  eval_samples: 2
+
+hessian:
+  enabled: false
+
+adaptive_training:
+  enabled: true
+  warmup_updates: 0
+  gflownet_loss_min: 0.00015
+  gflownet_loss_max: 0.00075
+  gflownet_gap_step: 0.00004
+  gflownet_relax_step: 0.00002
+  gflownet_increase_drift_guard: 0.025
+  entropy_target_min: 1.95
+  entropy_target_tau_steps: 8000
+  complex_mix_min: 0.08
+  complex_mix_max: 0.25
+  complex_down_step: 0.015
+  complex_up_step: 0.004
+  train_bpb_ema_beta: 0.75
+  train_drift_threshold: 0.025
+  val_improvement_delta: 0.0015
+  recovery_mode_enabled: true
+  recovery_train_drift_threshold: 0.07
+  recovery_complex_down_step: 0.03
+  recovery_gflownet_down_step: 0.00004
+  recovery_exit_val_improvements: 2
+  structural_loss_min: 0.70
+  structural_loss_max: 1.45
+  structural_loss_up_step: 0.04
+  structural_loss_down_step: 0.08
+  structural_signal_threshold: 0.12
+  structural_train_drift_guard: 0.025
+
 phase_curriculum:
+  enabled: true
   phases:
     - name: bpb_stabilized_structural_warmup
       start_step: 0
       end_step: 2000
-      graphcg_loss_weight: 0.00003
-      analogy_lattice_loss_weight: 0.00005
-      trajectory_memory_loss_weight: 0.00001
-      gflownet_loss_weight: 0.00015
-    - name: graphcg_memory_analogy_full
-      start_step: 2000
-      graphcg_loss_weight: 0.00006
-      analogy_lattice_loss_weight: 0.00010
+      graphcg_loss_weight: 0.00008
+      analogy_lattice_loss_weight: 0.00008
       trajectory_memory_loss_weight: 0.00002
       gflownet_loss_weight: 0.00025
+      koszul_persistence_loss_weight: 0.00005
+      toric_geometry_loss_weight: 0.00005
+      toric_bgg_loss_weight: 0.00003
+      slepian_pollak_loss_weight: 0.00003
+      fineweb_mix_ratio: 0.15
+    - name: graphcg_memory_analogy_full
+      start_step: 2000
+      graphcg_loss_weight: 0.00014
+      analogy_lattice_loss_weight: 0.00016
+      trajectory_memory_loss_weight: 0.00005
+      gflownet_loss_weight: 0.00040
+      koszul_persistence_loss_weight: 0.00009
+      toric_geometry_loss_weight: 0.00009
+      toric_bgg_loss_weight: 0.00006
+      slepian_pollak_loss_weight: 0.00005
+      fineweb_mix_ratio: 0.10
 
 logging:
   wandb: true
+  project: toricgt-parameter-golf

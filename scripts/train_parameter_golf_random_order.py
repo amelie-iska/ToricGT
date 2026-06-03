@@ -777,6 +777,7 @@ PHASE_CONTROL_KEYS = {
     "graphcg_loss_weight",
     "analogy_lattice_loss_weight",
     "koszul_persistence_loss_weight",
+    "slepian_pollak_loss_weight",
     "trajectory_flow_loss_weight",
     "trajectory_memory_loss_weight",
     "contrastive_loss_weight",
@@ -948,6 +949,12 @@ class AdaptiveTrainingController:
     recovery_complex_down_step: float = 0.04
     recovery_gflownet_down_step: float = 0.001
     recovery_exit_val_improvements: int = 2
+    structural_loss_min: float = 0.70
+    structural_loss_max: float = 1.45
+    structural_loss_up_step: float = 0.04
+    structural_loss_down_step: float = 0.08
+    structural_signal_threshold: float = 0.12
+    structural_train_drift_guard: float = 0.025
 
     def __post_init__(self) -> None:
         self.state_path = Path(self.state_path)
@@ -958,6 +965,7 @@ class AdaptiveTrainingController:
         self.gflownet_loss_weight = float(self.initial_gflownet_loss_weight)
         self.gflownet_entropy_target = float(self.initial_entropy_target)
         self.complex_mix_ratio = float(self.initial_complex_mix_ratio)
+        self.structural_loss_multiplier = 1.0
         self.consecutive_val_improvements = 0
         self.last_metrics: dict[str, float] = {}
         self.load()
@@ -1003,6 +1011,12 @@ class AdaptiveTrainingController:
             recovery_complex_down_step=float(section.get("recovery_complex_down_step", 0.04)),
             recovery_gflownet_down_step=float(section.get("recovery_gflownet_down_step", 0.001)),
             recovery_exit_val_improvements=int(section.get("recovery_exit_val_improvements", 2)),
+            structural_loss_min=float(section.get("structural_loss_min", 0.70)),
+            structural_loss_max=float(section.get("structural_loss_max", 1.45)),
+            structural_loss_up_step=float(section.get("structural_loss_up_step", 0.04)),
+            structural_loss_down_step=float(section.get("structural_loss_down_step", 0.08)),
+            structural_signal_threshold=float(section.get("structural_signal_threshold", 0.12)),
+            structural_train_drift_guard=float(section.get("structural_train_drift_guard", 0.025)),
         )
 
     def load(self) -> None:
@@ -1036,6 +1050,9 @@ class AdaptiveTrainingController:
         self.gflownet_loss_weight = float(payload.get("gflownet_loss_weight", self.gflownet_loss_weight))
         self.gflownet_entropy_target = float(payload.get("gflownet_entropy_target", self.gflownet_entropy_target))
         self.complex_mix_ratio = float(payload.get("complex_mix_ratio", self.complex_mix_ratio))
+        self.structural_loss_multiplier = float(
+            payload.get("structural_loss_multiplier", self.structural_loss_multiplier)
+        )
         self.consecutive_val_improvements = int(
             payload.get("consecutive_val_improvements", self.consecutive_val_improvements)
         )
@@ -1057,6 +1074,10 @@ class AdaptiveTrainingController:
             self.complex_mix_min,
             min(self.complex_mix_max, float(self.complex_mix_ratio)),
         )
+        self.structural_loss_multiplier = max(
+            self.structural_loss_min,
+            min(self.structural_loss_max, float(self.structural_loss_multiplier)),
+        )
 
     def state_dict(self) -> dict[str, Any]:
         return {
@@ -1069,12 +1090,14 @@ class AdaptiveTrainingController:
             "gflownet_loss_weight": self.gflownet_loss_weight,
             "gflownet_entropy_target": self.gflownet_entropy_target,
             "complex_mix_ratio": self.complex_mix_ratio,
+            "structural_loss_multiplier": self.structural_loss_multiplier,
             "consecutive_val_improvements": self.consecutive_val_improvements,
             "last_metrics": self.last_metrics,
             "bounds": {
                 "gflownet_loss": [self.gflownet_loss_min, self.gflownet_loss_max],
                 "entropy_target": [self.entropy_target_min, self.initial_entropy_target],
                 "complex_mix": [self.complex_mix_min, self.complex_mix_max],
+                "structural_loss_multiplier": [self.structural_loss_min, self.structural_loss_max],
             },
         }
 
@@ -1088,11 +1111,46 @@ class AdaptiveTrainingController:
             "controller/gflownet_loss_weight": float(self.gflownet_loss_weight),
             "controller/gflownet_entropy_target": float(self.gflownet_entropy_target),
             "controller/complex_mix_ratio": float(self.complex_mix_ratio),
+            "controller/structural_loss_multiplier": float(self.structural_loss_multiplier),
             "controller/recovery_mode_enabled": float(self.recovery_mode_enabled),
             "controller/consecutive_val_improvements": float(self.consecutive_val_improvements),
         }
         metrics.update(self.last_metrics)
         return metrics
+
+    @staticmethod
+    def _metric_value(metrics: dict[str, float], *keys: str) -> float:
+        for key in keys:
+            value = metrics.get(key)
+            if value is None:
+                continue
+            try:
+                value_float = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value_float):
+                return value_float
+        return 0.0
+
+    @classmethod
+    def structural_pressure(cls, metrics: dict[str, float]) -> float:
+        """Compress advanced-geometry diagnostics into a bounded control signal."""
+
+        slepian_leakage = cls._metric_value(metrics, "slepian_pollak/leakage", "toric/slepian_leakage")
+        graphcg_loss = cls._metric_value(metrics, "graphcg/basis_loss", "train/analogy_basis_loss")
+        topology_loss = cls._metric_value(metrics, "topology/step_directed_loss", "topology/directed_loss")
+        koszul_loss = cls._metric_value(metrics, "koszul_persistence/loss", "train/koszul_persistence_loss")
+        bgg_loss = cls._metric_value(metrics, "bgg_category_o/loss", "train/toric_bgg_loss")
+        memory_loss = cls._metric_value(metrics, "train/trajectory_memory_loss")
+        pressure = (
+            0.35 * max(0.0, min(1.0, slepian_leakage))
+            + 0.15 * max(0.0, min(1.0, graphcg_loss))
+            + 0.15 * max(0.0, min(1.0, topology_loss))
+            + 0.12 * max(0.0, min(1.0, koszul_loss))
+            + 0.10 * max(0.0, min(1.0, bgg_loss))
+            + 0.13 * max(0.0, min(1.0, memory_loss))
+        )
+        return max(0.0, min(1.0, pressure))
 
     def update(
         self,
@@ -1101,7 +1159,9 @@ class AdaptiveTrainingController:
         train_bpb: float,
         val_bpb: float,
         val_gflownet_bpb: float,
+        train_metrics: dict[str, float] | None = None,
     ) -> dict[str, float]:
+        train_metrics = train_metrics or {}
         if not self.enabled:
             self.save()
             return self.log_metrics()
@@ -1120,6 +1180,7 @@ class AdaptiveTrainingController:
         self.best_val_bpb = min(self.best_val_bpb, float(val_bpb))
         gfn_eval_gap = float(val_gflownet_bpb) - float(val_bpb)
         self.consecutive_val_improvements = self.consecutive_val_improvements + 1 if val_improved else 0
+        structural_pressure = self.structural_pressure(train_metrics)
 
         elapsed = max(0, int(step) - int(self.start_step))
         tau = max(1.0, float(self.entropy_target_tau_steps))
@@ -1162,6 +1223,18 @@ class AdaptiveTrainingController:
             ):
                 self.complex_mix_ratio += self.complex_up_step
 
+            if recovery_active or (train_drift > float(self.train_drift_threshold) and not val_improved):
+                self.structural_loss_multiplier -= self.structural_loss_down_step
+            elif (
+                structural_pressure > float(self.structural_signal_threshold)
+                and val_improved
+                and train_drift <= float(self.structural_train_drift_guard)
+            ):
+                fraction = min(1.0, structural_pressure / max(1e-6, float(self.structural_signal_threshold)))
+                self.structural_loss_multiplier += self.structural_loss_up_step * fraction
+            elif structural_pressure < 0.5 * float(self.structural_signal_threshold) and not val_improved:
+                self.structural_loss_multiplier -= 0.5 * self.structural_loss_down_step
+
         self.update_count += 1
         self._clamp()
         self.last_metrics = {
@@ -1173,6 +1246,7 @@ class AdaptiveTrainingController:
             "controller/val_improved": float(val_improved),
             "controller/scheduled_entropy_target": float(scheduled_target),
             "controller/recovery_active": float(recovery_active),
+            "controller/structural_pressure": float(structural_pressure),
         }
         self.save()
         return self.log_metrics()
@@ -2226,6 +2300,16 @@ def main() -> None:
         koszul_temperature=config_get(file_config, "model", "koszul_temperature", 0.12),
         koszul_chart_exponents=config_get(file_config, "model", "koszul_chart_exponents", 12),
         koszul_rank_temperature=config_get(file_config, "model", "koszul_rank_temperature", 0.05),
+        use_slepian_pollak=config_get(file_config, "model", "use_slepian_pollak", False),
+        slepian_pollak_max_positions=config_get(file_config, "model", "slepian_pollak_max_positions", 256),
+        slepian_pollak_modes=config_get(file_config, "model", "slepian_pollak_modes", 8),
+        slepian_pollak_bandwidth=config_get(file_config, "model", "slepian_pollak_bandwidth", 0.075),
+        slepian_pollak_target_concentration=config_get(
+            file_config,
+            "model",
+            "slepian_pollak_target_concentration",
+            0.72,
+        ),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
         use_trajectory_memory_head=(
@@ -2419,6 +2503,7 @@ def main() -> None:
     )
     toric_bgg_loss_weight = config_get_float(file_config, "training", "toric_bgg_loss_weight", 0.0)
     koszul_persistence_loss_weight = config_get(file_config, "training", "koszul_persistence_loss_weight", 0.0)
+    slepian_pollak_loss_weight = config_get_float(file_config, "training", "slepian_pollak_loss_weight", 0.0)
     toric_entropy_floor = (
         args.toric_entropy_floor
         if args.toric_entropy_floor is not None
@@ -3018,6 +3103,7 @@ def main() -> None:
                     "toric_geometry_loss_weight": toric_geometry_loss_weight,
                     "toric_bgg_loss_weight": toric_bgg_loss_weight,
                     "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
+                    "slepian_pollak_loss_weight": slepian_pollak_loss_weight,
                     "toric_entropy_floor": toric_entropy_floor,
                     "toric_entropy_loss_weight": toric_entropy_loss_weight,
                     "mtp_loss_weight": mtp_loss_weight,
@@ -3095,6 +3181,7 @@ def main() -> None:
                         "complexity",
                         "bgg_category_o",
                         "category_o",
+                        "slepian_pollak",
                         "oai_competition",
                         "hessian",
                     ],
@@ -3169,6 +3256,7 @@ def main() -> None:
                 "metrics_status/tropical_metric_aliases_instantiated": float(model_config.use_toric_geometry_tasks),
                 "metrics_status/bgg_category_o_probe_instantiated": float(model_config.use_toric_bgg),
                 "metrics_status/koszul_persistence_probe_instantiated": float(model_config.use_koszul_persistence),
+                "metrics_status/slepian_pollak_probe_instantiated": float(model_config.use_slepian_pollak),
                 "metrics_status/complexity_enabled": float(complexity_enabled),
                 "metrics_status/hessian_enabled": float(hessian_enabled),
                 "oai_competition/enabled": float(oai_competition_eval_enabled),
@@ -3261,6 +3349,7 @@ def main() -> None:
             "toric_geometry_loss_weight": toric_geometry_loss_weight,
             "toric_bgg_loss_weight": toric_bgg_loss_weight,
             "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
+            "slepian_pollak_loss_weight": slepian_pollak_loss_weight,
             "trajectory_flow_target": trajectory_flow_target,
             "trajectory_memory_loss_weight": trajectory_memory_loss_weight,
             "use_trajectory_memory_head": model_config.use_trajectory_memory_head,
@@ -3338,6 +3427,7 @@ def main() -> None:
     use_amp = device.type == "cuda" and precision in {"bf16", "fp16"}
     progress = tqdm(range(start_step + 1, steps + 1), initial=start_step, total=steps, desc="parameter-golf-random-order")
     running_loss = 0.0
+    last_train_metrics: dict[str, float] = {}
     for step in progress:
         model.train()
         optimizer.zero_grad(set_to_none=True)
@@ -3407,6 +3497,13 @@ def main() -> None:
         step_koszul_chart_coverage = 0.0
         step_koszul_chart_transition_shift = 0.0
         step_koszul_windows = 0.0
+        step_slepian_pollak_loss = 0.0
+        step_slepian_pollak_concentration = 0.0
+        step_slepian_pollak_leakage = 0.0
+        step_slepian_pollak_mode_entropy = 0.0
+        step_slepian_pollak_effective_modes = 0.0
+        step_slepian_pollak_modes = 0.0
+        step_slepian_pollak_bandwidth = 0.0
         step_robust_micro_loss_guard_fraction = 0.0
         step_robust_micro_loss_guard_scale = 0.0
         step_robust_micro_loss_guard_cap = 0.0
@@ -3524,6 +3621,10 @@ def main() -> None:
             0.0,
             control_float(phase_controls, "koszul_persistence_loss_weight", koszul_persistence_loss_weight),
         )
+        effective_slepian_pollak_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "slepian_pollak_loss_weight", slepian_pollak_loss_weight),
+        )
         effective_mtp_loss_weight = max(0.0, control_float(phase_controls, "mtp_loss_weight", mtp_loss_weight))
         effective_contrastive_loss_weight = max(
             0.0,
@@ -3537,6 +3638,16 @@ def main() -> None:
             0.0,
             control_float(phase_controls, "trajectory_memory_loss_weight", trajectory_memory_loss_weight),
         )
+        structural_loss_multiplier = (
+            adaptive_controller.structural_loss_multiplier if adaptive_controller.enabled else 1.0
+        )
+        effective_graphcg_loss_weight *= structural_loss_multiplier
+        effective_analogy_lattice_loss_weight *= structural_loss_multiplier
+        effective_toric_geometry_loss_weight *= structural_loss_multiplier
+        effective_toric_bgg_loss_weight *= structural_loss_multiplier
+        effective_koszul_persistence_loss_weight *= structural_loss_multiplier
+        effective_slepian_pollak_loss_weight *= structural_loss_multiplier
+        effective_trajectory_memory_loss_weight *= structural_loss_multiplier
         effective_toric_entropy_loss_weight = max(
             0.0,
             control_float(phase_controls, "toric_entropy_loss_weight", toric_entropy_loss_weight),
@@ -3607,6 +3718,7 @@ def main() -> None:
                 toric_geometry_loss = out.get("toric_geometry_loss", torch.zeros((), device=device))
                 toric_bgg_loss = out.get("toric_bgg_loss", torch.zeros((), device=device))
                 koszul_persistence_loss = out.get("koszul_persistence_loss", torch.zeros((), device=device))
+                slepian_pollak_loss = out.get("slepian_pollak_loss", torch.zeros((), device=device))
                 qat_loss = (
                     quantization_grid_loss(qat_named_params, bits=qat_bits)
                     if effective_qat_loss_weight > 0 and qat_named_params
@@ -3666,6 +3778,11 @@ def main() -> None:
                     total_micro_loss,
                     effective_koszul_persistence_loss_weight,
                     koszul_persistence_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_slepian_pollak_loss_weight,
+                    slepian_pollak_loss,
                 )
                 total_micro_loss = add_weighted_aux_loss(total_micro_loss, effective_qat_loss_weight, qat_loss)
                 total_micro_loss = add_weighted_aux_loss(
@@ -3942,6 +4059,21 @@ def main() -> None:
                 out.get("koszul_chart_transition_resolution_shift", torch.zeros(())).detach().cpu()
             )
             step_koszul_windows += float(out.get("koszul_windows", torch.zeros(())).detach().cpu())
+            step_slepian_pollak_loss += float(slepian_pollak_loss.detach().cpu())
+            step_slepian_pollak_concentration += float(
+                out.get("slepian_pollak_concentration", torch.zeros(())).detach().cpu()
+            )
+            step_slepian_pollak_leakage += float(out.get("slepian_pollak_leakage", torch.zeros(())).detach().cpu())
+            step_slepian_pollak_mode_entropy += float(
+                out.get("slepian_pollak_mode_entropy", torch.zeros(())).detach().cpu()
+            )
+            step_slepian_pollak_effective_modes += float(
+                out.get("slepian_pollak_effective_modes", torch.zeros(())).detach().cpu()
+            )
+            step_slepian_pollak_modes += float(out.get("slepian_pollak_modes", torch.zeros(())).detach().cpu())
+            step_slepian_pollak_bandwidth += float(
+                out.get("slepian_pollak_bandwidth", torch.zeros(())).detach().cpu()
+            )
             step_qat_loss += float(qat_loss.detach().cpu())
             step_qat_weight += float(effective_qat_loss_weight)
             step_contrastive_loss += float(contrastive_loss.detach().cpu())
@@ -4110,6 +4242,13 @@ def main() -> None:
         step_koszul_chart_coverage /= grad_accum
         step_koszul_chart_transition_shift /= grad_accum
         step_koszul_windows /= grad_accum
+        step_slepian_pollak_loss /= grad_accum
+        step_slepian_pollak_concentration /= grad_accum
+        step_slepian_pollak_leakage /= grad_accum
+        step_slepian_pollak_mode_entropy /= grad_accum
+        step_slepian_pollak_effective_modes /= grad_accum
+        step_slepian_pollak_modes /= grad_accum
+        step_slepian_pollak_bandwidth /= grad_accum
         step_robust_micro_loss_guard_fraction /= grad_accum
         step_robust_micro_loss_guard_scale /= grad_accum
         step_robust_micro_loss_guard_cap /= grad_accum
@@ -4443,6 +4582,22 @@ def main() -> None:
                 "koszul_persistence/toric_affine_chart_coverage": step_koszul_chart_coverage,
                 "koszul_persistence/chart_transition_resolution_shift": step_koszul_chart_transition_shift,
                 "koszul_persistence/windows": step_koszul_windows,
+                "train/slepian_pollak_loss": step_slepian_pollak_loss,
+                "train/slepian_pollak_loss_weight": float(effective_slepian_pollak_loss_weight),
+                "slepian_pollak/loss": step_slepian_pollak_loss,
+                "slepian_pollak/loss_weight": float(effective_slepian_pollak_loss_weight),
+                "slepian_pollak/concentration": step_slepian_pollak_concentration,
+                "slepian_pollak/leakage": step_slepian_pollak_leakage,
+                "slepian_pollak/mode_entropy": step_slepian_pollak_mode_entropy,
+                "slepian_pollak/effective_modes": step_slepian_pollak_effective_modes,
+                "slepian_pollak/modes": step_slepian_pollak_modes,
+                "slepian_pollak/bandwidth": step_slepian_pollak_bandwidth,
+                "toric/slepian_concentration": step_slepian_pollak_concentration,
+                "toric/slepian_leakage": step_slepian_pollak_leakage,
+                "toric/slepian_mode_entropy": step_slepian_pollak_mode_entropy,
+                "toric/slepian_effective_modes": step_slepian_pollak_effective_modes,
+                "diagnostics/latest/pollak_prolate_slepian_concentration": step_slepian_pollak_concentration,
+                "diagnostics/latest/pollak_prolate_slepian_leakage": step_slepian_pollak_leakage,
                 "artifact/initial_bytes": report.bytes_total,
                 "artifact/estimated_tensor_bytes": estimated_tensor_bytes,
                 "artifact/deployment_parameters": report.deployment_parameters,
@@ -4482,6 +4637,8 @@ def main() -> None:
                 "phase/grad_clip_norm": float(effective_grad_clip_norm),
                 "phase/base_gflownet_loss_weight": float(gflownet_loss_weight),
                 "phase/base_complex_mix_ratio": float(complex_mix_ratio),
+                "phase/structural_loss_multiplier": float(structural_loss_multiplier),
+                "phase/structural_controller_enabled": float(adaptive_controller.enabled),
                 "metrics_status/all_metric_namespaces_always_on": 1.0,
                 "metrics_status/losses_follow_phase_curriculum": 1.0,
                 "metrics_status/topology_probe_instantiated": float(model_config.use_analogy_lattice),
@@ -4489,6 +4646,7 @@ def main() -> None:
                 "metrics_status/tropical_metric_aliases_instantiated": float(model_config.use_toric_geometry_tasks),
                 "metrics_status/bgg_category_o_probe_instantiated": float(model_config.use_toric_bgg),
                 "metrics_status/koszul_persistence_probe_instantiated": float(model_config.use_koszul_persistence),
+                "metrics_status/slepian_pollak_probe_instantiated": float(model_config.use_slepian_pollak),
                 "metrics_status/complexity_enabled": float(complexity_enabled),
                 "metrics_status/hessian_enabled": float(hessian_enabled),
                 "metrics_status/oai_competition_enabled": float(oai_competition_eval_enabled),
@@ -4503,10 +4661,13 @@ def main() -> None:
             if device.type == "cuda":
                 metrics["system/vram_allocated_gb"] = torch.cuda.memory_allocated(device) / 1e9
                 metrics["system/vram_reserved_gb"] = torch.cuda.memory_reserved(device) / 1e9
+            last_train_metrics = dict(metrics)
             if wandb_run is not None:
                 wandb_run.log(metrics, step=step)
-        elif complexity_metrics and wandb_run is not None:
-            wandb_run.log(complexity_metrics, step=step)
+        elif complexity_metrics:
+            last_train_metrics.update(complexity_metrics)
+            if wandb_run is not None:
+                wandb_run.log(complexity_metrics, step=step)
 
         if step % eval_interval == 0 or step == steps:
             val_deterministic = evaluate(
@@ -4658,6 +4819,7 @@ def main() -> None:
                 train_bpb=bpb,
                 val_bpb=float(val_deterministic["bpb"]),
                 val_gflownet_bpb=float(val_gflownet["bpb"]),
+                train_metrics=last_train_metrics,
             )
             if adaptive_controller.enabled:
                 gflownet_loss_weight = adaptive_controller.gflownet_loss_weight

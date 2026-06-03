@@ -183,6 +183,11 @@ class RandomOrderLMConfig:
     koszul_temperature: float = 0.12
     koszul_chart_exponents: int = 12
     koszul_rank_temperature: float = 0.05
+    use_slepian_pollak: bool = False
+    slepian_pollak_max_positions: int = 256
+    slepian_pollak_modes: int = 8
+    slepian_pollak_bandwidth: float = 0.075
+    slepian_pollak_target_concentration: float = 0.72
     aux_mtp_offsets: int = 2
     contrastive_temperature: float = 0.2
     trajectory_flow_viscosity: float = 0.05
@@ -563,6 +568,7 @@ class DenseRandomOrderToricLM(nn.Module):
             for table in list(self.revealed_left_logits) + list(self.revealed_right_logits):
                 nn.init.zeros_(table.weight)
         nn.init.zeros_(self.output_bias) if self.output_bias is not None else None
+        self._slepian_pollak_basis_cache: dict[tuple[int, str, int, float], torch.Tensor] = {}
 
     def _init_module(self, module: nn.Module) -> None:
         if isinstance(module, nn.Embedding):
@@ -1490,6 +1496,67 @@ class DenseRandomOrderToricLM(nn.Module):
             "analogy_graphcg_chart_energy": graphcg_chart_energy.detach(),
         }
 
+    def _slepian_pollak_basis(self, n: int, device: torch.device) -> torch.Tensor:
+        """Return cached finite DPSS/prolate modes for a trajectory length."""
+
+        modes = max(1, min(int(self.config.slepian_pollak_modes), int(n)))
+        bandwidth = max(1e-4, min(0.49, float(self.config.slepian_pollak_bandwidth)))
+        key = (int(n), str(device), modes, round(bandwidth, 8))
+        cached = self._slepian_pollak_basis_cache.get(key)
+        if cached is not None and cached.device == device:
+            return cached
+        with torch.no_grad():
+            positions = torch.arange(int(n), device=device, dtype=torch.float32)
+            diff = positions[:, None] - positions[None, :]
+            kernel = torch.empty((int(n), int(n)), device=device, dtype=torch.float32)
+            zero = diff == 0
+            kernel[zero] = 2.0 * bandwidth
+            kernel[~zero] = torch.sin(2.0 * math.pi * bandwidth * diff[~zero]) / (math.pi * diff[~zero])
+            eigvals, eigvecs = torch.linalg.eigh(kernel)
+            order = torch.argsort(eigvals, descending=True)[:modes]
+            basis = F.normalize(eigvecs[:, order].transpose(0, 1).contiguous(), dim=-1)
+            self._slepian_pollak_basis_cache[key] = basis.detach()
+            return basis
+
+    def _slepian_pollak_losses(self, hidden: torch.Tensor) -> dict[str, torch.Tensor]:
+        zero = hidden.new_zeros(())
+        if not bool(self.config.use_slepian_pollak) or hidden.ndim != 3 or hidden.shape[1] < 4:
+            return {
+                "slepian_pollak_loss": zero,
+                "slepian_pollak_concentration": zero.detach(),
+                "slepian_pollak_leakage": zero.detach(),
+                "slepian_pollak_mode_entropy": zero.detach(),
+                "slepian_pollak_effective_modes": zero.detach(),
+                "slepian_pollak_modes": zero.detach(),
+                "slepian_pollak_bandwidth": zero.detach(),
+            }
+        max_positions = max(4, int(self.config.slepian_pollak_max_positions))
+        n = min(int(hidden.shape[1]), max_positions)
+        indices = torch.linspace(0, hidden.shape[1] - 1, steps=n, device=hidden.device).round().long()
+        trajectory = hidden.index_select(1, indices).float()
+        trajectory = trajectory - trajectory.mean(dim=1, keepdim=True)
+        basis = self._slepian_pollak_basis(n, hidden.device).to(dtype=trajectory.dtype)
+        coeff = torch.einsum("mn,bnd->bmd", basis, trajectory)
+        focused_energy = coeff.pow(2).sum()
+        total_energy = trajectory.pow(2).sum().clamp_min(1e-8)
+        concentration = (focused_energy / total_energy).clamp(0.0, 1.0)
+        leakage = (1.0 - concentration).clamp_min(0.0)
+        target = max(0.0, min(1.0, float(self.config.slepian_pollak_target_concentration)))
+        loss = torch.relu(torch.as_tensor(target, device=hidden.device) - concentration).pow(2)
+        mode_energy = coeff.pow(2).sum(dim=(0, 2))
+        probs = mode_energy / mode_energy.sum().clamp_min(1e-8)
+        mode_entropy = -(probs * probs.clamp_min(1e-8).log()).sum() / math.log(max(2, probs.numel()))
+        effective_modes = torch.exp(mode_entropy * math.log(max(2, probs.numel())))
+        return {
+            "slepian_pollak_loss": loss,
+            "slepian_pollak_concentration": concentration.detach(),
+            "slepian_pollak_leakage": leakage.detach(),
+            "slepian_pollak_mode_entropy": mode_entropy.detach(),
+            "slepian_pollak_effective_modes": effective_modes.detach(),
+            "slepian_pollak_modes": hidden.new_tensor(float(basis.shape[0])).detach(),
+            "slepian_pollak_bandwidth": hidden.new_tensor(float(self.config.slepian_pollak_bandwidth)).detach(),
+        }
+
     def forward_from_previous(
         self,
         previous_tokens: torch.Tensor,
@@ -1619,6 +1686,7 @@ class DenseRandomOrderToricLM(nn.Module):
                         ),
                     )
                 )
+            out.update(self._slepian_pollak_losses(hidden))
         if hidden is not None and hidden.shape[0] > 1:
             pooled = F.normalize(hidden.mean(dim=1).float(), dim=-1)
             sim = pooled @ pooled.transpose(0, 1) / max(float(self.config.contrastive_temperature), 1e-4)
