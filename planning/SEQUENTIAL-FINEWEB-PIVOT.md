@@ -22,7 +22,7 @@ The root cause is objective mismatch.  FineWeb BPB rewards strict local left-to-
 
 ## Decision
 
-Promote a sequential FineWeb-first branch as the primary contest path.  Keep the current random-order ToricGT run only long enough to finish the scheduled step-5500 analysis.  If step 5500 is still flat near `4.52` BPB, demote or stop that run and use the GPU for sequential FineWeb training.
+Promote a sequential FineWeb-first branch as the primary contest path.  The current random-order ToricGT recovery run has been stopped before step 5500 because the BPB signal was flat near `4.52`, the resumed logging state was inconsistent, and the only active local GPU was needed for the sequential branch.
 
 ## Primary launch candidate
 
@@ -53,6 +53,8 @@ WARMDOWN_ITERS=3000 \
 MAX_WALLCLOCK_SECONDS=0 \
 VAL_LOSS_EVERY=1000 \
 TRAIN_LOG_EVERY=200 \
+CHECKPOINT_EVERY=1000 \
+CHECKPOINT_DIR=checkpoints/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z \
 torchrun --standalone --nproc_per_node=1 records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
 ```
 
@@ -74,6 +76,16 @@ amelie-iska/parameter-golf/records/track_10min_16mb/2026-03-19_TrainingOptSeq409
 
 was patched to use `torch.no_grad()` for validation and to clone cached cosine and sine tables on return from `Rotary.forward`.  This is a compatibility fix only; it does not change the model, optimizer, data, BPB metric, or launch hyperparameters.
 
+The same local script now also has opt-in durability knobs:
+
+```text
+CHECKPOINT_EVERY
+CHECKPOINT_DIR
+RESUME_CHECKPOINT
+```
+
+When enabled, checkpoints are written at validation boundaries and include model weights, optimizer states, token-loader position, CPU/CUDA RNG state, step, and accumulated training time.
+
 Smoke verification:
 
 ```text
@@ -86,21 +98,36 @@ int8+zlib total submission size: 4,972,577 bytes
 result: passed initial-validation -> backward -> final-validation -> quantized-roundtrip
 ```
 
+Checkpoint/resume smoke verification:
+
+```text
+run A: toricgt_seq4096_resume_smoke_a
+run A checkpoint: checkpoints/toricgt_seq4096_resume_smoke/toricgt_seq4096_resume_smoke_a_step_000001.pt
+checkpoint bytes: 135,612,859
+run B: toricgt_seq4096_resume_smoke_b
+resume result: loaded step 1, trained step 2, saved step-2 checkpoint
+run B val_bpb: 4.1067
+run B post-quant round-trip val_bpb: 4.10907022
+int8+zlib total submission size after durability patch: 4,983,519 bytes
+```
+
 ## Active sequential run
 
 ```text
 tmux session: toricgt_seq4096_pivot
-run id: toricgt_seq4096_pivot_seed1337_20260603T1718Z
-log: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_seed1337_20260603T1718Z.txt
+run id: toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z
+log: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z.txt
+console log: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z.console.txt
+checkpoint dir: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z
 script: amelie-iska/parameter-golf/records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
 python: /home/iska/miniconda3/envs/tokengt/bin/python
-status at launch check: warmup step 9/20, GPU process alive
+status at launch check: warmup started, GPU process alive
 ```
 
 Launch command actually used:
 
 ```bash
-RUN_ID=toricgt_seq4096_pivot_seed1337_20260603T1718Z \
+RUN_ID=toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z \
 DATA_PATH=./data/datasets/fineweb10B_sp1024 \
 TOKENIZER_PATH=./data/tokenizers/fineweb_1024_bpe.model \
 VOCAB_SIZE=1024 \
@@ -116,6 +143,9 @@ WARMDOWN_ITERS=3000 \
 MAX_WALLCLOCK_SECONDS=0 \
 VAL_LOSS_EVERY=1000 \
 TRAIN_LOG_EVERY=200 \
+ITERATIONS=20000 \
+CHECKPOINT_EVERY=1000 \
+CHECKPOINT_DIR=checkpoints/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z \
 /home/iska/miniconda3/envs/tokengt/bin/python -m torch.distributed.run --standalone --nproc_per_node=1 \
   records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
 ```

@@ -583,3 +583,31 @@ log: amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_seed1337_20260603T171
 ```
 
 Smoke verification for the patched `TrainingOptSeq4096` record script passed initial validation, one backward step, final validation, int8+zlib export, and quantized round-trip evaluation.  The one-step smoke round-trip BPB was `4.10907054`, as expected for an essentially untrained model, and the int8+zlib total size was `4,972,577` bytes.
+
+### Checkpointed relaunch update
+
+The first sequential launch was stopped at step 10 to add opt-in checkpoint/resume support before committing several hours of GPU time.  The durability patch writes model, optimizer, loader, RNG, step, and accumulated training-time state at validation boundaries when `CHECKPOINT_EVERY` is set.
+
+Checkpoint/resume smoke verification passed:
+
+```text
+save smoke: toricgt_seq4096_resume_smoke_a
+saved checkpoint: checkpoints/toricgt_seq4096_resume_smoke/toricgt_seq4096_resume_smoke_a_step_000001.pt
+checkpoint bytes: 135,612,859
+resume smoke: toricgt_seq4096_resume_smoke_b
+resume result: loaded step 1, trained through step 2, saved a new checkpoint
+post-resume val_bpb: 4.1067
+post-resume int8+zlib round-trip val_bpb: 4.10907022
+post-resume int8+zlib total size: 4,983,519 bytes
+```
+
+Active checkpointed sequential run:
+
+```text
+tmux session: toricgt_seq4096_pivot
+run id: toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z
+log: amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z.txt
+console log: amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z.console.txt
+checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z
+checkpoint cadence: every 1000 validation steps
+```
