@@ -18,11 +18,24 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 
 Current validated status:
 
-- CPU tests: `pytest -q tests` passes.
+- Branch: active work is on `oai`.
+- CPU tests: focused Parameter-Golf structural-token/model/recovery tests pass:
+  `PYTHONPATH=src python -m pytest tests/test_parameter_golf_advanced_tokens.py tests/test_random_order_lm.py tests/test_seq4096_4k_recovery_gate.py -q`.
 - CPU implementation validation: default Soft-MoE, tropical-ring attention, embedding-space GFlowNet trajectory balance, and finite rotation-algebra checks run without meaningful VRAM use.
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
-- Parameter-Golf BPB pivot: the supervised random-order FineWeb recovery run reached a best native OAI/FineWeb BPB near `4.5232` by step 5250, which is structurally far from the `<= 1.2` target.  The primary contest path is now a strict sequential FineWeb-first objective under the same artifact discipline; random-order ToricGT remains a research, diagnostics, and graph/reasoning auxiliary track.
+- OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
+  `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
+  It restarted from the earlier step-1000 checkpoint with optimizer/RNG/loader reset, doubled batch tokens, dense W&B aliases, and periodic analysis sidecars. At step 1250 it reached native validation BPB `1.3259`, ahead of the original run's step-1500 BPB `1.3399`, and is being monitored against the `<= 1.2` gate before step 4000.
+- Advanced reasoning/memory branch: the live auxiliary run is
+  `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
+  It trains the random-order ToricGT adapter with explicit graph-of-thought,
+  reasoning-step, memory, and analogy tokens; GraphCG basis disentangling;
+  trajectory-memory, analogy, topology, toric, BGG Category O, Koszul
+  persistence, and Slepian/Pollak auxiliary diagnostics; and a bounded adaptive
+  structural-loss multiplier.
+- W&B is on by default for training configs that can use it. The local
+  `keys.txt`/`.netrc` credential path is intentionally not committed or pushed.
 - The full curation job writes leakage-controlled train/validation/test Parquet splits under `data/curated/`; validate it with `scripts/inspect_curated_data.py` before launching long training.
 
 ## What Is Here
@@ -45,9 +58,9 @@ Local implementation:
 - `src/toricgt/synthetic.py`: synthetic rotation-algebra and tropical shortest-path curriculum records.
 - `src/toricgt/polar_cache.py`: recursive polar encode/decode utilities for optional KV-cache compression experiments.
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
-- `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing.
+- `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing, advanced reasoning/memory special-token encoding, GraphCG/analogy/topology hooks, Toric BGG/Koszul probes, and differentiable Slepian/Pollak trajectory-concentration losses.
 - `src/toricgt/toric_geometry_tasks.py`: training-only low-rank toric probes for Newton active-face, bend, binomial, affine-Coxeter, braid, and phase-foliation signals.
-- `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves.
+- `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves used by the geometry audit suite.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, Slepian envelopes, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
 - `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.
@@ -356,9 +369,17 @@ Resume from a checkpoint by adding:
 --resume checkpoints/<run>/toricgt_step_00001000.pt
 ```
 
-When `--wandb` is enabled, the trainer reports online metrics for train loss, supervised loss, GFlowNet trajectory-balance loss, GFlowNet loss weight, graph tokens per microbatch, LR, grad norm, validation masked MSE, VRAM, and Soft-MoE routing diagnostics.
+When `--wandb` is enabled, the trainer reports online metrics with an explicit
+`trainer/step` alias. Core graph-model runs report train loss, supervised
+loss, GFlowNet trajectory-balance loss, GFlowNet loss weight, graph tokens per
+microbatch, LR, grad norm, validation masked MSE, VRAM, and Soft-MoE routing
+diagnostics. Parameter-Golf runs additionally report `train/bpb`, `val/bpb`,
+`openai_parameter_golf/bpb`, `oai_competition/bpb`,
+`competition/oai_bpb`, `bpb/oai_competition`, GraphCG, topology, toric,
+Slepian/Pollak, BGG Category O, Koszul persistence, complexity, and controller
+metrics when those probes are enabled.
 
-YAML configs are available in [config/](/home/iska/Documents/amelie/bio/ToricGT/config). CLI flags override YAML values:
+YAML configs are available in [config/](/home/iska/Documents/amelie/bio/ToricGT/config) and [configs/](/home/iska/Documents/amelie/bio/ToricGT/configs). CLI flags override YAML values:
 
 ```bash
 conda run --no-capture-output -n tokengt env PYTHONPATH=src WANDB_PROJECT=toricgt \
@@ -556,50 +577,148 @@ runs W&B/OAI BPB/simplex/geometry analyses as non-interrupting sidecars. Codex
 review handoffs are allowed to time out without stopping training; the BPB loop
 uses `BPB_TARGET=1.2` and a 100-analysis cap.
 
-Current `oai` recovery replay from the early checkpoint:
+Current `oai` OpenAI Parameter-Golf recovery status:
 
-```bash
-conda run --no-capture-output -n tokengt env PYTHONPATH=src \
-  python scripts/train_parameter_golf_random_order.py \
-  --config config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml \
-  --resume checkpoints/parameter_golf_oai_dense/random_order_step_00001000.pt \
-  --wandb --wandb-project toricgt-parameter-golf \
-  --wandb-run-name oai-bpb-valmix35-01000-<timestamp>
+- Primary BPB run:
+  `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
+- W&B:
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z>.
+- Training tmux:
+  `toricgt_seq4096_4k_recovery_r7_20260603T212821Z`.
+- Analysis tmux sidecars:
+  `toricgt_seq4096_4k_analysis_r7_20260603T212821Z`,
+  `toricgt_seq4096_4k_mirror_r7_20260603T212821Z`,
+  `toricgt_seq4096_4k_full_diag_r7_20260603T212821Z`, and
+  `toricgt_seq4096_4k_gate_r7_20260603T212821Z`.
+- Checkpoint directory:
+  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
+- Step-1250 periodic analysis:
+  `outputs/post_resume_analysis/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z/step-00001250`.
+
+Periodic analyses are part of the live training loop. The R7 sidecars produce
+W&B metric-history summaries, BPB descent plots, rockfall dashboards,
+target-zone plots, BPB phase planes, descent simplices, diagnostic proxy
+geometry, and full ToricGT geometry payloads. The step-1250 analysis wrote:
+
+```text
+bpb/bpb_descent_timeseries.png
+bpb/bpb_velocity.png
+bpb/bpb_descent_simplex.png
+bpb/bpb_phase_plane.png
+bpb/bpb_rockfall_dashboard.png
+bpb/diagnostic_proxy_geometry.png
+metrics/core_metric_timeseries.png
+metrics/recent_metric_slopes.png
+metrics/selected_metric_correlations.png
+geometry/fineweb_curve_diagnostic_payload.json
 ```
 
-This replay uses the same dense ToricGT Parameter-Golf architecture, but the
-active BPB recovery now rolls back to the aligned step `1500` checkpoint after
-the step-1700 watcher showed that the revealed-context run found a local
-likelihood valley near step 1545--1550 and then bounced out of it.  The
-likelihood-side intervention remains a legal score-before-update
-revealed-context mixture: a Dirichlet-smoothed prefix byte distribution is
-mixed in probability space with the neural distribution, while zero-initialized
-trainable local potentials learn from already revealed graph neighbors at
-positions `p +/- r`.  The mixture form is deliberately conservative: a bad
-revealed-prefix prior cannot dominate the neural distribution the way an
-additive product-of-experts logit can.  This preserves random-order graph
-decoding and does not read the current or future target before scoring.  W&B
-reports `train/neural_bpb`, `train/bpb`,
-`train/revealed_context_prior_mixture_weight`,
-`train/revealed_neighbor_known_fraction`, and
-`train/revealed_neighbor_context_norm` so the analysis gate can separate true
-neural improvement from context correction.
+The current readout is to keep the Seq4096 schedule unchanged while validation
+continues to improve; the last train sample at step 1250 was noisy, but the
+validation move is the signal that matters for the 4K gate.
 
-The current launch path is:
+The run restarted from the original step-1000 Seq4096 checkpoint rather than
+from the later step-3000 checkpoint. The reason is runway: after the step-3000
+and double-batch step-3000 replays improved but did not project to cross
+`1.2` by step 4000, the watcher was retuned to require at least 3000 recovery
+steps before the gate. R7 therefore resumes from:
 
-```bash
-scripts/launch_oai_bpb_cliff_recovery.sh
+```text
+amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_step_001000.pt
 ```
 
-It resumes from `random_order_step_00001500.pt`, keeps medium/hard/graph rows
-off through the 1500--1700 BPB floor-lock, resets Adam optimizer moments by
-default, runs fixed validation probes every 50 steps, skips shock updates
-inside the recovery band, keeps heavy ToricGT auxiliaries diagnostic-only, and
-pauses first at step `1525` for CUDA/bf16 analysis and an automated Codex
-review before any continuation decision.  Toric BGG certificate probes are
-instantiated as training-only metrics, but `toric_bgg_loss_weight` is explicitly
-`0.0` through the BPB repair phases and becomes nonzero only in the later
-alignment/compression phases if the analysis gate allows it.
+Launch controls for R7:
+
+```text
+TRAIN_BATCH_TOKENS=786432
+TIED_EMBED_LR=0.032
+MATRIX_LR=0.020
+SCALAR_LR=0.020
+MUON_MOMENTUM=0.985
+MUON_MOMENTUM_WARMUP_STEPS=500
+MUON_MOMENTUM_WARMUP_START=0.900
+GRAD_CLIP_NORM=1.0
+RESET_OPTIMIZER=1
+RESET_RNG=1
+RESET_DATALOADER=1
+```
+
+Observed validation trajectory:
+
+| Run | Step | Native validation BPB |
+| --- | ---: | ---: |
+| original Seq4096 | 1000 | `1.3637` |
+| original Seq4096 | 1500 | `1.3399` |
+| original Seq4096 | 4000 | `1.2569` |
+| R7 recovery | 1000 | `1.3637` |
+| R7 recovery | 1250 | `1.3259` |
+
+The step-1250 analysis classifies the run as `near_target`, with target gap
+`0.1259` and validation slope about `-0.01512` BPB per 100 steps. The train BPB
+samples are noisy, but validation is ahead of the old trajectory; the current
+policy is to leave the run alone until the next validation checkpoints unless
+the gate watcher detects a missed 4K trajectory. If BPB is not on track for
+`<=1.2` by the step-4000 gate, `scripts/watch_seq4096_4k_recovery.py` can
+restart from the best checkpoint with the same recovery-control environment.
+
+The current launch path for this family is:
+
+```bash
+python scripts/watch_seq4096_4k_recovery.py \
+  --run-id toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z \
+  --gate-step 4000 \
+  --target-bpb 1.2 \
+  --min-recovery-runway-steps 3000
+```
+
+The live advanced reasoning/memory transfer run is separate from the Seq4096
+competition scaffold so BPB repair is not disrupted by experimental auxiliary
+losses. It uses:
+
+- run id: `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`;
+- W&B:
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z>;
+- tmux: `toricgt_graphcg_slepian_adaptive_20260603T214528Z`;
+- config: `configs/advanced_reasoning_memory_graphcg.yaml`;
+- commit: `7eace3c`.
+
+This run starts from step 0 with `special_token_mode: reasoning_memory`, a
+272-token byte vocabulary with 16 reserved structural-token slots, GraphCG
+enabled, trajectory memory enabled, analogy lattice enabled, Toric BGG and
+Koszul persistence probes enabled, Slepian/Pollak concentration enabled, OAI
+competition evaluation enabled, FineWeb calibration enabled, and complexity
+diagnostics enabled. The phase curriculum is now explicitly enabled. The first
+phase keeps structural weights small while BPB stabilizes; the second phase
+raises GraphCG, analogy, trajectory-memory, GFlowNet, Koszul, toric, BGG, and
+Slepian/Pollak weights after step 2000.
+
+The adaptive controller is bounded for BPB safety. It may adjust GFlowNet
+weight, GFlowNet entropy target, complex-row mix, and a single structural-loss
+multiplier. Structural pressure is computed from Slepian leakage, GraphCG basis
+loss, directed-topology loss, Koszul persistence loss, BGG loss, and
+trajectory-memory loss. It strengthens the structural family only when
+validation improves and train BPB drift remains within the configured guard.
+The CE/BPB objective is not rescaled by this controller.
+
+The native random-order trainer now has explicit graph-of-thought and memory
+tokens:
+
+```text
+<|got_begin|> <|got_end|>
+<|simplex_begin|> <|simplex_end|>
+<|reason_step_begin|> <|reason_step_end|> <|reason_edge|>
+<|memory_begin|> <|memory_end|>
+<|memory_read|> <|memory_write|> <|memory_link|> <|memory_consolidate|>
+<|analogy_begin|> <|analogy_end|>
+```
+
+These symbols are encoded as reserved ids below the byte offset, so ordinary
+UTF-8 bytes remain reversible. Graph projections wrap reasoning trajectories,
+directed edges, simplex/cell spans, graph-structured memory operations, and
+analogy spans with these markers. That gives the geometry suite sharper
+boundaries for directed noncommutative reasoning trajectories and memory
+retrieval paths while keeping the competition scoring path byte-level and
+causal.
 
 For official-style FineWeb BPB checks, the repo also includes
 `scripts/launch_parameter_golf_fineweb_bpb.sh`.  That path runs the separate
@@ -847,20 +966,16 @@ validation/test bytes for adaptation; score-first state updates are allowed only
 after the current byte has been scored.
 
 The loader already packs multiple source rows into one byte chunk with a
-separator, so short problems are combined into a single random-order training
-instance. The default `oai` config keeps the initial BPB capture stream
-text-first, introduces medium-length rows after step `2500`, and delays the
-larger technical graph-projection stream until step `6000` with
-math/code/graph/reasoning/health/physics/biomed/biochem task-family filters.
-The current restart is from the aligned step `1,500` checkpoint with
-revealed-context compression enabled, Adam moments reset, and a first
-`1500--1525` analysis gate before any longer `1500--1600` / `1600--1700`
-capture decision. This protects the observed low near 1545--1550 rather than
-chasing the later rebound. A bounded
-checkpoint-level adaptive controller remains enabled for GFlowNet entropy
-target, GFlowNet loss weight, and hard-row mix; it writes
-`checkpoints/parameter_golf_oai_dense/adaptive_controller_state_01500_revealed_context.json`
-and logs `controller/*` metrics to W&B.
+separator, so short problems are combined into one random-order training
+instance. The current Seq4096 competition run keeps the training objective
+FineWeb-first until the `<=1.2` BPB checkpoint is preserved, with dense
+validation and checkpoint gates. The current advanced native ToricGT branch
+uses a separate config, `configs/advanced_reasoning_memory_graphcg.yaml`, for
+graph-of-thought, memory, analogy, topology, toric, BGG, Koszul,
+Slepian/Pollak, and complexity training signals. Its bounded controller logs
+`controller/*` and `phase/*` metrics to W&B; it can adjust GFlowNet controls,
+complex-row mix, and a structural auxiliary multiplier, but it does not rescale
+the main BPB/CE loss.
 
 For challenge-time throughput experiments, use the long-context packed config:
 
@@ -1132,4 +1247,24 @@ Implemented:
 - curation manifest and clustered splitting logic;
 - visualization script.
 
-The active full 30M-class training run uses the documented `tmux` command, reports online metrics to W&B, and writes checkpoints under `checkpoints/toricgt_full_30m/`.
+Recent `oai` commits:
+
+- `7eace3c Log explicit trainer step in parameter golf runs`
+- `bee47f5 Add adaptive structural training signals`
+- `c256c21 Test Seq4096 data-initialized bigram prior`
+- `5b04529 Test Seq4096 bigram transition bias`
+- `e98a943 Add recovery runway control for 4K gate`
+
+Active live training:
+
+- Primary BPB recovery: `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
+  Latest checked validation: step 1250, BPB `1.3259`; state `near_target`.
+- Advanced reasoning/memory transfer:
+  `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
+  W&B confirms `trainer/step`, `train/bpb`, phase index, GraphCG weight, and
+  Slepian/Pollak leakage are reporting.
+
+The active full 30M-class graph-model training recipe remains documented above,
+but the current priority is the OpenAI Parameter-Golf BPB gate followed by the
+advanced graph-of-thought, graph-memory, analogy, topology, toric, BGG,
+Koszul, Slepian/Pollak, and complexity phases.
