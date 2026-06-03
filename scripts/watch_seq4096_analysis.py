@@ -102,6 +102,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--skip-wandb-metrics", action="store_true")
     parser.add_argument("--skip-full-diagnostics", action="store_true")
+    parser.add_argument("--wandb-settle-seconds", type=float, default=5.0)
     return parser.parse_args()
 
 
@@ -832,21 +833,6 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
     run_id = args.run_id or args.run_path.split("/")[-1]
 
     command_status: dict[str, int] = {}
-    if not args.skip_wandb_metrics:
-        metrics_cmd = [
-            args.python,
-            str(root / "scripts" / "analyze_wandb_metrics.py"),
-            "--run-path",
-            args.run_path,
-            "--checkpoint",
-            str(checkpoint),
-            "--output-dir",
-            str(metrics_dir),
-            "--max-plot-metrics",
-            "36",
-        ]
-        command_status["wandb_metrics"] = run_command(metrics_cmd, logs_dir / "analyze_wandb_metrics.log", env)
-
     diagnostic_payload: dict[str, Any] = {}
     diagnostic_json = geometry_dir / "fineweb_curve_diagnostic_payload.json"
     if not args.skip_full_diagnostics:
@@ -871,6 +857,23 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
         ]
         command_status["full_diagnostics"] = run_command(diag_cmd, logs_dir / "full_diagnostics.log", env)
         diagnostic_payload = load_json(diagnostic_json)
+
+    if not args.skip_wandb_metrics:
+        if command_status.get("full_diagnostics") == 0 and args.wandb_settle_seconds > 0:
+            time.sleep(float(args.wandb_settle_seconds))
+        metrics_cmd = [
+            args.python,
+            str(root / "scripts" / "analyze_wandb_metrics.py"),
+            "--run-path",
+            args.run_path,
+            "--checkpoint",
+            str(checkpoint),
+            "--output-dir",
+            str(metrics_dir),
+            "--max-plot-metrics",
+            "36",
+        ]
+        command_status["wandb_metrics"] = run_command(metrics_cmd, logs_dir / "analyze_wandb_metrics.log", env)
 
     parsed = parse_seq4096_log(Path(args.log))
     report = write_bpb_analysis_artifacts(
