@@ -617,3 +617,43 @@ checkpoint cadence: every 1000 validation steps
 W&B is now default-on in the local Parameter Golf record script, using `WANDB_ENTITY=amelie-iska-math` and `WANDB_PROJECT=toricgt-parameter-golf` unless overridden.  The script reads the API key only from `WANDB_API_KEY` or local `keys.txt`; key files are ignored and must not be committed.
 
 The W&B metric sweep is documented in `planning/WANDB-SWEEP.md`.  It records that the active run logs canonical BPB as `val/bpb`, while Parameter Golf commit `7dc7d59` adds expanded direct reporting for progress, target-gap, throughput, artifact, checkpoint, VRAM, BPB aliases, and best-BPB metrics for the next resume or launch.
+
+### Fresh step-0 metrics run
+
+The previous resumed Seq4096 run reached the step-1000 checkpoint with `val_bpb=1.3641321682066738` and checkpoint size `135,618,603` bytes.  It was stopped after proving the BPB path and W&B fixes.  The active GPU budget is now assigned to a fresh step-0 run that includes all W&B lessons from the checkpointed run.
+
+```text
+tmux session: toricgt_seq4096_fresh
+run id: toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z
+parameter-golf commit: ea485aa
+wandb: https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z
+log: amelie-iska/parameter-golf/logs/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z.txt
+checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z
+validation cadence: every 500 steps
+checkpoint cadence: every 500 steps
+```
+
+The new run starts from step 0 and reports train BPB directly from the SentencePiece byte denominator used by validation.  Verified W&B summary keys include:
+
+```text
+train/bpb
+train_bpb
+fineweb/train_bpb
+bpb/train
+openai_parameter_golf/train_bpb
+val/bpb
+bpb
+val_bpb
+openai_parameter_golf/bpb
+```
+
+First verified values:
+
+```text
+step 0 val_bpb: 4.107707800251096
+step 1 train_bpb in log: 4.0876
+W&B progress after startup: step 11
+W&B train/bpb after startup: about 3.56585
+```
+
+Persistent sidecars for the fresh run are `toricgt_seq4096_fresh_mirror` and `toricgt_seq4096_fresh_full_diag`.  The next hard gate is the step-500 validation/checkpoint.

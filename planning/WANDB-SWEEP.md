@@ -374,14 +374,20 @@ This policy uses the metrics and losses where helpful without sacrificing the co
 
 ## Next Operational Step
 
-Let the active run reach step 1000 and write its first checkpoint.  Then resume from that checkpoint with Parameter Golf commit `7dc7d59` so the expanded direct W&B metric set is active without discarding trained state.
+Completed and superseded by a fresh metrics run.  The step-1000 checkpointed run reached `val/bpb=1.3641321682066738`, then the trainer was patched further to report train BPB and a fresh step-0 run was launched.
 
-After step 1000:
+Current active run:
 
 ```text
-1. Verify val/bpb and checkpoint bytes.
-2. Resume from checkpoint with 7dc7d59.
-3. Start or run once the full-diagnostics mirror for proxy ToricGT/tropical/topology/BGG metrics.
-4. Use BPB trend, throughput, and artifact-size metrics for hyperparameter decisions.
-5. Do not enable auxiliary ToricGT losses in the Seq4096 path unless a controlled checkpoint comparison shows no BPB regression.
+run id: toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z
+parameter-golf commit: ea485aa
+trainer session: toricgt_seq4096_fresh
+mirror session: toricgt_seq4096_fresh_mirror
+full diagnostics session: toricgt_seq4096_fresh_full_diag
+validation cadence: every 500 steps
+checkpoint cadence: every 500 steps
 ```
+
+Train BPB is now reported directly by the trainer as `train/bpb`, `train_bpb`, `fineweb/train_bpb`, `bpb/train`, and `openai_parameter_golf/train_bpb`.  Validation BPB remains the contest gate and is reported as `val/bpb`, `bpb`, `val_bpb`, `fineweb/val_bpb`, and `openai_parameter_golf/bpb`.
+
+Verified startup values: step-0 validation BPB is `4.107707800251096`; the first training line reports `train_bpb=4.0876`; W&B summary showed `train/bpb` near `3.56585` by step 11.  The next hard gate is step 500.
