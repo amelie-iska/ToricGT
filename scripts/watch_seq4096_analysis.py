@@ -255,6 +255,14 @@ def slope_per_steps(steps: np.ndarray, values: np.ndarray, unit_steps: float = 1
     return float(np.sum(x * (y - y.mean())) / denom)
 
 
+def estimate_steps_to_target(current_bpb: float | None, slope_per_100: float, target_bpb: float) -> float:
+    if current_bpb is None or not math.isfinite(current_bpb):
+        return float("nan")
+    if not math.isfinite(slope_per_100) or slope_per_100 >= 0:
+        return float("nan")
+    return max(0.0, (float(current_bpb) - float(target_bpb)) / (-float(slope_per_100)) * 100.0)
+
+
 def last_finite(frame: pd.DataFrame, field: str) -> float | None:
     if field not in frame.columns:
         return None
@@ -297,6 +305,11 @@ def bpb_acceleration_report(
 
     val_steps, val_values = finite_xy(frame, "val_bpb")
     val_slope = slope_per_steps(val_steps, val_values, unit_steps=100.0)
+    recent_val_slope = val_slope
+    if len(val_values) >= 3:
+        recent_n = min(max(3, len(val_values) // 2), len(val_values))
+        recent_val_slope = slope_per_steps(val_steps[-recent_n:], val_values[-recent_n:], unit_steps=100.0)
+    latest_val_step = int(val_steps[-1]) if len(val_steps) else latest_step
 
     state = "insufficient_data"
     if gap_source is not None and gap_source <= target_bpb:
@@ -322,9 +335,14 @@ def bpb_acceleration_report(
         recommendations.append(
             "Keep validation and checkpoint gates dense; the run is close enough that every checkpoint can become the target artifact."
         )
-        recommendations.append(
-            "Continue the current high-throughput schedule while train BPB descent remains negative."
-        )
+        if math.isfinite(recent_val_slope) and recent_val_slope < 0:
+            recommendations.append(
+                "Continue the current high-throughput schedule while validation BPB keeps descending; treat short train-BPB ETA noise as secondary."
+            )
+        else:
+            recommendations.append(
+                "Do not restart on train-BPB noise alone; wait for the next validation checkpoint unless validation stalls."
+            )
     elif state == "fast_descent":
         recommendations.append(
             "Do not interrupt the current schedule; train BPB is still dropping quickly."
@@ -346,9 +364,21 @@ def bpb_acceleration_report(
     else:
         recommendations.append("Wait for at least one train BPB and one validation BPB observation.")
 
-    projected_steps_to_target = float("nan")
-    if latest_train is not None and math.isfinite(recent_train_slope) and recent_train_slope < 0:
-        projected_steps_to_target = max(0.0, (latest_train - target_bpb) / (-recent_train_slope) * 100.0)
+    projected_steps_to_target_from_train = estimate_steps_to_target(
+        latest_train, recent_train_slope, target_bpb
+    )
+    val_projection_bpb = best_val if best_val is not None else latest_val
+    projected_steps_to_target_from_val = estimate_steps_to_target(
+        val_projection_bpb, recent_val_slope, target_bpb
+    )
+    projected_target_step_from_val = (
+        float(latest_val_step) + projected_steps_to_target_from_val
+        if math.isfinite(projected_steps_to_target_from_val)
+        else float("nan")
+    )
+    projection_source = "validation" if math.isfinite(projected_steps_to_target_from_val) else "train"
+    if not math.isfinite(projected_steps_to_target_from_val) and not math.isfinite(projected_steps_to_target_from_train):
+        projection_source = "unavailable"
 
     return {
         "state": state,
@@ -362,7 +392,11 @@ def bpb_acceleration_report(
         "train_bpb_slope_per_100_steps": train_slope,
         "train_bpb_recent_slope_per_100_steps": recent_train_slope,
         "val_bpb_slope_per_100_steps": val_slope,
-        "projected_steps_to_target_from_train": projected_steps_to_target,
+        "val_bpb_recent_slope_per_100_steps": recent_val_slope,
+        "projected_steps_to_target_from_train": projected_steps_to_target_from_train,
+        "projected_steps_to_target_from_val": projected_steps_to_target_from_val,
+        "projected_target_step_from_val": projected_target_step_from_val,
+        "projection_source": projection_source,
         "recommendations": recommendations,
     }
 
@@ -436,8 +470,8 @@ def train_drop_segments(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def rolling_eta_to_target(frame: pd.DataFrame, target_bpb: float) -> pd.DataFrame:
-    steps, values = finite_xy(frame, "train_bpb")
+def rolling_eta_to_target(frame: pd.DataFrame, target_bpb: float, field: str = "train_bpb") -> pd.DataFrame:
+    steps, values = finite_xy(frame, field)
     rows = []
     if len(values) < 2:
         return pd.DataFrame(columns=["step", "eta_steps", "recent_drop_per_100"])
@@ -502,16 +536,24 @@ def plot_bpb_drop_waterfall(frame: pd.DataFrame, out: Path) -> None:
 
 def plot_bpb_eta_to_target(frame: pd.DataFrame, out: Path, target_bpb: float) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
-    eta = rolling_eta_to_target(frame, target_bpb)
+    train_eta = rolling_eta_to_target(frame, target_bpb, field="train_bpb")
+    val_eta = rolling_eta_to_target(frame, target_bpb, field="val_bpb")
     fig, ax = plt.subplots(figsize=(11, 5), constrained_layout=True)
-    if not eta.empty:
-        ax.plot(eta["step"], eta["eta_steps"], color="#7c3aed", marker="o", linewidth=1.7)
-        ax.fill_between(eta["step"], eta["eta_steps"], color="#c4b5fd", alpha=0.25)
+    plotted = False
+    if not train_eta.empty:
+        ax.plot(train_eta["step"], train_eta["eta_steps"], color="#7c3aed", marker="o", linewidth=1.7, label="train-slope ETA")
+        ax.fill_between(train_eta["step"], train_eta["eta_steps"], color="#c4b5fd", alpha=0.20)
+        plotted = True
+    if not val_eta.empty:
+        ax.plot(val_eta["step"], val_eta["eta_steps"], color="#dc2626", marker="s", linewidth=1.9, label="validation-slope ETA")
+        plotted = True
+    if plotted:
+        ax.legend(loc="best")
     else:
-        ax.text(0.5, 0.5, "need recent negative train-BPB slope", ha="center", va="center")
+        ax.text(0.5, 0.5, "need recent negative BPB slope", ha="center", va="center")
     ax.axhline(0.0, color="#111827", linewidth=0.9)
     ax.set_xlabel("trainer step")
-    ax.set_ylabel("projected steps to train BPB target")
+    ax.set_ylabel("projected steps to BPB target")
     ax.set_title("Rolling ETA To BPB Target")
     ax.grid(alpha=0.25)
     fig.savefig(out, dpi=180)
@@ -548,11 +590,16 @@ def plot_bpb_rockfall_dashboard(frame: pd.DataFrame, out: Path, target_bpb: floa
     ax.grid(axis="y", alpha=0.25)
 
     ax = axes[1, 0]
-    eta = rolling_eta_to_target(frame, target_bpb)
-    if not eta.empty:
-        ax.plot(eta["step"], eta["eta_steps"], color="#7c3aed", marker="o", linewidth=1.5)
+    train_eta = rolling_eta_to_target(frame, target_bpb, field="train_bpb")
+    val_eta = rolling_eta_to_target(frame, target_bpb, field="val_bpb")
+    if not train_eta.empty:
+        ax.plot(train_eta["step"], train_eta["eta_steps"], color="#7c3aed", marker="o", linewidth=1.5, label="train")
+    if not val_eta.empty:
+        ax.plot(val_eta["step"], val_eta["eta_steps"], color="#dc2626", marker="s", linewidth=1.6, label="validation")
+    if not train_eta.empty or not val_eta.empty:
+        ax.legend(loc="best", fontsize=8)
     ax.axhline(0.0, color="#111827", linewidth=0.9)
-    ax.set_title("ETA from train slope")
+    ax.set_title("ETA from BPB slopes")
     ax.set_xlabel("trainer step")
     ax.set_ylabel("steps")
     ax.grid(alpha=0.25)
@@ -564,7 +611,11 @@ def plot_bpb_rockfall_dashboard(frame: pd.DataFrame, out: Path, target_bpb: floa
         f"best val BPB: {report.get('best_val_bpb')}",
         f"target gap: {report.get('target_gap')}",
         f"recent train slope/100: {report.get('train_bpb_recent_slope_per_100_steps')}",
-        f"projected steps: {report.get('projected_steps_to_target_from_train')}",
+        f"recent val slope/100: {report.get('val_bpb_recent_slope_per_100_steps')}",
+        f"train-projected steps: {report.get('projected_steps_to_target_from_train')}",
+        f"val-projected steps: {report.get('projected_steps_to_target_from_val')}",
+        f"val-projected target step: {report.get('projected_target_step_from_val')}",
+        f"projection source: {report.get('projection_source')}",
     ]
     ax.text(0.02, 0.95, "\n".join(summary_lines), va="top", ha="left", fontsize=11)
     ax.set_title("Intervention readout")
@@ -806,6 +857,9 @@ def write_synopsis(
         f"- target BPB: `{report.get('target_bpb')}`",
         f"- target gap: `{report.get('target_gap')}`",
         f"- recent train BPB slope per 100 steps: `{report.get('train_bpb_recent_slope_per_100_steps')}`",
+        f"- recent validation BPB slope per 100 steps: `{report.get('val_bpb_recent_slope_per_100_steps')}`",
+        f"- validation-projected steps to target: `{report.get('projected_steps_to_target_from_val')}`",
+        f"- validation-projected target step: `{report.get('projected_target_step_from_val')}`",
         "",
         "## Plots",
         "",
@@ -814,7 +868,7 @@ def write_synopsis(
         "- `bpb/bpb_descent_simplex.png`: BPB Descent Simplex over target gap, generalization gap, and descent velocity.",
         "- `bpb/bpb_target_zone.png`: zoomed view of the target band where <1.2 decisions are made.",
         "- `bpb/bpb_drop_waterfall.png`: interval-by-interval BPB drop pressure.",
-        "- `bpb/bpb_eta_to_target.png`: rolling projection of steps remaining to the target from the recent train-BPB slope.",
+        "- `bpb/bpb_eta_to_target.png`: rolling projection of steps remaining to the target from train and validation BPB slopes.",
         "- `bpb/bpb_rockfall_dashboard.png`: combined intervention readout for deciding whether to leave the run alone or adjust scalar controls.",
         "- `bpb/bpb_phase_plane.png`: train BPB versus validation BPB trajectory.",
         "- `bpb/diagnostic_proxy_geometry.png`: topology, toric, Slepian, BGG, tropical, and complexity proxy readout.",
