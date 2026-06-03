@@ -10036,3 +10036,146 @@ checkpoint.  The controlled restart intentionally selected the analyzed step
 log rows below the previously reached W&B step until the restarted process
 passes that step, but local training, checkpointing, and the non-blocking
 watcher are active.
+
+## 2026-06-03 Revealed FineWeb BPB Recovery Step-4500 Review
+
+Run:
+
+```text
+wandb: amelie-iska-math/toricgt-parameter-golf/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z
+checkpoint: checkpoints/parameter_golf_all_phases_fineweb_from0/random_order_step_00004500.pt
+analysis: outputs/post_resume_analysis/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/step-00004500
+loop: all_phases_supervised_watchdog, iteration 3 / 100, target BPB <= 1.2
+```
+
+Status:
+
+```text
+checkpoint train_bpb: 4.640970192680871
+checkpoint train_loss: 3.2168754041194916
+checkpoint best_val_bpb: 5.359212953324989
+checkpoint best_oai_competition_bpb: 4.5321342827483715
+official-style OAI/FineWeb BPB: 4.531955764756776
+official-style OAI/FineWeb loss: 3.14131236076355
+metric categories: desired=444, weak/slow=192, undesirable=138
+geometry records: 4 selected records, 24 branches
+geometry mean_bpb: 7.249248186747233
+geometry best_bpb: 5.000315189361572
+geometry best_answer_bpb: 4.882333955567765
+mean MST efficiency: 0.4691183015454703
+mean path smoothness: 0.13947036705111682
+hessian trace estimate: -13.477617263793944
+hessian dominant curvature: 8.59504234540509e-06
+```
+
+Two-gate read:
+
+- Desired: official-style FineWeb/OAI BPB and validation BPB improved across
+  the review loop.  The loop history moved from `best_val_bpb=5.382641461921426`
+  at step 4000 to `5.373151803212118` at step 4250 and `5.359212953324989` at
+  step 4500.  OAI BPB moved from `4.54670499689477` at step 4000 to
+  `4.540763684238064` in W&B at step 4250 and `4.531955764756776` in the
+  analyzed checkpoint eval.  Future-permutation audit stayed zero; FineWeb
+  calibration was active; artifact size and parameter count were stable.
+- Desired but too weak or slow: train BPB and loss are mostly flat/noisy over
+  steps 3755--4495.  W&B recent train BPB slope is positive
+  (`+0.22511659058030803` per 1k steps), while validation/OAI slopes remain
+  negative but sparse.  Hard curated validation is still far from the BPB target
+  (`best_val_bpb=5.3592`), and OAI eval covers only 8 batches.
+- Undesirable: robust micro-loss guard activity rose (`fraction=0.125` at the
+  latest W&B row), toric binomial loss/residual showed the strongest adverse
+  recent slopes, toric memory entropy is low (`0.029866` in W&B), and some
+  analogical/relative-K stability proxies moved too much.  These are reasoning
+  gate warnings, not yet evidence to abandon the FineWeb-first warmup.
+
+Mathematical/statistical interpretation:
+
+- The BPB gate has not reached the target, but its validation derivative is
+  still negative.  The finite difference for W&B `val/bpb` from step 4000 to
+  4250 is about `-3.80e-5` BPB/step; OAI `bpb` over the same interval is about
+  `-2.38e-5` BPB/step.  The checkpoint metadata improves again at step 4500.
+  This rejects rollback: there is no positive validation first derivative and
+  no measured floor-bounce basin.
+- Train BPB is noisy: minimum `4.33499` at step 4325, maximum `5.04374` at
+  step 4050, and latest `4.57025` at W&B step 4495.  The positive recent train
+  slope should be monitored, but it is dominated by microbatch variance and is
+  weaker evidence than deterministic validation.
+- Hessian probes do not justify rollback.  Dominant curvature is tiny positive
+  (`8.6e-6`) and trace is negative, so the checkpoint does not look like a
+  sharp positive-curvature trap.
+- The phase is still `byte_warmup`: `fineweb_mix_ratio=1.0` and hard/complex
+  microbatch fractions are zero.  Therefore the current FineWeb result is direct
+  FineWeb calibration, not an OOD-transfer claim.  Any future transfer claim
+  still needs tokenizer, n-gram/context-tree, dataset-easiness, FineWeb-only,
+  hard-data-only, and equal-budget mixed controls.
+- GFlowNet branch replay is alive but weak.  Entropy and action diversity are
+  high in training (`entropy ~= 2.771`, diversity `~= 0.9986`), but geometry
+  branch BPB has a large mean-best gap (`7.2493 - 5.0003 ~= 2.249`), so the
+  policy is not reliably selecting low-BPB branches.
+- Kolmogorov and relative-K proxies are mixed.  Prediction target NCD remains
+  high (`complexity/val/prediction_target_ncd_lzma_mean ~= 0.9269`), argmax byte
+  accuracy is low (`0.1738` on curated validation), and several relative-K
+  metrics are categorized undesirable.  These proxies do not override the BPB
+  gate.
+- GraphCG basis behavior is acceptable for the current phase.  Basis coherence
+  decreased from `0.0791` to `0.07275`; graphcg loss weight is still the tiny
+  phase value (`5e-5`).  The proposal's GraphCG-lift suggestion is noted for
+  later but is not a reason to restart while validation BPB is descending.
+- Persistence/simplex/Koszul topology is coherent but not promotion-grade.
+  Directed cycle flux is numerical zero, exact edge validity is high
+  (`0.9753`), exact triangle validity is moderate (`0.4858`), chart coverage is
+  `1.0`, and HDBSCAN stability is usable (`0.7739` in geometry).  Koszul and
+  topology losses should remain probes in this BPB-first window.
+- Toric BGG diagnostics are mixed but stable enough as probes:
+  `resolution_consistency=0.94384`, `d2_residual=0.05985`,
+  `gale_dual_consistency=0.18488`, `koszul_linearity_residual=0`,
+  `standard_leakage=0.46279`, and signature smoothness is low but drifting.
+  BGG remains diagnostic-only.
+- Plot review covered metric plots, recent-slope bars, simplex
+  triangles/tetrahedra, geometry triangles/tetrahedra, 3D GoT trajectories,
+  Ramachandran-style phase-energy plots, toric shadow/topology audits, and
+  energy landscapes.  The plots are structured and non-collapsed; lower BPB is
+  not yet well aligned with stronger MST efficiency, toric entropy, or smooth
+  trajectory flow.
+
+The adjustment proposal from `scripts/propose_training_adjustments.py` was run
+on the analysis directory and saved as:
+
+```text
+outputs/post_resume_analysis/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/step-00004500/training_adjustment_proposal.md
+outputs/post_resume_analysis/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/step-00004500/training_adjustment_proposal.json
+```
+
+It recommended lower LR or rollback, tiny GraphCG/GFlowNet activation, and
+continued zero toric/Koszul loss while toric margins are weak.  I treated that
+as evidence, not authority.  The active config already has FineWeb-only warmup,
+tiny GraphCG/GFlowNet weights, zero toric/Koszul losses, and improving
+validation/OAI BPB, so a restart would add process risk without a validated
+gain.
+
+Decision: `CONTINUE`.
+
+No code or config scalar was changed.  The better-strategy stop sentinel was
+not written.  Training was already active again when inspected, so the correct
+handoff is to preserve the active supervisor and live training process rather
+than force a restart from the step-4500 checkpoint.
+
+Operational handoff:
+
+```text
+supervisor tmux: toricgt_supervisor_fineweb_bpb_recovery
+training tmux: toricgt_fineweb_bpb_recovery_live
+training config: config/train.parameter_golf_all_phases.yaml
+active checkpoint for decision: checkpoints/parameter_golf_all_phases_fineweb_from0/random_order_step_00004500.pt
+training log: logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/restart_001_20260603T124401Z/train.log
+W&B run path: amelie-iska-math/toricgt-parameter-golf/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z
+watcher tmux: toricgt_fineweb_bpb_recovery_watcher
+next watcher target: 4750
+next watcher log: logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/analysis_target_00004750_20260603T143906Z/watcher.log
+watcher device/precision: cpu / fp32
+watcher pause behavior: non-interrupting; no --pause-training-before-analysis
+loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
+          BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/bpb_codex_loop_state.json,
+          BPB_LOOP_STOP_FILE=logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/bpb_codex_loop_stop,
+          BPB_LOOP_NAME=all_phases_supervised_watchdog
+```
