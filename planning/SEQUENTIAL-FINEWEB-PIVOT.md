@@ -96,6 +96,18 @@ WANDB=1
 
 The script reads `WANDB_API_KEY` first and otherwise searches local `keys.txt` files at runtime.  `keys.txt`, `wandb/`, checkpoints, and generated model artifacts are ignored and must not be committed.
 
+W&B metric location:
+
+```text
+canonical BPB metric: val/bpb
+initial live-run value: 4.107707800251096 at _step=0
+refresh cadence: every 1000 training steps
+```
+
+Commit `5050ecd` on the Parameter Golf fork adds more visible BPB aliases (`bpb`, `val_bpb`, and `openai_parameter_golf/bpb`) for the next resume or launch.  The active `toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z` process was already launched from `00ebe09`, so it logs the canonical `val/bpb` metric until resumed.
+
+Commit `7dc7d59` expands the next-resume metric surface further with progress, best BPB, target gap, throughput, optimizer LR, VRAM, artifact, and checkpoint metrics.  The full inventory and utilization policy are in `planning/WANDB-SWEEP.md`.
+
 Smoke verification:
 
 ```text

@@ -615,3 +615,5 @@ checkpoint cadence: every 1000 validation steps
 ```
 
 W&B is now default-on in the local Parameter Golf record script, using `WANDB_ENTITY=amelie-iska-math` and `WANDB_PROJECT=toricgt-parameter-golf` unless overridden.  The script reads the API key only from `WANDB_API_KEY` or local `keys.txt`; key files are ignored and must not be committed.
+
+The W&B metric sweep is documented in `planning/WANDB-SWEEP.md`.  It records that the active run logs canonical BPB as `val/bpb`, while Parameter Golf commit `7dc7d59` adds expanded direct reporting for progress, target-gap, throughput, artifact, checkpoint, VRAM, BPB aliases, and best-BPB metrics for the next resume or launch.
