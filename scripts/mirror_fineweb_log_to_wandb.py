@@ -61,8 +61,10 @@ def main() -> None:
     best_bpb: float | None = None
     initial_bpb: float | None = None
     while True:
+        stop_requested = False
         if path.exists():
             text = path.read_text(encoding="utf-8", errors="replace")
+            text_tail = "\n".join(text.splitlines()[-20:])
             for line in text.splitlines():
                 val = VAL_RE.search(line)
                 if val:
@@ -118,7 +120,7 @@ def main() -> None:
                         "openai_parameter_golf/target_bpb": args.target_bpb,
                         "openai_parameter_golf/gap_to_target": target_gap,
                     }
-                    wandb.log(payload, step=step)
+                    wandb.log(payload)
                     run.summary.update(
                         {
                             "fineweb/val_bpb": bpb,
@@ -170,7 +172,7 @@ def main() -> None:
                         "train/loss": train_loss,
                         "train/perplexity": math.exp(min(train_loss, 20.0)),
                     }
-                    wandb.log(payload, step=step)
+                    wandb.log(payload)
                     run.summary.update(
                         {
                             "fineweb/train_loss": train_loss,
@@ -179,7 +181,11 @@ def main() -> None:
                             "progress/fraction": step / max(total, 1),
                         }
                     )
-        if any(marker in text for marker in ("final_int8_zlib_roundtrip", "Traceback", "RuntimeError")) if path.exists() else False:
+            stop_requested = any(
+                marker in text_tail
+                for marker in ("final_int8_zlib_roundtrip", "Traceback", "RuntimeError")
+            )
+        if stop_requested:
             break
         time.sleep(max(1.0, args.poll_seconds))
     run.finish()
