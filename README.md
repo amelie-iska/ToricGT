@@ -26,7 +26,7 @@ Current validated status:
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
   `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
-  It restarted from the earlier step-1000 checkpoint with optimizer/RNG/loader reset, doubled batch tokens, dense W&B aliases, and periodic analysis sidecars. At step 2000 it reached native validation BPB `1.2735`, ahead of the original run's step-1500 BPB `1.3399` and closing toward the original step-4000 BPB `1.2569`, while being monitored against the `<= 1.2` gate before step 4000.
+  It restarted from the earlier step-1000 checkpoint with optimizer/RNG/loader reset, doubled batch tokens, dense W&B aliases, and periodic analysis sidecars. At step 2250 it reached native validation BPB `1.2632`, ahead of the original run's step-4000 BPB `1.2569` pace, while being monitored against the `<= 1.2` gate before step 4000.
 - Advanced reasoning/memory branch: the live auxiliary run is
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   It trains the random-order ToricGT adapter with explicit graph-of-thought,
@@ -592,13 +592,13 @@ Current `oai` OpenAI Parameter-Golf recovery status:
   `toricgt_seq4096_4k_gate_r7_20260603T212821Z`.
 - Checkpoint directory:
   `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
-- Step-2000 periodic analysis:
-  `outputs/post_resume_analysis/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z/step-00002000`.
+- Step-2250 periodic analysis:
+  `outputs/post_resume_analysis/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z/step-00002250`.
 
 Periodic analyses are part of the live training loop. The R7 sidecars produce
 W&B metric-history summaries, BPB descent plots, rockfall dashboards,
 target-zone plots, BPB phase planes, descent simplices, diagnostic proxy
-geometry, and full ToricGT geometry payloads. The step-2000 analysis wrote:
+geometry, and full ToricGT geometry payloads. The step-2250 analysis wrote:
 
 ```text
 bpb/bpb_descent_timeseries.png
@@ -616,12 +616,13 @@ geometry/fineweb_curve_diagnostic_payload.json
 ```
 
 The current readout is to keep the Seq4096 schedule unchanged while validation
-continues to improve. Step 2000 reached train BPB `1.3181` and validation BPB
-`1.2735`; the validation move is the signal that matters for the 4K gate.
+continues to improve. Step 2250 reached train BPB `1.2888` and validation BPB
+`1.2632`; the validation move is the signal that matters for the 4K gate.
 `scripts/watch_seq4096_analysis.py` now reports a validation-slope ETA in
-addition to the intentionally noisy train-slope ETA. On the step-2000 periodic
-analysis, the validation trend projected the target crossing around step `3308`,
-which is before the step-4000 recovery gate.
+addition to the intentionally noisy train-slope ETA. On the step-2250 periodic
+analysis, the validation trend projected the target crossing around step `3618`,
+which is still before the step-4000 recovery gate but close enough that the
+step-2500 analysis is the next important intervention check.
 The advanced proxy geometry is being used as an intervention dashboard rather
 than a reason to rescale the main CE/BPB objective mid-descent: Slepian
 leakage, BGG/Koszul residuals, topology pressure, and toric shadow diagnostics
@@ -666,12 +667,13 @@ Observed validation trajectory:
 | R7 recovery | 1500 | `1.3016` |
 | R7 recovery | 1750 | `1.2863` |
 | R7 recovery | 2000 | `1.2735` |
+| R7 recovery | 2250 | `1.2632` |
 
-The step-2000 analysis classifies the run as `near_target`, with target gap
-`0.0735`, full validation slope about `-0.00880` BPB per 100 steps, and recent
-validation slope about `-0.00562` BPB per 100 steps. The patched validation-ETA
-report projects about `1307.8` additional steps to target, or a target crossing
-around step `3308`. The train BPB samples are noisy, but validation is ahead of
+The step-2250 analysis classifies the run as `near_target`, with target gap
+`0.0632`, full validation slope about `-0.00771` BPB per 100 steps, and recent
+validation slope about `-0.00462` BPB per 100 steps. The patched validation-ETA
+report projects about `1368.0` additional steps to target, or a target crossing
+around step `3618`. The train BPB samples are noisy, but validation is ahead of
 the old trajectory; the current policy is to leave the run alone until the next
 validation checkpoints unless the gate watcher detects a missed 4K trajectory.
 If BPB is not on track for `<=1.2` by the step-4000 gate,
@@ -1275,7 +1277,7 @@ Recent `oai` implementation commits:
 Active live training:
 
 - Primary BPB recovery: `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
-  Latest checked validation: step 2000, BPB `1.2735`; state `near_target`.
+  Latest checked validation: step 2250, BPB `1.2632`; state `near_target`.
 - Advanced reasoning/memory transfer:
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   W&B confirms `trainer/step`, `train/bpb`, phase index, GraphCG weight, and
