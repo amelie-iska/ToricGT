@@ -59,6 +59,7 @@ def main() -> None:
     path = Path(args.log)
     seen: set[tuple[str, int]] = set()
     best_bpb: float | None = None
+    initial_bpb: float | None = None
     while True:
         if path.exists():
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -76,6 +77,8 @@ def main() -> None:
                     train_time_ms = float(val.group("ms"))
                     step_avg_ms = float(val.group("avg"))
                     best_bpb = bpb if best_bpb is None else min(best_bpb, bpb)
+                    if initial_bpb is None:
+                        initial_bpb = bpb
                     target_gap = bpb - args.target_bpb
                     payload = {
                         "trainer/step": step,
@@ -100,14 +103,20 @@ def main() -> None:
                         "val/loss": val_loss,
                         "val/perplexity": math.exp(min(val_loss, 20.0)),
                         "val/bpb": bpb,
+                        "val_bpb": bpb,
+                        "bpb": bpb,
                         "bpb/val": bpb,
                         "bpb/best": best_bpb,
                         "bpb/target": args.target_bpb,
                         "bpb/gap_to_target": target_gap,
                         "bpb/improvement_from_initial": (
-                            0.0 if best_bpb is None else 4.1077 - bpb
+                            0.0 if initial_bpb is None else initial_bpb - bpb
                         ),
                         "bpb/target_reached": float(best_bpb <= args.target_bpb),
+                        "openai_parameter_golf/bpb": bpb,
+                        "openai_parameter_golf/best_bpb": best_bpb,
+                        "openai_parameter_golf/target_bpb": args.target_bpb,
+                        "openai_parameter_golf/gap_to_target": target_gap,
                     }
                     wandb.log(payload, step=step)
                     run.summary.update(
@@ -117,10 +126,16 @@ def main() -> None:
                             "fineweb/target_bpb": args.target_bpb,
                             "val/bpb": bpb,
                             "val/loss": val_loss,
+                            "val_bpb": bpb,
+                            "bpb": bpb,
                             "bpb/val": bpb,
                             "bpb/best": best_bpb,
                             "bpb/target": args.target_bpb,
                             "bpb/gap_to_target": target_gap,
+                            "openai_parameter_golf/bpb": bpb,
+                            "openai_parameter_golf/best_bpb": best_bpb,
+                            "openai_parameter_golf/target_bpb": args.target_bpb,
+                            "openai_parameter_golf/gap_to_target": target_gap,
                             "progress/step": step,
                             "progress/fraction": step / max(total, 1),
                         }
