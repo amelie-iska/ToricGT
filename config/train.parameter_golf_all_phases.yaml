@@ -193,12 +193,14 @@ fineweb_calibration:
   enabled: true
   train_token_glob: amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_train_*.bin
   tokenizer_path: amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model
-  mix_ratio: 0.35
+  # Parameter-Golf BPB is the primary objective. Start from FineWeb bytes by
+  # default; phase controls may later admit curated graph/reasoning batches.
+  mix_ratio: 1.0
   sp_tokens_per_decode: 4096
   workers: 0
 
 training:
-  checkpoint_dir: checkpoints/parameter_golf_all_phases_fineweb35_from1000
+  checkpoint_dir: checkpoints/parameter_golf_all_phases_fineweb_from0
   max_steps: 60000
   batch_size: 2
   grad_accum_steps: 16
@@ -236,7 +238,7 @@ training:
   qat_loss_weight: 0.0
   qat_bits: 6
   qat_max_tensors: 2
-  qat_start_step: 48000
+  qat_start_step: 54000
   qat_warmup_steps: 4000
   eval_score_first_bias_lr: 0.025
   eval_score_first_bias_decay: 0.98
@@ -281,10 +283,10 @@ phase_curriculum:
   phases:
     - name: byte_warmup
       start_step: 0
-      end_step: 2500
+      end_step: 8000
       lr_multiplier: 0.70
       grad_clip_norm: 0.65
-      fineweb_mix_ratio: 0.35
+      fineweb_mix_ratio: 1.0
       medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
@@ -302,12 +304,12 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
     - name: graphcg_toric_probe
-      start_step: 2500
-      end_step: 8000
+      start_step: 8000
+      end_step: 18000
       lr_multiplier: 0.85
       grad_clip_norm: 0.85
-      fineweb_mix_ratio: 0.30
-      medium_mix_ratio: 0.08
+      fineweb_mix_ratio: 0.90
+      medium_mix_ratio: 0.04
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
       gflownet_loss_weight: 0.0004
@@ -325,12 +327,12 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.00005
       qat_loss_weight: 0.0
     - name: topology_koszul
-      start_step: 8000
-      end_step: 18000
+      start_step: 18000
+      end_step: 30000
       lr_multiplier: 0.95
       grad_clip_norm: 0.90
-      fineweb_mix_ratio: 0.25
-      medium_mix_ratio: 0.12
+      fineweb_mix_ratio: 0.80
+      medium_mix_ratio: 0.08
       hard_mix_ratio: 0.02
       complex_mix_ratio: 0.02
       gflownet_loss_weight: 0.0007
@@ -348,12 +350,12 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.00015
       qat_loss_weight: 0.0
     - name: memory_reasoning
-      start_step: 18000
-      end_step: 30000
+      start_step: 30000
+      end_step: 42000
       lr_multiplier: 1.0
       grad_clip_norm: 0.90
-      fineweb_mix_ratio: 0.25
-      medium_mix_ratio: 0.16
+      fineweb_mix_ratio: 0.75
+      medium_mix_ratio: 0.12
       hard_mix_ratio: 0.04
       complex_mix_ratio: 0.04
       gflownet_loss_weight: 0.0010
@@ -371,12 +373,12 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.00025
       qat_loss_weight: 0.0
     - name: toric_bgg_category_o
-      start_step: 30000
-      end_step: 48000
+      start_step: 42000
+      end_step: 54000
       lr_multiplier: 0.80
       grad_clip_norm: 0.80
-      fineweb_mix_ratio: 0.20
-      medium_mix_ratio: 0.18
+      fineweb_mix_ratio: 0.70
+      medium_mix_ratio: 0.15
       hard_mix_ratio: 0.05
       complex_mix_ratio: 0.05
       gflownet_loss_weight: 0.0010
@@ -394,11 +396,11 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.00025
       qat_loss_weight: 0.0
     - name: compression_qat_export
-      start_step: 48000
+      start_step: 54000
       end_step:
       lr_multiplier: 0.60
       grad_clip_norm: 0.70
-      fineweb_mix_ratio: 0.20
+      fineweb_mix_ratio: 0.80
       medium_mix_ratio: 0.12
       hard_mix_ratio: 0.03
       complex_mix_ratio: 0.03
@@ -416,7 +418,7 @@ phase_curriculum:
       mtp_loss_weight: 0.010
       toric_entropy_loss_weight: 0.00015
       qat_loss_weight: 0.0000001
-      qat_start_step: 48000
+      qat_start_step: 54000
       qat_warmup_steps: 4000
 
 checkpoint_publishing:
