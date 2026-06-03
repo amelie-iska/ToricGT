@@ -23,6 +23,15 @@ model:
   bigram_hash_weight: 0.35
   use_caseops_features: true
   caseops_weight: 0.35
+  # BPB recovery path: these are score-before-update legal because they use
+  # only bytes already revealed by the random-order prefix.
+  use_revealed_context_prior: true
+  revealed_context_prior_alpha: 0.25
+  revealed_context_prior_mode: mixture
+  revealed_context_prior_weight: 0.10
+  use_revealed_neighbor_context: true
+  revealed_neighbor_radius: 2
+  revealed_neighbor_context_weight: 0.45
   use_smear_gate: true
   smear_temperature_min: 0.55
   smear_temperature_max: 1.75
@@ -223,24 +232,24 @@ training:
   causal_audit_interval: 250
 
   # Conservative base weights. The phase curriculum controls all real ramping.
-  gflownet_loss_weight: 0.00025
-  gflownet_entropy_weight: 0.00005
+  gflownet_loss_weight: 0.00010
+  gflownet_entropy_weight: 0.0
   gflownet_entropy_target: 2.0
-  graphcg_loss_weight: 0.00008
-  analogy_lattice_loss_weight: 0.00001
+  graphcg_loss_weight: 0.00005
+  analogy_lattice_loss_weight: 0.0
   toric_geometry_loss_weight: 0.0
   toric_bgg_loss_weight: 0.0
   koszul_persistence_loss_weight: 0.0
   trajectory_memory_loss_weight: 0.0
   trajectory_flow_loss_weight: 0.0
-  contrastive_loss_weight: 0.00040
+  contrastive_loss_weight: 0.00015
   mtp_loss_weight: 0.0
   toric_entropy_floor: 0.20
   toric_entropy_loss_weight: 0.0
   qat_loss_weight: 0.0
   qat_bits: 6
   qat_max_tensors: 2
-  qat_start_step: 54000
+  qat_start_step: 56000
   qat_warmup_steps: 4000
   eval_score_first_bias_lr: 0.025
   eval_score_first_bias_decay: 0.98
@@ -285,30 +294,30 @@ phase_curriculum:
   phases:
     - name: byte_warmup
       start_step: 0
-      end_step: 8000
-      lr_multiplier: 0.70
-      grad_clip_norm: 0.65
+      end_step: 12000
+      lr_multiplier: 0.75
+      grad_clip_norm: 0.75
       fineweb_mix_ratio: 1.0
       medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
-      gflownet_loss_weight: 0.00025
-      gflownet_entropy_weight: 0.00005
+      gflownet_loss_weight: 0.00010
+      gflownet_entropy_weight: 0.0
       gflownet_entropy_target: 2.0
-      graphcg_loss_weight: 0.00008
-      analogy_lattice_loss_weight: 0.00001
+      graphcg_loss_weight: 0.00005
+      analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
-      contrastive_loss_weight: 0.00040
+      contrastive_loss_weight: 0.00015
       mtp_loss_weight: 0.0
       toric_entropy_loss_weight: 0.0
       qat_loss_weight: 0.0
     - name: graphcg_toric_probe
-      start_step: 8000
-      end_step: 18000
+      start_step: 12000
+      end_step: 22000
       lr_multiplier: 0.85
       grad_clip_norm: 0.85
       fineweb_mix_ratio: 0.90
@@ -330,8 +339,8 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.00005
       qat_loss_weight: 0.0
     - name: topology_koszul
-      start_step: 18000
-      end_step: 30000
+      start_step: 22000
+      end_step: 34000
       lr_multiplier: 0.95
       grad_clip_norm: 0.90
       fineweb_mix_ratio: 0.80
@@ -353,8 +362,8 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.00015
       qat_loss_weight: 0.0
     - name: memory_reasoning
-      start_step: 30000
-      end_step: 42000
+      start_step: 34000
+      end_step: 46000
       lr_multiplier: 1.0
       grad_clip_norm: 0.90
       fineweb_mix_ratio: 0.75
@@ -376,8 +385,8 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.00025
       qat_loss_weight: 0.0
     - name: toric_bgg_category_o
-      start_step: 42000
-      end_step: 54000
+      start_step: 46000
+      end_step: 56000
       lr_multiplier: 0.80
       grad_clip_norm: 0.80
       fineweb_mix_ratio: 0.70
@@ -399,7 +408,7 @@ phase_curriculum:
       toric_entropy_loss_weight: 0.00025
       qat_loss_weight: 0.0
     - name: compression_qat_export
-      start_step: 54000
+      start_step: 56000
       end_step:
       lr_multiplier: 0.60
       grad_clip_norm: 0.70
@@ -421,7 +430,7 @@ phase_curriculum:
       mtp_loss_weight: 0.010
       toric_entropy_loss_weight: 0.00015
       qat_loss_weight: 0.0000001
-      qat_start_step: 54000
+      qat_start_step: 56000
       qat_warmup_steps: 4000
 
 checkpoint_publishing:
