@@ -34,7 +34,7 @@ Current validated status:
   held at `0.02`, Muon momentum `0.985`, and gradient clipping `1.0`. Its W&B
   run is <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r9_20260603T233614Z>.
   Latest confirmed W&B summary while this README was refreshed: trainer step
-  `3025`, train BPB `1.2934333534767184`, validation/OpenAI BPB
+  `3056`, train BPB `1.2257571882718448`, validation/OpenAI BPB
   `1.2453678313891468`, target gap `0.04536783138914679`, target not yet
   reached.
 - Seq4096 recovery automation now uses metric-driven launch controls. Repeated
