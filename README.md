@@ -613,21 +613,30 @@ metrics/core_metric_timeseries.png
 metrics/recent_metric_slopes.png
 metrics/selected_metric_correlations.png
 geometry/fineweb_curve_diagnostic_payload.json
+training_adjustment_proposal.json
+training_adjustment_proposal.md
 ```
 
 The current readout is to keep the Seq4096 schedule unchanged while validation
 continues to improve. Step 2250 reached train BPB `1.2888` and validation BPB
 `1.2632`; the validation move is the signal that matters for the 4K gate.
 `scripts/watch_seq4096_analysis.py` now reports a validation-slope ETA in
-addition to the intentionally noisy train-slope ETA. On the step-2250 periodic
-analysis, the validation trend projected the target crossing around step `3618`,
-which is still before the step-4000 recovery gate but close enough that the
-step-2500 analysis is the next important intervention check.
+addition to the intentionally noisy train-slope ETA, and it writes
+`training_adjustment_proposal.json`/`.md` through
+`scripts/propose_training_adjustments.py`. On the step-2250 periodic analysis,
+the validation trend projected the target crossing around step `3618`, which is
+still before the step-4000 recovery gate but close enough that the step-2500
+analysis is the next important intervention check.
 The advanced proxy geometry is being used as an intervention dashboard rather
 than a reason to rescale the main CE/BPB objective mid-descent: Slepian
 leakage, BGG/Koszul residuals, topology pressure, and toric shadow diagnostics
 are routed into the separate bounded structural branch unless the BPB gate
 watcher calls for a restart.
+The current proposal policy therefore says: hold primary BPB controls while the
+validation gate is on track, keep structural losses off or tiny in the
+competition run until the threshold artifact is preserved, and continue the
+GraphCG/Slepian/memory/analogy branch as the place where topology, BGG/Koszul,
+and Slepian pressure can be trained without slowing the BPB race.
 
 The run restarted from the original step-1000 Seq4096 checkpoint rather than
 from the later step-3000 checkpoint. The reason is runway: after the step-3000
