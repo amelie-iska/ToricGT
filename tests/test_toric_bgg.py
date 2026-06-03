@@ -43,6 +43,27 @@ def test_config_get_float_preserves_explicit_zero_guard_scalars():
     assert train_script.config_get_float(config, "training", "missing", 0.35) == 0.35
 
 
+def test_fineweb_mix_ratio_is_phase_control():
+    train_script = _load_train_script()
+    config = {
+        "phase_curriculum": {
+            "enabled": True,
+            "phases": [
+                {
+                    "name": "calibrated",
+                    "start_step": 1000,
+                    "end_step": 1500,
+                    "fineweb_mix_ratio": 0.35,
+                }
+            ],
+        }
+    }
+    controls, name, index = train_script.active_phase_controls(config, 1250)
+    assert name == "calibrated"
+    assert index == 0
+    assert controls["fineweb_mix_ratio"] == 0.35
+
+
 def test_two_variable_toy_bgg_certificate_has_zero_boundary_square():
     cert = toy_bgg_certificate()
     assert boundary_square_residual(cert.boundaries).item() == 0.0

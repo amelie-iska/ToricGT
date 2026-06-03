@@ -189,8 +189,16 @@ oai_competition:
   sp_tokens_per_decode: 4096
   workers: 0
 
+fineweb_calibration:
+  enabled: true
+  train_token_glob: amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_train_*.bin
+  tokenizer_path: amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model
+  mix_ratio: 0.35
+  sp_tokens_per_decode: 4096
+  workers: 0
+
 training:
-  checkpoint_dir: checkpoints/parameter_golf_all_phases
+  checkpoint_dir: checkpoints/parameter_golf_all_phases_fineweb35_from1000
   max_steps: 60000
   batch_size: 2
   grad_accum_steps: 16
@@ -276,6 +284,7 @@ phase_curriculum:
       end_step: 2500
       lr_multiplier: 0.70
       grad_clip_norm: 0.65
+      fineweb_mix_ratio: 0.35
       medium_mix_ratio: 0.0
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
@@ -297,6 +306,7 @@ phase_curriculum:
       end_step: 8000
       lr_multiplier: 0.85
       grad_clip_norm: 0.85
+      fineweb_mix_ratio: 0.30
       medium_mix_ratio: 0.08
       hard_mix_ratio: 0.0
       complex_mix_ratio: 0.0
@@ -319,6 +329,7 @@ phase_curriculum:
       end_step: 18000
       lr_multiplier: 0.95
       grad_clip_norm: 0.90
+      fineweb_mix_ratio: 0.25
       medium_mix_ratio: 0.12
       hard_mix_ratio: 0.02
       complex_mix_ratio: 0.02
@@ -341,6 +352,7 @@ phase_curriculum:
       end_step: 30000
       lr_multiplier: 1.0
       grad_clip_norm: 0.90
+      fineweb_mix_ratio: 0.25
       medium_mix_ratio: 0.16
       hard_mix_ratio: 0.04
       complex_mix_ratio: 0.04
@@ -363,6 +375,7 @@ phase_curriculum:
       end_step: 48000
       lr_multiplier: 0.80
       grad_clip_norm: 0.80
+      fineweb_mix_ratio: 0.20
       medium_mix_ratio: 0.18
       hard_mix_ratio: 0.05
       complex_mix_ratio: 0.05
@@ -385,6 +398,7 @@ phase_curriculum:
       end_step:
       lr_multiplier: 0.60
       grad_clip_norm: 0.70
+      fineweb_mix_ratio: 0.20
       medium_mix_ratio: 0.12
       hard_mix_ratio: 0.03
       complex_mix_ratio: 0.03

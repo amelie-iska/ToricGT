@@ -669,6 +669,7 @@ def choose_difficulty_stream(step: int, accum_idx: int, medium_ratio: float, har
 
 PHASE_CONTROL_KEYS = {
     "complex_mix_ratio",
+    "fineweb_mix_ratio",
     "hard_mix_ratio",
     "medium_mix_ratio",
     "gflownet_loss_weight",
@@ -2209,6 +2210,30 @@ def main() -> None:
         if args.oai_competition_workers is not None
         else config_get(file_config, "oai_competition", "workers", 0)
     )
+    fineweb_calibration_enabled = bool(config_get(file_config, "fineweb_calibration", "enabled", False))
+    fineweb_train_token_glob = config_get(
+        file_config,
+        "fineweb_calibration",
+        "train_token_glob",
+        "amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_train_*.bin",
+    )
+    fineweb_tokenizer_path = config_get(
+        file_config,
+        "fineweb_calibration",
+        "tokenizer_path",
+        oai_competition_tokenizer_path,
+    )
+    fineweb_mix_ratio = max(
+        0.0,
+        min(1.0, config_get_float(file_config, "fineweb_calibration", "mix_ratio", 0.0)),
+    )
+    fineweb_sp_tokens_per_decode = config_get_int(
+        file_config,
+        "fineweb_calibration",
+        "sp_tokens_per_decode",
+        int(oai_competition_sp_tokens_per_decode),
+    )
+    fineweb_workers = config_get_int(file_config, "fineweb_calibration", "workers", int(oai_competition_workers))
     gflownet_loss_weight = (
         args.gflownet_loss_weight
         if args.gflownet_loss_weight is not None
@@ -2777,6 +2802,26 @@ def main() -> None:
         except Exception as exc:
             oai_competition_error = f"{type(exc).__name__}: {exc}"
             print(json.dumps({"oai_competition_eval_error": oai_competition_error}))
+    fineweb_train_loader = None
+    fineweb_calibration_available = False
+    fineweb_calibration_error = ""
+    if fineweb_calibration_enabled and fineweb_mix_ratio > 0.0:
+        try:
+            fineweb_train_loader = build_oai_competition_loader(
+                token_glob=fineweb_train_token_glob,
+                tokenizer_path=fineweb_tokenizer_path,
+                batch_size=batch_size,
+                seq_len=model_config.max_seq_len,
+                byte_offset=model_config.byte_offset,
+                sp_tokens_per_decode=int(fineweb_sp_tokens_per_decode),
+                seed=seed + 750_000 + stream_seed_offset,
+                workers=int(fineweb_workers),
+                repeat=True,
+            )
+            fineweb_calibration_available = True
+        except Exception as exc:
+            fineweb_calibration_error = f"{type(exc).__name__}: {exc}"
+            raise RuntimeError(f"fineweb calibration loader unavailable: {fineweb_calibration_error}") from exc
 
     use_wandb = bool(args.wandb or config_get(file_config, "logging", "wandb", False)) and not args.no_wandb
     wandb_run = None
@@ -2859,6 +2904,18 @@ def main() -> None:
                     "metric_namespace": "oai_competition",
                     "source": "local_fineweb10B_sp1024_validation_decoded_to_utf8_bytes",
                     "error": oai_competition_error,
+                },
+                "fineweb_calibration": {
+                    "enabled": fineweb_calibration_enabled,
+                    "available": fineweb_calibration_available,
+                    "train_token_glob": fineweb_train_token_glob,
+                    "tokenizer_path": fineweb_tokenizer_path,
+                    "mix_ratio": fineweb_mix_ratio,
+                    "sp_tokens_per_decode": fineweb_sp_tokens_per_decode,
+                    "workers": fineweb_workers,
+                    "metric_namespace": "fineweb_calibration",
+                    "source": "local_fineweb10B_sp1024_train_decoded_to_utf8_bytes",
+                    "error": fineweb_calibration_error,
                 },
                 "metric_policy": {
                     "all_metric_namespaces_always_on": True,
@@ -2949,6 +3006,9 @@ def main() -> None:
                 "oai_competition/enabled": float(oai_competition_eval_enabled),
                 "oai_competition/available": float(oai_competition_available),
                 "oai_competition/source_sp1024_decoded_bytes": float(oai_competition_available),
+                "fineweb_calibration/enabled": float(fineweb_calibration_enabled),
+                "fineweb_calibration/available": float(fineweb_calibration_available),
+                "fineweb_calibration/mix_ratio": float(fineweb_mix_ratio),
             },
             step=start_step,
         )
@@ -3012,6 +3072,14 @@ def main() -> None:
             "oai_competition_eval_batches": oai_competition_eval_batches,
             "oai_competition_sp_tokens_per_decode": oai_competition_sp_tokens_per_decode,
             "oai_competition_error": oai_competition_error,
+            "fineweb_calibration_enabled": fineweb_calibration_enabled,
+            "fineweb_calibration_available": fineweb_calibration_available,
+            "fineweb_train_token_glob": fineweb_train_token_glob,
+            "fineweb_tokenizer_path": fineweb_tokenizer_path,
+            "fineweb_mix_ratio": fineweb_mix_ratio,
+            "fineweb_sp_tokens_per_decode": fineweb_sp_tokens_per_decode,
+            "fineweb_workers": fineweb_workers,
+            "fineweb_calibration_error": fineweb_calibration_error,
             "hessian_enabled": hessian_enabled,
             "hessian_eval_every": hessian_eval_every,
             "hessian_max_tokens": hessian_max_tokens,
@@ -3053,6 +3121,7 @@ def main() -> None:
     iterator = iter(train_loader)
     medium_iterator = iter(medium_train_loader) if medium_train_loader is not None else None
     complex_iterator = iter(complex_train_loader) if complex_train_loader is not None else None
+    fineweb_iterator = iter(fineweb_train_loader) if fineweb_train_loader is not None else None
     burnin_result = burn_in_training_iterators(
         iterator,
         medium_iterator,
@@ -3241,8 +3310,13 @@ def main() -> None:
         step_analogy_graphcg_chart_energy = 0.0
         step_medium_microbatches = 0.0
         step_complex_microbatches = 0.0
+        step_fineweb_microbatches = 0.0
         last_train_batch: dict[str, torch.Tensor] | None = None
         phase_controls, phase_name, phase_index = active_phase_controls(file_config, step)
+        effective_fineweb_mix_ratio = max(
+            0.0,
+            min(1.0, control_float(phase_controls, "fineweb_mix_ratio", fineweb_mix_ratio)),
+        )
         effective_medium_mix_ratio = max(0.0, min(1.0, control_float(phase_controls, "medium_mix_ratio", medium_mix_ratio)))
         effective_complex_mix_ratio = max(
             0.0,
@@ -3313,25 +3387,34 @@ def main() -> None:
         for group in optimizer.param_groups:
             group["lr"] = lr_step
         for accum_idx in range(grad_accum):
-            medium_ratio = (
-                effective_medium_mix_ratio
-                if medium_iterator is not None and step >= int(medium_start_step or 0)
-                else 0.0
+            use_fineweb = (
+                fineweb_iterator is not None
+                and effective_fineweb_mix_ratio > 0.0
+                and deterministic_unit_interval(step, accum_idx, salt=29) < effective_fineweb_mix_ratio
             )
-            hard_ratio = (
-                effective_complex_mix_ratio
-                if complex_iterator is not None and step >= int(complex_start_step or 0)
-                else 0.0
-            )
-            stream_name = choose_difficulty_stream(step, accum_idx, medium_ratio, hard_ratio)
-            if stream_name == "hard" and complex_iterator is not None:
-                batch = next(complex_iterator)
-                step_complex_microbatches += 1.0
-            elif stream_name == "medium" and medium_iterator is not None:
-                batch = next(medium_iterator)
-                step_medium_microbatches += 1.0
+            if use_fineweb:
+                batch = next(fineweb_iterator)
+                step_fineweb_microbatches += 1.0
             else:
-                batch = next(iterator)
+                medium_ratio = (
+                    effective_medium_mix_ratio
+                    if medium_iterator is not None and step >= int(medium_start_step or 0)
+                    else 0.0
+                )
+                hard_ratio = (
+                    effective_complex_mix_ratio
+                    if complex_iterator is not None and step >= int(complex_start_step or 0)
+                    else 0.0
+                )
+                stream_name = choose_difficulty_stream(step, accum_idx, medium_ratio, hard_ratio)
+                if stream_name == "hard" and complex_iterator is not None:
+                    batch = next(complex_iterator)
+                    step_complex_microbatches += 1.0
+                elif stream_name == "medium" and medium_iterator is not None:
+                    batch = next(medium_iterator)
+                    step_medium_microbatches += 1.0
+                else:
+                    batch = next(iterator)
             tokens = batch["tokens"].to(device, non_blocking=True)
             sample_ids = batch["sample_ids"].to(device, non_blocking=True)
             last_train_batch = {"tokens": tokens.detach(), "sample_ids": sample_ids.detach()}
@@ -3864,6 +3947,7 @@ def main() -> None:
         step_robust_micro_loss_guard_cap /= grad_accum
         step_medium_microbatches /= grad_accum
         step_complex_microbatches /= grad_accum
+        step_fineweb_microbatches /= grad_accum
         grad_norm = torch.nn.utils.clip_grad_norm_(
             model.parameters(),
             max_norm=effective_grad_clip_norm if effective_grad_clip_norm > 0 else float("inf"),
@@ -4202,8 +4286,14 @@ def main() -> None:
                 "data/difficulty_curriculum_active": float(difficulty_curriculum_enabled),
                 "data/easy_microbatch_fraction": max(
                     0.0,
-                    1.0 - float(step_medium_microbatches) - float(step_complex_microbatches),
+                    1.0
+                    - float(step_fineweb_microbatches)
+                    - float(step_medium_microbatches)
+                    - float(step_complex_microbatches),
                 ),
+                "data/fineweb_calibration_active": float(fineweb_iterator is not None),
+                "data/fineweb_microbatch_fraction": step_fineweb_microbatches,
+                "data/fineweb_mix_ratio": effective_fineweb_mix_ratio,
                 "data/medium_curriculum_active": float(
                     medium_iterator is not None and step >= int(medium_start_step or 0)
                 ),
@@ -4235,6 +4325,8 @@ def main() -> None:
                 "metrics_status/hessian_enabled": float(hessian_enabled),
                 "metrics_status/oai_competition_enabled": float(oai_competition_eval_enabled),
                 "metrics_status/oai_competition_available": float(oai_competition_available),
+                "metrics_status/fineweb_calibration_enabled": float(fineweb_calibration_enabled),
+                "metrics_status/fineweb_calibration_available": float(fineweb_calibration_available),
             }
             metrics.update(adaptive_controller.log_metrics())
             if audit_error is not None:
