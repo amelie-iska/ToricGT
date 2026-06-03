@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch a fresh native ToricGT all-phases Parameter-Golf training run.
+# Launch a supervised native ToricGT all-phases Parameter-Golf training run.
 #
 # This is the full implemented-metrics path, not the external FineWeb scaffold:
 # the native trainer logs byte BPB plus topology, toric geometry, tropical,
@@ -18,11 +18,12 @@ STAMP="${STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
 RUN_ID="${RUN_ID:-toricgt-all-phases-${STAMP}}"
 RUN_NAME="${RUN_NAME:-${RUN_ID}}"
 TRAIN_SESSION="${TRAIN_SESSION:-toricgt_all_phases_${STAMP}}"
-WATCH_SESSION="${WATCH_SESSION:-${TRAIN_SESSION}_watcher}"
-CHECKPOINT_DIR="${CHECKPOINT_DIR:-checkpoints/parameter_golf_all_phases}"
+WATCH_SESSION="${WATCH_SESSION:-${TRAIN_SESSION}_analysis}"
+SUPERVISOR_SESSION="${SUPERVISOR_SESSION:-${TRAIN_SESSION}_supervisor}"
+CHECKPOINT_DIR="${CHECKPOINT_DIR:-checkpoints/parameter_golf_all_phases_fineweb_from0}"
 LOG_DIR="${LOG_DIR:-logs/parameter_golf_all_phases/${RUN_ID}}"
 ANALYSIS_ROOT="${ANALYSIS_ROOT:-outputs/post_resume_analysis/${RUN_ID}}"
-TARGET_STEP="${TARGET_STEP:-1000}"
+CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
 
 export BPB_TARGET="${BPB_TARGET:-1.2}"
@@ -35,78 +36,52 @@ mkdir -p "$LOG_DIR" "$ANALYSIS_ROOT" "$CHECKPOINT_DIR"
 START_EPOCH="$(date +%s)"
 printf '%s\n' "$START_EPOCH" > "${LOG_DIR}/start_epoch.txt"
 
-if tmux has-session -t "$TRAIN_SESSION" 2>/dev/null; then
-  echo "training tmux session already exists: $TRAIN_SESSION" >&2
-  exit 1
-fi
-if tmux has-session -t "$WATCH_SESSION" 2>/dev/null; then
-  echo "watcher tmux session already exists: $WATCH_SESSION" >&2
+if tmux has-session -t "$SUPERVISOR_SESSION" 2>/dev/null; then
+  echo "supervisor tmux session already exists: $SUPERVISOR_SESSION" >&2
   exit 1
 fi
 
-TRAIN_CMD=(
+SUPERVISOR_CMD=(
   conda run --no-capture-output -n "$CONDA_ENV" env
   PYTHONPATH=src
-  WANDB_RUN_ID="$RUN_ID"
-  WANDB_RESUME=allow
-  python scripts/train_parameter_golf_random_order.py
-  --config "$CONFIG"
-  --wandb
-  --wandb-project "$PROJECT"
-  --wandb-run-name "$RUN_NAME"
-)
-
-WATCH_CMD=(
-  conda run --no-capture-output -n "$CONDA_ENV" env
-  PYTHONPATH=src
+  WANDB_ENTITY="$ENTITY"
+  WANDB_PROJECT="$PROJECT"
   BPB_TARGET="$BPB_TARGET"
   BPB_MAX_REVIEW_ITERATIONS="$BPB_MAX_REVIEW_ITERATIONS"
-  BPB_LOOP_STATE="$BPB_LOOP_STATE"
-  BPB_LOOP_STOP_FILE="$BPB_LOOP_STOP_FILE"
-  BPB_LOOP_NAME="$BPB_LOOP_NAME"
-  python scripts/watch_training_analysis.py
-  --checkpoint-dir "$CHECKPOINT_DIR"
-  --start-step 0
-  --target-step "$TARGET_STEP"
-  --min-mtime-unix "$START_EPOCH"
-  --poll-seconds "$POLL_SECONDS"
-  --run-path "${ENTITY}/${PROJECT}/${RUN_ID}"
-  --output-root "$ANALYSIS_ROOT"
+  python scripts/supervise_parameter_golf_training.py
   --config "$CONFIG"
-  --data-glob "data/curated_hf_shards/validation/*.parquet"
-  --seq-len 1024
-  --simplex-samples 8
-  --geometry-records 4
-  --geometry-branches 6
-  --device cuda
-  --precision bf16
-  --pause-training-before-analysis
-  --pause-wait-seconds 12
-  --training-tmux "$TRAIN_SESSION"
-  --codex-review-hook scripts/codex_training_review_resume.sh
-  --codex-review-tmux-prefix toricgt_codex_review_all_phases
+  --run-id "$RUN_ID"
+  --run-name "$RUN_NAME"
+  --wandb-entity "$ENTITY"
+  --wandb-project "$PROJECT"
+  --conda-env "$CONDA_ENV"
+  --train-session "$TRAIN_SESSION"
+  --watch-session "$WATCH_SESSION"
+  --checkpoint-dir "$CHECKPOINT_DIR"
+  --log-root "$LOG_DIR/supervisor"
+  --analysis-root "$ANALYSIS_ROOT"
+  --poll-seconds "$POLL_SECONDS"
+  --checkpoint-interval "$CHECKPOINT_INTERVAL"
+  --target-bpb "$BPB_TARGET"
+  --max-analysis-iterations "$BPB_MAX_REVIEW_ITERATIONS"
 )
 
-printf '%q ' "${TRAIN_CMD[@]}" > "${LOG_DIR}/train_command.sh"
-printf '\n' >> "${LOG_DIR}/train_command.sh"
-printf '%q ' "${WATCH_CMD[@]}" > "${LOG_DIR}/watch_command.sh"
-printf '\n' >> "${LOG_DIR}/watch_command.sh"
-TRAIN_CMD_STR="$(printf '%q ' "${TRAIN_CMD[@]}")"
-WATCH_CMD_STR="$(printf '%q ' "${WATCH_CMD[@]}")"
+printf '%q ' "${SUPERVISOR_CMD[@]}" > "${LOG_DIR}/supervisor_command.sh"
+printf '\n' >> "${LOG_DIR}/supervisor_command.sh"
+SUPERVISOR_CMD_STR="$(printf '%q ' "${SUPERVISOR_CMD[@]}")"
 
-tmux new-session -d -s "$TRAIN_SESSION" \
-  "cd '$REPO_ROOT' && ${TRAIN_CMD_STR} 2>&1 | tee '$LOG_DIR/train.log'"
-tmux new-session -d -s "$WATCH_SESSION" \
-  "cd '$REPO_ROOT' && ${WATCH_CMD_STR} 2>&1 | tee '$LOG_DIR/watcher.log'"
+tmux new-session -d -s "$SUPERVISOR_SESSION" \
+  "cd '$REPO_ROOT' && ${SUPERVISOR_CMD_STR} 2>&1 | tee '$LOG_DIR/supervisor.log'"
 
 cat <<EOF
-started native ToricGT all-phases training
+started supervised native ToricGT all-phases training
   config:        $CONFIG
   run id:        $RUN_ID
   wandb:         https://wandb.ai/${ENTITY}/${PROJECT}/runs/${RUN_ID}
+  supervisor:    $SUPERVISOR_SESSION
   training tmux: $TRAIN_SESSION
-  watcher tmux:  $WATCH_SESSION
-  first review:  checkpoint >= step $TARGET_STEP
+  analysis tmux: $WATCH_SESSION
+  review cadence: every $CHECKPOINT_INTERVAL checkpoint steps
   logs:          $LOG_DIR
   analysis root: $ANALYSIS_ROOT
   BPB loop:      target=$BPB_TARGET max_reviews=$BPB_MAX_REVIEW_ITERATIONS

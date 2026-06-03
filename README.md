@@ -535,7 +535,7 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --config config/train.parameter_golf_random_order_dense.yaml
 ```
 
-Launch the fresh native all-phases run with automated Codex check-ins:
+Launch the fresh native all-phases run with supervised automated check-ins:
 
 ```bash
 scripts/launch_parameter_golf_all_phases.sh
@@ -547,9 +547,12 @@ directed topology plus Koszul persistence, trajectory memory and reasoning,
 late Toric BGG Category O supervision, and final QAT/export stabilization.
 The Toric BGG probe is instantiated from the start so `train/toric_bgg_*`
 diagnostics are visible in W&B, but `toric_bgg_loss_weight` remains `0.0`
-until the late `toric_bgg_category_o` phase. The launcher starts a watcher that
-pauses at a fresh checkpoint, runs W&B/geometry/simplex analyses, and hands off
-to the Codex review hook with `BPB_TARGET=1.2` and a 100-review cap.
+until the late `toric_bgg_category_o` phase. The launcher now starts
+`scripts/supervise_parameter_golf_training.py`, which keeps the training tmux
+alive, restarts from the latest checkpoint if the process dies or stalls, and
+runs W&B/OAI BPB/simplex/geometry analyses as non-interrupting sidecars. Codex
+review handoffs are allowed to time out without stopping training; the BPB loop
+uses `BPB_TARGET=1.2` and a 100-analysis cap.
 
 Current `oai` recovery replay from the early checkpoint:
 
@@ -771,12 +774,14 @@ This is an audit signal, not a new deploy parameter block: it checks whether
 the toric phase path has coherent time-band-limited structure or diffuse
 spectral leakage.
 
-Operational rule for the current `oai` experiments: the watcher pauses
-training before each planned analysis gate, runs the fixed BPB/reasoning/plot
-suite, and hands the result to Codex for a CONTINUE/ROLLBACK/EDIT_AND_RESTART
-decision. The skeptical-onlooker guardrail is explicit: advanced geometry,
-including Toric BGG, can influence training only after it has a metric, an
-ablation, and a plot path. The requested "there be dragons"
+Operational rule for the current `oai` experiments: the supervisor owns
+training liveness. It checks the training tmux, checkpoint freshness, and log
+freshness; if the run is missing or stale, it restarts from the newest
+`random_order_step_*.pt` checkpoint with the same W&B run id. Planned analyses
+run beside training and never use `--pause-training-before-analysis`. The
+skeptical-onlooker guardrail is explicit: advanced geometry, including Toric
+BGG, can influence training only after it has a metric, an ablation, and a plot
+path. The requested "there be dragons"
 responding-onlooker ablation is an absence check in executable paths:
 repository search finds no matching observer, prompt, or role path outside
 ignored outputs/checkpoints/data.

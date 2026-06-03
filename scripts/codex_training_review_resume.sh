@@ -440,18 +440,16 @@ Requested work:
    ToricGT reasoning, GFlowNet, GraphCG, topology, toric/tropical, and memory
    metrics are the reasoning gate.  If the gates disagree, adjust mixture
    ratios and auxiliary weights rather than discarding either objective.
-   In all three cases, start a fresh training tmux and report the tmux, log,
-   checkpoint, and W&B details.  Do not leave the paused tmux as the active run.
-9. After the resume/restart decision, schedule the next interrupting analysis.
-   Use a target about 250 steps later while the run is still inside the
-   2000--2500 BPB-cliff window, otherwise about 500--600 steps later.  The next
-   watcher must use scripts/watch_training_analysis.py with --target-step,
-   --pause-training-before-analysis, --device cuda, --precision bf16,
-   --codex-review-hook scripts/codex_training_review_resume.sh, and
-   --codex-review-tmux-prefix toricgt_codex_review. Use a fresh
-   --min-mtime-unix captured at the restart time so old checkpoint filenames are
-   ignored.  This creates the periodic pause -> analysis -> Codex review ->
-   adjustment -> restart loop requested by the user.
+   In all three cases, preserve or hand off to the active supervisor from
+   scripts/supervise_parameter_golf_training.py unless you have made a concrete
+   config/code edit that requires a controlled restart.  Report the supervisor,
+   training tmux, log, checkpoint, and W&B details.
+9. After the resume/restart decision, keep the next analysis non-interrupting.
+   Use scripts/watch_training_analysis.py without --pause-training-before-analysis,
+   preferably on CPU unless there is enough idle GPU memory.  The supervisor owns
+   crash/stall recovery and schedules the next target checkpoint; Codex review is
+   a sidecar analysis, not a blocking gate.  Never leave training inactive while
+   waiting for an interactive or long-running Codex review.
    Preserve these loop environment variables on every restart:
    BPB_TARGET=$BPB_TARGET, BPB_MAX_REVIEW_ITERATIONS=$BPB_MAX_REVIEW_ITERATIONS,
    BPB_LOOP_STATE=$BPB_LOOP_STATE_ABS, BPB_LOOP_STOP_FILE=$BPB_LOOP_STOP_FILE,
@@ -591,7 +589,7 @@ WATCH_CMD+=(python scripts/watch_training_analysis.py --checkpoint-dir "\$CHECKP
 if [[ -n "\$RUN_PATH" ]]; then
   WATCH_CMD+=(--run-path "\$RUN_PATH")
 fi
-WATCH_CMD+=(--output-root "\$ANALYSIS_ROOT" --config "\$CONFIG" --data-glob 'data/curated_hf_shards/validation/*.parquet' --seq-len 1024 --simplex-samples 8 --geometry-records 4 --geometry-branches 6 --device cuda --precision bf16 --pause-training-before-analysis --pause-wait-seconds 12 --training-tmux "\$TRAIN_SESSION" --codex-review-hook scripts/codex_training_review_resume.sh --codex-review-tmux-prefix toricgt_codex_review)
+WATCH_CMD+=(--output-root "\$ANALYSIS_ROOT" --config "\$CONFIG" --data-glob 'data/curated_hf_shards/validation/*.parquet' --seq-len 1024 --simplex-samples 8 --geometry-records 4 --geometry-branches 6 --device cpu --precision fp32 --training-tmux "\$TRAIN_SESSION" --codex-review-hook scripts/codex_training_review_resume.sh --codex-review-tmux-prefix toricgt_codex_review)
 
 TRAIN_CMD_STR="\$(printf '%q ' "\${TRAIN_CMD[@]}")"
 WATCH_CMD_STR="\$(printf '%q ' "\${WATCH_CMD[@]}")"
