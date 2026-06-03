@@ -111,13 +111,28 @@ def select_best_validation(rows: list[ValRow], gate_step: int) -> ValRow | None:
     return min(candidates, key=lambda row: (row.val_bpb, -row.step))
 
 
+def select_recovery_validation(rows: list[ValRow], gate_step: int) -> ValRow | None:
+    """Select the checkpoint to restart from after a missed gate.
+
+    If the gate step itself is the best-but-still-missed checkpoint, restarting
+    there gives the recovery run no training room before the same gate.  Prefer
+    the best validation strictly before the gate; fall back to the inclusive
+    best only when no earlier validation exists.
+    """
+
+    before_gate = [row for row in rows if row.step < int(gate_step) and math.isfinite(row.val_bpb)]
+    if before_gate:
+        return min(before_gate, key=lambda row: (row.val_bpb, -row.step))
+    return select_best_validation(rows, gate_step)
+
+
 def checkpoint_for_step(checkpoint_dir: Path | str, run_id: str, step: int) -> Path | None:
     checkpoint_dir = Path(checkpoint_dir)
     exact = checkpoint_dir / CHECKPOINT_RE_TEMPLATE.format(run_id=run_id, step=int(step))
     if exact.exists():
-        return exact
+        return exact.resolve()
     candidates = sorted(checkpoint_dir.glob(f"*_step_{int(step):06d}.pt"))
-    return candidates[-1] if candidates else None
+    return candidates[-1].resolve() if candidates else None
 
 
 def shell_env(env: dict[str, Any]) -> str:
@@ -395,10 +410,15 @@ def main() -> None:
             time.sleep(max(1.0, args.poll_seconds))
             continue
 
-        resume_checkpoint = checkpoint_for_step(checkpoint_dir, args.run_id, best_val.step)
+        recovery_val = select_recovery_validation(parsed.val_rows, args.gate_step)
+        if recovery_val is None:
+            time.sleep(max(1.0, args.poll_seconds))
+            continue
+
+        resume_checkpoint = checkpoint_for_step(checkpoint_dir, args.run_id, recovery_val.step)
         if resume_checkpoint is None:
             status["event"] = "waiting_for_best_checkpoint"
-            status["best_checkpoint_step"] = best_val.step
+            status["best_checkpoint_step"] = recovery_val.step
             write_state(state_path, status)
             time.sleep(max(1.0, args.poll_seconds))
             continue
@@ -472,6 +492,7 @@ def main() -> None:
         status.update(
             {
                 "event": "launching_4k_recovery",
+                "selected_recovery_validation": recovery_val.__dict__,
                 "resume_checkpoint": str(resume_checkpoint),
                 "recovery_run_id": recovery_run_id,
                 "recovery_train_tmux": recovery_train_tmux,
