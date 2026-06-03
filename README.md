@@ -644,7 +644,11 @@ and Slepian pressure can be trained without slowing the BPB race. The retuned
 gate recovery controls are: `min_recovery_runway_steps=1000`,
 `train_batch_tokens=917504`, `tied_embed_lr=0.0352`, `matrix_lr=0.02`,
 `scalar_lr=0.02`, `muon_momentum=0.985`, `muon_momentum_warmup_steps=400`, and
-`grad_clip_norm=1.0`.
+`grad_clip_norm=1.0`. The gate watcher now also supports a tested pre-gate ETA
+risk trigger: with `--preempt-on-projected-miss --preempt-min-step 2500
+--preempt-patience 2`, one projected miss is logged as a warning, while two
+consecutive validation-ETA misses can launch the same mid-run recovery before
+waiting for step 4000.
 
 The run restarted from the original step-1000 Seq4096 checkpoint rather than
 from the later step-3000 checkpoint. The reason is runway: after the step-3000
@@ -694,10 +698,12 @@ report projects about `1636.6` additional steps to target, or a target crossing
 around step `4137`. The train BPB samples are noisy, but validation is ahead of
 the old trajectory; the current policy is to leave the live run alone while
 arming the gate watcher to restart from a mid-run best checkpoint if the 4K
-threshold is missed.
-If BPB is not on track for `<=1.2` by the step-4000 gate,
-`scripts/watch_seq4096_4k_recovery.py` can restart from the best checkpoint
-with the same recovery-control environment.
+threshold is missed or if two consecutive periodic analyses project a target
+crossing after the gate. Immediately after the step-2500 analysis, the live
+pre-gate watcher reports `missed_projection_count=1` with
+`required_patience=2`, so it is armed but has not preempted the primary run.
+If BPB is not on track for `<=1.2`, `scripts/watch_seq4096_4k_recovery.py` can
+restart from the best checkpoint with the same recovery-control environment.
 
 The current launch path for this family is:
 
@@ -706,7 +712,10 @@ python scripts/watch_seq4096_4k_recovery.py \
   --run-id toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z \
   --gate-step 4000 \
   --target-bpb 1.2 \
-  --min-recovery-runway-steps 3000
+  --min-recovery-runway-steps 1000 \
+  --preempt-on-projected-miss \
+  --preempt-min-step 2500 \
+  --preempt-patience 2
 ```
 
 The live advanced reasoning/memory transfer run is separate from the Seq4096
