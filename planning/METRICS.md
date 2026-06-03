@@ -9158,3 +9158,42 @@ outputs/bpb_codex_loop_stop
 Next action: start the official-style FineWeb BPB scaffold, log `val_bpb`
 periodically, and use that as the primary BPB gate while keeping the ToricGT hard
 reasoning diagnostics as a secondary gate.
+
+## 2026-06-03 Native All-Phases Step-1000 Review
+
+Run:
+
+```text
+wandb: amelie-iska-math/toricgt-parameter-golf/toricgt-all-phases-20260602T214351Z
+checkpoint: checkpoints/parameter_golf_all_phases/random_order_step_00001000.pt
+analysis: outputs/post_resume_analysis/toricgt-all-phases-20260602T214351Z/step-00001000
+```
+
+Status:
+
+```text
+checkpoint train_bpb: 3.772965
+checkpoint best_val_bpb: 8.238147
+geometry mean_bpb: 7.948619
+geometry best_bpb: 4.092317
+geometry best_answer_bpb: 3.563895
+metric categories: desired=305, weak/slow=121, undesirable=207
+```
+
+Decision: `CONTINUE` from the analyzed checkpoint with the same
+`config/train.parameter_golf_all_phases.yaml`.  This is not yet a plateau:
+training BPB fell from the random-init range to about `3.77` by step 1000, and
+the local train curve is still descending.  Validation/geometry BPB remain high,
+which is expected this early for the native hard-reasoning surface and should
+not trigger BGG/topology activation.  Toric BGG remains instantiated for
+diagnostics only; `toric_bgg_loss_weight=0.0` until the late Category O phase.
+
+Operational note: the watcher successfully paused training and produced the
+analysis, but the launched Codex review tmux exited before resuming.  A manual
+continuation was started from step 1000 with optimizer state preserved:
+
+```text
+training tmux: toricgt_all_phases_continue_1000_20260603T004919Z
+watcher tmux: toricgt_all_phases_continue_1000_20260603T004919Z_watcher
+next gate: 1500
+```
