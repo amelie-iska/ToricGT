@@ -1,5 +1,164 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-03 Automated Review: Step 5,000 FineWeb-Revealed BPB Recovery Gate
+
+The watcher analyzed:
+
+```text
+outputs/post_resume_analysis/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/step-00005000/
+```
+
+Analyzed checkpoint:
+
+```text
+checkpoints/parameter_golf_all_phases_fineweb_from0/random_order_step_00005000.pt
+```
+
+The BPB loop target remains `<= 1.2`.  This was review iteration `5 / 100`.
+The loop primary BPB is still `best_val_bpb=5.349750123909216`, first reached at
+step `4750`; the target is not reached.  The post-analysis official-style
+FineWeb/OAI eval on decoded local `fineweb10B_sp1024` validation bytes reported
+`oai_competition/bpb=4.520416072849183`, loss `3.1333136558532715`, over 8 eval
+batches.  This is the competition calibration gate.  The hard ToricGT validation
+gate remains the reasoning gate.
+
+### Metric Categorization
+
+| category | read |
+|---|---|
+| desired | official-style FineWeb/OAI BPB improved again (`4.52796404743025` W&B step-4750 summary to `4.520416072849183` post-analysis step-5000 eval); hard validation best BPB did not regress (`5.349750123909216`); exported hard validation BPB/loss slopes remain negative (`val/bpb -0.046803/1k`, `val/loss -0.032442/1k`); checkpoint train BPB is lower than the late W&B training samples (`4.49188378560791`); future-permutation logit audit remains zero; GFlowNet entropy/diversity are high (`2.771388`, `0.998646`); GraphCG basis coherence and covariance improved; Koszul exactness and syzygy residuals remain small; Toric BGG resolution consistency is high (`0.934541`); topology inclusion/boundary residuals and directed cycle flux are effectively zero; exact edge validity is high (`0.972594`), Slepian concentration/leakage are clean (`1.0` / `0.0`) |
+| desired but too weak or slow | both gates remain far above `1.2`; recent train BPB/loss slopes are weakly positive (`+0.131640/1k`, `+0.091246/1k`) despite lower medians over the full window; hard validation improvement is slow and the best metric has plateaued for one checkpoint; score-first hard validation gives only a small gain (`5.342478` vs deterministic `5.349750`); simplex BPB is nearly flat across budgets (`6.5473--6.5571`) and argmax byte accuracy is only `0.10034`; geometry branch replay has a large mean-best gap (`mean BPB 7.388789`, best `5.036372`, gap `2.352417`); mean answer BPB is weak (`7.530481`, best answer `4.912411`); MST efficiency is moderate (`0.477016`) and path smoothness is low (`0.124134`); hard-val argmax byte accuracy is stuck (`0.173828`), and `complexity/val/prediction_target_ncd_lzma_mean` worsened in the W&B window |
+| undesirable | BPB target missed by a large margin; this phase is still FineWeb-only calibration (`fineweb_mix_ratio=1.0`, hard/medium/complex ratios `0.0`), so the current FineWeb result is not evidence of OOD transfer from hard reasoning data; OAI eval uses 8 batches and must not be overclaimed without tokenizer, n-gram, dataset-easiness, FineWeb-only, hard-only zero-shot, mixed-exposure, and GFlowNet/GraphCG/toric/topology ablation controls; toric active-face margin remains strongly negative (`geometry mean -2.827209`, train around `-3.109375`); toric shadow margins are thin (`mean 0.023280`, min `0.000166`); toric memory entropy is collapsed-low (`0.029454`); BGG standard leakage remains high (`0.478637`); exact triangle validity is only `0.497139`; HDBSCAN noise is material (`0.226020`); Hessian trace, dominant curvature, HVP norm, and probe grad norm are `NaN`, so Hessian evidence cannot justify a rollback |
+
+Core values:
+
+| metric | value | read |
+|---|---:|---|
+| checkpoint train BPB / loss | `4.49188378560791` / `3.1135365813970566` | lower than most late W&B samples, but train stream is noisy |
+| post-analysis official-style FineWeb BPB / loss | `4.520416072849183` / `3.1333136558532715` | competition calibration gate available, improved, target failed |
+| W&B OAI/FineWeb BPB at export | `4.52796404743025` | last exported W&B summary before the post-analysis eval |
+| hard validation best BPB | `5.349750123909216` | loop primary BPB, nonworse since step 4750 |
+| hard score-first / GFlowNet BPB | `5.342478009500132` / `5.35063996214478` | score-first helps slightly; GFlowNet does not beat deterministic |
+| geometry mean / best BPB | `7.388788839181264` / `5.03637170791626` | large branch-selection gap |
+| geometry mean / best answer BPB | `7.530481064764796` / `4.912411313446559` | answer-span quality remains weak |
+| GFlowNet loss / entropy / diversity | `1.630382` / `2.771388` / `0.998646` | alive, diverse, not selecting low-BPB branches reliably |
+| GraphCG basis / coherence / covariance | `0.140295` / `0.068848` / `0.146411` | frame is stable enough; utility is weak |
+| Toric BGG resolution/leakage/Gale/signature | `0.934541` / `0.478637` / `0.149744` / `0.007681` | consistency good, leakage high |
+| Koszul exactness / syzygy / affine coverage | `0.013567` / `0.006784` / `1.0` | stable diagnostic |
+| topology exact edge / triangle validity | `0.972594` / `0.497139` | edge complex good, triangles weak |
+| topology directed asymmetry / cycle flux | `0.456544` / `4.52e-18` | noncommutative structure without cycle explosion |
+| HDBSCAN clusters/noise/stability | `0.914931` / `0.226020` / `0.773980` | structured but noisy |
+| MST efficiency / path smoothness | `0.477016` / `0.124134` | useful graph geometry, rough trajectories |
+| toric active-face entropy / margin | `0.336880` / `-2.827209` geometry mean | entropy present, margins inverted |
+| toric shadow occupied cells / mean margin / min margin | `15.25` / `0.023280` / `0.000166` | broad fan coverage, thin stability margin |
+| Slepian concentration / leakage / effective modes | `1.0` / `0.0` / `3.419880` | desired spectral audit |
+| Hessian probe | probe loss finite, curvature/trace/HVP `NaN` | unusable rollback evidence |
+
+### Plot Review
+
+Reviewed generated metric plots, simplex plots, geometry triangles/tetrahedra,
+3D reasoning trajectories, Ramachandran-style phase-energy plots, toric
+phase/winding plots, energy landscapes, directed nested-simplicial topology
+plots, exact persistence/Koszul audits, and noncommutative heatmaps.
+
+Plot categorization:
+
+| diagnostic | category | evidence |
+|---|---|---|
+| core metric timeseries | desired but weak | validation BPB/loss decline cleanly; train BPB/loss are noisy and recently tilt up |
+| recent slopes/correlations | mixed | validation and OAI slopes are favorable; train BPB correlates with GFlowNet loss and recent train slope is weakly adverse |
+| simplex plots | desired but too weak/slow | budget movement changes reasoning/K proxies more than BPB; low-BPB contour is not strongly exploited |
+| geometry tetrahedra | desired but weak | lower-BPB branches exist, but lower BPB is not consistently aligned with MST, toric entropy, or GFlowNet axes |
+| 3D reasoning trajectories | desired but weak | branches are structured and nonblank, with visible off-manifold excursions and jagged fan-like spans |
+| Ramachandran-style phase plots | desired but weak | chamber exploration is broad and non-collapsed, but phase paths are tangled rather than terminal-directed |
+| energy landscapes | desired but weak | basins exist, but many typical branches remain far worse than the best branch |
+| exact persistence/topology | mixed | edge validity, H0 behavior, inclusion, and zero cycle flux are healthy; H1/triangle validity and clustering noise are weak |
+| toric phase/shadow/Slepian | mixed | fan occupancy and Slepian concentration are good; active-face and shadow margins are too thin |
+
+### Mathematical Reading
+
+Let `B_fw` be official-style FineWeb/OAI BPB and `B_hard` be hard ToricGT
+validation BPB.  The loop history is:
+
+```text
+B_hard best: 5.382641, 5.373152, 5.359213, 5.349750, 5.349750
+B_fw W&B:    4.546705, 4.540764, 4.532134, 4.527964
+B_fw local step-5000 post-analysis: 4.520416
+```
+
+The hard validation first differences through step 4750 are negative
+(`-0.009490`, `-0.013939`, `-0.009463`), then the best metric is flat at step
+5000.  The FineWeb/OAI first differences are also negative, including the local
+step-5000 post-analysis improvement from `4.527964` to `4.520416`.  The last
+second differences are mildly positive, so descent is decelerating, but there is
+no positive validation first derivative and no valid Hessian trace/sharpness
+probe.  This is slow descent with noisy train samples, not a demonstrated
+floor-bounce basin.
+
+The branch/test-time-scaling diagnostics show a selection problem rather than a
+representation collapse.  GFlowNet entropy and action diversity are high, and
+branch replay finds terminals more than 2 BPB better than the mean branch, but
+the learned policy does not yet put enough mass on those low-BPB terminals.
+Because the BPB gate is still improving, the small existing GFlowNet/GraphCG
+anchors should be preserved and monitored instead of promoted into heavier
+auxiliary losses during byte warmup.
+
+The two-gate rule is respected: FineWeb/OAI is the competition calibration gate,
+and hard ToricGT reasoning plus GFlowNet/GraphCG/topology/toric/Koszul/BGG
+diagnostics are the reasoning gate.  Both gates are weak but non-regressing
+enough to continue.  Strong FineWeb performance after limited FineWeb exposure
+would be possible OOD transfer only after controls against tokenizer convention,
+n-gram/context-tree baselines, dataset easiness, FineWeb-only training,
+hard-only zero-shot transfer, mixed exposure, and auxiliary ablations.
+
+The adjustment proposal was run and saved:
+
+```text
+python scripts/propose_training_adjustments.py \
+  --analysis-dir outputs/post_resume_analysis/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/step-00005000
+```
+
+It recommended lower LR or rollback, tiny GraphCG/GFlowNet/entropy/analogy
+activation, and keeping toric/Koszul losses zero while margins are weak.  I used
+that as evidence, not authority.  I rejected `EDIT_AND_RESTART` because the
+active byte-warmup phase already has FineWeb-only calibration, tiny GFlowNet and
+GraphCG anchors, zero toric/Koszul/topology losses, and improving FineWeb/OAI and
+hard validation gates.  I rejected `ROLLBACK` because the validation first
+derivative is not positive, the primary hard BPB is nonworse, the FineWeb
+post-analysis BPB improved, and Hessian evidence is invalid.
+
+### Decision
+
+Action: `CONTINUE`.
+
+No code or config scalar was changed.  The better-strategy stop sentinel was
+not written.  The live training tmux was inspected and observed advancing past
+step `5150` under the active supervisor, same config, and same W&B run.  Since
+the supervisor had already continued the checkpoint lineage and the step-5250
+watcher is non-interrupting CPU/fp32, I preserved the live supervisor-owned
+process instead of killing and replaying the same run.
+
+Operational handoff:
+
+```text
+supervisor tmux: toricgt_supervisor_fineweb_bpb_recovery
+training tmux: toricgt_fineweb_bpb_recovery_live
+watcher tmux: toricgt_fineweb_bpb_recovery_watcher
+training config: config/train.parameter_golf_all_phases.yaml
+analyzed checkpoint: checkpoints/parameter_golf_all_phases_fineweb_from0/random_order_step_00005000.pt
+active training log: logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/restart_001_20260603T124401Z/train.log
+W&B run path: amelie-iska-math/toricgt-parameter-golf/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z
+W&B URL: https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z
+next watcher target: 5250
+next watcher log: logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/analysis_target_00005250_20260603T154409Z/watcher.log
+watcher command: scripts/watch_training_analysis.py without --pause-training-before-analysis
+watcher device/precision: cpu / fp32
+loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
+          BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/bpb_codex_loop_state.json,
+          BPB_LOOP_STOP_FILE=logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/bpb_codex_loop_stop,
+          BPB_LOOP_NAME=all_phases_supervised_watchdog
+```
+
 ## 2026-06-03 Automated Review: Step 4,750 FineWeb-Revealed BPB Recovery Gate
 
 The watcher analyzed:
