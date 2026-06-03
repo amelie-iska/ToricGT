@@ -61,6 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-points", type=int, default=160)
     parser.add_argument("--output-json", default="")
     parser.add_argument("--once", action="store_true", help="Log one diagnostics payload and exit.")
+    parser.add_argument("--no-wandb", action="store_true", help="Write a one-shot JSON payload without opening W&B.")
     return parser.parse_args()
 
 
@@ -315,8 +316,48 @@ def write_json(path: str, payload: dict[str, Any]) -> None:
     out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def run_once_without_wandb(
+    *,
+    log_path: Path,
+    output_json: Path | str,
+    target_bpb: float,
+    max_points: int,
+) -> dict[str, float]:
+    parsed = parse_log(log_path)
+    latest_step = int(parsed.get("latest_step") or 0)
+    total = int(parsed.get("total") or 0)
+    payload = compute_payload(parsed, log_path, target_bpb, max_points)
+    payload.update(
+        {
+            "trainer/step": latest_step,
+            "trainer/total_steps": total,
+            "progress/step": latest_step,
+            "progress/total_steps": total,
+            "progress/fraction": float(latest_step) / max(float(total), 1.0),
+        }
+    )
+    write_json(str(output_json), payload)
+    return payload
+
+
 def main() -> None:
     args = parse_args()
+    if args.no_wandb:
+        payload = run_once_without_wandb(
+            log_path=Path(args.log),
+            output_json=args.output_json,
+            target_bpb=args.target_bpb,
+            max_points=args.max_points,
+        )
+        print(
+            "fineweb_full_diag_json "
+            f"step={int(payload.get('trainer/step', 0.0))} "
+            f"topology={payload.get('topology/topology_loss', 0.0):.4f} "
+            f"toric_entropy={payload.get('toric/shadow_fan_cell_entropy', 0.0):.4f}",
+            flush=True,
+        )
+        return
+
     import wandb
 
     run = wandb.init(

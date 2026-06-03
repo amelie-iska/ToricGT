@@ -691,6 +691,103 @@ def plot_diagnostic_proxy_geometry(payload: dict[str, Any], out: Path) -> None:
     plt.close(fig)
 
 
+def phase_bpb_breakdown_plan(target_bpb: float) -> dict[str, Any]:
+    return {
+        "target_bpb": float(target_bpb),
+        "principle": (
+            "Keep the OpenAI FineWeb BPB gate primary until a <= target checkpoint is preserved; "
+            "if it stalls, activate structured transfer phases and analyze each phase with its own BPB surface."
+        ),
+        "phases": {
+            "competition_fineweb": {
+                "objective": "OpenAI Parameter-Golf FineWeb byte-level BPB <= target.",
+                "bpb_metrics": [
+                    "openai_parameter_golf/bpb",
+                    "fineweb/val_bpb",
+                    "val/bpb",
+                    "bpb/gap_to_target",
+                ],
+                "advanced_metrics": [
+                    "tropical/bpb_recent_slope",
+                    "tropical/bpb_target_gap",
+                    "topology/topology_loss",
+                    "toric/shadow_fan_cell_entropy",
+                ],
+                "activation": "Always active before threshold checkpoint preservation.",
+            },
+            "reasoning_got_tot_cot": {
+                "objective": "Train graph-of-thought, tree-of-thought, and chain-of-thought trajectories as explicit reasoning surfaces.",
+                "bpb_metrics": [
+                    "reasoning/got_bpb",
+                    "reasoning/tot_bpb",
+                    "reasoning/cot_bpb",
+                    "reasoning/heldout_bpb",
+                ],
+                "advanced_metrics": [
+                    "gflownet/action_trace_complexity",
+                    "gflownet/trajectory_entropy",
+                    "topology/directed_topology_loss",
+                    "topology/simplex_closure_loss",
+                ],
+                "activation": "Use if FineWeb BPB slope stalls above target or after preserving the competition checkpoint.",
+            },
+            "embedding_gflownet": {
+                "objective": "Use embedding-space graph-of-thought GFlowNet training, inference, and test-time scaling.",
+                "bpb_metrics": [
+                    "gflownet/replay_bpb",
+                    "gflownet/branch_bpb",
+                    "gflownet/test_time_scaled_bpb",
+                ],
+                "advanced_metrics": [
+                    "gflownet/branch_diversity",
+                    "gflownet/flow_matching_loss",
+                    "gflownet/reward_calibration",
+                    "topology/directed_chain_commutator",
+                ],
+                "activation": "Use as a BPB-transfer phase when pure FineWeb training flattens.",
+            },
+            "memory_retrieval": {
+                "objective": "Train graph-structured memory read/write/retrieval paths and analyze retrieval-conditioned BPB.",
+                "bpb_metrics": [
+                    "memory/retrieval_bpb",
+                    "memory/write_bpb",
+                    "memory/read_bpb",
+                    "memory/consolidation_bpb",
+                ],
+                "advanced_metrics": [
+                    "memory/retrieval_accuracy",
+                    "memory/link_consistency",
+                    "complexity/memory_trace_ncd",
+                    "topology/memory_graph_stability",
+                ],
+                "activation": "Use for long dependency transfer and after adding memory boundary tokens or markup.",
+            },
+            "analogical_transfer": {
+                "objective": "Train analogy pairs and structure-preserving maps to improve compression and reasoning transfer.",
+                "bpb_metrics": [
+                    "analogy/source_bpb",
+                    "analogy/target_bpb",
+                    "analogy/transfer_bpb",
+                    "analogy/heldout_family_bpb",
+                ],
+                "advanced_metrics": [
+                    "topology/analogical_map_loss",
+                    "toric/braid_loss",
+                    "bgg_category_o/resolution_consistency",
+                    "complexity/analogy_ncd",
+                ],
+                "activation": "Use when BPB improvements require nonlocal structural transfer rather than more FineWeb exposure.",
+            },
+            "long_context_tropical": {
+                "objective": "Extend beyond 4096 tokens with tropical ring attention for long reasoning and memory trajectories.",
+                "bpb_metrics": ["long_context/8192_bpb", "long_context/16384_bpb", "long_context/trajectory_bpb"],
+                "advanced_metrics": ["tropical/active_face_entropy", "toric/slepian_concentration", "topology/cycle_rank"],
+                "activation": "Use after threshold preservation or as a controlled transfer phase if short-context BPB stalls.",
+            },
+        },
+    }
+
+
 def write_synopsis(
     output_dir: Path,
     report: dict[str, Any],
@@ -733,10 +830,15 @@ def write_synopsis(
             "## Post-Threshold Reasoning And Memory Phase",
             "",
             "- After the OpenAI Parameter-Golf BPB checkpoint is preserved, start a graph-structured reasoning curriculum with explicit reasoning boundary tokens for step starts, step ends, directed edges, and simplex/cell identifiers.",
+            "- If straightforward FineWeb competition training stalls above target, use embedding-space GFlowNet graph-of-thought training, inference, and test-time scaling as a BPB-transfer phase rather than a blind optimizer tweak.",
+            "- Break down GoT/ToT/CoT reasoning BPB separately from competition BPB: track `reasoning/got_bpb`, `reasoning/tot_bpb`, `reasoning/cot_bpb`, and held-out reasoning BPB alongside topology, GFlowNet, and complexity metrics.",
             "- Add graph-structured memory examples with memory boundary tokens for memory read, memory write, memory link, and memory consolidation events.",
+            "- Analyze memory-retrieval BPB, memory read/write BPB, and retrieval-conditioned held-out BPB so memory improvements are not hidden inside aggregate loss.",
+            "- Train analogical reasoning as a separate transfer phase and track analogical-transfer BPB, analogy source/target BPB, and topology/toric/BGG consistency metrics.",
             "- Keep these as existing-token markup for the current tokenizer, or train a clean advanced-phase tokenizer with user-defined symbols if the model shape is intentionally reset.",
             "- Analyze the resulting trajectories as directed noncommutative paths through reasoning-step simplicial complexes and graph memory cells.",
             "- Expand beyond 4096 tokens in later phases with long-context tropical ring attention so multi-step graph-of-thought trajectories and memory paths can be trained and audited in one context.",
+            "- See `bpb/phase_bpb_breakdown_plan.json` for the phase-specific BPB surfaces and advanced metrics to activate when the competition gate stalls or after the threshold checkpoint is saved.",
         ]
     )
     if diagnostic_payload:
@@ -782,6 +884,7 @@ def write_bpb_analysis_artifacts(
             "target_bpb": target_bpb,
         },
     )
+    write_json(bpb_dir / "phase_bpb_breakdown_plan.json", phase_bpb_breakdown_plan(target_bpb))
     if diagnostic_payload:
         write_json(output_dir / "geometry" / "fineweb_curve_diagnostic_payload.json", diagnostic_payload)
     plot_bpb_timeseries(frame, bpb_dir / "bpb_descent_timeseries.png", target_bpb)
@@ -854,6 +957,7 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
             "--output-json",
             str(diagnostic_json),
             "--once",
+            "--no-wandb",
         ]
         command_status["full_diagnostics"] = run_command(diag_cmd, logs_dir / "full_diagnostics.log", env)
         diagnostic_payload = load_json(diagnostic_json)

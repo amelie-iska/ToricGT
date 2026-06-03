@@ -2,16 +2,31 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import json
+import sys
 
 import pytest
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "watch_seq4096_analysis.py"
+FULL_DIAG_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "mirror_fineweb_full_diagnostics_to_wandb.py"
 
 
 def load_module():
     assert SCRIPT_PATH.exists(), "Seq4096 watcher script should exist"
     spec = importlib.util.spec_from_file_location("watch_seq4096_analysis", SCRIPT_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_full_diag_module():
+    assert FULL_DIAG_SCRIPT_PATH.exists(), "FineWeb full diagnostics script should exist"
+    src_path = str(FULL_DIAG_SCRIPT_PATH.resolve().parents[1] / "src")
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+    spec = importlib.util.spec_from_file_location("mirror_fineweb_full_diagnostics_to_wandb", FULL_DIAG_SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -108,9 +123,39 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert (tmp_path / "analysis" / "bpb" / "bpb_drop_waterfall.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_eta_to_target.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_rockfall_dashboard.png").exists()
+    phase_plan_path = tmp_path / "analysis" / "bpb" / "phase_bpb_breakdown_plan.json"
+    assert phase_plan_path.exists()
+    phase_plan = json.loads(phase_plan_path.read_text(encoding="utf-8"))
+    assert "competition_fineweb" in phase_plan["phases"]
+    assert "reasoning_got_tot_cot" in phase_plan["phases"]
+    assert "memory_retrieval" in phase_plan["phases"]
+    assert "analogical_transfer" in phase_plan["phases"]
     synopsis = (tmp_path / "analysis" / "SYNOPSIS.md").read_text(encoding="utf-8")
     assert "BPB Descent Simplex" in synopsis
     assert "entity/project/run-id" in synopsis
     assert "graph-structured reasoning" in synopsis
     assert "memory boundary tokens" in synopsis
     assert "long-context tropical ring attention" in synopsis
+    assert "embedding-space GFlowNet" in synopsis
+    assert "GoT/ToT/CoT" in synopsis
+    assert "memory-retrieval BPB" in synopsis
+    assert "analogical-transfer BPB" in synopsis
+
+
+def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
+    module = load_full_diag_module()
+    log_path = tmp_path / "train.log"
+    write_sample_log(log_path)
+    output_json = tmp_path / "diagnostics.json"
+
+    payload = module.run_once_without_wandb(
+        log_path=log_path,
+        output_json=output_json,
+        target_bpb=1.2,
+        max_points=16,
+    )
+
+    assert output_json.exists()
+    assert payload["trainer/step"] == 500
+    assert payload["tropical/bpb_best_so_far"] == pytest.approx(1.3641)
+    assert payload["metrics_status/fineweb_curve_diagnostics_available"] == 1.0
