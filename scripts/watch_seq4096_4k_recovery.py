@@ -111,15 +111,24 @@ def select_best_validation(rows: list[ValRow], gate_step: int) -> ValRow | None:
     return min(candidates, key=lambda row: (row.val_bpb, -row.step))
 
 
-def select_recovery_validation(rows: list[ValRow], gate_step: int) -> ValRow | None:
+def select_recovery_validation(
+    rows: list[ValRow],
+    gate_step: int,
+    min_recovery_runway_steps: int = 500,
+) -> ValRow | None:
     """Select the checkpoint to restart from after a missed gate.
 
     If the gate step itself is the best-but-still-missed checkpoint, restarting
     there gives the recovery run no training room before the same gate.  Prefer
-    the best validation strictly before the gate; fall back to the inclusive
-    best only when no earlier validation exists.
+    the best validation with enough room to retrain before the gate; fall back
+    to the best earlier validation only when no roomy validation exists, and
+    then to the inclusive best only when no earlier validation exists.
     """
 
+    min_step = int(gate_step) - max(1, int(min_recovery_runway_steps))
+    roomy = [row for row in rows if row.step <= min_step and math.isfinite(row.val_bpb)]
+    if roomy:
+        return min(roomy, key=lambda row: (row.val_bpb, -row.step))
     before_gate = [row for row in rows if row.step < int(gate_step) and math.isfinite(row.val_bpb)]
     if before_gate:
         return min(before_gate, key=lambda row: (row.val_bpb, -row.step))
@@ -198,6 +207,7 @@ def build_recovery_launch(
         "RESUME_CHECKPOINT": resume_checkpoint,
         "RESET_OPTIMIZER_ON_RESUME": 1,
         "RESET_RNG_ON_RESUME": 1,
+        "RESET_LOADER_ON_RESUME": 1,
     }
     training_command = [f"{key}={value}" for key, value in env.items()] + [
         python,
@@ -312,6 +322,7 @@ def build_gate_shell(
     gate_step: int,
     restart_index: int,
     max_restarts: int,
+    min_recovery_runway_steps: int,
     python: str,
 ) -> str:
     gate_log = repo_root / "logs" / f"{run_id}.4k_gate.txt"
@@ -323,6 +334,7 @@ def build_gate_shell(
         f"--run-id {shlex.quote(run_id)} --train-tmux {shlex.quote(train_tmux)} "
         f"--target-bpb {float(target_bpb)} --gate-step {int(gate_step)} "
         f"--restart-index {int(restart_index)} --max-restarts {int(max_restarts)} "
+        f"--min-recovery-runway-steps {int(min_recovery_runway_steps)} "
         f"--state {shlex.quote(str(state_path))} "
         f"2>&1 | tee -a {shlex.quote(str(gate_log))}"
     )
@@ -339,6 +351,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--poll-seconds", type=float, default=30.0)
     parser.add_argument("--max-restarts", type=int, default=6)
     parser.add_argument("--restart-index", type=int, default=0)
+    parser.add_argument("--min-recovery-runway-steps", type=int, default=500)
     parser.add_argument("--state", default="")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--parameter-golf-root", default="amelie-iska/parameter-golf")
@@ -377,6 +390,7 @@ def main() -> None:
             "best_validation_at_or_before_gate": None if best_val is None else best_val.__dict__,
             "target_reached": target_reached,
             "restart_index": args.restart_index,
+            "min_recovery_runway_steps": args.min_recovery_runway_steps,
             "updated_unix": time.time(),
         }
         rendered = json.dumps(status, sort_keys=True)
@@ -410,7 +424,11 @@ def main() -> None:
             time.sleep(max(1.0, args.poll_seconds))
             continue
 
-        recovery_val = select_recovery_validation(parsed.val_rows, args.gate_step)
+        recovery_val = select_recovery_validation(
+            parsed.val_rows,
+            args.gate_step,
+            min_recovery_runway_steps=args.min_recovery_runway_steps,
+        )
         if recovery_val is None:
             time.sleep(max(1.0, args.poll_seconds))
             continue
@@ -453,7 +471,7 @@ def main() -> None:
             checkpoint_dir=recovery_checkpoint_dir,
             log_path=recovery_log,
             target_bpb=args.target_bpb,
-            start_step=best_val.step,
+            start_step=recovery_val.step,
             python=args.python,
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
@@ -482,6 +500,7 @@ def main() -> None:
             gate_step=args.gate_step,
             restart_index=next_index,
             max_restarts=args.max_restarts,
+            min_recovery_runway_steps=args.min_recovery_runway_steps,
             python=args.python,
         )
         (command_dir / "analysis_command.sh").write_text(analysis_shell + "\n", encoding="utf-8")

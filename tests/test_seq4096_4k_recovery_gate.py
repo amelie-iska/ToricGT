@@ -52,6 +52,7 @@ def test_4k_recovery_selects_best_checkpoint_and_sets_resume_env(tmp_path: Path)
     assert "CHECKPOINT_DIR=" in rendered
     assert "RESET_OPTIMIZER_ON_RESUME=1" in rendered
     assert "RESET_RNG_ON_RESUME=1" in rendered
+    assert "RESET_LOADER_ON_RESUME=1" in rendered
 
 
 def test_4k_recovery_uses_best_pre_gate_checkpoint_when_gate_step_is_best_miss(tmp_path: Path):
@@ -84,3 +85,38 @@ def test_4k_recovery_uses_best_pre_gate_checkpoint_when_gate_step_is_best_miss(t
     recovery_checkpoint = checkpoint_for_step(checkpoint_dir, run_id, recovery.step)
     assert recovery_checkpoint is not None
     assert recovery_checkpoint.is_absolute()
+
+
+def test_4k_recovery_can_hold_back_best_checkpoint_for_minimum_runway(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 val_loss:2.1498 val_bpb:1.2732 train_time:1ms step_avg:1ms",
+                "step:3500/20000 val_loss:2.1343 val_bpb:1.2641 train_time:1ms step_avg:1ms",
+                "step:3750/20000 val_loss:2.1179 val_bpb:1.2543 train_time:1ms step_avg:1ms",
+                "step:4000/20000 val_loss:2.1150 val_bpb:1.2528 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    parsed = parse_seq4096_log(log)
+    recovery = select_recovery_validation(
+        parsed.val_rows,
+        gate_step=4000,
+        min_recovery_runway_steps=500,
+    )
+
+    assert recovery is not None
+    assert recovery.step == 3500
+
+    longer_runway_recovery = select_recovery_validation(
+        parsed.val_rows,
+        gate_step=4000,
+        min_recovery_runway_steps=1000,
+    )
+
+    assert longer_runway_recovery is not None
+    assert longer_runway_recovery.step == 3000
