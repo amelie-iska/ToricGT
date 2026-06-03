@@ -25,6 +25,7 @@ CHECKPOINT=""
 STEP=""
 RUN_PATH=""
 TRAINING_TMUX="toricgt_pg_oai"
+CONFIG="config/train.parameter_golf_random_order_dense.yaml"
 SESSION_ID="${CODEX_RESUME_SESSION_ID:-}"
 TMUX_SESSION=""
 DRY_RUN=0
@@ -58,6 +59,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --training-tmux)
       TRAINING_TMUX="${2:?missing value for --training-tmux}"
+      shift 2
+      ;;
+    --config)
+      CONFIG="${2:?missing value for --config}"
       shift 2
       ;;
     --session-id)
@@ -361,6 +366,7 @@ Context:
 - Branch target: oai
 - Training tmux session: $TRAINING_TMUX
 - W&B run path: ${RUN_PATH:-not provided}
+- Training config: $CONFIG
 - Analyzed checkpoint: $CHECKPOINT
 - Analyzed step: $STEP
 - Analysis directory: $ANALYSIS_DIR
@@ -478,8 +484,147 @@ fi
 } > "$HOOK_LOG_DIR/codex_resume_command.sh"
 chmod 700 "$HOOK_LOG_DIR/codex_resume_command.sh"
 
+FALLBACK_AFTER_STEPS="${CODEX_REVIEW_FALLBACK_AFTER_STEPS:-}"
+if [[ -z "$FALLBACK_AFTER_STEPS" ]]; then
+  if [[ "$STEP" -ge 2000 && "$STEP" -lt 2500 ]]; then
+    FALLBACK_AFTER_STEPS=250
+  else
+    FALLBACK_AFTER_STEPS=500
+  fi
+fi
+NEXT_TARGET_STEP=$((STEP + FALLBACK_AFTER_STEPS))
+CHECKPOINT_DIR="$(dirname "$CHECKPOINT")"
+ANALYSIS_ROOT="$(dirname "$ANALYSIS_DIR")"
+CODEX_REVIEW_TIMEOUT_SECONDS="${CODEX_REVIEW_TIMEOUT_SECONDS:-1800}"
+CODEX_REVIEW_POST_EXIT_GRACE_SECONDS="${CODEX_REVIEW_POST_EXIT_GRACE_SECONDS:-10}"
+CODEX_REVIEW_FALLBACK_CONTINUE="${CODEX_REVIEW_FALLBACK_CONTINUE:-1}"
+CODEX_FALLBACK_LOG_ROOT="$HOOK_LOG_DIR/fallback_continue"
+mkdir -p "$CODEX_FALLBACK_LOG_ROOT"
+
+cat > "$HOOK_LOG_DIR/codex_review_wrapper.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT=$(printf '%q' "$REPO_ROOT")
+ANALYSIS_DIR=$(printf '%q' "$ANALYSIS_DIR")
+CHECKPOINT=$(printf '%q' "$CHECKPOINT")
+CHECKPOINT_DIR=$(printf '%q' "$CHECKPOINT_DIR")
+CONFIG=$(printf '%q' "$CONFIG")
+RUN_PATH=$(printf '%q' "$RUN_PATH")
+ANALYSIS_ROOT=$(printf '%q' "$ANALYSIS_ROOT")
+HOOK_LOG_DIR=$(printf '%q' "$HOOK_LOG_DIR")
+FALLBACK_LOG_ROOT=$(printf '%q' "$CODEX_FALLBACK_LOG_ROOT")
+STEP=$STEP
+NEXT_TARGET_STEP=$NEXT_TARGET_STEP
+TIMEOUT_SECONDS=$CODEX_REVIEW_TIMEOUT_SECONDS
+POST_EXIT_GRACE_SECONDS=$CODEX_REVIEW_POST_EXIT_GRACE_SECONDS
+FALLBACK_CONTINUE=$CODEX_REVIEW_FALLBACK_CONTINUE
+
+cd "\$REPO_ROOT"
+CODEX_EXIT=0
+timeout "\$TIMEOUT_SECONDS" "\$HOOK_LOG_DIR/codex_resume_command.sh" || CODEX_EXIT=\$?
+sleep "\$POST_EXIT_GRACE_SECONDS"
+
+TRAINING_ACTIVE=0
+if pgrep -f 'scripts/train_parameter_golf_random_order.py' >/dev/null 2>&1; then
+  TRAINING_ACTIVE=1
+fi
+
+python3 - "\$HOOK_LOG_DIR/codex_review_status.json" "\$CODEX_EXIT" "\$TRAINING_ACTIVE" "\$FALLBACK_CONTINUE" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+path, exit_code, active, fallback = sys.argv[1:]
+payload = {
+    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    "codex_exit_code": int(exit_code),
+    "training_active_after_codex": bool(int(active)),
+    "fallback_continue_enabled": bool(int(fallback)),
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\\n")
+PY
+
+if [[ "\$TRAINING_ACTIVE" == "1" ]]; then
+  echo "Codex review completed and training is active; no fallback needed."
+  exit "\$CODEX_EXIT"
+fi
+
+if [[ "\$FALLBACK_CONTINUE" != "1" ]]; then
+  echo "Codex review exited with code \$CODEX_EXIT and no training is active; fallback disabled."
+  exit "\$CODEX_EXIT"
+fi
+
+STAMP="\$(date -u +%Y%m%dT%H%M%SZ)"
+START_EPOCH="\$(date +%s)"
+TRAIN_SESSION="toricgt_codex_fallback_\${STEP}_\${STAMP}"
+WATCH_SESSION="\${TRAIN_SESSION}_watcher"
+LOG_DIR="\$FALLBACK_LOG_ROOT/\${TRAIN_SESSION}"
+mkdir -p "\$LOG_DIR"
+printf '%s\\n' "\$START_EPOCH" > "\$LOG_DIR/start_epoch.txt"
+
+WANDB_PROJECT="toricgt-parameter-golf"
+WANDB_RUN_ID_VALUE=""
+if [[ -n "\$RUN_PATH" ]]; then
+  IFS=/ read -r _WANDB_ENTITY _WANDB_PROJECT _WANDB_RUN_ID <<< "\$RUN_PATH"
+  if [[ -n "\${_WANDB_PROJECT:-}" ]]; then
+    WANDB_PROJECT="\$_WANDB_PROJECT"
+  fi
+  if [[ -n "\${_WANDB_RUN_ID:-}" ]]; then
+    WANDB_RUN_ID_VALUE="\$_WANDB_RUN_ID"
+  fi
+fi
+
+TRAIN_CMD=(conda run --no-capture-output -n "\${CONDA_ENV:-tokengt}" env PYTHONPATH=src)
+if [[ -n "\$WANDB_RUN_ID_VALUE" ]]; then
+  TRAIN_CMD+=(WANDB_RUN_ID="\$WANDB_RUN_ID_VALUE" WANDB_RESUME=allow)
+fi
+TRAIN_CMD+=(python scripts/train_parameter_golf_random_order.py --config "\$CONFIG" --resume "\$CHECKPOINT" --wandb --wandb-project "\$WANDB_PROJECT")
+if [[ -n "\$WANDB_RUN_ID_VALUE" ]]; then
+  TRAIN_CMD+=(--wandb-run-name "\$WANDB_RUN_ID_VALUE")
+fi
+
+WATCH_CMD=(conda run --no-capture-output -n "\${CONDA_ENV:-tokengt}" env PYTHONPATH=src)
+WATCH_CMD+=(BPB_TARGET=$(printf '%q' "$BPB_TARGET") BPB_MAX_REVIEW_ITERATIONS=$(printf '%q' "$BPB_MAX_REVIEW_ITERATIONS") BPB_LOOP_STATE=$(printf '%q' "$BPB_LOOP_STATE_ABS") BPB_LOOP_STOP_FILE=$(printf '%q' "$BPB_LOOP_STOP_FILE") BPB_LOOP_NAME=$(printf '%q' "$BPB_LOOP_NAME"))
+WATCH_CMD+=(python scripts/watch_training_analysis.py --checkpoint-dir "\$CHECKPOINT_DIR" --start-step "\$STEP" --target-step "\$NEXT_TARGET_STEP" --min-mtime-unix "\$START_EPOCH" --poll-seconds 60)
+if [[ -n "\$RUN_PATH" ]]; then
+  WATCH_CMD+=(--run-path "\$RUN_PATH")
+fi
+WATCH_CMD+=(--output-root "\$ANALYSIS_ROOT" --config "\$CONFIG" --data-glob 'data/curated_hf_shards/validation/*.parquet' --seq-len 1024 --simplex-samples 8 --geometry-records 4 --geometry-branches 6 --device cuda --precision bf16 --pause-training-before-analysis --pause-wait-seconds 12 --training-tmux "\$TRAIN_SESSION" --codex-review-hook scripts/codex_training_review_resume.sh --codex-review-tmux-prefix toricgt_codex_review)
+
+TRAIN_CMD_STR="\$(printf '%q ' "\${TRAIN_CMD[@]}")"
+WATCH_CMD_STR="\$(printf '%q ' "\${WATCH_CMD[@]}")"
+printf '%s\\n' "\$TRAIN_CMD_STR" > "\$LOG_DIR/train_command.sh"
+printf '%s\\n' "\$WATCH_CMD_STR" > "\$LOG_DIR/watch_command.sh"
+
+tmux new-session -d -s "\$TRAIN_SESSION" "cd '\$REPO_ROOT' && \$TRAIN_CMD_STR 2>&1 | tee '\$LOG_DIR/train.log'"
+tmux new-session -d -s "\$WATCH_SESSION" "cd '\$REPO_ROOT' && \$WATCH_CMD_STR 2>&1 | tee '\$LOG_DIR/watcher.log'"
+
+python3 - "\$HOOK_LOG_DIR/codex_review_status.json" "\$TRAIN_SESSION" "\$WATCH_SESSION" "\$LOG_DIR" "\$NEXT_TARGET_STEP" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+payload.update({
+    "fallback_started": True,
+    "fallback_training_tmux": sys.argv[2],
+    "fallback_watcher_tmux": sys.argv[3],
+    "fallback_log_dir": sys.argv[4],
+    "fallback_next_target_step": int(sys.argv[5]),
+})
+path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+PY
+
+echo "Codex review did not leave training active; fallback CONTINUE started: \$TRAIN_SESSION, watcher: \$WATCH_SESSION"
+exit 0
+EOF
+chmod 700 "$HOOK_LOG_DIR/codex_review_wrapper.sh"
+
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "dry-run: wrote $HOOK_LOG_DIR/codex_resume_command.sh"
+  echo "dry-run: wrote $HOOK_LOG_DIR/codex_review_wrapper.sh"
   exit 0
 fi
 
@@ -489,8 +634,8 @@ if [[ -n "$TMUX_SESSION" ]]; then
     exit 1
   fi
   tmux new-session -d -s "$TMUX_SESSION" \
-    "cd '$REPO_ROOT' && exec '$HOOK_LOG_DIR/codex_resume_command.sh' > '$HOOK_LOG_DIR/codex_review_tmux.log' 2>&1"
+    "cd '$REPO_ROOT' && exec '$HOOK_LOG_DIR/codex_review_wrapper.sh' > '$HOOK_LOG_DIR/codex_review_tmux.log' 2>&1"
   echo "launched Codex review tmux: $TMUX_SESSION"
 else
-  exec "${CODEX_CMD[@]}"
+  exec "$HOOK_LOG_DIR/codex_review_wrapper.sh"
 fi

@@ -260,6 +260,8 @@ def trigger_codex_review_hook(args: argparse.Namespace, base: Path, checkpoint: 
         str(step),
         "--training-tmux",
         str(args.training_tmux),
+        "--config",
+        str(args.config),
     ]
     if args.run_path:
         command.extend(["--run-path", str(args.run_path)])
