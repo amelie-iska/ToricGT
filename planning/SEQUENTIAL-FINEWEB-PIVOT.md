@@ -54,7 +54,7 @@ MAX_WALLCLOCK_SECONDS=0 \
 VAL_LOSS_EVERY=1000 \
 TRAIN_LOG_EVERY=200 \
 CHECKPOINT_EVERY=1000 \
-CHECKPOINT_DIR=checkpoints/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z \
+CHECKPOINT_DIR=checkpoints/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z \
 torchrun --standalone --nproc_per_node=1 records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
 ```
 
@@ -86,6 +86,16 @@ RESUME_CHECKPOINT
 
 When enabled, checkpoints are written at validation boundaries and include model weights, optimizer states, token-loader position, CPU/CUDA RNG state, step, and accumulated training time.
 
+W&B logging is default-on in the local Parameter Golf fork as of commit `00ebe09`.  It defaults to:
+
+```text
+WANDB_ENTITY=amelie-iska-math
+WANDB_PROJECT=toricgt-parameter-golf
+WANDB=1
+```
+
+The script reads `WANDB_API_KEY` first and otherwise searches local `keys.txt` files at runtime.  `keys.txt`, `wandb/`, checkpoints, and generated model artifacts are ignored and must not be committed.
+
 Smoke verification:
 
 ```text
@@ -115,20 +125,21 @@ int8+zlib total submission size after durability patch: 4,983,519 bytes
 
 ```text
 tmux session: toricgt_seq4096_pivot
-run id: toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z
-log: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z.txt
-console log: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z.console.txt
-checkpoint dir: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z
+run id: toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z
+wandb: https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z
+log: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/logs/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z.txt
+console log: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/logs/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z.console.txt
+checkpoint dir: /home/iska/Documents/amelie/bio/ToricGT/amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z
 script: amelie-iska/parameter-golf/records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
-parameter-golf commit: a0f111f
+parameter-golf commit: 00ebe09
 python: /home/iska/miniconda3/envs/tokengt/bin/python
-status at launch check: warmup started, GPU process alive
+status at launch check: W&B handshake complete, GPU process alive
 ```
 
 Launch command actually used:
 
 ```bash
-RUN_ID=toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z \
+RUN_ID=toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z \
 DATA_PATH=./data/datasets/fineweb10B_sp1024 \
 TOKENIZER_PATH=./data/tokenizers/fineweb_1024_bpe.model \
 VOCAB_SIZE=1024 \
@@ -146,7 +157,7 @@ VAL_LOSS_EVERY=1000 \
 TRAIN_LOG_EVERY=200 \
 ITERATIONS=20000 \
 CHECKPOINT_EVERY=1000 \
-CHECKPOINT_DIR=checkpoints/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z \
+CHECKPOINT_DIR=checkpoints/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z \
 /home/iska/miniconda3/envs/tokengt/bin/python -m torch.distributed.run --standalone --nproc_per_node=1 \
   records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
 ```

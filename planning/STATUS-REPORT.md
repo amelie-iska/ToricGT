@@ -605,10 +605,13 @@ Active checkpointed sequential run:
 
 ```text
 tmux session: toricgt_seq4096_pivot
-run id: toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z
-parameter-golf commit: a0f111f
-log: amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z.txt
-console log: amelie-iska/parameter-golf/logs/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z.console.txt
-checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_pivot_ckpt_seed1337_20260603T1727Z
+run id: toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z
+parameter-golf commit: 00ebe09
+wandb: https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z
+log: amelie-iska/parameter-golf/logs/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z.txt
+console log: amelie-iska/parameter-golf/logs/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z.console.txt
+checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_wandb_ckpt_seed1337_20260603T1743Z
 checkpoint cadence: every 1000 validation steps
 ```
+
+W&B is now default-on in the local Parameter Golf record script, using `WANDB_ENTITY=amelie-iska-math` and `WANDB_PROJECT=toricgt-parameter-golf` unless overridden.  The script reads the API key only from `WANDB_API_KEY` or local `keys.txt`; key files are ignored and must not be committed.
