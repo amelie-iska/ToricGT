@@ -157,5 +157,18 @@ def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
 
     assert output_json.exists()
     assert payload["trainer/step"] == 500
+    assert payload["fineweb_curve/latest_train_bpb"] == pytest.approx(1.6322)
+    assert payload["fineweb_curve/latest_val_bpb"] == pytest.approx(1.3641)
+    assert payload["diagnostics/latest/train_bpb"] == pytest.approx(1.6322)
+    assert payload["diagnostics/latest/val_bpb"] == pytest.approx(1.3641)
+    assert payload["diagnostics/latest/topology_loss"] == pytest.approx(payload["topology/topology_loss"])
+    assert payload["diagnostics/latest/bgg_d2_residual"] == pytest.approx(payload["bgg_category_o/d2_residual"])
+    assert payload["diagnostics/latest/pollak_prolate_slepian_concentration"] == pytest.approx(
+        payload["toric/slepian_concentration"]
+    )
+    assert payload["diagnostics/families/topology_available"] == 1.0
+    assert payload["diagnostics/families/category_o_bgg_available"] == 1.0
+    assert payload["diagnostics/families/koszul_persistence_available"] == 1.0
+    assert payload["diagnostics/families/slepian_pollak_prolate_available"] == 1.0
     assert payload["tropical/bpb_best_so_far"] == pytest.approx(1.3641)
     assert payload["metrics_status/fineweb_curve_diagnostics_available"] == 1.0

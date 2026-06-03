@@ -41,6 +41,7 @@ from toricgt.toric_geometry_tasks import (
 TRAIN_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+train_loss:(?P<loss>[0-9.]+)"
     r"\s+train_time:(?P<ms>[0-9.]+)ms\s+step_avg:(?P<avg>[0-9.]+)ms"
+    r"(?:\s+train_bpb:(?P<bpb>[0-9.]+))?"
 )
 VAL_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+val_loss:(?P<loss>[0-9.]+)"
@@ -90,6 +91,7 @@ def parse_log(path: Path) -> dict[str, Any]:
                 "step": float(step),
                 "total": float(train_match.group("total")),
                 "train_loss": float(train_match.group("loss")),
+                "train_bpb": float(train_match.group("bpb")) if train_match.group("bpb") is not None else float("nan"),
                 "train_time_ms": float(train_match.group("ms")),
                 "step_avg_ms": float(train_match.group("avg")),
             }
@@ -110,7 +112,7 @@ def build_curve_tensor(parsed: dict[str, Any], max_points: int, target_bpb: floa
     vals: dict[int, dict[str, float]] = parsed["vals"]
     steps = sorted(set(train) | set(vals))
     if not steps:
-        hidden = torch.zeros((1, 0, 12), dtype=torch.float32)
+        hidden = torch.zeros((1, 0, 18), dtype=torch.float32)
         positions = torch.zeros((1, 0), dtype=torch.long)
         return hidden, positions, np.zeros((0,), dtype=np.float64)
     if len(steps) > max_points:
@@ -122,8 +124,12 @@ def build_curve_tensor(parsed: dict[str, Any], max_points: int, target_bpb: floa
     best = float("inf")
     prev_val = _last_at_or_before(vals, steps[0], "val_bpb", target_bpb + 1.0)
     prev_train = _last_at_or_before(train, steps[0], "train_loss", 0.0)
+    prev_train_bpb = _last_at_or_before(train, steps[0], "train_bpb", prev_val)
     for step in steps:
         train_loss = _last_at_or_before(train, step, "train_loss", prev_train)
+        train_bpb = _last_at_or_before(train, step, "train_bpb", prev_train_bpb)
+        if not math.isfinite(train_bpb):
+            train_bpb = prev_train_bpb
         val_loss = _last_at_or_before(vals, step, "val_loss", train_loss)
         val_bpb = _last_at_or_before(vals, step, "val_bpb", prev_val)
         best = min(best, val_bpb)
@@ -132,6 +138,9 @@ def build_curve_tensor(parsed: dict[str, Any], max_points: int, target_bpb: floa
         gap = val_bpb - float(target_bpb)
         val_delta = val_bpb - prev_val
         train_delta = train_loss - prev_train
+        train_bpb_delta = train_bpb - prev_train_bpb
+        train_gap = train_bpb - float(target_bpb)
+        generalization_gap = val_bpb - train_bpb
         angle_theta = 2.0 * math.pi * 0.6180339887498948 * step
         angle_beta = 2.0 * math.pi * (math.sqrt(2.0) - 1.0) * step
         rows.append(
@@ -139,12 +148,16 @@ def build_curve_tensor(parsed: dict[str, Any], max_points: int, target_bpb: floa
                 progress,
                 math.log1p(float(step)) / math.log1p(max(total, 1.0)),
                 train_loss,
+                train_bpb,
                 val_loss,
                 val_bpb,
                 best,
                 gap,
+                train_gap,
+                generalization_gap,
                 val_delta,
                 train_delta,
+                train_bpb_delta,
                 step_avg / 1000.0,
                 math.sin(angle_theta),
                 math.cos(angle_theta),
@@ -155,6 +168,7 @@ def build_curve_tensor(parsed: dict[str, Any], max_points: int, target_bpb: floa
         val_bpbi.append(val_bpb)
         prev_val = val_bpb
         prev_train = train_loss
+        prev_train_bpb = train_bpb
     arr = np.asarray(rows, dtype=np.float32)
     if arr.shape[0] > 1:
         mean = arr.mean(axis=0, keepdims=True)
@@ -184,6 +198,117 @@ def add_prefixed_torch_metrics(
             if clean.startswith(strip):
                 clean = clean[len(strip) :]
         target[f"{prefix}/{clean}"] = _tensor_value(value)
+
+
+def _latest_at_or_before(
+    rows: dict[int, dict[str, float]],
+    step: int,
+    field: str,
+) -> float | None:
+    keys = [key for key in rows if key <= step]
+    if not keys:
+        return None
+    value = rows[max(keys)].get(field)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def add_fineweb_curve_status(payload: dict[str, float], parsed: dict[str, Any], target_bpb: float) -> None:
+    latest_step = int(parsed.get("latest_step") or 0)
+    train: dict[int, dict[str, float]] = parsed["train"]
+    vals: dict[int, dict[str, float]] = parsed["vals"]
+    latest_train_bpb = _latest_at_or_before(train, latest_step, "train_bpb")
+    latest_val_bpb = _latest_at_or_before(vals, latest_step, "val_bpb")
+    if latest_train_bpb is not None:
+        payload["fineweb_curve/latest_train_bpb"] = latest_train_bpb
+        payload["fineweb_curve/latest_train_gap_to_target"] = latest_train_bpb - float(target_bpb)
+    if latest_val_bpb is not None:
+        payload["fineweb_curve/latest_val_bpb"] = latest_val_bpb
+        payload["fineweb_curve/latest_val_gap_to_target"] = latest_val_bpb - float(target_bpb)
+    if latest_train_bpb is not None and latest_val_bpb is not None:
+        payload["fineweb_curve/latest_generalization_gap_bpb"] = latest_val_bpb - latest_train_bpb
+
+
+DIAGNOSTIC_ALIAS_KEYS = {
+    "topology/topology_loss": "diagnostics/latest/topology_loss",
+    "topology/directed_topology_loss": "diagnostics/latest/directed_topology_loss",
+    "topology/simplex_closure_loss": "diagnostics/latest/simplex_closure_loss",
+    "topology/directed_chain_commutator": "diagnostics/latest/directed_chain_commutator",
+    "topology/cycle_rank": "diagnostics/latest/cycle_rank",
+    "topology/hdbscan_stability": "diagnostics/latest/hdbscan_stability",
+    "topology/affine_toric/persistence_loss": "diagnostics/latest/persistence_loss",
+    "bgg_category_o/persistence/exactness_residual": "diagnostics/latest/koszul_exactness_residual",
+    "bgg_category_o/persistence/syzygy_residual": "diagnostics/latest/koszul_syzygy_residual",
+    "bgg_category_o/persistence/buchsbaum_eisenbud_rank_residual": "diagnostics/latest/koszul_buchsbaum_eisenbud_rank_residual",
+    "bgg_category_o/d2_residual": "diagnostics/latest/bgg_d2_residual",
+    "bgg_category_o/loss": "diagnostics/latest/bgg_loss",
+    "bgg_category_o/resolution_consistency": "diagnostics/latest/bgg_resolution_consistency",
+    "bgg_category_o/standard_leakage": "diagnostics/latest/bgg_standard_leakage",
+    "toric/geometry_loss": "diagnostics/latest/toric_geometry_loss",
+    "toric/shadow_fan_cell_entropy": "diagnostics/latest/toric_shadow_fan_cell_entropy",
+    "toric/shadow_mean_bend": "diagnostics/latest/toric_shadow_mean_bend",
+    "toric/active_face_entropy": "diagnostics/latest/toric_active_face_entropy",
+    "toric/active_face_margin": "diagnostics/latest/toric_active_face_margin",
+    "toric/braid_loss": "diagnostics/latest/toric_braid_loss",
+    "toric/binomial_residual": "diagnostics/latest/toric_binomial_residual",
+    "toric/slepian_concentration": "diagnostics/latest/slepian_concentration",
+    "toric/slepian_leakage": "diagnostics/latest/slepian_leakage",
+    "toric/slepian_mode_entropy": "diagnostics/latest/slepian_mode_entropy",
+    "toric/slepian_effective_modes": "diagnostics/latest/slepian_effective_modes",
+    "tropical/bpb_recent_slope": "diagnostics/latest/tropical_bpb_recent_slope",
+    "tropical/bpb_target_gap": "diagnostics/latest/tropical_bpb_target_gap",
+    "tropical/bpb_active_face_entropy": "diagnostics/latest/tropical_bpb_active_face_entropy",
+    "tropical/bpb_plateau_pressure": "diagnostics/latest/tropical_bpb_plateau_pressure",
+    "complexity/recent_full_log_ncd_lzma": "diagnostics/latest/complexity_recent_full_log_ncd_lzma",
+    "fineweb_curve/latest_train_bpb": "diagnostics/latest/train_bpb",
+    "fineweb_curve/latest_val_bpb": "diagnostics/latest/val_bpb",
+    "fineweb_curve/latest_generalization_gap_bpb": "diagnostics/latest/generalization_gap_bpb",
+}
+
+
+def diagnostic_alias_payload(payload: dict[str, float]) -> dict[str, float]:
+    aliases: dict[str, float] = {
+        "diagnostics/families/topology_available": 1.0 if any(key.startswith("topology/") for key in payload) else 0.0,
+        "diagnostics/families/toric_available": 1.0 if any(key.startswith("toric/") for key in payload) else 0.0,
+        "diagnostics/families/tropical_available": 1.0 if any(key.startswith("tropical/") for key in payload) else 0.0,
+        "diagnostics/families/category_o_bgg_available": 1.0 if any(key.startswith("bgg_category_o/") for key in payload) else 0.0,
+        "diagnostics/families/koszul_persistence_available": 1.0
+        if any(key.startswith("bgg_category_o/persistence/") for key in payload)
+        else 0.0,
+        "diagnostics/families/slepian_pollak_prolate_available": 1.0
+        if any(key.startswith("toric/slepian_") for key in payload)
+        else 0.0,
+        "diagnostics/families/complexity_available": 1.0 if any(key.startswith("complexity/") for key in payload) else 0.0,
+        "diagnostics/families/fineweb_bpb_curve_available": 1.0
+        if any(key.startswith("fineweb_curve/") for key in payload)
+        else 0.0,
+    }
+    for source, alias in DIAGNOSTIC_ALIAS_KEYS.items():
+        value = payload.get(source)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(numeric):
+            aliases[alias] = numeric
+    if "diagnostics/latest/slepian_concentration" in aliases:
+        aliases["diagnostics/latest/pollak_prolate_slepian_concentration"] = aliases[
+            "diagnostics/latest/slepian_concentration"
+        ]
+    if "diagnostics/latest/slepian_leakage" in aliases:
+        aliases["diagnostics/latest/pollak_prolate_slepian_leakage"] = aliases["diagnostics/latest/slepian_leakage"]
+    gap = aliases.get("diagnostics/latest/tropical_bpb_target_gap")
+    plateau = aliases.get("diagnostics/latest/tropical_bpb_plateau_pressure", 0.0)
+    topology_loss = aliases.get("diagnostics/latest/topology_loss", 0.0)
+    slepian_leakage = aliases.get("diagnostics/latest/slepian_leakage", 0.0)
+    if gap is not None:
+        aliases["diagnostics/latest/bpb_intervention_pressure"] = float(
+            max(0.0, gap) + max(0.0, plateau) + 0.05 * max(0.0, topology_loss) + 0.02 * max(0.0, slepian_leakage)
+        )
+    return aliases
 
 
 def tropical_curve_metrics(values: np.ndarray, target_bpb: float) -> dict[str, float]:
@@ -305,6 +430,8 @@ def compute_payload(parsed: dict[str, Any], log_path: Path, target_bpb: float, m
     payload["category_o/late_phase_toggle_enabled"] = 0.0
     payload.update(tropical_curve_metrics(val_bpbs, target_bpb))
     payload.update(complexity_metrics(log_path))
+    add_fineweb_curve_status(payload, parsed, target_bpb)
+    payload.update(diagnostic_alias_payload(payload))
     return payload
 
 
@@ -314,6 +441,25 @@ def write_json(path: str, payload: dict[str, Any]) -> None:
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def sync_public_summary(
+    wandb_module: Any,
+    *,
+    entity: str,
+    project: str,
+    run_id: str,
+    summary_payload: dict[str, float],
+) -> bool:
+    try:
+        api_run = wandb_module.Api().run(f"{entity}/{project}/{run_id}")
+        for key, value in summary_payload.items():
+            api_run.summary[key] = value
+        api_run.summary.update()
+    except Exception as exc:  # pragma: no cover - network/API failure should not stop diagnostics.
+        print(f"wandb_summary_sync_failed:{type(exc).__name__}:{exc}", flush=True)
+        return False
+    return True
 
 
 def run_once_without_wandb(
@@ -393,19 +539,28 @@ def main() -> None:
                 }
             )
             wandb.log(payload)
-            run.summary.update(
-                {
-                    "diagnostics/latest_full_metrics_step": latest_step,
-                    "metrics_status/model_hidden_state_available": 0.0,
-                    "metrics_status/fineweb_curve_diagnostics_available": payload[
-                        "metrics_status/fineweb_curve_diagnostics_available"
-                    ],
-                    "bgg_category_o/late_phase_toggle_enabled": 0.0,
-                    "toric/shadow_fan_cell_entropy": payload.get("toric/shadow_fan_cell_entropy", 0.0),
-                    "topology/topology_loss": payload.get("topology/topology_loss", 0.0),
-                    "tropical/bpb_best_so_far": payload.get("tropical/bpb_best_so_far", 0.0),
-                }
-            )
+            summary_payload = {
+                "diagnostics/latest_full_metrics_step": latest_step,
+                "metrics_status/model_hidden_state_available": 0.0,
+                "metrics_status/fineweb_curve_diagnostics_available": payload[
+                    "metrics_status/fineweb_curve_diagnostics_available"
+                ],
+                "bgg_category_o/late_phase_toggle_enabled": 0.0,
+                "toric/shadow_fan_cell_entropy": payload.get("toric/shadow_fan_cell_entropy", 0.0),
+                "topology/topology_loss": payload.get("topology/topology_loss", 0.0),
+                "tropical/bpb_best_so_far": payload.get("tropical/bpb_best_so_far", 0.0),
+            }
+            summary_payload.update({key: value for key, value in payload.items() if key.startswith("diagnostics/latest/")})
+            summary_payload.update({key: value for key, value in payload.items() if key.startswith("diagnostics/families/")})
+            run.summary.update(summary_payload)
+            if sync_public_summary(
+                wandb,
+                entity=args.entity,
+                project=args.project,
+                run_id=args.run_id,
+                summary_payload=summary_payload,
+            ):
+                print(f"wandb_summary_sync step={latest_step} keys={len(summary_payload)}", flush=True)
             write_json(args.output_json, payload)
             print(
                 "wandb_full_diag "
