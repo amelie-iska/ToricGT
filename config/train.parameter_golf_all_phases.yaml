@@ -122,6 +122,15 @@ model:
   koszul_chart_exponents: 12
   koszul_rank_temperature: 0.05
 
+  # Pollak/prolate Slepian trajectory concentration is cheap enough to audit
+  # during BPB warmup, but its loss stays zero until later phases so it does
+  # not fight the competition objective before the threshold checkpoint exists.
+  use_slepian_pollak: true
+  slepian_pollak_max_positions: 192
+  slepian_pollak_modes: 8
+  slepian_pollak_bandwidth: 0.075
+  slepian_pollak_target_concentration: 0.72
+
   use_trajectory_memory_head: true
   trajectory_memory_projection_dim: 128
   trajectory_memory_teacher_temperature: 0.20
@@ -253,6 +262,7 @@ training:
   toric_geometry_loss_weight: 0.0
   toric_bgg_loss_weight: 0.0
   koszul_persistence_loss_weight: 0.0
+  slepian_pollak_loss_weight: 0.0
   trajectory_memory_loss_weight: 0.0
   trajectory_flow_loss_weight: 0.0
   contrastive_loss_weight: 0.00015
@@ -300,7 +310,27 @@ hessian:
   max_parameters: 1500000
 
 adaptive_training:
-  enabled: false
+  enabled: true
+  gflownet_loss_min: 0.00005
+  gflownet_loss_max: 0.00120
+  gflownet_gap_step: 0.00005
+  gflownet_relax_step: 0.00002
+  complex_mix_min: 0.0
+  complex_mix_max: 0.08
+  complex_down_step: 0.005
+  complex_up_step: 0.002
+  train_drift_threshold: 0.03
+  gflownet_increase_drift_guard: 0.025
+  recovery_mode_enabled: true
+  recovery_train_drift_threshold: 0.06
+  recovery_complex_down_step: 0.010
+  recovery_gflownet_down_step: 0.00005
+  structural_loss_min: 0.70
+  structural_loss_max: 1.20
+  structural_loss_up_step: 0.025
+  structural_loss_down_step: 0.080
+  structural_signal_threshold: 0.10
+  structural_train_drift_guard: 0.020
 
 phase_curriculum:
   enabled: true
@@ -322,6 +352,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.0
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
+      slepian_pollak_loss_weight: 0.0
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.00015
@@ -345,6 +376,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.00004
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
+      slepian_pollak_loss_weight: 0.00002
       trajectory_flow_loss_weight: 0.0
       trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.0005
@@ -368,6 +400,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.00008
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.000015
+      slepian_pollak_loss_weight: 0.000035
       trajectory_flow_loss_weight: 0.00012
       trajectory_memory_loss_weight: 0.0
       contrastive_loss_weight: 0.001
@@ -391,6 +424,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.00010
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.000025
+      slepian_pollak_loss_weight: 0.00005
       trajectory_flow_loss_weight: 0.00025
       trajectory_memory_loss_weight: 0.00008
       contrastive_loss_weight: 0.0015
@@ -414,6 +448,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.00010
       toric_bgg_loss_weight: 0.000025
       koszul_persistence_loss_weight: 0.000025
+      slepian_pollak_loss_weight: 0.00005
       trajectory_flow_loss_weight: 0.00025
       trajectory_memory_loss_weight: 0.00010
       contrastive_loss_weight: 0.0015
@@ -437,6 +472,7 @@ phase_curriculum:
       toric_geometry_loss_weight: 0.00008
       toric_bgg_loss_weight: 0.000015
       koszul_persistence_loss_weight: 0.000020
+      slepian_pollak_loss_weight: 0.00003
       trajectory_flow_loss_weight: 0.00020
       trajectory_memory_loss_weight: 0.00008
       contrastive_loss_weight: 0.0010

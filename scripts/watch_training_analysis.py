@@ -75,6 +75,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--geometry-records", type=int, default=4)
     parser.add_argument("--geometry-branches", type=int, default=6)
     parser.add_argument("--seed", type=int, default=10017)
+    parser.add_argument("--target-bpb", type=float, default=float(os.environ.get("BPB_TARGET", "1.2")))
+    parser.add_argument("--gate-step", type=int, default=int(os.environ.get("BPB_GATE_STEP", "4000")))
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--precision", default="fp32", choices=["bf16", "fp16", "fp32"])
     parser.add_argument("--skip-oai-competition-eval", action="store_true")
@@ -203,6 +205,7 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     simplex = load_json(simplex_dir / "reasoning_simplex_summary.json")
     oai = load_json(oai_dir / "summary.json")
     checkpoint_meta = load_json(metrics_dir / "checkpoint_meta.json")
+    proposal = load_json(base / "training_adjustment_proposal.json")
     lines = [
         "# Post-Resume Analysis Synopsis",
         "",
@@ -264,6 +267,34 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
             f"- Mean radius-HDBSCAN noise: `{geometry.get('mean_topology_hdbscan_noise_fraction', 'n/a')}`",
             f"- Mean radius-HDBSCAN stability: `{geometry.get('mean_topology_hdbscan_stability', 'n/a')}`",
             f"- Nested-simplicial topology plots: `{geometry_dir / 'topology'}`",
+        ]
+    )
+    if proposal:
+        decision = proposal.get("decision", {}) if isinstance(proposal.get("decision", {}), dict) else {}
+        bpb_gate = proposal.get("bpb_gate", {}) if isinstance(proposal.get("bpb_gate", {}), dict) else {}
+        structural = (
+            proposal.get("structural_diagnostics", {})
+            if isinstance(proposal.get("structural_diagnostics", {}), dict)
+            else {}
+        )
+        lines.extend(
+            [
+                "",
+                "## Training Control Proposal",
+                f"- Target status: `{decision.get('target_status', 'n/a')}`",
+                f"- Primary action: `{decision.get('primary_action', 'n/a')}`",
+                f"- Current primary BPB: `{bpb_gate.get('current_primary_bpb', 'n/a')}`",
+                f"- Best observed BPB: `{bpb_gate.get('best_observed_bpb', 'n/a')}`",
+                f"- Gap to target: `{bpb_gate.get('gap_to_target', 'n/a')}`",
+                f"- Required drop / 100 steps: `{bpb_gate.get('required_drop_per_100_steps', 'n/a')}`",
+                f"- Recent drop / 100 steps: `{bpb_gate.get('recent_drop_per_100_steps', 'n/a')}`",
+                f"- Structural pressure: `{structural.get('structural_pressure', 'n/a')}`",
+                f"- Dominant structural family: `{structural.get('dominant_family', 'n/a')}`",
+                f"- Proposal file: `{base / 'training_adjustment_proposal.md'}`",
+            ]
+        )
+    lines.extend(
+        [
             "",
             "## Initial Interpretation",
             "",
@@ -435,6 +466,25 @@ def main() -> None:
         ],
         cwd=repo,
         log_path=base / "logs" / "geometry.log",
+    )
+    proposal_command = [
+        "python",
+        "scripts/propose_training_adjustments.py",
+        "--analysis-dir",
+        str(base),
+        "--target-bpb",
+        str(args.target_bpb),
+        "--gate-step",
+        str(args.gate_step),
+        "--checkpoint-step",
+        str(step),
+    ]
+    if args.run_path:
+        proposal_command.extend(["--wandb-run-path", args.run_path])
+    run_optional_command(
+        proposal_command,
+        cwd=repo,
+        log_path=base / "logs" / "training_adjustment_proposal.log",
     )
     synopsis = write_synopsis(base, checkpoint, step, args.run_path)
     print(f"wrote {synopsis}", flush=True)

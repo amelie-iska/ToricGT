@@ -38,6 +38,7 @@ CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
 
 export BPB_TARGET="${BPB_TARGET:-1.2}"
+export BPB_GATE_STEP="${BPB_GATE_STEP:-4000}"
 export BPB_MAX_REVIEW_ITERATIONS="${BPB_MAX_REVIEW_ITERATIONS:-100}"
 export BPB_LOOP_STATE="${BPB_LOOP_STATE:-outputs/bpb_codex_loop_state_all_phases.json}"
 export BPB_LOOP_STOP_FILE="${BPB_LOOP_STOP_FILE:-outputs/bpb_codex_loop_stop_all_phases}"
@@ -77,6 +78,7 @@ SUPERVISOR_CMD=(
   --poll-seconds "$POLL_SECONDS"
   --checkpoint-interval "$CHECKPOINT_INTERVAL"
   --target-bpb "$BPB_TARGET"
+  --gate-step "$BPB_GATE_STEP"
   --max-analysis-iterations "$BPB_MAX_REVIEW_ITERATIONS"
 )
 
@@ -98,5 +100,5 @@ started supervised native ToricGT all-phases training
   review cadence: every $CHECKPOINT_INTERVAL checkpoint steps
   logs:          $LOG_DIR
   analysis root: $ANALYSIS_ROOT
-  BPB loop:      target=$BPB_TARGET max_reviews=$BPB_MAX_REVIEW_ITERATIONS
+  BPB loop:      target=$BPB_TARGET gate_step=$BPB_GATE_STEP max_reviews=$BPB_MAX_REVIEW_ITERATIONS
 EOF

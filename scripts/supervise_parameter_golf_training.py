@@ -59,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analysis-device", default="cpu", choices=["cpu", "cuda"])
     parser.add_argument("--analysis-precision", default="fp32", choices=["fp32", "fp16", "bf16"])
     parser.add_argument("--target-bpb", type=float, default=float(os.environ.get("BPB_TARGET", "1.2")))
+    parser.add_argument("--gate-step", type=int, default=int(os.environ.get("BPB_GATE_STEP", "4000")))
     parser.add_argument("--max-restarts", type=int, default=100)
     parser.add_argument("--max-analysis-iterations", type=int, default=100)
     parser.add_argument("--data-glob", default="data/curated_hf_shards/validation/*.parquet")
@@ -343,6 +344,10 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         args.analysis_precision,
         "--seed",
         str(args.seed),
+        "--target-bpb",
+        str(args.target_bpb),
+        "--gate-step",
+        str(args.gate_step),
         "--training-tmux",
         args.train_session,
     ]
@@ -419,6 +424,7 @@ def main() -> None:
             "train_session": args.train_session,
             "watch_session": args.watch_session,
             "target_bpb": args.target_bpb,
+            "gate_step": args.gate_step,
             "updated_utc": utc_iso(),
         }
     )
