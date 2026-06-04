@@ -196,6 +196,12 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
             "bgg_category_o/standard_leakage": 0.40,
             "complexity/recent_full_log_ncd_lzma": 0.86,
         },
+        artifact_report={
+            "artifact_probe_status": "ok",
+            "artifact/int8_zlib_total_bytes": 15_900_000,
+            "artifact/under_size_limit": 1,
+            "artifact/size_limit_bytes": 16_000_000,
+        },
     )
 
     assert report["state"] == "near_target"
@@ -224,6 +230,7 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert (tmp_path / "analysis" / "bpb" / "bpb_gate_velocity_requirement.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "advanced_metric_evidence_map.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "advanced_metric_evidence_report.json").exists()
+    assert (tmp_path / "analysis" / "bpb" / "artifact_export_probe.json").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_controller_map.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_controller_report.json").exists()
     assert report["bpb_transfer_competition_phase_policy"] in {
@@ -234,6 +241,8 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     }
     assert "topology_directed" in report["bpb_transfer_recommended_loss_scales"]
     assert "toric_slepian" in report["bpb_transfer_recommended_modes"]
+    assert report["bpb_transfer_controller"]["artifact_size_policy"] == "under_limit_tight_margin"
+    assert report["bpb_transfer_controller"]["artifact_size_margin_bytes"] == pytest.approx(100_000)
     assert "required_val_velocity_to_gate_per_100_steps" in report
     assert "bpb_velocity_shortfall_pressure" in report
     phase_plan_path = tmp_path / "analysis" / "bpb" / "phase_bpb_breakdown_plan.json"

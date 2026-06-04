@@ -17,6 +17,7 @@ using the real Seq4096 artifacts:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import os
@@ -1969,6 +1970,7 @@ def write_bpb_analysis_artifacts(
     checkpoint_path: Path | None = None,
     run_path: str = "",
     diagnostic_payload: dict[str, Any] | None = None,
+    artifact_report: dict[str, Any] | None = None,
     history_root: Path | None = None,
 ) -> dict[str, Any]:
     diagnostic_payload = diagnostic_payload or {}
@@ -1993,10 +1995,16 @@ def write_bpb_analysis_artifacts(
     controller_report = bpb_transfer_control_report(
         report,
         evidence_report,
-        diagnostic_payload,
+        artifact_report or diagnostic_payload,
         target_bpb=target_bpb,
         gate_step=gate_step,
-        artifact_size_limit_bytes=int(finite_payload_value(diagnostic_payload, "artifact/size_limit_bytes", default=16_000_000)),
+        artifact_size_limit_bytes=int(
+            finite_payload_value(
+                artifact_report or diagnostic_payload,
+                "artifact/size_limit_bytes",
+                default=16_000_000,
+            )
+        ),
     )
     report.update(
         {
@@ -2023,6 +2031,8 @@ def write_bpb_analysis_artifacts(
     write_json(bpb_dir / "bpb_transfer_efficiency_report.json", transfer_report)
     write_json(bpb_dir / "bpb_gate_velocity_requirement_report.json", velocity_report)
     write_json(bpb_dir / "advanced_metric_evidence_report.json", evidence_report)
+    if artifact_report:
+        write_json(bpb_dir / "artifact_export_probe.json", artifact_report)
     write_json(bpb_dir / "bpb_transfer_controller_report.json", controller_report)
     write_json(
         bpb_dir / "checkpoint_manifest.json",
@@ -2075,6 +2085,78 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def compute_seq4096_artifact_report(
+    checkpoint: Path | None,
+    root: Path,
+    *,
+    artifact_size_limit_bytes: int = 16_000_000,
+    export_prune_fraction: float = 0.0,
+) -> dict[str, Any]:
+    """Best-effort int8+zlib export byte accounting for a Seq4096 checkpoint."""
+
+    if checkpoint is None:
+        return {"artifact_probe_status": "missing_checkpoint"}
+    checkpoint = Path(checkpoint)
+    if not checkpoint.exists():
+        return {"artifact_probe_status": "checkpoint_not_found", "checkpoint": str(checkpoint)}
+    script_path = (
+        root
+        / "amelie-iska"
+        / "parameter-golf"
+        / "records"
+        / "track_10min_16mb"
+        / "2026-03-19_TrainingOptSeq4096"
+        / "train_gpt.py"
+    )
+    if not script_path.exists():
+        return {"artifact_probe_status": "compact_script_not_found", "checkpoint": str(checkpoint)}
+    try:
+        import torch
+
+        spec = importlib.util.spec_from_file_location("seq4096_train_gpt_export_probe", script_path)
+        if spec is None or spec.loader is None:
+            return {"artifact_probe_status": "compact_script_import_failed", "checkpoint": str(checkpoint)}
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        export_fn = getattr(module, "quantized_export_blob_for_limit", None)
+        if export_fn is None:
+            return {"artifact_probe_status": "export_function_not_found", "checkpoint": str(checkpoint)}
+
+        payload = torch.load(checkpoint, map_location="cpu")
+        state = payload.get("model") if isinstance(payload, dict) else None
+        if state is None and isinstance(payload, dict):
+            state = payload
+        if not isinstance(state, dict):
+            return {"artifact_probe_status": "model_state_not_found", "checkpoint": str(checkpoint)}
+
+        code_bytes = len(script_path.read_bytes())
+        _, _, _, metrics = export_fn(
+            state,
+            code_bytes=code_bytes,
+            artifact_size_limit_bytes=int(artifact_size_limit_bytes),
+            export_prune_fraction=float(export_prune_fraction),
+        )
+        total = float(metrics.get("int8_zlib_total_bytes", float("nan")))
+        margin = float(artifact_size_limit_bytes) - total if math.isfinite(total) else float("nan")
+        return {
+            **metrics,
+            "artifact/int8_zlib_total_bytes": metrics.get("int8_zlib_total_bytes"),
+            "artifact/under_size_limit": metrics.get("under_artifact_size_limit"),
+            "artifact/size_limit_bytes": int(artifact_size_limit_bytes),
+            "artifact_size_margin_bytes": margin,
+            "artifact_probe_status": "ok",
+            "checkpoint": str(checkpoint),
+            "script_path": str(script_path),
+            "code_bytes": int(code_bytes),
+        }
+    except Exception as exc:
+        return {
+            "artifact_probe_status": "error",
+            "checkpoint": str(checkpoint),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int) -> dict[str, Any]:
@@ -2137,6 +2219,12 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
         command_status["wandb_metrics"] = run_command(metrics_cmd, logs_dir / "analyze_wandb_metrics.log", env)
 
     parsed = parse_seq4096_log(Path(args.log))
+    artifact_report = compute_seq4096_artifact_report(
+        checkpoint,
+        root,
+        artifact_size_limit_bytes=16_000_000,
+        export_prune_fraction=0.0,
+    )
     report = write_bpb_analysis_artifacts(
         parsed,
         output_dir,
@@ -2145,6 +2233,7 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
         checkpoint_path=checkpoint,
         run_path=args.run_path,
         diagnostic_payload=diagnostic_payload,
+        artifact_report=artifact_report,
         history_root=Path(args.output_root).parent,
     )
     proposal_cmd = [
