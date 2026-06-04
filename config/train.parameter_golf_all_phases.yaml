@@ -12,7 +12,9 @@ model:
   d_model: 384
   num_heads: 6
   num_layers: 7
-  recurrent_passes: 2
+  # Second recurrent pass is reintroduced after the BPB warmup basin; with
+  # full GraphCG/reasoning-memory heads it OOMs at step 0 on the 24 GB card.
+  recurrent_passes: 1
   ffn_multiplier: 4
   dropout: 0.0
   attention: hybrid
