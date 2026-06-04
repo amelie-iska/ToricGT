@@ -1,7 +1,12 @@
 model:
-  vocab_size: 260
-  byte_offset: 4
-  max_seq_len: 1024
+  # Reserve graph-of-thought, reasoning-step, memory, and analogy markers
+  # before byte IDs so directed reasoning/memory trajectories can be trained
+  # and audited without colliding with ordinary UTF-8 bytes.
+  special_token_mode: reasoning_memory
+  use_advanced_reasoning_tokens: true
+  vocab_size: 272
+  byte_offset: 16
+  max_seq_len: 4096
   d_model: 384
   num_heads: 6
   num_layers: 7
