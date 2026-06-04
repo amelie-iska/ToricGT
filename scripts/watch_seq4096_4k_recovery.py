@@ -125,6 +125,9 @@ class RecoveryControls:
     advanced_loss_warmup_steps: int = 0
     advanced_loss_min_best_val_bpb: float = 0.0
     advanced_loss_max_ce_ratio: float = 0.0
+    reset_optimizer_on_resume: bool = True
+    reset_rng_on_resume: bool = True
+    reset_loader_on_resume: bool = True
 
     def launch_dict(self) -> dict[str, Any]:
         return {
@@ -161,6 +164,9 @@ class RecoveryControls:
             "advanced_loss_warmup_steps": int(self.advanced_loss_warmup_steps),
             "advanced_loss_min_best_val_bpb": float(self.advanced_loss_min_best_val_bpb),
             "advanced_loss_max_ce_ratio": float(self.advanced_loss_max_ce_ratio),
+            "reset_optimizer_on_resume": bool(self.reset_optimizer_on_resume),
+            "reset_rng_on_resume": bool(self.reset_rng_on_resume),
+            "reset_loader_on_resume": bool(self.reset_loader_on_resume),
         }
 
 
@@ -1368,6 +1374,9 @@ def build_recovery_launch(
     advanced_loss_warmup_steps: int = 0,
     advanced_loss_min_best_val_bpb: float = 0.0,
     advanced_loss_max_ce_ratio: float = 0.0,
+    reset_optimizer_on_resume: bool = True,
+    reset_rng_on_resume: bool = True,
+    reset_loader_on_resume: bool = True,
 ) -> RecoveryLaunch:
     _ = repo_root
     env = {
@@ -1399,9 +1408,9 @@ def build_recovery_launch(
         "SEED": seed,
         "WANDB_LOG_EVERY": 1,
         "RESUME_CHECKPOINT": resume_checkpoint,
-        "RESET_OPTIMIZER_ON_RESUME": 1,
-        "RESET_RNG_ON_RESUME": 1,
-        "RESET_LOADER_ON_RESUME": 1,
+        "RESET_OPTIMIZER_ON_RESUME": 1 if reset_optimizer_on_resume else 0,
+        "RESET_RNG_ON_RESUME": 1 if reset_rng_on_resume else 0,
+        "RESET_LOADER_ON_RESUME": 1 if reset_loader_on_resume else 0,
         "ADVANCED_LOSS_SCALE": advanced_loss_scale,
         "GRAPHCG_LOSS_WEIGHT": graphcg_loss_weight,
         "TORIC_TROPICAL_LOSS_WEIGHT": toric_tropical_loss_weight,
@@ -1584,6 +1593,9 @@ def build_gate_shell(
     recovery_advanced_loss_warmup_steps: int,
     recovery_advanced_loss_min_best_val_bpb: float,
     recovery_advanced_loss_max_ce_ratio: float,
+    recovery_reset_optimizer: bool,
+    recovery_reset_rng: bool,
+    recovery_reset_loader: bool,
     preempt_on_projected_miss: bool,
     preempt_min_step: int,
     preempt_patience: int,
@@ -1650,6 +1662,13 @@ def build_gate_shell(
     )
     if recovery_advanced_loss_log_only:
         advanced_loss_arg += "--recovery-advanced-loss-log-only "
+    reset_arg = ""
+    if not recovery_reset_optimizer:
+        reset_arg += "--no-recovery-reset-optimizer "
+    if not recovery_reset_rng:
+        reset_arg += "--no-recovery-reset-rng "
+    if not recovery_reset_loader:
+        reset_arg += "--no-recovery-reset-loader "
     return (
         f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src {shell_env(loop_env)} && "
         f"{shlex.quote(str(python))} scripts/watch_seq4096_4k_recovery.py "
@@ -1668,6 +1687,7 @@ def build_gate_shell(
         f"{grad_clip_arg}"
         f"{bigram_arg}"
         f"{advanced_loss_arg}"
+        f"{reset_arg}"
         f"{preempt_arg}"
         f"{advanced_metric_arg}"
         f"--recovery-max-train-batch-tokens {int(recovery_max_train_batch_tokens)} "
@@ -1727,6 +1747,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recovery-advanced-loss-warmup-steps", type=int, default=0)
     parser.add_argument("--recovery-advanced-loss-min-best-val-bpb", type=float, default=0.0)
     parser.add_argument("--recovery-advanced-loss-max-ce-ratio", type=float, default=0.0)
+    parser.add_argument("--recovery-reset-optimizer", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--recovery-reset-rng", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--recovery-reset-loader", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--analysis-root", default="")
     parser.add_argument("--preempt-on-projected-miss", action="store_true")
     parser.add_argument("--preempt-min-step", type=int, default=2500)
@@ -1857,6 +1880,9 @@ def main() -> None:
             advanced_loss_warmup_steps=args.recovery_advanced_loss_warmup_steps,
             advanced_loss_min_best_val_bpb=args.recovery_advanced_loss_min_best_val_bpb,
             advanced_loss_max_ce_ratio=args.recovery_advanced_loss_max_ce_ratio,
+            reset_optimizer_on_resume=args.recovery_reset_optimizer,
+            reset_rng_on_resume=args.recovery_reset_rng,
+            reset_loader_on_resume=args.recovery_reset_loader,
         )
         projected_target_step = (
             float("nan")
@@ -2017,6 +2043,9 @@ def main() -> None:
             advanced_loss_warmup_steps=recovery_controls.advanced_loss_warmup_steps,
             advanced_loss_min_best_val_bpb=recovery_controls.advanced_loss_min_best_val_bpb,
             advanced_loss_max_ce_ratio=recovery_controls.advanced_loss_max_ce_ratio,
+            reset_optimizer_on_resume=recovery_controls.reset_optimizer_on_resume,
+            reset_rng_on_resume=recovery_controls.reset_rng_on_resume,
+            reset_loader_on_resume=recovery_controls.reset_loader_on_resume,
         )
         command_dir = repo_root / "logs" / recovery_run_id / "supervisor"
         command_dir.mkdir(parents=True, exist_ok=True)
@@ -2089,6 +2118,9 @@ def main() -> None:
             recovery_advanced_loss_warmup_steps=recovery_controls.advanced_loss_warmup_steps,
             recovery_advanced_loss_min_best_val_bpb=recovery_controls.advanced_loss_min_best_val_bpb,
             recovery_advanced_loss_max_ce_ratio=recovery_controls.advanced_loss_max_ce_ratio,
+            recovery_reset_optimizer=recovery_controls.reset_optimizer_on_resume,
+            recovery_reset_rng=recovery_controls.reset_rng_on_resume,
+            recovery_reset_loader=recovery_controls.reset_loader_on_resume,
             preempt_on_projected_miss=args.preempt_on_projected_miss,
             preempt_min_step=args.preempt_min_step,
             preempt_patience=args.preempt_patience,

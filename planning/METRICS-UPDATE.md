@@ -8,6 +8,52 @@
 
 **Tech Stack:** PyTorch, W&B, matplotlib, pandas/numpy, existing ToricGT modules under `src/toricgt`, Seq4096 watcher scripts under `scripts`, and compact Parameter-Golf training script under `amelie-iska/parameter-golf/records/.../train_gpt.py`.
 
+## Current Live Update - 2026-06-04 R77
+
+- Active branch: `oai-advanced` in both ToricGT and the nested
+  Parameter-Golf repo.
+- Active BPB run: `toricgt_seq4096_4k_recovery_r77_20260604T183710Z`.
+- Current recovery origin: R75 step 3600 checkpoint
+  `toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt`,
+  with authoritative validation BPB `1.2169`.
+- R75 result: the first controlled active advanced-loss branch improved full
+  validation from `1.2198` at step 3500 to `1.2169` at step 3600 using
+  GraphCG, toric/tropical, and Slepian/Pollak losses with Koszul/BGG and
+  analogy held at zero. This was the best full validation point in the current
+  recovery family but projected the <=1.2 target around step 4183, so it was
+  still too slow for the 4K gate.
+- R76 incident: an automatic recovery branch selected step 3500 with
+  optimizer/RNG/loader reset and active advanced losses, while the manually
+  intended step-3600 continuation OOMed because that reset branch held the GPU.
+  The reset branch was stopped; the failed manual run was discarded.
+- R77 policy: begin true advanced-methodology utilization now, not just
+  sidecar logging. Resume from R75 step 3600 with optimizer/RNG/loader
+  preserved, slightly stronger late BPB velocity controls
+  (`TIED_EMBED_LR=0.0345`, `BIGRAM_BIAS_LR=0.014`, `WARMDOWN_ITERS=750`),
+  and active advanced gradients:
+  `ADVANCED_LOSS_SCALE=0.018`, `GRAPHCG_LOSS_WEIGHT=0.032`,
+  `TORIC_TROPICAL_LOSS_WEIGHT=0.006`, `SLEPIAN_LOSS_WEIGHT=0.020`,
+  `KOSZUL_BGG_LOSS_WEIGHT=0.0006`, `ANALOGY_LOSS_WEIGHT=0.0006`,
+  `ADVANCED_LOSS_SAMPLE_TOKENS=320`, `TORIC_TROPICAL_FAN_BINS=12`,
+  `ADVANCED_LOSS_EVERY=4`, and `ADVANCED_LOSS_MAX_CE_RATIO=0.00075`.
+- R77 rationale: the run is close enough to <=1.2 that structural losses should
+  now shape the embedding basis and directed reasoning trajectory geometry, but
+  BPB remains the controlling objective. The CE-ratio cap keeps GraphCG,
+  Slepian/Pollak concentration, toric/tropical chambering, Koszul/BGG exactness,
+  and analogical transport from overwhelming compression gradients.
+- Automation change: `scripts/watch_seq4096_4k_recovery.py` now exposes
+  explicit recovery reset controls via `--no-recovery-reset-optimizer`,
+  `--no-recovery-reset-rng`, and `--no-recovery-reset-loader`; the generated
+  recovery state records those settings. This prevents future gate restarts
+  from silently turning a continuation experiment into a reset experiment.
+- Periodic analyses for R77: W&B mirroring, full diagnostics, gate status, and
+  Seq4096 checkpoint analysis are attached. The analysis outputs should be
+  reviewed at each 50-step checkpoint, with special attention to validation
+  BPB velocity, sampled OAI BPB, artifact-size margin, GraphCG off-diagonal
+  coherence, Slepian leakage/concentration, toric active-face margin,
+  Koszul/BGG residuals, analogical transport residual, and the 3D/dark-mode
+  trajectory and triangle heatmap plots.
+
 ## Current Live Update - 2026-06-04 R60
 
 - Active branch: `oai-advanced` in both ToricGT and the nested
@@ -1073,6 +1119,33 @@ or increase auxiliary scale; continue R73 unchanged through 3450. If 3450 stalls
 or reverses, the next fallback should keep the 4K warmdown, disable the tiny
 analogy term, and preserve GraphCG/Slepian/toric at the same or lower CE-ratio
 cap.
+
+R73 step-3450 infrastructure failure: validation continued to improve to
+`val_bpb=1.2216`, but checkpoint saving failed with
+`PytorchStreamWriter failed writing file` because the root filesystem was full.
+The partial `step_003450.pt.tmp` was removed, old failed Seq4096 recovery
+checkpoints and stale post-resume analyses were pruned, and about 17GB of free
+space was restored. This is classified as storage/checkpoint failure, not a
+training-quality failure. R74
+(`toricgt_seq4096_4k_recovery_r74_20260604T180722Z`) resumes from the last clean
+R73 step-3400 checkpoint with optimizer/RNG/loader preserved and the same active
+advanced-loss settings. Continue the R74 replay; if it reproduces the 3450
+descent, keep the branch running toward the 4K gate.
+
+R74 step-3500 decision: R74 recovered from the disk-full crash, reproduced the
+R73 descent, and saved checkpoints through step 3500. Validation reached
+`val_bpb=1.2198`; sampled OAI/FineWeb BPB reached `1.2018`; artifact export
+remained under 16MB by about `116k` bytes with `export_prune_fraction=0.10`.
+However, full-validation velocity was still short of the 4K gate requirement
+(`projected_target_step` about `4119`), and the periodic proposal recommended a
+damped structural restart. R75
+(`toricgt_seq4096_4k_recovery_r75_20260604T182013Z`) resumes from the clean R74
+step-3500 checkpoint with optimizer/RNG/loader preserved and a damped advanced
+stack: `ADVANCED_LOSS_SCALE=0.015`, `ADVANCED_LOSS_MAX_CE_RATIO=0.001`,
+`GRAPHCG=0.025`, `SLEPIAN=0.015`, `TORIC_TROPICAL=0.004`, and
+`KOSZUL_BGG=ANALOGY=0.0`. This preserves the helpful GraphCG/Slepian basis
+pressure while removing pre-threshold analogy/Koszul gradient budget and
+halving the auxiliary CE cap.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
