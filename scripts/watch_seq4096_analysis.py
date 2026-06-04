@@ -53,6 +53,18 @@ VAL_RE = re.compile(
     r"\s+step_avg:(?P<avg>[0-9.eE+-]+)ms"
 )
 SEQ4096_CHECKPOINT_RE = re.compile(r"(?:^|_)step_(?P<step>\d+)\.pt$")
+REVIEW_ARTIFACT_SUFFIXES = {
+    ".csv",
+    ".html",
+    ".jpeg",
+    ".jpg",
+    ".json",
+    ".log",
+    ".md",
+    ".png",
+    ".txt",
+}
+IMAGE_SUFFIXES = {".jpeg", ".jpg", ".png"}
 
 
 class TrainRow(NamedTuple):
@@ -2101,6 +2113,124 @@ def run_command(command: list[str], log_path: Path, env: dict[str, str]) -> int:
     return int(result.returncode)
 
 
+def collect_analysis_artifacts(output_dir: Path) -> dict[str, list[str]]:
+    """Collect all current-run artifacts after every sidecar has written files."""
+
+    output_dir = Path(output_dir)
+    paths: list[Path] = []
+    if output_dir.exists():
+        for path in output_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.name == "artifact_inventory.json":
+                continue
+            if path.suffix.lower() not in REVIEW_ARTIFACT_SUFFIXES:
+                continue
+            paths.append(path)
+    paths = sorted(paths, key=lambda item: item.relative_to(output_dir).as_posix())
+    absolute = [str(path) for path in paths]
+
+    def by_suffix(suffixes: set[str]) -> list[str]:
+        return [str(path) for path in paths if path.suffix.lower() in suffixes]
+
+    return {
+        "files": absolute,
+        "relative_files": [path.relative_to(output_dir).as_posix() for path in paths],
+        "image_files": by_suffix(IMAGE_SUFFIXES),
+        "json_files": by_suffix({".json"}),
+        "csv_files": by_suffix({".csv"}),
+        "markdown_files": by_suffix({".md"}),
+        "html_files": by_suffix({".html"}),
+        "log_files": by_suffix({".log"}),
+        "text_files": by_suffix({".txt"}),
+    }
+
+
+def refresh_analysis_artifact_inventory(
+    output_dir: Path,
+    *,
+    run_path: str,
+    checkpoint: Path | None,
+    checkpoint_step: int,
+    report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Rewrite the review inventory so late BPB/W&B artifacts are not missed."""
+
+    artifacts = collect_analysis_artifacts(output_dir)
+    report = report or {}
+    counts = {
+        "files": len(artifacts["files"]),
+        "images": len(artifacts["image_files"]),
+        "json": len(artifacts["json_files"]),
+        "csv": len(artifacts["csv_files"]),
+        "markdown": len(artifacts["markdown_files"]),
+        "html": len(artifacts["html_files"]),
+        "logs": len(artifacts["log_files"]),
+        "text": len(artifacts["text_files"]),
+    }
+    inventory = {
+        "analysis_dir": str(output_dir),
+        "run_path": str(run_path),
+        "checkpoint": str(checkpoint) if checkpoint else "",
+        "checkpoint_step": int(checkpoint_step),
+        **artifacts,
+        "counts": counts,
+        "review_required": 1.0,
+        "review_scope": (
+            "Every listed current-run artifact, including BPB, W&B metric, sampled OAI, "
+            "simplex, geometry, topology, toric, Slepian/Pollak, Koszul/BGG, "
+            "GraphCG, analogical, tropical, proposal, status, and log outputs."
+        ),
+    }
+    write_json(Path(output_dir) / "artifact_inventory.json", inventory)
+    write_analysis_review_prompt(Path(output_dir), inventory, report)
+    return inventory
+
+
+def write_analysis_review_prompt(output_dir: Path, inventory: dict[str, Any], report: dict[str, Any]) -> None:
+    counts = inventory.get("counts", {})
+    highlights = {
+        "latest_step": report.get("latest_step"),
+        "checkpoint_step": report.get("checkpoint_step"),
+        "latest_train_bpb": report.get("latest_train_bpb"),
+        "latest_val_bpb": report.get("latest_val_bpb"),
+        "best_val_bpb": report.get("best_val_bpb"),
+        "target_bpb": report.get("target_bpb"),
+        "target_gap": report.get("target_gap"),
+        "state": report.get("state"),
+        "sampled_oai_bpb_is_not_authoritative": True,
+        "command_status": report.get("command_status"),
+        "bpb_transfer_competition_phase_policy": report.get("bpb_transfer_competition_phase_policy"),
+        "bpb_transfer_recommended_loss_scales": report.get("bpb_transfer_recommended_loss_scales"),
+    }
+    lines = [
+        "# Seq4096 Artifact Review Prompt",
+        "",
+        "Review every current-run image and output file listed in `artifact_inventory.json`.",
+        "Classify each metric/visual family as desired, desired but too weak or slow, missing, contradictory, or undesirable.",
+        "Treat sampled compact OAI probes as analysis hints only unless they are full validation evaluations.",
+        "Recommend training/controller changes only when they help the active BPB gate or the post-threshold reasoning curriculum.",
+        "",
+        "## Inventory Counts",
+        "",
+        json.dumps(counts, indent=2, sort_keys=True),
+        "",
+        "## Current Gate Highlights",
+        "",
+        json.dumps(highlights, indent=2, sort_keys=True, default=str),
+        "",
+        "## Required Families",
+        "",
+        "- BPB descent, velocity, transfer efficiency, target-zone, gate-requirement, and controller plots.",
+        "- W&B trend statistics and core metric plots.",
+        "- Sampled OAI/FineWeb BPB output with clear sampled/full scope labeling.",
+        "- Reasoning simplex and tetrahedron outputs.",
+        "- Geometry trajectories, energy landscapes, directed filtrations, persistence morphisms, commutative algebra/Koszul/BGG audits, toric shadow audits, Slepian/Pollak audits, GraphCG disentanglement, analogical transport, and tropical chamber visualizations.",
+        "- Proposal/status/log files that explain what the automation did and whether the next run should change.",
+    ]
+    (Path(output_dir) / "analysis_review_prompt.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def build_compact_oai_eval_command(
     *,
     python_bin: str,
@@ -2116,7 +2246,7 @@ def build_compact_oai_eval_command(
 ) -> list[str]:
     return [
         str(python_bin),
-        str(Path(repo_root) / "scripts" / "evaluate_seq4096_competition_bpb.py"),
+        str(Path(repo_root) / "scripts" / "evaluate_oai_competition_bpb.py"),
         "--checkpoint",
         str(checkpoint),
         "--output-json",
@@ -2125,7 +2255,7 @@ def build_compact_oai_eval_command(
         str(device),
         "--seq-len",
         str(int(seq_len)),
-        "--val-batch-size",
+        "--batch-size",
         str(int(val_batch_size)),
         "--val-max-sequences",
         str(int(val_max_sequences)),
@@ -2396,8 +2526,22 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
     report["command_status"] = command_status
     write_json(output_dir / "analysis_status.json", report)
     maybe_write_target_artifact_manifest(args, output_dir, checkpoint, report)
+    refresh_analysis_artifact_inventory(
+        output_dir,
+        run_path=args.run_path,
+        checkpoint=checkpoint,
+        checkpoint_step=step,
+        report=report,
+    )
     if args.codex_review_hook:
         run_codex_review_hook(args, output_dir, checkpoint, step, env)
+        refresh_analysis_artifact_inventory(
+            output_dir,
+            run_path=args.run_path,
+            checkpoint=checkpoint,
+            checkpoint_step=step,
+            report=report,
+        )
     return report
 
 

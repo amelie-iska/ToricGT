@@ -768,6 +768,27 @@ compact Seq4096 GPT checkpoints and delegates to the compact evaluator while
 preserving the historical metric aliases. This keeps the familiar analysis
 script usable for both RandomOrderLM and compact Seq4096 checkpoint families.
 
+Live-analysis inventory correction: `scripts/watch_seq4096_analysis.py` now
+refreshes `artifact_inventory.json` and `analysis_review_prompt.md` after the
+full periodic sidecar stack has completed. This is important because the compact
+advanced-geometry runner writes its inventory before later BPB, W&B metric,
+sampled OAI, proposal, status, and hook-log artifacts exist. The final inventory
+now scans the current analysis directory and includes every reviewable PNG,
+JSON, CSV, Markdown, HTML, text, and log file except the inventory itself. This
+prevents the sub-agent review queue from silently missing plots such as
+`bpb/bpb_descent_timeseries.png`, `bpb/bpb_transfer_efficiency.png`,
+`metrics/core_metric_timeseries.png`, and `metrics/recent_metric_slopes.png`.
+
+R56/R57 gate update: R56 reached the step-4000 gate with authoritative
+validation BPB `1.2163`, so the <=1.2 BPB threshold was **not** reached. The
+gate correctly relaunched R57 from the R56 step-3750 checkpoint, which remains
+the best validation checkpoint at `1.2131` so far. R57 uses optimizer/RNG/loader
+reset, `TRAIN_BATCH_TOKENS=983040`, tied embedding LR `0.034`, matrix/scalar LR
+`0.018`, Muon momentum warmup to `0.985`, validation/checkpoint interval 250,
+and low-rate bigram bias. The policy remains BPB-clean before threshold: use
+advanced metrics as sidecar evidence and controller priors, not heavy auxiliary
+losses, until an authoritative <=1.2 competition checkpoint is preserved.
+
 Recommended follow-up for the advanced-analysis track: implement compact
 Seq4096 analogues of the old simplex/geometry entrypoints so graph-of-thought
 trajectory, directed simplicial, toric, Slepian/Pollak, BGG/Koszul, and memory
@@ -805,12 +826,14 @@ Use best checkpoint at or before 3250/3500/3750, then launch the controller-reco
   stored-weight compression path, because PolarQuant K/V cache compression does
   not shrink model weights.
 
-Current action: R52 missed the projected gate velocity at step 3750, so R54 was
-launched from the R52 step-3500 checkpoint with the controller's guarded
-velocity-recapture controls. R54 then worsened at step 3750, so R55 was
-launched from the R54/R52 step-3500 checkpoint with a lower bigram-bias LR and
-guarded structural-recapture policy. A live analysis supervisor is attached and
-will follow subsequent R56/R57-style restarts.
+Current action: R52 missed the projected gate velocity at step 3750, R54 and
+R55 did not improve the authoritative validation gate, and R56 missed step 4000
+at `val_bpb=1.2163`. R57 is now active from the best step-3750 checkpoint
+(`val_bpb=1.2131`) with reset optimizer/RNG/loader and conservative BPB-clean
+controls. The live analysis supervisor is attached, runs the historical W&B
+metrics and OAI BPB entrypoints plus compact Seq4096 advanced geometry/simplex
+visualization, refreshes the final artifact inventory, and dispatches the Codex
+review hook for sub-agent inspection of every current-run output family.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 

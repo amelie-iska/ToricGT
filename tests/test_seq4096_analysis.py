@@ -120,15 +120,69 @@ def test_compact_oai_eval_command_uses_sampled_cpu_probe(tmp_path: Path) -> None
         tokenizer_path="data/tokenizers/fineweb_1024_bpe.model",
     )
 
-    assert command[:2] == ["/env/python", str(tmp_path / "scripts" / "evaluate_seq4096_competition_bpb.py")]
+    assert command[:2] == ["/env/python", str(tmp_path / "scripts" / "evaluate_oai_competition_bpb.py")]
     assert "--checkpoint" in command
     assert str(checkpoint) in command
     assert "--output-json" in command
     assert str(output_json) in command
     assert "--device" in command
     assert "cpu" in command
+    assert "--batch-size" in command
+    assert "256" in command
     assert "--val-max-sequences" in command
     assert "1" in command
+
+
+def test_refresh_artifact_inventory_includes_late_bpb_and_wandb_outputs(tmp_path: Path) -> None:
+    module = load_module()
+    analysis_dir = tmp_path / "analysis" / "step-00004000"
+    geometry_dir = analysis_dir / "geometry" / "topology"
+    bpb_dir = analysis_dir / "bpb"
+    metrics_dir = analysis_dir / "metrics"
+    logs_dir = analysis_dir / "logs"
+    geometry_dir.mkdir(parents=True)
+    bpb_dir.mkdir(parents=True)
+    metrics_dir.mkdir(parents=True)
+    logs_dir.mkdir(parents=True)
+
+    (analysis_dir / "artifact_inventory.json").write_text(
+        json.dumps({"files": [str(geometry_dir / "old_geometry_only.png")]}) + "\n",
+        encoding="utf-8",
+    )
+    (geometry_dir / "directed_filtration.png").write_bytes(b"png")
+    (analysis_dir / "geometry" / "reasoning_geometry_summary.json").write_text("{}\n", encoding="utf-8")
+    (bpb_dir / "bpb_descent_timeseries.png").write_bytes(b"png")
+    (bpb_dir / "bpb_acceleration_report.json").write_text("{}\n", encoding="utf-8")
+    (metrics_dir / "core_metric_timeseries.png").write_bytes(b"png")
+    (metrics_dir / "metric_trend_statistics.csv").write_text("metric,slope\n", encoding="utf-8")
+    (logs_dir / "analyze_wandb_metrics.log").write_text("ok\n", encoding="utf-8")
+    (analysis_dir / "SYNOPSIS.md").write_text("# Synopsis\n", encoding="utf-8")
+
+    inventory = module.refresh_analysis_artifact_inventory(
+        analysis_dir,
+        run_path="entity/project/run",
+        checkpoint=tmp_path / "run_step_004000.pt",
+        checkpoint_step=4000,
+        report={
+            "latest_train_bpb": 1.19,
+            "latest_val_bpb": 1.21,
+            "best_val_bpb": 1.21,
+            "target_bpb": 1.2,
+            "command_status": {"wandb_metrics": 0},
+        },
+    )
+
+    relative_files = set(inventory["relative_files"])
+    assert "geometry/topology/directed_filtration.png" in relative_files
+    assert "bpb/bpb_descent_timeseries.png" in relative_files
+    assert "metrics/core_metric_timeseries.png" in relative_files
+    assert "metrics/metric_trend_statistics.csv" in relative_files
+    assert "logs/analyze_wandb_metrics.log" in relative_files
+    assert "artifact_inventory.json" not in relative_files
+    assert inventory["counts"]["images"] == 3
+    prompt = (analysis_dir / "analysis_review_prompt.md").read_text(encoding="utf-8")
+    assert "sampled compact OAI probes" in prompt
+    assert "GraphCG disentanglement" in prompt
 
 
 def test_advanced_geometry_command_targets_current_analysis_dir(tmp_path: Path) -> None:
