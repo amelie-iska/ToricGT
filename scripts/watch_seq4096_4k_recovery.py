@@ -570,6 +570,37 @@ def plan_metric_driven_recovery_controls(
                 int(gate_step) + 250,
                 int(latest_val.step) + 750,
             )
+            validation_transfer_relieved = (
+                0.50 <= structural_score < 0.75
+                and math.isfinite(validation_gap)
+                and validation_gap <= 0.005
+            )
+            if validation_transfer_relieved:
+                return replace(
+                    base,
+                    train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
+                    tied_embed_lr=round(max(base.tied_embed_lr, min(0.038, base.tied_embed_lr * 1.08)), 6),
+                    matrix_lr=base.matrix_lr,
+                    scalar_lr=base.scalar_lr,
+                    muon_momentum_warmup_steps=resume_step_aware_warmup_steps,
+                    bigram_bias=True,
+                    bigram_bias_lr=round(
+                        max(base.bigram_bias_lr, min(0.03, base.bigram_bias_lr * 1.25)),
+                        6,
+                    ),
+                    bigram_bias_init_from_data=False,
+                    policy="structural_relief_velocity_recapture",
+                    advanced_metric_policy="guarded_transfer_relief_bpb_velocity",
+                    rationale=(
+                        f"validation projects target at step {projected_target_step:.1f}, beyond gate {gate_step}",
+                        "structural recapture pressure has eased into the guarded band: "
+                        f"score={structural_score:.3f} band={structural_band}",
+                        f"validation BPB {latest_val.val_bpb:.4f} is no longer lagging train BPB {train_bpb:.4f} "
+                        f"(gap={validation_gap:.4f})",
+                        "use a small tied-embedding and bigram-LR velocity push while keeping matrix/scalar LR fixed",
+                        "keep GraphCG/Slepian/topology/toric/BGG/Koszul losses in sidecar transfer until the competition checkpoint is preserved",
+                    ),
+                )
             return replace(
                 base,
                 train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
