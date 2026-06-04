@@ -198,6 +198,29 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def is_compact_seq4096_checkpoint(path: Path) -> bool:
+    try:
+        import torch
+
+        payload = torch.load(path, map_location="cpu")
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    model = payload.get("model")
+    return isinstance(model, dict) and "tok_emb.weight" in model
+
+
+def seq4096_training_log_path(repo: Path, run_path: str, checkpoint: Path) -> Path:
+    run_id = ""
+    parts = [part for part in str(run_path).split("/") if part]
+    if len(parts) >= 3:
+        run_id = parts[-1]
+    if not run_id:
+        run_id = checkpoint.parent.name
+    return repo / "amelie-iska" / "parameter-golf" / "logs" / f"{run_id}.txt"
+
+
 def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Path:
     metrics_dir = base / "metrics"
     simplex_dir = base / "simplex"
@@ -409,67 +432,91 @@ def main() -> None:
             cwd=repo,
             log_path=base / "logs" / "oai_competition.log",
         )
-    run_optional_command(
-        [
-            sys.executable,
-            "scripts/evaluate_reasoning_simplex.py",
-            "--checkpoint",
-            str(checkpoint),
-            "--config",
-            args.config,
-            "--data-glob",
-            args.data_glob,
-            "--output-dir",
-            str(base / "simplex"),
-            "--samples",
-            str(args.simplex_samples),
-            "--batch-size",
-            "2",
-            "--seq-len",
-            str(args.seq_len),
-            "--budgets",
-            "1",
-            "2",
-            "4",
-            "8",
-            "--device",
-            args.device,
-            "--precision",
-            args.precision,
-            "--seed",
-            str(args.seed),
-        ],
-        cwd=repo,
-        log_path=base / "logs" / "simplex.log",
-    )
-    run_optional_command(
-        [
-            sys.executable,
-            "scripts/evaluate_reasoning_geometry_suite.py",
-            "--checkpoint",
-            str(checkpoint),
-            "--config",
-            args.config,
-            "--data-glob",
-            args.data_glob,
-            "--output-dir",
-            str(base / "geometry"),
-            "--records",
-            str(args.geometry_records),
-            "--branches",
-            str(args.geometry_branches),
-            "--seq-len",
-            str(args.seq_len),
-            "--device",
-            args.device,
-            "--precision",
-            args.precision,
-            "--seed",
-            str(args.seed),
-        ],
-        cwd=repo,
-        log_path=base / "logs" / "geometry.log",
-    )
+    if is_compact_seq4096_checkpoint(checkpoint):
+        run_optional_command(
+            [
+                sys.executable,
+                "scripts/evaluate_seq4096_reasoning_geometry_suite.py",
+                "--checkpoint",
+                str(checkpoint),
+                "--log",
+                str(seq4096_training_log_path(repo, args.run_path, checkpoint)),
+                "--output-dir",
+                str(base),
+                "--run-path",
+                args.run_path,
+                "--target-bpb",
+                str(args.target_bpb),
+                "--records",
+                str(args.geometry_records),
+                "--seed",
+                str(args.seed),
+            ],
+            cwd=repo,
+            log_path=base / "logs" / "seq4096_reasoning_geometry_suite.log",
+        )
+    else:
+        run_optional_command(
+            [
+                sys.executable,
+                "scripts/evaluate_reasoning_simplex.py",
+                "--checkpoint",
+                str(checkpoint),
+                "--config",
+                args.config,
+                "--data-glob",
+                args.data_glob,
+                "--output-dir",
+                str(base / "simplex"),
+                "--samples",
+                str(args.simplex_samples),
+                "--batch-size",
+                "2",
+                "--seq-len",
+                str(args.seq_len),
+                "--budgets",
+                "1",
+                "2",
+                "4",
+                "8",
+                "--device",
+                args.device,
+                "--precision",
+                args.precision,
+                "--seed",
+                str(args.seed),
+            ],
+            cwd=repo,
+            log_path=base / "logs" / "simplex.log",
+        )
+        run_optional_command(
+            [
+                sys.executable,
+                "scripts/evaluate_reasoning_geometry_suite.py",
+                "--checkpoint",
+                str(checkpoint),
+                "--config",
+                args.config,
+                "--data-glob",
+                args.data_glob,
+                "--output-dir",
+                str(base / "geometry"),
+                "--records",
+                str(args.geometry_records),
+                "--branches",
+                str(args.geometry_branches),
+                "--seq-len",
+                str(args.seq_len),
+                "--device",
+                args.device,
+                "--precision",
+                args.precision,
+                "--seed",
+                str(args.seed),
+            ],
+            cwd=repo,
+            log_path=base / "logs" / "geometry.log",
+        )
     proposal_command = [
         sys.executable,
         "scripts/propose_training_adjustments.py",
