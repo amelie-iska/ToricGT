@@ -111,6 +111,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-wandb-metrics", action="store_true")
     parser.add_argument("--skip-full-diagnostics", action="store_true")
     parser.add_argument("--skip-compact-oai-eval", action="store_true")
+    parser.add_argument("--skip-advanced-geometry", action="store_true")
     parser.add_argument("--compact-oai-eval-device", default="cpu")
     parser.add_argument("--compact-oai-eval-seq-len", type=int, default=256)
     parser.add_argument("--compact-oai-eval-val-batch-size", type=int, default=256)
@@ -123,6 +124,11 @@ def parse_args() -> argparse.Namespace:
         "--compact-oai-eval-tokenizer-path",
         default="amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model",
     )
+    parser.add_argument("--advanced-geometry-max-points", type=int, default=96)
+    parser.add_argument("--advanced-geometry-records", type=int, default=6)
+    parser.add_argument("--advanced-geometry-topology-max-points", type=int, default=28)
+    parser.add_argument("--advanced-geometry-topology-window-size", type=int, default=32)
+    parser.add_argument("--advanced-geometry-topology-levels", type=int, default=4)
     parser.add_argument("--wandb-settle-seconds", type=float, default=5.0)
     return parser.parse_args()
 
@@ -1929,6 +1935,13 @@ def write_synopsis(
         "- `bpb/advanced_metric_control_map.png`: Advanced Metric Control Map showing family-level pressure used to decide velocity, damping, or transfer stabilization.",
         "- `bpb/advanced_metric_evidence_map.png`: Advanced Metric Evidence Map showing whether each advanced metric family historically predicted the next validation BPB drop.",
         "- `bpb/bpb_transfer_controller_map.png`: BPB Transfer Controller Map showing artifact-size policy and recommended family loss scales.",
+        "- `geometry/reasoning_geometry_summary.json`: compact Seq4096 advanced geometry summary for current checkpoint tensor trajectories.",
+        "- `geometry/trajectories/*.png`: 3D embedding trajectories, energy landscapes, toric phase maps, and winding collections.",
+        "- `geometry/topology/*.png`: directed filtrations, noncommutative heatmaps, persistence morphisms, commutative algebra/Koszul/BGG audits, toric shadow audits, and Slepian/Pollak audits.",
+        "- `geometry/graphcg/*.png`, `geometry/analogical/*.png`, `geometry/tropical/*.png`: GraphCG basis disentanglement, analogical transport, and tropical chamber visualizations.",
+        "- `geometry/triangles/*.png` and `geometry/tetrahedra/*.png`: old-suite style simplex/tetrahedron projections over advanced metric families.",
+        "- `simplex/reasoning_simplex_summary.json` and `simplex/*.png`: compact reasoning simplex/tetrahedron diagnostics compatible with the old review hook.",
+        "- `artifact_inventory.json` and `analysis_review_prompt.md`: explicit current-run artifact review queue for Codex/sub-agent inspection.",
         "- `training_adjustment_proposal.json` and `.md`: conservative intervention recommendation combining BPB trajectory, W&B metric statistics, and structural diagnostics.",
         "",
         "## Recommendations",
@@ -2123,6 +2136,47 @@ def build_compact_oai_eval_command(
     ]
 
 
+def build_advanced_geometry_command(
+    *,
+    python_bin: str,
+    repo_root: Path,
+    checkpoint: Path,
+    log_path: Path,
+    output_dir: Path,
+    run_path: str,
+    target_bpb: float,
+    max_points: int,
+    records: int,
+    topology_max_points: int,
+    topology_window_size: int,
+    topology_levels: int,
+) -> list[str]:
+    return [
+        str(python_bin),
+        str(Path(repo_root) / "scripts" / "evaluate_seq4096_reasoning_geometry_suite.py"),
+        "--checkpoint",
+        str(checkpoint),
+        "--log",
+        str(log_path),
+        "--output-dir",
+        str(output_dir),
+        "--run-path",
+        str(run_path),
+        "--target-bpb",
+        str(float(target_bpb)),
+        "--max-points",
+        str(int(max_points)),
+        "--records",
+        str(int(records)),
+        "--topology-max-points",
+        str(int(topology_max_points)),
+        "--topology-window-size",
+        str(int(topology_window_size)),
+        "--topology-levels",
+        str(int(topology_levels)),
+    ]
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -2282,6 +2336,27 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
         command_status["seq4096_oai_competition"] = run_command(
             oai_cmd,
             logs_dir / "seq4096_oai_competition.log",
+            env,
+        )
+
+    if not args.skip_advanced_geometry:
+        geometry_cmd = build_advanced_geometry_command(
+            python_bin=args.python,
+            repo_root=root,
+            checkpoint=checkpoint,
+            log_path=Path(args.log),
+            output_dir=output_dir,
+            run_path=args.run_path,
+            target_bpb=args.target_bpb,
+            max_points=args.advanced_geometry_max_points,
+            records=args.advanced_geometry_records,
+            topology_max_points=args.advanced_geometry_topology_max_points,
+            topology_window_size=args.advanced_geometry_topology_window_size,
+            topology_levels=args.advanced_geometry_topology_levels,
+        )
+        command_status["seq4096_reasoning_geometry_suite"] = run_command(
+            geometry_cmd,
+            logs_dir / "seq4096_reasoning_geometry_suite.log",
             env,
         )
 

@@ -678,6 +678,96 @@ authoritative pre-threshold competition metric; sampled sidecar BPB is a load
 and aliasing sanity check unless `val_max_sequences=0` is used for a full
 evaluation.
 
+Live-analysis correction: the sidecar is intended to review up-to-date training
+checkpoints during training, not stale completed analysis folders. The active
+R56 live watcher now analyzes
+`outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r56_20260604T142900Z/step-00003750`
+from the current run's own checkpoint and then waits for step 4000. The live
+supervisor now also parses `resume_checkpoint:..._step_N.pt` before the trainer
+emits `checkpoint_resumed:... step:N`, which prevents resumed runs from
+accidentally launching their analysis watcher at step 0 during warmup. This is
+the behavior required for sub-agent/sidecar recommendations to track current
+checkpoint evidence.
+
+Fresh R56 step-3750 sidecar readout:
+
+- authoritative trainer validation BPB: `1.2131`;
+- train BPB in W&B summary: about `1.1846`;
+- sampled compact OAI probe BPB: `1.1972` with `eval_scope=sampled`, `seq_len=256`,
+  and `val_max_sequences=1`;
+- state: `off_track_unreachable` for the step-4000 <=1.2 BPB gate;
+- action: keep R56 running to the 4000 checkpoint while the gate remains armed
+  to relaunch from the best checkpoint if the authoritative validation BPB misses
+  the threshold. Treat the sampled compact probe as an alias/load sanity signal,
+  not as the gate metric.
+
+Advanced visualization correction: the live Seq4096 sidecar now includes a
+compact-checkpoint-compatible advanced geometry runner:
+
+```text
+scripts/evaluate_seq4096_reasoning_geometry_suite.py
+```
+
+It writes the old-suite review surface into the current checkpoint's analysis
+directory:
+
+- `geometry/reasoning_geometry_summary.json`;
+- `geometry/reasoning_geometry_records.{json,csv}`;
+- `geometry/selected_records.json`;
+- `geometry/trajectories/*trajectory_3d.png`, `*energy_landscape.png`,
+  `*phase_energy.png`, `*toric_phase_simplicial_trajectory.png`,
+  `*toric_phase_winding_collection.png`, and companion HTML files;
+- `geometry/topology/*directed_filtration.png`,
+  `*step_radius_hierarchy.png`, `*noncommutative_heatmaps.png`,
+  `*exact_persistence_morphisms.png`,
+  `*commutative_algebra_audit.png`, `*toric_shadow_audit.png`, and
+  `*toric_slepian_audit.png`;
+- `geometry/graphcg/*graphcg_basis_disentanglement.png`;
+- `geometry/analogical/*analogical_transport_map.png`;
+- `geometry/tropical/*tropical_chamber_audit.png`;
+- `geometry/triangles/*.png` and `geometry/tetrahedra/*.{png,html}`;
+- `simplex/reasoning_simplex_summary.json`;
+- `simplex/reasoning_simplex_records.{json,csv}`;
+- `simplex/*triangle.png` and `simplex/*tetrahedron.{png,html}`;
+- `artifact_inventory.json` and `analysis_review_prompt.md` for Codex/sub-agent
+  image-by-image review.
+
+The runner labels its source as `seq4096_checkpoint_embedding_proxy`: it uses
+current compact checkpoint tensors, embedding-space trajectories, layer-control
+paths, attention-transport statistics, and bigram memory-graph surfaces. It is
+not a fake placeholder, but it is not yet a generated hidden-state trace from a
+compact GPT forward pass. The next recommended analysis upgrade is a compact
+hidden-state adapter that registers hooks on the Seq4096 GPT blocks and feeds
+actual validation-token hidden trajectories into the same plotting surface.
+
+Manual current-run R56 step-3750 execution produced 93 current-run images and
+120 reviewable output files under:
+
+```text
+outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r56_20260604T142900Z/step-00003750
+```
+
+Summary signals:
+
+- GraphCG disentanglement score mean: `0.7294` (desired);
+- Slepian concentration mean: `0.7261`, leakage mean `0.2739` (desired);
+- toric fan-cell entropy mean: `0.8195` (desired);
+- topology directed asymmetry mean: `0.4842` (useful noncommutative signal);
+- tropical chamber crossing rate mean: `0.8981` (high, monitor as sidecar);
+- BGG standard leakage mean: `0.1111` and Koszul d2 residual `0.0` (desired);
+- analogical map score mean: `0.2181` (desired direction but too weak).
+
+Training policy from this analysis: do not inject advanced losses before the
+4K BPB gate. Keep the competition phase BPB-clean and use these structural
+metrics as sidecar evidence for restarts/controllers. After a <=1.2 checkpoint
+is preserved, prioritize analogical pair and graph-structured memory curricula,
+because analogical transport is the weakest current advanced surface.
+
+Compatibility correction: `scripts/evaluate_oai_competition_bpb.py` now detects
+compact Seq4096 GPT checkpoints and delegates to the compact evaluator while
+preserving the historical metric aliases. This keeps the familiar analysis
+script usable for both RandomOrderLM and compact Seq4096 checkpoint families.
+
 Recommended follow-up for the advanced-analysis track: implement compact
 Seq4096 analogues of the old simplex/geometry entrypoints so graph-of-thought
 trajectory, directed simplicial, toric, Slepian/Pollak, BGG/Koszul, and memory

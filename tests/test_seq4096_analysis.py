@@ -131,6 +131,36 @@ def test_compact_oai_eval_command_uses_sampled_cpu_probe(tmp_path: Path) -> None
     assert "1" in command
 
 
+def test_advanced_geometry_command_targets_current_analysis_dir(tmp_path: Path) -> None:
+    module = load_module()
+    checkpoint = tmp_path / "run_step_000500.pt"
+    log_path = tmp_path / "logs" / "run.txt"
+    output_dir = tmp_path / "analysis" / "step-00000500"
+
+    command = module.build_advanced_geometry_command(
+        python_bin="/env/python",
+        repo_root=tmp_path,
+        checkpoint=checkpoint,
+        log_path=log_path,
+        output_dir=output_dir,
+        run_path="entity/project/run-id",
+        target_bpb=1.2,
+        max_points=64,
+        records=4,
+        topology_max_points=24,
+        topology_window_size=32,
+        topology_levels=4,
+    )
+
+    assert command[:2] == ["/env/python", str(tmp_path / "scripts" / "evaluate_seq4096_reasoning_geometry_suite.py")]
+    assert "--checkpoint" in command
+    assert str(checkpoint) in command
+    assert "--output-dir" in command
+    assert str(output_dir) in command
+    assert "--run-path" in command
+    assert "entity/project/run-id" in command
+
+
 def test_bpb_acceleration_report_marks_near_target_descent(tmp_path: Path) -> None:
     module = load_module()
     log_path = tmp_path / "train.log"

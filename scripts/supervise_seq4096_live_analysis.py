@@ -31,6 +31,7 @@ STAMP_RE = re.compile(r"(\d{8}T\d{6}Z)")
 STEP_RE = re.compile(r"_step_(\d+)\.pt$")
 LOG_STEP_RE = re.compile(r"step:(\d+)/\d+")
 RESUME_STEP_RE = re.compile(r"checkpoint_resumed:.* step:(\d+)")
+RESUME_CHECKPOINT_PATH_RE = re.compile(r"resume_checkpoint:.*_step_(\d+)\.pt")
 EXCLUDED_SESSION_FRAGMENTS = (
     "_analysis_",
     "_full_diag_",
@@ -69,6 +70,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--project", default=os.environ.get("WANDB_PROJECT", "toricgt-parameter-golf"))
     parser.add_argument("--entity", default=os.environ.get("WANDB_ENTITY", "amelie-iska-math"))
     parser.add_argument("--tmux-prefix", default="toricgt_seq4096_live_full_analysis_")
+    parser.add_argument("--codex-review-hook", default="scripts/codex_training_review_resume.sh")
+    parser.add_argument("--codex-review-tmux-prefix", default="toricgt_codex_review_seq4096_live")
     parser.add_argument("--once", action="store_true", help="Attach once and exit.")
     parser.add_argument("--dry-run", action="store_true", help="Write no files and launch no tmux sessions.")
     return parser.parse_args()
@@ -141,12 +144,21 @@ def resume_step(log_path: Path) -> int:
     return best
 
 
+def resume_checkpoint_path_step(log_path: Path) -> int:
+    if not log_path.exists():
+        return 0
+    best = 0
+    for match in RESUME_CHECKPOINT_PATH_RE.finditer(log_path.read_text(encoding="utf-8", errors="replace")):
+        best = max(best, int(match.group(1)))
+    return best
+
+
 def start_step_for_run(checkpoint_dir: Path, log_path: Path, interval_steps: int) -> int:
     interval = max(1, int(interval_steps))
     checkpoint_step = latest_checkpoint_step(checkpoint_dir)
     if checkpoint_step > 0:
         return max(0, checkpoint_step - interval)
-    base = max(latest_log_step(log_path), resume_step(log_path))
+    base = max(latest_log_step(log_path), resume_step(log_path), resume_checkpoint_path_step(log_path))
     if base <= 0:
         return 0
     return base // interval * interval
@@ -175,6 +187,8 @@ def build_watcher_launch(
     project: str,
     entity: str,
     tmux_prefix: str,
+    codex_review_hook: str = "",
+    codex_review_tmux_prefix: str = "",
 ) -> WatcherLaunch:
     checkpoint_dir = root / "amelie-iska" / "parameter-golf" / "checkpoints" / run_id
     log_path = root / "amelie-iska" / "parameter-golf" / "logs" / f"{run_id}.txt"
@@ -216,6 +230,21 @@ def build_watcher_launch(
                 quote(run_id),
                 "--python",
                 quote(python_bin),
+            ]
+            + (
+                [
+                    "--codex-review-hook",
+                    quote((root / codex_review_hook).resolve() if codex_review_hook and not Path(codex_review_hook).is_absolute() else codex_review_hook),
+                ]
+                if codex_review_hook
+                else []
+            )
+            + (
+                ["--codex-review-tmux-prefix", quote(codex_review_tmux_prefix)]
+                if codex_review_tmux_prefix
+                else []
+            )
+            + [
                 "2>&1",
                 "|",
                 "tee",
@@ -263,6 +292,8 @@ def ensure_run_watcher(args: argparse.Namespace, run_id: str, log_path: Path) ->
         project=args.project,
         entity=args.entity,
         tmux_prefix=args.tmux_prefix,
+        codex_review_hook=args.codex_review_hook,
+        codex_review_tmux_prefix=args.codex_review_tmux_prefix,
     )
     if tmux_has_session(launch.session):
         return launch

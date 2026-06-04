@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=0)
     parser.add_argument("--seq-len", type=int, default=0)
     parser.add_argument("--batches", type=int, default=0)
+    parser.add_argument(
+        "--val-max-sequences",
+        type=int,
+        default=0,
+        help="Compact Seq4096 compatibility: 0 means full validation, positive values sample this many sequences.",
+    )
     parser.add_argument("--sp-tokens-per-decode", type=int, default=0)
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=10017)
@@ -89,11 +95,93 @@ def log_to_wandb(run_path: str, metrics: dict[str, float], step: int) -> None:
         run.finish()
 
 
+def is_compact_seq4096_payload(payload: dict[str, Any]) -> bool:
+    model = payload.get("model") if isinstance(payload, dict) else None
+    return isinstance(model, dict) and "tok_emb.weight" in model
+
+
+def compact_seq4096_max_sequences(args: argparse.Namespace, seq_len: int, val_batch_size: int) -> int:
+    if int(args.val_max_sequences) > 0:
+        return int(args.val_max_sequences)
+    if int(args.batches) <= 0:
+        return 0
+    local_batch_seqs = max(1, int(val_batch_size) // max(1, int(seq_len)))
+    return int(args.batches) * local_batch_seqs
+
+
+def run_compact_seq4096_eval(args: argparse.Namespace, checkpoint_path: Path) -> None:
+    """Run the compact evaluator from this historical entrypoint.
+
+    This preserves the familiar ``evaluate_oai_competition_bpb.py`` CLI for
+    periodic analysis while avoiding RandomOrderLM loading on compact GPT
+    checkpoints.
+    """
+
+    from scripts import evaluate_seq4096_competition_bpb as compact_eval
+
+    device_name = args.device
+    if device_name == "cuda" and not torch.cuda.is_available():
+        device_name = "cpu"
+    device = torch.device(device_name)
+    seq_len = int(args.seq_len or 4096)
+    val_batch_size = int(args.batch_size or 524_288)
+    val_max_sequences = compact_seq4096_max_sequences(args, seq_len, val_batch_size)
+    token_glob = args.token_glob or str(compact_eval.DEFAULT_TOKEN_GLOB)
+    tokenizer_path = args.tokenizer_path or str(compact_eval.DEFAULT_TOKENIZER)
+    precision = args.precision if args.precision in {"bf16", "fp32"} else "fp32"
+    module = compact_eval.load_compact_module(compact_eval.DEFAULT_COMPACT_SCRIPT)
+    payload, val_loss, val_bpb, compact_config = compact_eval.evaluate_checkpoint(
+        module=module,
+        checkpoint_path=checkpoint_path,
+        token_glob=token_glob,
+        tokenizer_path=tokenizer_path,
+        device=device,
+        seq_len=seq_len,
+        val_batch_size=val_batch_size,
+        val_max_sequences=val_max_sequences,
+        precision=precision,
+        config_kwargs={
+            "logit_softcap": 30.0,
+            "rope_base": 10000.0,
+            "qk_gain_init": 1.5,
+            "bigram_bias_scale": 1.0,
+            "hash_ngram_bias_order": 3,
+            "hash_ngram_bias_scale": 1.0,
+            "polarquant_kv_bits": 0,
+            "polarquant_eval_sample_tokens": 0,
+            "polarquant_seed": 271828,
+        },
+    )
+    summary = compact_eval.oai_metric_summary(
+        checkpoint=checkpoint_path,
+        step=compact_eval.checkpoint_step(payload),
+        val_loss=val_loss,
+        val_bpb=val_bpb,
+        seq_len=seq_len,
+        val_max_sequences=val_max_sequences,
+        token_glob=token_glob,
+        tokenizer_path=tokenizer_path,
+        config=compact_config,
+    )
+    summary["compatibility_entrypoint"] = "evaluate_oai_competition_bpb.py"
+    if not math.isfinite(float(summary["oai_competition/bpb"])):
+        raise RuntimeError(f"non-finite compact Seq4096 OAI competition BPB: {summary['oai_competition/bpb']}")
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    compact_eval.log_to_wandb(args.wandb_run_path, summary, step=int(summary["step"]))
+
+
 def main() -> None:
     args = parse_args()
     file_config = read_yaml(args.config)
     checkpoint_path = Path(args.checkpoint)
     payload = torch.load(checkpoint_path, map_location="cpu")
+    if is_compact_seq4096_payload(payload):
+        run_compact_seq4096_eval(args, checkpoint_path)
+        return
     model_config = config_from_checkpoint(payload)
     seq_len = int(args.seq_len or model_config.max_seq_len)
     if seq_len > int(model_config.max_seq_len):

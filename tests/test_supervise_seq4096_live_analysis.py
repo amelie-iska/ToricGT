@@ -62,6 +62,20 @@ def test_start_step_for_run_falls_back_to_log_interval_floor(tmp_path: Path) -> 
     assert module.start_step_for_run(checkpoint_dir, log_path, 250) == 3500
 
 
+def test_start_step_for_run_uses_resume_checkpoint_path_before_resume_event(tmp_path: Path) -> None:
+    module = load_module()
+    checkpoint_dir = tmp_path / "checkpoints"
+    checkpoint_dir.mkdir()
+    log_path = tmp_path / "train.log"
+    log_path.write_text(
+        "resume_checkpoint:/checkpoints/old_run/old_run_step_003750.pt\n",
+        encoding="utf-8",
+    )
+
+    assert module.resume_checkpoint_path_step(log_path) == 3750
+    assert module.start_step_for_run(checkpoint_dir, log_path, 250) == 3750
+
+
 def test_build_watcher_launch_renders_seq4096_analysis_command(tmp_path: Path) -> None:
     module = load_module()
     launch = module.build_watcher_launch(
@@ -77,12 +91,17 @@ def test_build_watcher_launch_renders_seq4096_analysis_command(tmp_path: Path) -
         project="toricgt-parameter-golf",
         entity="amelie-iska-math",
         tmux_prefix="toricgt_seq4096_live_full_analysis_",
+        codex_review_hook="scripts/codex_training_review_resume.sh",
+        codex_review_tmux_prefix="toricgt_codex_review_seq4096_live",
     )
 
     assert launch.start_step == 3250
     assert "scripts/watch_seq4096_analysis.py" in launch.shell_text
     assert "--start-step 3250" in launch.shell_text
     assert "--gate-step 4000" in launch.shell_text
+    assert "--codex-review-hook" in launch.shell_text
+    assert "scripts/codex_training_review_resume.sh" in launch.shell_text
+    assert "--codex-review-tmux-prefix toricgt_codex_review_seq4096_live" in launch.shell_text
     assert "amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r55_20260604T140841Z" in launch.shell_text
     assert launch.command_file.name == "live_periodic_full_analysis_command.sh"
     assert launch.output_root.name == "toricgt_seq4096_4k_recovery_r55_20260604T140841Z"
