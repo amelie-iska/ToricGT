@@ -189,15 +189,15 @@ generic non-pausing watcher log: logs/toricgt_seq4096_4k_recovery_r77_20260604T1
 generic non-pausing watcher output root: outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r77_20260604T183710Z_watch_training_analysis
 generic non-pausing watcher target: checkpoint >= 3650 on CPU, no pause-training flag
 generic watcher loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
-                          BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_state.json,
-                          BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_stop,
+                          BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_state.json,
+                          BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_stop,
                           BPB_LOOP_NAME=parameter_golf_bpb_target
 ```
 
 The active r77 gate supervisor and its compact `watch_seq4096_analysis.py`
 sidecar were launched by the supervisor/concurrent review using r77-local loop
 state files.  The required generic `scripts/watch_training_analysis.py` sidecar
-for the next review preserves the supplied r75 loop environment and is
+for the next review preserves the supplied r74 loop environment and is
 non-blocking; training remains active while it waits for the step-3650
 checkpoint.
 
