@@ -119,6 +119,38 @@ def test_bpb_acceleration_report_marks_near_target_descent(tmp_path: Path) -> No
     assert any("validation" in item.lower() or "checkpoint" in item.lower() for item in report["recommendations"])
 
 
+def test_bpb_acceleration_report_marks_near_target_unreachable_by_gate(tmp_path: Path) -> None:
+    module = load_module()
+    log_path = tmp_path / "flat_validation.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "step:3250/20000 train_loss:2.1083 train_time:1ms step_avg:1ms train_bpb:1.2377",
+                "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+                "step:3500/20000 train_loss:2.1093 train_time:1ms step_avg:1ms train_bpb:1.2383",
+                "step:3500/20000 val_loss:2.0834 val_bpb:1.2339 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = module.parse_seq4096_log(log_path)
+    frame = module.training_dataframe(parsed, target_bpb=1.2)
+
+    report = module.bpb_acceleration_report(
+        frame,
+        target_bpb=1.2,
+        checkpoint_step=3500,
+        gate_step=4000,
+    )
+
+    assert report["state"] == "off_track_unreachable"
+    assert report["required_val_velocity_to_gate_per_100_steps"] > 0.006
+    assert report["val_bpb_velocity_recent_per_100_steps"] == pytest.approx(0.0)
+    assert report["bpb_velocity_shortfall_pressure"] == pytest.approx(1.0)
+    assert any("advanced metric" in item.lower() for item in report["recommendations"])
+
+
 def test_transfer_efficiency_report_identifies_train_descent_validation_lag(tmp_path: Path) -> None:
     module = load_module()
     log_path = tmp_path / "transfer_lag.log"

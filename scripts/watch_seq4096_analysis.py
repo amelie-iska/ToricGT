@@ -286,6 +286,7 @@ def bpb_acceleration_report(
     frame: pd.DataFrame,
     target_bpb: float = 1.2,
     checkpoint_step: int | None = None,
+    gate_step: int = 4000,
 ) -> dict[str, Any]:
     latest_step = int(frame["step"].max()) if not frame.empty else 0
     latest_train = last_finite(frame, "train_bpb")
@@ -381,10 +382,66 @@ def bpb_acceleration_report(
     if not math.isfinite(projected_steps_to_target_from_val) and not math.isfinite(projected_steps_to_target_from_train):
         projection_source = "unavailable"
 
+    remaining_steps_to_gate = max(0.0, float(gate_step) - float(latest_val_step))
+    gate_gap_source = latest_val if latest_val is not None else gap_source
+    gate_target_gap = (
+        max(0.0, float(gate_gap_source) - float(target_bpb))
+        if gate_gap_source is not None and math.isfinite(float(gate_gap_source))
+        else float("nan")
+    )
+    required_val_velocity = (
+        gate_target_gap / max(1.0, remaining_steps_to_gate) * 100.0
+        if math.isfinite(gate_target_gap)
+        else float("nan")
+    )
+    recent_val_velocity = (
+        max(0.0, -float(recent_val_slope))
+        if math.isfinite(recent_val_slope)
+        else float("nan")
+    )
+    val_velocity_shortfall = (
+        max(0.0, required_val_velocity - (recent_val_velocity if math.isfinite(recent_val_velocity) else 0.0))
+        if math.isfinite(required_val_velocity)
+        else float("nan")
+    )
+    velocity_shortfall_pressure = (
+        max(0.0, min(1.0, val_velocity_shortfall / 0.005))
+        if math.isfinite(val_velocity_shortfall)
+        else float("nan")
+    )
+    projected_gate_miss = (
+        not math.isfinite(projected_target_step_from_val)
+        or projected_target_step_from_val > float(gate_step)
+    )
+    near_gate_window = latest_val_step >= int(gate_step) - 1000
+    material_velocity_shortfall = (
+        math.isfinite(val_velocity_shortfall)
+        and (val_velocity_shortfall >= 0.0005 or velocity_shortfall_pressure >= 0.10)
+    )
+    off_track_unreachable = (
+        state != "target_reached"
+        and gap_source is not None
+        and gap_source > float(target_bpb)
+        and remaining_steps_to_gate > 0.0
+        and near_gate_window
+        and material_velocity_shortfall
+        and projected_gate_miss
+    )
+    if off_track_unreachable:
+        state = "off_track_unreachable"
+        recommendations = [
+            "Treat this near-target run as unreachable by the 4K gate; validation BPB velocity is below the required gate velocity.",
+            "Trigger an advanced metric intervention now: use structural recapture, toric/Slepian/topology pressure, and failed-trajectory analogues to pick the next restart.",
+            "Keep the primary competition run BPB-clean while using GraphCG/Koszul/BGG/topology diagnostics as controller inputs or sidecar transfer signals.",
+        ]
+
     return {
         "state": state,
         "latest_step": latest_step,
         "checkpoint_step": int(checkpoint_step) if checkpoint_step is not None else None,
+        "gate_step": int(gate_step),
+        "latest_val_step": latest_val_step,
+        "remaining_steps_to_gate": remaining_steps_to_gate,
         "latest_train_bpb": latest_train,
         "latest_val_bpb": latest_val,
         "best_val_bpb": best_val,
@@ -398,6 +455,10 @@ def bpb_acceleration_report(
         "projected_steps_to_target_from_val": projected_steps_to_target_from_val,
         "projected_target_step_from_val": projected_target_step_from_val,
         "projection_source": projection_source,
+        "required_val_velocity_to_gate_per_100_steps": required_val_velocity,
+        "val_bpb_velocity_recent_per_100_steps": recent_val_velocity,
+        "val_velocity_shortfall_to_gate_per_100_steps": val_velocity_shortfall,
+        "bpb_velocity_shortfall_pressure": velocity_shortfall_pressure,
         "recommendations": recommendations,
     }
 
@@ -1540,7 +1601,12 @@ def write_bpb_analysis_artifacts(
     bpb_dir.mkdir(parents=True, exist_ok=True)
     frame = training_dataframe(parsed, target_bpb=target_bpb)
     checkpoint_step = extract_checkpoint_step(checkpoint_path) if checkpoint_path else None
-    report = bpb_acceleration_report(frame, target_bpb=target_bpb, checkpoint_step=checkpoint_step)
+    report = bpb_acceleration_report(
+        frame,
+        target_bpb=target_bpb,
+        checkpoint_step=checkpoint_step,
+        gate_step=gate_step,
+    )
     structural_report = structural_recapture_report(diagnostic_payload)
     transfer_report = transfer_efficiency_report(frame, target_bpb=target_bpb)
     velocity_report = gate_velocity_report(frame, target_bpb=target_bpb, gate_step=gate_step)
