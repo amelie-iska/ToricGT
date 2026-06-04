@@ -22,6 +22,7 @@ if [[ -z "$CONDA_BIN" ]]; then
     CONDA_BIN="conda"
   fi
 fi
+PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="${STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
@@ -58,6 +59,7 @@ SUPERVISOR_CMD=(
   WANDB_PROJECT="$PROJECT"
   BPB_TARGET="$BPB_TARGET"
   BPB_MAX_REVIEW_ITERATIONS="$BPB_MAX_REVIEW_ITERATIONS"
+  PYTORCH_CUDA_ALLOC_CONF="$PYTORCH_CUDA_ALLOC_CONF"
   CONDA_BIN="$CONDA_BIN"
   python scripts/supervise_parameter_golf_training.py
   --config "$CONFIG"

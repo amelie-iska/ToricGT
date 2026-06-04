@@ -215,6 +215,10 @@ def start_training(args: argparse.Namespace, state: dict[str, Any], checkpoint: 
         return
     if tmux_has(args.train_session):
         tmux_kill(args.train_session)
+    cuda_alloc_conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    cuda_alloc_env = []
+    if cuda_alloc_conf:
+        cuda_alloc_env.append(f"PYTORCH_CUDA_ALLOC_CONF={cuda_alloc_conf}")
 
     stamp = utc_stamp()
     run_name = args.run_name or args.run_id
@@ -233,6 +237,7 @@ def start_training(args: argparse.Namespace, state: dict[str, Any], checkpoint: 
         f"WANDB_PROJECT={args.wandb_project}",
         f"WANDB_RUN_ID={args.run_id}",
         f"CONDA_BIN={args.conda_bin}",
+        *cuda_alloc_env,
         "WANDB_RESUME=allow",
         "python",
         "scripts/train_parameter_golf_random_order.py",
@@ -285,6 +290,10 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
     loop_state = os.environ.get("BPB_LOOP_STATE", str(Path(args.log_root) / "bpb_codex_loop_state.json"))
     loop_stop_file = os.environ.get("BPB_LOOP_STOP_FILE", str(Path(args.log_root) / "bpb_codex_loop_stop"))
     loop_name = os.environ.get("BPB_LOOP_NAME", "all_phases_supervised_watchdog")
+    cuda_alloc_conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    cuda_alloc_env = []
+    if cuda_alloc_conf:
+        cuda_alloc_env.append(f"PYTORCH_CUDA_ALLOC_CONF={cuda_alloc_conf}")
     command = [
         args.conda_bin,
         "run",
@@ -297,6 +306,7 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         f"BPB_MAX_REVIEW_ITERATIONS={args.max_analysis_iterations}",
         f"BPB_LOOP_STATE={loop_state}",
         f"CONDA_BIN={args.conda_bin}",
+        *cuda_alloc_env,
         f"BPB_LOOP_STOP_FILE={loop_stop_file}",
         f"BPB_LOOP_NAME={loop_name}",
         "CODEX_REVIEW_FALLBACK_CONTINUE=0",
