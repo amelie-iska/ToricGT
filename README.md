@@ -25,42 +25,47 @@ Current validated status:
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
-  `toricgt_seq4096_4k_recovery_r14_20260604T004756Z`.
-  R14 is a compact-id, W&B-reporting structural-pressure recovery launched
-  from the R13 step-3000 checkpoint after R13's zero-initialized bigram
-  recovery improved validation BPB to `1.2418272257606944` at step 3250 but
-  still projected the <1.2 target at about step `6152.8`, beyond the 4K gate.
-  R14 resets optimizer/RNG/loader, uses `983040` train tokens per step,
-  `TIED_EMBED_LR=0.037`, matrix/scalar LR `0.019`, Muon momentum `0.985`,
-  warmup `650`, gradient clipping `1.0`, and keeps the zero-initialized learned
-  `BIGRAM_BIAS=1` head while damping `BIGRAM_BIAS_LR` to `0.025`. The launch
-  was chosen because R13's diagnostics showed high structural pressure:
-  topology loss `1.109377384185791`, directed topology loss
-  `0.17621713876724243`, Slepian/Pollak leakage `1.0`, toric active-face
-  margin `-1.73760986328125`, and toric shadow mean bend `1.947449803352356`.
-  Data-initialized bigram bias was tested in R12 and rejected because it
-  worsened initial validation BPB to `1.2680636231146791`. R14's W&B run is
-  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r14_20260604T004756Z>.
-  Latest confirmed R14 W&B status while this README was refreshed: trainer
-  step `3021`, train BPB `1.1966783562679195`, validation/OpenAI BPB
-  `1.245367828628834`, target gap `0.04536782862883415`, target not yet
-  reached.
+  `toricgt_seq4096_4k_recovery_r16_20260604T013007Z`. The <1.2 BPB competition
+  checkpoint has not yet been preserved. R16 was launched automatically by the
+  4K gate controller after R15 reached validation/OpenAI BPB `1.2392` at step
+  `3250`, but projected the target at step `4830.645161290331`, beyond the
+  4K gate. R16 resumes from the R15 step-3000 checkpoint with optimizer, RNG,
+  and loader reset; it uses `983040` train tokens per step, `TIED_EMBED_LR=0.034`,
+  matrix/scalar LR `0.018`, Muon momentum `0.985`, warmup `650`, gradient
+  clipping `1.0`, and the zero-initialized learned `BIGRAM_BIAS=1` head with
+  `BIGRAM_BIAS_LR=0.02`. R16's W&B run is
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r16_20260604T013007Z>.
+  Initial R16 validation reproduced the step-3000 baseline:
+  `val_bpb=1.245367828628834`; W&B train BPB was already reporting by trainer
+  step `3006`.
+- R15 is the current best completed recovery analysis. Its step-3250 checkpoint
+  was saved at
+  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r15_20260604T010856Z/toricgt_seq4096_4k_recovery_r15_20260604T010856Z_step_003250.pt`
+  with validation/OpenAI BPB `1.2392`, target gap `0.0392`, recent validation
+  slope `-0.00248` BPB per 100 steps, and structural recapture score
+  `0.8423222920027302`. The structural prior was
+  `restart_guarded_damp_lr_use_structural_sidecar_transfer`.
 - Seq4096 recovery automation now uses metric-driven launch controls. Repeated
-  validation ETA misses trigger pre-gate recovery; projected-miss cases use a
-  small tied-embedding LR lift plus higher effective batch, while train-low /
-  validation-lag cases lower LR and keep the competition BPB runner clean.
-  GraphCG, Slepian/Pollak, topology, toric, BGG Category O, Koszul, tropical,
-  complexity, and persistent-homology signals are used as sidecar transfer and
-  decision diagnostics until the <1.2 BPB competition checkpoint is preserved.
-  At the tied-LR cap, the recovery watcher now switches to a zero-initialized
-  bigram transition-bias recapture instead of repeating the same LR-only
-  restart. If the bigram head is already enabled and the latest full
-  diagnostics show high topology/toric/Slepian/tropical pressure, the watcher
-  now switches to a guarded structural-pressure recovery: it stops escalating
-  the tied embedding LR cap, damps the bigram LR, lengthens warmup, and keeps
-  heavy structural losses out of the compact competition scorer. Recovery run
-  ids are compacted to avoid W&B `CommError` failures from recursively long
-  names.
+  validation ETA misses trigger pre-gate recovery; projected-miss cases use
+  batch/LR controls, while train-low / validation-lag cases lower LR and keep
+  the competition BPB runner clean. GraphCG, Slepian/Pollak, topology, toric,
+  BGG Category O, Koszul, tropical, complexity, and persistent-homology signals
+  are used as sidecar transfer and decision diagnostics until the <1.2 BPB
+  competition checkpoint is preserved. At the tied-LR cap, the watcher switches
+  to zero-initialized bigram transition-bias recapture. If the bigram head is
+  already enabled and diagnostics show high topology/toric/Slepian/BGG/
+  complexity pressure, the watcher now uses a bounded structural recapture
+  score and a guarded structural-pressure recovery: it stops escalating tied
+  embedding LR, damps lexical/bigram controls to their floor, lengthens warmup,
+  and keeps heavy structural losses out of the compact competition scorer.
+  Recovery run ids are compacted to avoid W&B `CommError` failures from
+  recursively long names.
+- W&B mirrors now report `diagnostics/latest/structural_recapture_score`,
+  `diagnostics/latest/structural_pressure_high`,
+  `diagnostics/latest/structural_recapture_band_id`, and
+  `diagnostics/structural_recapture_components/*` in both history and summary.
+  Periodic analyses also write `bpb/structural_recapture_report.json` and
+  `bpb/bpb_structural_recapture_map.png` beside the BPB rockfall dashboard.
 - Advanced reasoning/memory branch: the live auxiliary run is
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   It trains the random-order ToricGT adapter with explicit graph-of-thought,
@@ -614,28 +619,27 @@ uses `BPB_TARGET=1.2` and a 100-analysis cap.
 Current `oai` OpenAI Parameter-Golf recovery status:
 
 - Primary BPB run:
-  `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z`.
+  `toricgt_seq4096_4k_recovery_r16_20260604T013007Z`.
 - W&B:
-  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z>.
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r16_20260604T013007Z>.
 - Training tmux:
-  `toricgt_seq4096_4k_recovery_r8_20260603T230843Z`.
+  `toricgt_seq4096_4k_recovery_r16_20260604T013007Z`.
 - Analysis tmux sidecars:
-  `toricgt_seq4096_4k_analysis_r8_20260603T230843Z`,
-  `toricgt_seq4096_4k_mirror_r8_20260603T230843Z`,
-  `toricgt_seq4096_4k_full_diag_r8_20260603T230843Z`, and
-  `toricgt_seq4096_4k_gate_r8_20260603T230843Z`.
+  `toricgt_seq4096_4k_analysis_r16_20260604T013007Z`,
+  `toricgt_seq4096_4k_mirror_r16_20260604T013007Z`,
+  `toricgt_seq4096_4k_full_diag_r16_20260604T013007Z`, and
+  `toricgt_seq4096_4k_gate_r16_20260604T013007Z`.
 - Checkpoint directory:
-  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z`.
+  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r16_20260604T013007Z`.
 - Latest preempt-trigger analysis:
-  `outputs/post_resume_analysis/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z/step-00002750`.
-- Previous R7 step-2500 periodic analysis:
-  `outputs/post_resume_analysis/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z/step-00002500`.
+  `outputs/post_resume_analysis/toricgt_seq4096_4k_recovery_r15_20260604T010856Z/step-00003250`.
 
-Periodic analyses are part of the live training loop. The R8 sidecars produce
+Periodic analyses are part of the live training loop. The R16 sidecars produce
 W&B metric-history summaries, BPB descent plots, rockfall dashboards,
 target-zone plots, BPB phase planes, descent simplices, diagnostic proxy
-geometry, full ToricGT geometry payloads, and structural BPB intervention
-proposals. The prior R7 step-2500 analysis wrote:
+geometry, full ToricGT geometry payloads, bounded structural recapture maps,
+and structural BPB intervention proposals. The latest R15 step-3250 analysis
+wrote:
 
 ```text
 bpb/bpb_descent_timeseries.png
@@ -646,6 +650,8 @@ bpb/bpb_rockfall_dashboard.png
 bpb/bpb_target_zone.png
 bpb/bpb_eta_to_target.png
 bpb/diagnostic_proxy_geometry.png
+bpb/bpb_structural_recapture_map.png
+bpb/structural_recapture_report.json
 metrics/core_metric_timeseries.png
 metrics/recent_metric_slopes.png
 metrics/selected_metric_correlations.png
@@ -654,62 +660,37 @@ training_adjustment_proposal.json
 training_adjustment_proposal.md
 ```
 
-The current readout is to keep the primary Seq4096 schedule alive while
-validation continues to improve, but to arm the 4K recovery watcher because the
-latest validation-slope ETA is now slightly beyond the gate. Step 2500 reached
-train BPB `1.2477` and validation BPB `1.2563`; the validation move is the
-signal that matters for the 4K gate.
-`scripts/watch_seq4096_analysis.py` now reports a validation-slope ETA in
-addition to the intentionally noisy train-slope ETA, and it writes
-`training_adjustment_proposal.json`/`.md` through
-`scripts/propose_training_adjustments.py`. On the step-2500 periodic analysis,
-the validation trend projected the target crossing around step `4137`, just
-past the step-4000 recovery gate. The live primary run was not killed because
-validation is still improving and the miss projection is close, but the 4K
-watcher was retuned to restart from a mid-run best checkpoint if the gate is
-missed.
-The advanced proxy geometry is being used as an intervention dashboard rather
-than a reason to rescale the main CE/BPB objective mid-descent: Slepian
-leakage, BGG/Koszul residuals, topology pressure, and toric shadow diagnostics
-are routed into the separate bounded structural branch unless the BPB gate
-watcher calls for a restart.
-The current proposal policy therefore says: hold primary BPB controls while the
-validation curve is still improving, keep structural losses off or tiny in the
-competition run until the threshold artifact is preserved, and continue the
-GraphCG/Slepian/memory/analogy branch as the place where topology, BGG/Koszul,
-and Slepian pressure can be trained without slowing the BPB race. The retuned
-gate recovery controls are: `min_recovery_runway_steps=1000`,
-`train_batch_tokens=917504`, `tied_embed_lr=0.0352`, `matrix_lr=0.02`,
-`scalar_lr=0.02`, `muon_momentum=0.985`, `muon_momentum_warmup_steps=400`, and
-`grad_clip_norm=1.0`. The gate watcher now also supports a tested pre-gate ETA
-risk trigger: with `--preempt-on-projected-miss --preempt-min-step 2500
---preempt-patience 2`, one projected miss is logged as a warning, while two
-consecutive validation-ETA misses can launch the same mid-run recovery before
-waiting for step 4000. R8 was launched by that path from the R7 step-2750
-checkpoint after the step-2750 analysis projected a target crossing around
-step `4495`.
+The current readout is not yet a solved <1.2 BPB checkpoint. R15 improved the
+best validation BPB to `1.2392`, but its validation-slope ETA projected the
+target crossing at step `4830.645161290331`, beyond the step-4000 gate. The
+step-3250 structural recapture score was `0.8423222920027302`, with high
+topology, directed-topology, Slepian/Pollak leakage, BGG leakage, toric
+negative-margin, and toric-bend pressure. The gate watcher therefore launched
+R16 using the guarded structural-pressure policy instead of an LR-escalation
+policy. Heavy GraphCG/Slepian/topology/toric/BGG/Koszul losses remain out of
+the compact competition scorer; they continue to guide sidecars and the
+separate advanced transfer branch until a <=1.2 competition checkpoint is
+preserved.
 
-The run restarted from the original step-1000 Seq4096 checkpoint rather than
-from the later step-3000 checkpoint. The reason is runway: after the step-3000
-and double-batch step-3000 replays improved but did not project to cross
-`1.2` by step 4000, the watcher was retuned to require at least 3000 recovery
-steps before the gate. R7 therefore resumes from:
+R16 resumes from:
 
 ```text
-amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z/toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_step_001000.pt
+amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r15_20260604T010856Z/toricgt_seq4096_4k_recovery_r15_20260604T010856Z_step_003000.pt
 ```
 
-Launch controls for R7:
+Launch controls for R16:
 
 ```text
-TRAIN_BATCH_TOKENS=786432
-TIED_EMBED_LR=0.032
-MATRIX_LR=0.020
-SCALAR_LR=0.020
+TRAIN_BATCH_TOKENS=983040
+TIED_EMBED_LR=0.034
+MATRIX_LR=0.018
+SCALAR_LR=0.018
 MUON_MOMENTUM=0.985
-MUON_MOMENTUM_WARMUP_STEPS=500
+MUON_MOMENTUM_WARMUP_STEPS=650
 MUON_MOMENTUM_WARMUP_START=0.900
 GRAD_CLIP_NORM=1.0
+BIGRAM_BIAS=1
+BIGRAM_BIAS_LR=0.02
 RESET_OPTIMIZER=1
 RESET_RNG=1
 RESET_DATALOADER=1
@@ -719,39 +700,45 @@ Observed validation trajectory:
 
 | Run | Step | Native validation BPB |
 | --- | ---: | ---: |
-| original Seq4096 | 1000 | `1.3637` |
-| original Seq4096 | 1500 | `1.3399` |
-| original Seq4096 | 4000 | `1.2569` |
-| R7 recovery | 1000 | `1.3637` |
-| R7 recovery | 1250 | `1.3259` |
-| R7 recovery | 1500 | `1.3016` |
-| R7 recovery | 1750 | `1.2863` |
-| R7 recovery | 2000 | `1.2735` |
-| R7 recovery | 2250 | `1.2632` |
-| R7 recovery | 2500 | `1.2563` |
-| R7 recovery | 2750 | `1.2513` |
-| R8 preemptive recovery | 2750 resume | `1.2513` |
+| R13 zero-init bigram recovery | 3000 | `1.245367828628834` |
+| R13 zero-init bigram recovery | 3250 | `1.2418272257606944` |
+| R14 structural-pressure recovery | 3000 | `1.245367828628834` |
+| R14 structural-pressure recovery | 3250 | `1.2403837644506015` |
+| R15 guarded structural recovery | 3000 | `1.245367828628834` |
+| R15 guarded structural recovery | 3250 | `1.2392` |
+| R16 guarded structural recovery | 3000 | `1.245367828628834` |
 
-The R7 step-2750 analysis classified the run as `near_target`, with validation
-BPB `1.2513`, target gap `0.0513`, recent validation slope about `-0.00294`
-BPB per 100 steps, and a validation-ETA target crossing around step `4495`.
-That was the second consecutive projected miss after the step-2500 `4137`
-projection, so the tested pre-gate watcher launched R8 from the step-2750
-checkpoint. R8 is the active BPB run; it has W&B `trainer/step`, train BPB,
-validation BPB, OpenAI Parameter-Golf BPB, best BPB, and target-gap aliases
-reporting from the new run id.
+R16 has W&B `trainer/step`, train BPB, validation BPB, OpenAI
+Parameter-Golf BPB, best BPB, target-gap aliases, optimizer hyperparameters,
+and structural-recapture diagnostics reporting from the new run id. The dense
+and full-diagnostic W&B mirrors report the bounded structural score and
+component metrics under:
+
+```text
+diagnostics/latest/structural_recapture_score
+diagnostics/latest/structural_pressure_high
+diagnostics/latest/structural_recapture_band_id
+diagnostics/structural_recapture_components/*
+```
+
+The bounded score uses BPB gap pressure, topology loss, directed topology
+loss, Slepian/Pollak leakage, toric negative margin, toric shadow bend, BGG
+standard leakage, BGG `d^2` residual, complexity NCD, and tropical plateau
+pressure. A high score does not add heavy structural losses to the competition
+scorer; it chooses guarded restart controls and keeps the structure-heavy work
+in sidecar transfer until the threshold checkpoint is safe.
 
 The current launch path for this family is:
 
 ```bash
 python scripts/watch_seq4096_4k_recovery.py \
-  --run-id toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z \
+  --run-id toricgt_seq4096_4k_recovery_r16_20260604T013007Z \
   --gate-step 4000 \
   --target-bpb 1.2 \
   --min-recovery-runway-steps 1000 \
   --preempt-on-projected-miss \
-  --preempt-min-step 2500 \
-  --preempt-patience 2
+  --preempt-min-step 3250 \
+  --preempt-patience 1
 ```
 
 The live advanced reasoning/memory transfer run is separate from the Seq4096
@@ -1332,6 +1319,8 @@ Implemented:
 
 Recent `oai` implementation commits:
 
+- `1d5175e Keep structural diagnostics in dense W&B mirror`
+- `adec5d4 Add structural recapture W&B diagnostics`
 - `c074a26 Add validation ETA to Seq4096 BPB analysis`
 - `7eace3c Log explicit trainer step in parameter golf runs`
 - `bee47f5 Add adaptive structural training signals`
@@ -1340,12 +1329,18 @@ Recent `oai` implementation commits:
 
 Active live training:
 
-- Primary BPB recovery: `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z`.
-  Preempted at step 2750, BPB `1.2513`, after two projected 4K misses.
-- Active BPB recovery: `toricgt_seq4096_fresh_metrics_seed1337_20260603T1818Z_4k_recovery_r7_20260603T212821Z_4k_recovery_r8_20260603T230843Z`.
-  Latest checked validation: step 2750 resume, BPB `1.2513`; W&B reports
+- Primary BPB recovery: `toricgt_seq4096_4k_recovery_r16_20260604T013007Z`.
+  It was launched from the R15 step-3000 checkpoint after R15 step 3250
+  reached validation/OpenAI BPB `1.2392` but projected the <1.2 target at
+  step `4830.645161290331`, beyond the 4K gate. R16 initial validation
+  reproduced the step-3000 baseline BPB `1.245367828628834`; W&B reports
   `trainer/step`, `train/bpb`, `val/bpb`, `openai_parameter_golf/bpb`,
-  `bpb/best`, and `bpb/gap_to_target`.
+  `bpb/best`, `bpb/gap_to_target`, optimizer hyperparameters, and structural
+  recapture diagnostics.
+- Current best completed BPB checkpoint: R15 step 3250,
+  `toricgt_seq4096_4k_recovery_r15_20260604T010856Z_step_003250.pt`,
+  validation/OpenAI BPB `1.2392`. The <1.2 threshold artifact is not yet
+  preserved.
 - Advanced reasoning/memory transfer:
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   W&B confirms `trainer/step`, `train/bpb`, phase index, GraphCG weight, and
