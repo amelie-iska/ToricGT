@@ -12190,3 +12190,60 @@ prefer a damped-auxiliary replay from step 3600 over another high-aux replay:
 lower `ADVANCED_LOSS_SCALE`, `GRAPHCG_LOSS_WEIGHT`, `SLEPIAN_LOSS_WEIGHT`, and
 `ADVANCED_LOSS_MAX_CE_RATIO`, or make the advanced losses log-only until the
 validation BPB slope turns negative again.
+
+## 2026-06-04 R80 High-Aux Rejected; R81 Low-BPB Trigger Confirmed
+
+R80 tested whether resetting RNG/loader while preserving optimizer state would
+make the R79 low-train-BPB behavior transfer to validation. It did not.
+
+Observed R80 transfer checkpoint:
+
+- step 3600: deterministic validation BPB `1.2169`;
+- step 3650: train BPB `1.2121`, validation BPB `1.2184`.
+
+Decision: stop R80 as an unhelpful high-auxiliary branch. The train curve
+improved modestly but validation BPB moved in the wrong direction, so this
+branch widened the train/validation gap instead of approaching the OpenAI
+FineWeb BPB gate.
+
+R81 is the damped-auxiliary replay from the same step-3600 checkpoint. It keeps
+advanced methods active for evidence and gentle shaping, but lowers auxiliary
+pressure and the CE cap:
+
+```text
+run: toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z
+resume checkpoint: toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
+TIED_EMBED_LR=0.0340
+BIGRAM_BIAS_LR=0.0120
+ADVANCED_LOSS_SCALE=0.010
+GRAPHCG_LOSS_WEIGHT=0.020
+TORIC_TROPICAL_LOSS_WEIGHT=0.003
+SLEPIAN_LOSS_WEIGHT=0.010
+KOSZUL_BGG_LOSS_WEIGHT=0.00010
+ANALOGY_LOSS_WEIGHT=0.00008
+ADVANCED_LOSS_SAMPLE_TOKENS=192
+ADVANCED_LOSS_EVERY=8
+ADVANCED_LOSS_WARMUP_STEPS=160
+ADVANCED_LOSS_MAX_CE_RATIO=0.00025
+CHECKPOINT_ON_TRAIN_BPB_BELOW=1.13
+VAL_ON_TRAIN_BPB_CHECKPOINT=1
+```
+
+The low-BPB trigger is confirmed live on R81:
+
+```text
+forced checkpoint: toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z_step_003608.pt
+trigger step: 3608
+trigger train BPB: 1.1142
+trigger validation BPB: 1.2170
+reason: low_train_bpb
+```
+
+The validation result again shows a train-side low-BPB transient rather than a
+competition-BPB breakthrough. Keep the forced checkpoints and analyses because
+they are useful for transfer diagnostics, but do not promote a low-train-BPB
+checkpoint unless deterministic validation or sampled OAI competition BPB also
+improves. If the 3650 validation checkpoint does not beat the step-3600
+validation baseline, prefer an even cleaner BPB branch with advanced losses
+log-only or lower tied-embedding/bigram-bias velocity rather than another
+high-auxiliary replay.
