@@ -242,6 +242,43 @@ def test_preemptive_gate_risk_ignores_tiny_gate_overrun_when_velocity_shortfall_
     assert not should_preempt_for_gate_risk(risk)
 
 
+def test_preemptive_gate_risk_preempts_when_validation_velocity_reverses(tmp_path: Path):
+    analysis_root = tmp_path / "analysis"
+    step_dir = analysis_root / "step-00003500"
+    step_dir.mkdir(parents=True)
+    (step_dir / "analysis_status.json").write_text(
+        (
+            "{"
+            "\"checkpoint_step\": 3500,"
+            "\"state\": \"near_target\","
+            "\"best_val_bpb\": 1.2339,"
+            "\"target_bpb\": 1.2,"
+            "\"val_bpb_recent_slope_per_100_steps\": 0.00008,"
+            "\"projected_target_step_from_val\": NaN,"
+            "\"required_val_velocity_to_gate_per_100_steps\": 0.00682,"
+            "\"val_bpb_velocity_recent_per_100_steps\": 0.0,"
+            "\"val_velocity_shortfall_to_gate_per_100_steps\": 0.00682,"
+            "\"bpb_velocity_shortfall_pressure\": 1.0"
+            "}"
+        ),
+        encoding="utf-8",
+    )
+
+    risk = load_preemptive_gate_risk(
+        analysis_root,
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3250,
+        patience=1,
+    )
+
+    assert risk is not None
+    assert risk.missed_projection_count == 1
+    assert risk.latest_projected_target_step > 4000
+    assert risk.latest_velocity_shortfall_pressure == 1.0
+    assert should_preempt_for_gate_risk(risk)
+
+
 def test_failed_trajectory_analogue_risk_preempts_on_on_track_replay(tmp_path: Path):
     current_log = tmp_path / "current.log"
     current_log.write_text(
