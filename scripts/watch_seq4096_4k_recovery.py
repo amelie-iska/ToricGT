@@ -434,7 +434,7 @@ def load_failed_trajectory_analogue_risk(
     current_projected, current_slope = projected_target_step_from_validation(current.val_rows, target_bpb)
     if not math.isfinite(current_projected):
         return None
-    if current_projected < float(gate_step) - float(current_projection_gate_margin_steps):
+    if current_projected <= float(gate_step):
         return None
 
     current_train_steps = [

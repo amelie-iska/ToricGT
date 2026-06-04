@@ -280,7 +280,7 @@ def test_preemptive_gate_risk_preempts_when_validation_velocity_reverses(tmp_pat
     assert should_preempt_for_gate_risk(risk)
 
 
-def test_failed_trajectory_analogue_risk_preempts_on_on_track_replay(tmp_path: Path):
+def test_failed_trajectory_analogue_risk_preempts_on_projected_miss_replay(tmp_path: Path):
     current_log = tmp_path / "current.log"
     current_log.write_text(
         "\n".join(
@@ -291,7 +291,7 @@ def test_failed_trajectory_analogue_risk_preempts_on_on_track_replay(tmp_path: P
                 "step:3150/20000 train_loss:1.9998 train_time:1ms step_avg:1ms train_bpb:1.1750",
                 "step:3200/20000 train_loss:2.0769 train_time:1ms step_avg:1ms train_bpb:1.2363",
                 "step:3250/20000 train_loss:2.1088 train_time:1ms step_avg:1ms train_bpb:1.2383",
-                "step:3250/20000 val_loss:2.0838 val_bpb:1.2339 train_time:1ms step_avg:1ms",
+                "step:3250/20000 val_loss:2.0857 val_bpb:1.2350 train_time:1ms step_avg:1ms",
             ]
         )
         + "\n",
@@ -337,6 +337,59 @@ def test_failed_trajectory_analogue_risk_preempts_on_on_track_replay(tmp_path: P
     assert risk.analogue_failed_count == 2
     assert risk.analogue_train_rmse_mean < 0.001
     assert should_preempt_for_gate_risk(risk)
+
+
+def test_failed_trajectory_analogue_risk_does_not_preempt_current_on_track_projection(tmp_path: Path):
+    current_log = tmp_path / "current.log"
+    current_log.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+                "step:3050/20000 train_loss:2.0872 train_time:1ms step_avg:1ms train_bpb:1.2501",
+                "step:3100/20000 train_loss:2.0389 train_time:1ms step_avg:1ms train_bpb:1.2108",
+                "step:3150/20000 train_loss:1.9994 train_time:1ms step_avg:1ms train_bpb:1.1747",
+                "step:3200/20000 train_loss:2.0753 train_time:1ms step_avg:1ms train_bpb:1.2361",
+                "step:3250/20000 train_loss:2.1083 train_time:1ms step_avg:1ms train_bpb:1.2377",
+                "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    history_logs = []
+    for index in range(2):
+        path = tmp_path / f"later_stalled_{index}.log"
+        path.write_text(
+            "\n".join(
+                [
+                    "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+                    "step:3050/20000 train_loss:2.0872 train_time:1ms step_avg:1ms train_bpb:1.2501",
+                    "step:3100/20000 train_loss:2.0389 train_time:1ms step_avg:1ms train_bpb:1.2108",
+                    "step:3150/20000 train_loss:1.9994 train_time:1ms step_avg:1ms train_bpb:1.1747",
+                    "step:3200/20000 train_loss:2.0753 train_time:1ms step_avg:1ms train_bpb:1.2361",
+                    "step:3250/20000 train_loss:2.1083 train_time:1ms step_avg:1ms train_bpb:1.2377",
+                    "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+                    "step:3500/20000 train_loss:2.0939 train_time:1ms step_avg:1ms train_bpb:1.2551",
+                    "step:3500/20000 val_loss:2.0751 val_bpb:1.2290 train_time:1ms step_avg:1ms",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        history_logs.append(path)
+
+    risk = load_failed_trajectory_analogue_risk(
+        current_log,
+        history_logs=history_logs,
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3250,
+        train_rmse_threshold=0.001,
+        min_failed_analogues=2,
+        current_projection_gate_margin_steps=100,
+    )
+
+    assert risk is None
 
 
 def test_train_wave_analogue_risk_preempts_before_next_validation(tmp_path: Path):
