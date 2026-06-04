@@ -237,6 +237,46 @@ current generic watcher loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
                                   BPB_LOOP_NAME=parameter_golf_bpb_target
 ```
 
+Final live-state correction for the step-3600 handoff:
+
+The active supervisor subsequently escalated again to the low-train-BPB capture
+branch, r79, after the r77/r78 sidecar reviews observed the validation bump at
+step 3650.  This remains the same `EDIT_AND_RESTART` decision class: preserve
+the r75 step-3600 checkpoint, keep optimizer/RNG/loader state, and apply only
+scalar BPB-capture controls.  The step-3650 r77 sidecar was non-pausing and
+completed its Seq4096-compatible geometry/simplex analysis; its Codex hook found
+the `toricgt_codex_review_seq4096_live_00003650` session already present, so no
+training pause was introduced.
+
+```text
+current active training tmux: toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z
+current active W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z
+current active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z.txt
+current active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z
+current active supervisor: scripts/watch_seq4096_4k_recovery.py
+current active supervisor tmux: toricgt_seq4096_4k_gate_r79_low_bpb_capture_20260604T185003Z
+current active supervisor log: logs/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z.4k_gate.txt
+current active resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r75_20260604T182013Z/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
+current active fresh checkpoints: step 3600 scheduled, step 3608 low_train_bpb
+current active latest checked BPB/loss: 1.2180 / 2.0565 at step 3608
+current generic non-pausing watcher: toricgt_watch_training_analysis_r79_3650
+current generic watcher log: logs/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z.watch_training_analysis_3650.txt
+current generic watcher target: fresh checkpoint >= 3650 on CPU, no pause-training flag
+current compact sidecar watcher: toricgt_seq4096_4k_analysis_r79_low_bpb_capture_20260604T185003Z
+corrected loop env for r79 gate and analysis sidecars: BPB_TARGET=1.2,
+    BPB_MAX_REVIEW_ITERATIONS=100,
+    BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_state.json,
+    BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_stop,
+    BPB_LOOP_NAME=parameter_golf_bpb_target
+```
+
+Implementation note: `scripts/watch_training_analysis.py` now detects compact
+Seq4096 checkpoints (`model.tok_emb.weight`) and dispatches their structural
+analysis to `scripts/evaluate_seq4096_reasoning_geometry_suite.py`, which writes
+the expected `geometry/` and `simplex/` outputs without loading the checkpoint
+through the incompatible RandomOrderLM diagnostic path.  The watcher still runs
+without `--pause-training-before-analysis`.
+
 ## 2026-06-04 Seq4096 R75 Step-3600 BPB Gate Review
 
 Run:
