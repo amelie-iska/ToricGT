@@ -13,6 +13,7 @@ from scripts.watch_seq4096_4k_recovery import (
     plan_failed_train_wave_recovery_controls,
     plan_metric_driven_recovery_controls,
     parse_seq4096_log,
+    recovery_observation_interval,
     should_hold_train_wave_for_validation_probe,
     should_preempt_for_gate_risk,
     select_recovery_validation,
@@ -1399,6 +1400,36 @@ def test_recovery_launch_exports_advanced_loss_env_when_enabled(tmp_path: Path):
     assert "ANALOGY_LOSS_WEIGHT=0.01" in rendered
     assert "ADVANCED_LOSS_SAMPLE_TOKENS=128" in rendered
     assert "TORIC_TROPICAL_FAN_BINS=8" in rendered
+
+
+def test_advanced_recovery_controls_use_tighter_observation_interval():
+    baseline = RecoveryControls(
+        train_batch_tokens=393_216,
+        tied_embed_lr=0.032,
+        matrix_lr=0.018,
+        scalar_lr=0.018,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=600,
+        muon_momentum_warmup_start=0.9,
+        grad_clip_norm=None,
+    )
+
+    advanced = RecoveryControls(
+        train_batch_tokens=917_504,
+        tied_embed_lr=0.029,
+        matrix_lr=0.0165,
+        scalar_lr=0.0165,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=5_000,
+        muon_momentum_warmup_start=0.9,
+        grad_clip_norm=1.0,
+        advanced_loss_scale=0.2,
+        graphcg_loss_weight=0.05,
+        toric_tropical_loss_weight=0.03,
+    )
+
+    assert recovery_observation_interval(baseline) == 250
+    assert recovery_observation_interval(advanced) == 50
 
 
 def test_metric_controls_hold_when_projection_is_on_track(tmp_path: Path):

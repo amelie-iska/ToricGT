@@ -150,6 +150,12 @@ class RecoveryControls:
         }
 
 
+def recovery_observation_interval(controls: RecoveryControls) -> int:
+    """Use tighter observation for advanced-loss recovery probes near 4K."""
+
+    return 50 if controls.advanced_loss_scale > 0 else 250
+
+
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -1859,6 +1865,8 @@ def main() -> None:
         recovery_train_tmux = sanitize_tmux_name(f"toricgt_seq4096_4k_recovery_r{next_index}_{stamp}")
         recovery_checkpoint_dir = parameter_golf_root / "checkpoints" / recovery_run_id
         recovery_log = parameter_golf_root / "logs" / f"{recovery_run_id}.txt"
+        recovery_eval_interval = recovery_observation_interval(recovery_controls)
+        recovery_checkpoint_interval = recovery_eval_interval
         launch = build_recovery_launch(
             repo_root=repo_root,
             parameter_golf_root=parameter_golf_root,
@@ -1869,6 +1877,8 @@ def main() -> None:
             seed=args.seed + next_index,
             target_bpb=args.target_bpb,
             python=args.python,
+            val_loss_every=recovery_eval_interval,
+            checkpoint_every=recovery_checkpoint_interval,
             train_batch_tokens=recovery_controls.train_batch_tokens,
             tied_embed_lr=recovery_controls.tied_embed_lr,
             matrix_lr=recovery_controls.matrix_lr,
@@ -1986,6 +1996,8 @@ def main() -> None:
                 "recovery_checkpoint_dir": str(recovery_checkpoint_dir),
                 "command_dir": str(command_dir),
                 "applied_recovery_launch_controls": recovery_controls.launch_dict(),
+                "recovery_validation_interval_steps": recovery_eval_interval,
+                "recovery_checkpoint_interval_steps": recovery_checkpoint_interval,
             }
         )
         write_state(state_path, status)

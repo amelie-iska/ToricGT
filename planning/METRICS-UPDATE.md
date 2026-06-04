@@ -936,6 +936,20 @@ sparse point-only triangles. These outputs should be reviewed at every live
 periodic interval and correlated with W&B advanced-loss metrics before
 increasing any auxiliary scale.
 
+Advanced-branch launch update (2026-06-04): the gate has now promoted from
+sidecar-only structural diagnostics to a live guarded advanced-loss recovery,
+`toricgt_seq4096_4k_recovery_r67_20260604T163811Z`, from the best step-3750
+checkpoint (`val_bpb=1.2131`). This branch enables GraphCG, toric/tropical,
+Slepian/Pollak, Koszul/BGG, and analogy auxiliary losses with
+`ADVANCED_LOSS_SCALE=0.20` while preserving the BPB cross-entropy objective as
+the primary training loss. Because this branch is within 250 steps of the
+competition gate, the active command was tightened to `VAL_LOSS_EVERY=50` and
+`CHECKPOINT_EVERY=50`; the recovery controller now applies that 50-step
+observation cadence automatically to future advanced-loss restarts while
+baseline restarts remain at 250. Review each 50-step validation/checkpoint for
+BPB transfer, `train/advanced_aux_loss`, and the individual `advanced/*`
+component metrics before increasing auxiliary scale.
+
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
 Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, verify code+weights <=16,000,000 bytes, then start post-threshold advanced reasoning/memory phases.
