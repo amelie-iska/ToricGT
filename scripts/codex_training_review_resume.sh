@@ -276,6 +276,13 @@ if candidates:
 best_state_bpb = maybe_float(state.get("best_bpb"))
 best_state_metric = str(state.get("best_bpb_metric", ""))
 best_state_step = state.get("best_bpb_step")
+if best_state_bpb is not None and measured_bpb_priority(best_state_metric) is None:
+    # Older hook versions could persist constants such as fineweb/target_bpb as
+    # the loop best.  Never let a non-measured/stale state metric satisfy the
+    # BPB gate or suppress a current measured validation/competition candidate.
+    best_state_bpb = None
+    best_state_metric = ""
+    best_state_step = None
 if primary is not None and (best_state_bpb is None or primary["value"] < best_state_bpb):
     best_bpb = primary["value"]
     best_metric = primary["metric"]
