@@ -406,6 +406,33 @@ def plan_failed_train_wave_recovery_controls(
 
     latest_val = parsed.val_rows[-1] if parsed.val_rows else None
     latest_step = latest_val.step if latest_val is not None else max(parsed.latest_step, 0)
+    repeated_damped_branch = base.tied_embed_lr <= 0.0325 and base.bigram_bias_lr <= 0.0065
+    if repeated_damped_branch:
+        return replace(
+            base,
+            train_batch_tokens=min(base.train_batch_tokens, 917_504),
+            tied_embed_lr=round(max(0.029, min(base.tied_embed_lr * 0.94, base.tied_embed_lr - 0.0015)), 6),
+            matrix_lr=round(max(0.0165, min(base.matrix_lr * 0.92, base.matrix_lr - 0.001)), 6),
+            scalar_lr=round(max(0.0165, min(base.scalar_lr * 0.92, base.scalar_lr - 0.001)), 6),
+            muon_momentum_warmup_steps=max(
+                base.muon_momentum_warmup_steps,
+                int(gate_step) + 750,
+                int(latest_step) + 1250,
+            ),
+            bigram_bias=True,
+            bigram_bias_lr=round(max(0.004, min(base.bigram_bias_lr * 0.70, base.bigram_bias_lr - 0.001)), 6),
+            bigram_bias_scale=round(max(base.bigram_bias_scale, 1.15), 6),
+            bigram_bias_init_from_data=False,
+            policy="repeated_damped_train_wave_diversity_probe",
+            advanced_metric_policy="repeated_damped_branch_graphcg_slepian_memory_sidecars",
+            rationale=(
+                "failed damped train-wave branch has reached the tied/bigram LR floor without validation transfer",
+                "matched failed analogue count "
+                f"{risk.analogue_failed_count} suggests this is the same recovery basin, not a fresh BPB descent",
+                "lower tied, matrix, scalar, and bigram LR and reduce batch tokens to change the optimizer trajectory",
+                "keep advanced topology/toric/BGG/Koszul/GraphCG/Slepian/analogy losses as sidecars until the <=1.2 checkpoint is preserved",
+            ),
+        )
     return replace(
         base,
         tied_embed_lr=round(max(0.032, min(base.tied_embed_lr * 0.92, base.tied_embed_lr - 0.001)), 6),

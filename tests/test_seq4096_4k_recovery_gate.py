@@ -683,6 +683,80 @@ def test_failed_train_wave_damping_does_not_increase_low_bigram_lr(tmp_path: Pat
     assert planned.bigram_bias_lr < base.bigram_bias_lr
 
 
+def test_repeated_damped_train_wave_uses_stronger_diversity_controls(tmp_path: Path):
+    current_log = tmp_path / "current.log"
+    current_log.write_text(
+        "\n".join(
+            [
+                "step:3750/20000 val_loss:2.0483 val_bpb:1.2131 train_time:1ms step_avg:1ms",
+                "step:3800/20000 train_loss:2.0725 train_time:1ms step_avg:1ms train_bpb:1.2413",
+                "step:3850/20000 train_loss:2.0361 train_time:1ms step_avg:1ms train_bpb:1.2088",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    failed_damped = tmp_path / "r59_failed.log"
+    failed_damped.write_text(
+        "\n".join(
+            [
+                "step:3750/20000 val_loss:2.0483 val_bpb:1.2131 train_time:1ms step_avg:1ms",
+                "step:3800/20000 train_loss:2.0725 train_time:1ms step_avg:1ms train_bpb:1.2412",
+                "step:3850/20000 train_loss:2.0361 train_time:1ms step_avg:1ms train_bpb:1.2087",
+                "step:3900/20000 train_loss:1.9968 train_time:1ms step_avg:1ms train_bpb:1.1727",
+                "step:3950/20000 train_loss:2.0685 train_time:1ms step_avg:1ms train_bpb:1.2313",
+                "step:4000/20000 train_loss:2.0973 train_time:1ms step_avg:1ms train_bpb:1.2306",
+                "step:4000/20000 val_loss:2.0748 val_bpb:1.2288 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    risk = load_train_wave_analogue_risk(
+        current_log,
+        history_logs=[failed_damped],
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3850,
+        train_rmse_threshold=0.001,
+        min_failed_analogues=1,
+    )
+    assert risk is not None
+    assert should_preempt_for_gate_risk(risk)
+
+    parsed = parse_seq4096_log(current_log)
+    base = RecoveryControls(
+        train_batch_tokens=983_040,
+        tied_embed_lr=0.032,
+        matrix_lr=0.018,
+        scalar_lr=0.018,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=4750,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+        bigram_bias=True,
+        bigram_bias_lr=0.006,
+        bigram_bias_scale=1.0,
+    )
+
+    planned = plan_failed_train_wave_recovery_controls(
+        base,
+        parsed=parsed,
+        risk=risk,
+        gate_step=4000,
+    )
+
+    assert planned.policy == "repeated_damped_train_wave_diversity_probe"
+    assert planned.train_batch_tokens == 917_504
+    assert planned.tied_embed_lr < base.tied_embed_lr
+    assert planned.matrix_lr < base.matrix_lr
+    assert planned.scalar_lr < base.scalar_lr
+    assert planned.bigram_bias_lr < base.bigram_bias_lr
+    assert planned.bigram_bias_scale > base.bigram_bias_scale
+    assert planned.muon_momentum_warmup_steps > base.muon_momentum_warmup_steps
+    assert planned.advanced_metric_policy == "repeated_damped_branch_graphcg_slepian_memory_sidecars"
+
+
 def test_seq4096_log_parses_train_bpb_for_validation_gap_controls(tmp_path: Path):
     log = tmp_path / "train.log"
     log.write_text(

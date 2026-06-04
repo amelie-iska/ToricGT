@@ -8,34 +8,39 @@
 
 **Tech Stack:** PyTorch, W&B, matplotlib, pandas/numpy, existing ToricGT modules under `src/toricgt`, Seq4096 watcher scripts under `scripts`, and compact Parameter-Golf training script under `amelie-iska/parameter-golf/records/.../train_gpt.py`.
 
-## Current Live Update - 2026-06-04 R52
+## Current Live Update - 2026-06-04 R60
 
 - Active branch: `oai-advanced` in both ToricGT and the nested
   Parameter-Golf repo.
-- Active BPB run: `toricgt_seq4096_warmdown_r52_20260604T125517Z`.
-- Latest completed validation: step 3500, validation/OpenAI BPB `1.2198`,
-  down from `1.2454` at step 3000 and `1.2290` at step 3250.
-- Latest gate projection: target step `3886.71875`, recent drop `0.00512` BPB
-  per 100 steps, required drop `0.00396` BPB per 100 steps.
-- Controller policy at step 3500: `pre_threshold_primary_bpb_clean`.
-  Keep `bpb_gap` at scale `1.0`; keep BGG/Koszul, topology, toric, tropical,
-  Slepian/Pollak, GraphCG, memory, and analogy families as sidecar/damping
-  evidence until either the <=1.2 threshold checkpoint is preserved or the
-  controller sees positive held-out BPB transfer.
+- Active BPB run: `toricgt_seq4096_4k_recovery_r60_20260604T153456Z`.
+- Current recovery origin: best authoritative validation checkpoint at step
+  3750 with validation/OpenAI BPB `1.2131`.
+- Most recent completed gate result: R59 reached step 4000 with authoritative
+  validation BPB `1.2288`, so the <=1.2 threshold was **not** reached. R60 was
+  relaunched from R59 step 3750 with optimizer/RNG/loader reset.
+- Current controller policy: pre-threshold BPB-clean recovery. Keep
+  cross-entropy, validation BPB, train-wave shape, bigram bias, LR, batch-token,
+  and Muon-warmup controls on the critical path. Keep BGG/Koszul, topology,
+  toric, tropical, Slepian/Pollak, GraphCG, memory, and analogy families as
+  sidecar evidence and damping priors until either an authoritative <=1.2
+  threshold checkpoint is preserved or a held-out transfer study shows direct
+  BPB benefit.
 - Artifact policy: under the 16,000,000 byte cap but extremely tight.  The
-  manual step-3500 export probe reported `15,996,978` total bytes, leaving only
-  `3,022` bytes of margin after 8% export pruning, so do not add exported probes,
-  code bloat, or larger stored weights before preserving the threshold
-  checkpoint.
+  latest int8+zlib probes have been within the cap but with little margin, so
+  do not add exported probes, code bloat, or larger stored weights before
+  preserving the threshold checkpoint.
 - PolarQuant/larger-parameter policy: PolarQuant currently quantizes K/V cache
   tensors, not stored model weights.  Larger-parameter retraining is permitted
   only as a separate sidecar branch if a true stored-weight/export compression
   path proves code+weights remain under `16,000,000` bytes and improves held-out
-  BPB.  It should not interrupt R52 while R52 remains on-track.
-- Training action: do not restart R52 before step-3750 validation unless the
-  gate watcher reports a material projected miss.  If step-3750 validation
-  misses velocity, restart from the best 3000/3250/3500/3750 checkpoint with
-  BPB-clean controls before adding structural loss weight.
+  BPB.  It should not interrupt the active BPB-clean R60 gate attempt.
+- Periodic analysis action: the live watcher for R60 must run the W&B metrics,
+  historical OAI BPB entrypoint, compact Seq4096 BPB evaluator, reasoning
+  simplex, geometry/topology/toric/Slepian/Koszul/BGG/GraphCG/analogical
+  visualization suite, final artifact inventory refresh, and Codex/sub-agent
+  review hook on the current-run checkpoint outputs. Reviewers must inspect
+  every inventoried output family and report early BPB-critical recommendations
+  separately from later advanced-reasoning recommendations.
 
 ---
 
@@ -810,8 +815,25 @@ with RMSE about `5.8e-05`. R59 launched from the R58 step-3750 checkpoint with
 bias LR `0.006`, matrix/scalar LR `0.018`, train batch tokens `983040`, and
 Muon warmup steps `4750`. Early train BPB moved off the exact R57/R58 replay:
 R59 has `3800 -> 1.2412` and `3850 -> 1.2087`, versus `1.2424` and `1.2101`
-for the repeated branch. This is still only a train-wave signal; the next
-authoritative decision is the R59 step-4000 validation BPB.
+for the repeated branch. R59 still missed the authoritative step-4000 gate with
+validation BPB `1.2288`, so the threshold was not reached and the best preserved
+origin remained step 3750 at `1.2131`.
+
+R60 launch: the gate relaunched
+`toricgt_seq4096_4k_recovery_r60_20260604T153456Z` from the R59 step-3750
+checkpoint with optimizer/RNG/loader reset, tied embedding LR `0.032`, bigram
+bias LR `0.006`, matrix/scalar LR `0.018`, train batch tokens `983040`, seed
+`7391`, and Muon warmup steps `4750`. W&B is enabled for R60, and its live
+periodic analysis watcher is attached to the current checkpoint directory.
+R60's first post-resume train point (`3800 -> 1.2413`) is already nearly the
+same basin as R59 (`3800 -> 1.2412`), so the controller now has a second-stage
+`repeated_damped_train_wave_diversity_probe`. If a run at the damped floor
+(`tied_embed_lr <= 0.0325`, `bigram_bias_lr <= 0.0065`) matches a prior failed
+train wave, the next branch lowers tied/matrix/scalar/bigram LR, lowers batch
+tokens to `917504`, increases bigram-bias scale to at least `1.15`, and extends
+Muon warmup. This remains BPB-clean: it changes optimizer and transition-bias
+controls rather than adding heavy topology/toric/BGG/Koszul/GraphCG losses
+before the <=1.2 checkpoint is preserved.
 
 Recommended follow-up for the advanced-analysis track: implement compact
 Seq4096 analogues of the old simplex/geometry entrypoints so graph-of-thought
@@ -852,17 +874,16 @@ Use best checkpoint at or before 3250/3500/3750, then launch the controller-reco
 
 Current action: R52 missed the projected gate velocity at step 3750, R54 and
 R55 did not improve the authoritative validation gate, R56 missed step 4000 at
-`val_bpb=1.2163`, and R57 missed step 4000 at `val_bpb=1.2299`. R58 is now
-active from the best step-3750 checkpoint (`val_bpb=1.2131`) with reset
-optimizer/RNG/loader and conservative BPB-clean controls. The live analysis
-supervisor is attached, runs the historical W&B metrics and OAI BPB entrypoints
-plus compact Seq4096 advanced geometry/simplex visualization, refreshes the
-final artifact inventory, and dispatches the Codex review hook for sub-agent
-inspection of every current-run output family. If R58 continues the R57 train
-wave, the patched gate should now launch the damped-transfer replay-diversity
-branch before spending another full gate cycle on an already-observed miss.
-This occurred and R59 is now the active branch; let R59 reach the next
-validation unless it collapses into another exact failed-train-wave analogue.
+`val_bpb=1.2163`, R57 missed at `1.2299`, and R59 missed at `1.2288` after R58
+was preempted for matching a failed train wave. R60 is now active from the best
+step-3750 checkpoint (`val_bpb=1.2131`) with reset optimizer/RNG/loader and
+conservative BPB-clean controls. The live analysis supervisor is attached, runs
+the historical W&B metrics and OAI BPB entrypoints plus compact Seq4096
+advanced geometry/simplex visualization, refreshes the final artifact
+inventory, and dispatches the Codex review hook for sub-agent inspection of
+every current-run output family. If R60 repeats the R59 branch, the patched
+gate should launch the `repeated_damped_train_wave_diversity_probe` from the
+best step-3750 checkpoint before adding heavy structural losses.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
