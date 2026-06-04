@@ -318,6 +318,105 @@ def latest_train_bpb_at_or_before(parsed: ParsedLog, step: int) -> float:
     return candidates[-1] if candidates else float("nan")
 
 
+def load_advanced_diagnostics(repo_root: Path | str, run_id: str) -> dict[str, Any]:
+    """Load the latest full-diagnostics sidecar payload for a Seq4096 run."""
+
+    path = Path(repo_root) / "logs" / f"{run_id}.full_diag.latest.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    payload = dict(payload)
+    payload["_source_path"] = str(path)
+    return payload
+
+
+def diagnostic_float(payload: dict[str, Any] | None, *keys: str, default: float = float("nan")) -> float:
+    if not payload:
+        return default
+    for key in keys:
+        if key in payload:
+            return finite_float(payload.get(key), default=default)
+    return default
+
+
+def diagnostic_available(payload: dict[str, Any] | None, key: str) -> bool:
+    return diagnostic_float(payload, key, default=0.0) >= 0.5
+
+
+def summarize_advanced_diagnostics(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Compact structural-pressure summary used by the recovery controller."""
+
+    if not payload:
+        return {"available": False, "structural_pressure_high": False}
+    bpb_pressure = diagnostic_float(payload, "diagnostics/latest/bpb_intervention_pressure", default=0.0)
+    topology_loss = diagnostic_float(payload, "diagnostics/latest/topology_loss", "topology/topology_loss")
+    directed_topology_loss = diagnostic_float(
+        payload,
+        "diagnostics/latest/directed_topology_loss",
+        "topology/directed_topology_loss",
+    )
+    slepian_leakage = diagnostic_float(
+        payload,
+        "diagnostics/latest/slepian_leakage",
+        "diagnostics/latest/pollak_prolate_slepian_leakage",
+        "toric/slepian_leakage",
+    )
+    toric_margin = diagnostic_float(
+        payload,
+        "diagnostics/latest/toric_active_face_margin",
+        "toric/active_face_margin",
+    )
+    toric_bend = diagnostic_float(
+        payload,
+        "diagnostics/latest/toric_shadow_mean_bend",
+        "toric/shadow_mean_bend",
+    )
+    tropical_plateau = diagnostic_float(
+        payload,
+        "tropical/bpb_plateau_pressure",
+        "diagnostics/latest/tropical_bpb_plateau_pressure",
+        default=0.0,
+    )
+    family_available = any(
+        diagnostic_available(payload, key)
+        for key in (
+            "diagnostics/families/topology_available",
+            "diagnostics/families/toric_available",
+            "diagnostics/families/slepian_pollak_prolate_available",
+            "diagnostics/families/koszul_persistence_available",
+            "diagnostics/families/category_o_bgg_available",
+            "diagnostics/families/tropical_available",
+        )
+    )
+    structural_pressure_high = bool(
+        family_available
+        and (
+            bpb_pressure >= 0.08
+            or (math.isfinite(topology_loss) and topology_loss >= 1.0)
+            or (math.isfinite(directed_topology_loss) and directed_topology_loss >= 0.17)
+            or (math.isfinite(slepian_leakage) and slepian_leakage >= 0.95)
+            or (math.isfinite(toric_margin) and toric_margin <= -1.0)
+            or (math.isfinite(toric_bend) and toric_bend >= 1.5)
+            or tropical_plateau >= 0.01
+        )
+    )
+    return {
+        "available": True,
+        "source_path": str(payload.get("_source_path", "")),
+        "structural_pressure_high": structural_pressure_high,
+        "bpb_intervention_pressure": bpb_pressure,
+        "topology_loss": topology_loss,
+        "directed_topology_loss": directed_topology_loss,
+        "slepian_leakage": slepian_leakage,
+        "toric_active_face_margin": toric_margin,
+        "toric_shadow_mean_bend": toric_bend,
+        "tropical_bpb_plateau_pressure": tropical_plateau,
+    }
+
+
 def plan_metric_driven_recovery_controls(
     base: RecoveryControls,
     *,
@@ -329,6 +428,7 @@ def plan_metric_driven_recovery_controls(
     validation_gap_threshold: float = 0.04,
     low_train_bpb_margin: float = 0.0,
     enabled: bool = True,
+    advanced_diagnostics: dict[str, Any] | None = None,
 ) -> RecoveryControls:
     """Adapt the next recovery launch to BPB and structural-analysis signals.
 
@@ -349,6 +449,7 @@ def plan_metric_driven_recovery_controls(
     validation_gap = (
         latest_val.val_bpb - train_bpb if math.isfinite(train_bpb) else float("nan")
     )
+    diagnostics_summary = summarize_advanced_diagnostics(advanced_diagnostics)
     projected_miss = (
         math.isfinite(projected_target_step)
         and projected_target_step > float(gate_step)
@@ -410,6 +511,30 @@ def plan_metric_driven_recovery_controls(
                     "tied-embedding LR is already at the recapture cap",
                     "enable a zero-initialized learned bigram transition-bias head so initial BPB is preserved",
                     "keep GraphCG/Slepian/topology losses in sidecar transfer while adding only BPB-native lexical bias",
+                ),
+            )
+        if base.bigram_bias and diagnostics_summary.get("structural_pressure_high"):
+            return replace(
+                base,
+                train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
+                tied_embed_lr=round(max(0.034, base.tied_embed_lr * 0.925), 6),
+                matrix_lr=round(max(0.018, base.matrix_lr * 0.95), 6),
+                scalar_lr=round(max(0.018, base.scalar_lr * 0.95), 6),
+                muon_momentum_warmup_steps=max(base.muon_momentum_warmup_steps, 650),
+                bigram_bias=True,
+                bigram_bias_lr=round(max(0.02, base.bigram_bias_lr * 0.50), 6),
+                bigram_bias_init_from_data=False,
+                policy="structural_pressure_recapture",
+                advanced_metric_policy="toric_topology_slepian_guarded_bpb_recapture",
+                rationale=(
+                    f"validation projects target at step {projected_target_step:.1f}, beyond gate {gate_step}",
+                    "bigram transition bias is already enabled, so stop escalating the tied embedding LR cap",
+                    "advanced diagnostics show structural pressure: "
+                    f"topology={diagnostics_summary.get('topology_loss')}, "
+                    f"directed_topology={diagnostics_summary.get('directed_topology_loss')}, "
+                    f"slepian_leakage={diagnostics_summary.get('slepian_leakage')}, "
+                    f"toric_margin={diagnostics_summary.get('toric_active_face_margin')}",
+                    "damp the lexical-head LR and lengthen warmup to improve validation transfer without injecting heavy structural losses",
                 ),
             )
         return replace(
@@ -783,6 +908,8 @@ def main() -> None:
             if args.analysis_root
             else repo_root / "outputs" / "post_resume_analysis" / args.run_id
         )
+        advanced_diagnostics = load_advanced_diagnostics(repo_root, args.run_id)
+        advanced_diagnostics_summary = summarize_advanced_diagnostics(advanced_diagnostics)
         preemptive_risk = (
             load_preemptive_gate_risk(
                 analysis_root,
@@ -832,6 +959,7 @@ def main() -> None:
             validation_gap_threshold=args.validation_gap_threshold,
             low_train_bpb_margin=args.low_train_bpb_margin,
             enabled=not args.no_advanced_metric_controls,
+            advanced_diagnostics=advanced_diagnostics,
         )
         status: dict[str, Any] = {
             "run_id": args.run_id,
@@ -850,6 +978,7 @@ def main() -> None:
             "base_recovery_launch_controls": base_controls.launch_dict(),
             "recovery_launch_controls": recovery_controls.launch_dict(),
             "advanced_metric_controls_enabled": not args.no_advanced_metric_controls,
+            "advanced_diagnostics": advanced_diagnostics_summary,
             "recovery_max_train_batch_tokens": args.recovery_max_train_batch_tokens,
             "validation_gap_threshold": args.validation_gap_threshold,
             "low_train_bpb_margin": args.low_train_bpb_margin,

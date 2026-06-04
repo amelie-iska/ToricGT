@@ -5,11 +5,13 @@ from scripts.watch_seq4096_4k_recovery import (
     build_recovery_launch,
     build_recovery_run_id,
     checkpoint_for_step,
+    load_advanced_diagnostics,
     load_preemptive_gate_risk,
     plan_metric_driven_recovery_controls,
     parse_seq4096_log,
     should_preempt_for_gate_risk,
     select_recovery_validation,
+    summarize_advanced_diagnostics,
     select_best_validation,
 )
 
@@ -346,6 +348,87 @@ def test_metric_controls_turn_on_bigram_bias_when_tied_lr_is_capped(tmp_path: Pa
     assert planned.bigram_bias_lr == 0.05
     assert planned.tied_embed_lr == base.tied_embed_lr
     assert planned.advanced_metric_policy == "bigram_bias_primary_bpb_clean_structural_sidecars"
+
+
+def test_advanced_diagnostics_loader_summarizes_structural_pressure(tmp_path: Path):
+    diagnostics = tmp_path / "logs" / "unit_run.full_diag.latest.json"
+    diagnostics.parent.mkdir()
+    diagnostics.write_text(
+        "{"
+        '"diagnostics/families/topology_available": 1,'
+        '"diagnostics/families/toric_available": 1,'
+        '"diagnostics/families/slepian_pollak_prolate_available": 1,'
+        '"diagnostics/latest/bpb_intervention_pressure": 0.12,'
+        '"diagnostics/latest/topology_loss": 1.10,'
+        '"diagnostics/latest/slepian_leakage": 1.0,'
+        '"diagnostics/latest/toric_active_face_margin": -1.7,'
+        '"tropical/bpb_plateau_pressure": 0.02'
+        "}",
+        encoding="utf-8",
+    )
+
+    loaded = load_advanced_diagnostics(tmp_path, "unit_run")
+    summary = summarize_advanced_diagnostics(loaded)
+
+    assert summary["available"] is True
+    assert summary["structural_pressure_high"] is True
+    assert summary["bpb_intervention_pressure"] == 0.12
+    assert summary["topology_loss"] == 1.10
+    assert summary["slepian_leakage"] == 1.0
+
+
+def test_metric_controls_use_structural_pressure_after_bigram_is_already_enabled(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 train_loss:2.0296 train_time:1ms step_avg:1ms train_bpb:1.2206",
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_seq4096_log(log)
+    base = RecoveryControls(
+        train_batch_tokens=983_040,
+        tied_embed_lr=0.040,
+        matrix_lr=0.020,
+        scalar_lr=0.020,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=400,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+        bigram_bias=True,
+        bigram_bias_lr=0.05,
+    )
+
+    planned = plan_metric_driven_recovery_controls(
+        base,
+        parsed=parsed,
+        target_bpb=1.2,
+        gate_step=4000,
+        projected_target_step=6500.0,
+        max_train_batch_tokens=983_040,
+        advanced_diagnostics={
+            "diagnostics/families/topology_available": 1,
+            "diagnostics/families/toric_available": 1,
+            "diagnostics/families/slepian_pollak_prolate_available": 1,
+            "diagnostics/latest/bpb_intervention_pressure": 0.12,
+            "diagnostics/latest/topology_loss": 1.10,
+            "diagnostics/latest/slepian_leakage": 1.0,
+            "diagnostics/latest/toric_active_face_margin": -1.7,
+        },
+    )
+
+    assert planned.policy == "structural_pressure_recapture"
+    assert planned.bigram_bias is True
+    assert planned.bigram_bias_lr < base.bigram_bias_lr
+    assert planned.tied_embed_lr < base.tied_embed_lr
+    assert planned.matrix_lr <= base.matrix_lr
+    assert planned.scalar_lr <= base.scalar_lr
+    assert planned.muon_momentum_warmup_steps > base.muon_momentum_warmup_steps
+    assert planned.advanced_metric_policy == "toric_topology_slepian_guarded_bpb_recapture"
 
 
 def test_recovery_launch_exports_bigram_bias_env_when_enabled(tmp_path: Path):
