@@ -48,6 +48,14 @@ VAL_RE = re.compile(
     r"\s+val_bpb:(?P<bpb>[0-9.]+)\s+train_time:(?P<ms>[0-9.]+)ms"
     r"\s+step_avg:(?P<avg>[0-9.]+)ms"
 )
+LOW_TRAIN_BPB_TRIGGER_VAL_RE = re.compile(
+    r"low_train_bpb_trigger_val\s+step:(?P<step>\d+)/(?P<total>\d+)"
+    r"\s+train_bpb:(?P<train_bpb>[0-9.eE+-]+)"
+    r"\s+threshold:(?P<threshold>[0-9.eE+-]+)"
+    r"\s+val_loss:(?P<val_loss>[0-9.eE+-]+)"
+    r"\s+val_bpb:(?P<val_bpb>[0-9.eE+-]+)"
+    r"\s+train_time:(?P<ms>[0-9.eE+-]+)ms"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,6 +92,30 @@ def parse_log(path: Path) -> dict[str, Any]:
                 "train_time_ms": float(val.group("ms")),
                 "step_avg_ms": float(val.group("avg")),
             }
+            continue
+        low_train_val = LOW_TRAIN_BPB_TRIGGER_VAL_RE.search(line)
+        if low_train_val:
+            step = int(low_train_val.group("step"))
+            total = float(low_train_val.group("total"))
+            train_bpb = float(low_train_val.group("train_bpb"))
+            train_time_ms = float(low_train_val.group("ms"))
+            vals[step] = {
+                "step": float(step),
+                "total": total,
+                "val_loss": float(low_train_val.group("val_loss")),
+                "val_bpb": float(low_train_val.group("val_bpb")),
+                "train_time_ms": train_time_ms,
+                "step_avg_ms": float("nan"),
+            }
+            if step not in train or not math.isfinite(float(train[step].get("train_bpb", float("nan")))):
+                train[step] = {
+                    "step": float(step),
+                    "total": total,
+                    "train_loss": float(low_train_val.group("val_loss")),
+                    "train_bpb": train_bpb,
+                    "train_time_ms": train_time_ms,
+                    "step_avg_ms": 0.0,
+                }
             continue
         train_match = TRAIN_RE.search(line)
         if train_match:

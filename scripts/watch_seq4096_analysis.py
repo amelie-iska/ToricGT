@@ -52,7 +52,17 @@ VAL_RE = re.compile(
     r"\s+val_bpb:(?P<bpb>[0-9.eE+-]+)\s+train_time:(?P<ms>[0-9.eE+-]+)ms"
     r"\s+step_avg:(?P<avg>[0-9.eE+-]+)ms"
 )
+LOW_TRAIN_BPB_TRIGGER_VAL_RE = re.compile(
+    r"low_train_bpb_trigger_val\s+step:(?P<step>\d+)/(?P<total>\d+)"
+    r"\s+train_bpb:(?P<train_bpb>[0-9.eE+-]+)"
+    r"\s+threshold:(?P<threshold>[0-9.eE+-]+)"
+    r"\s+val_loss:(?P<val_loss>[0-9.eE+-]+)"
+    r"\s+val_bpb:(?P<val_bpb>[0-9.eE+-]+)"
+    r"\s+train_time:(?P<ms>[0-9.eE+-]+)ms"
+)
 SEQ4096_CHECKPOINT_RE = re.compile(r"(?:^|_)step_(?P<step>\d+)\.pt$")
+LOG_LINE_STEP_RE = re.compile(r"\bstep:(?P<step>\d+)/\d+")
+LOG_LINE_CHECKPOINT_STEP_RE = re.compile(r"_step_(?P<step>\d+)\.pt")
 REVIEW_ARTIFACT_SUFFIXES = {
     ".csv",
     ".html",
@@ -180,6 +190,30 @@ def parse_seq4096_log(path: Path) -> Seq4096TrainingLog:
                 step_avg_ms=float(val.group("avg")),
             )
             continue
+        low_train_val = LOW_TRAIN_BPB_TRIGGER_VAL_RE.search(line)
+        if low_train_val:
+            step = int(low_train_val.group("step"))
+            total = int(low_train_val.group("total"))
+            train_bpb = float(low_train_val.group("train_bpb"))
+            train_time_ms = float(low_train_val.group("ms"))
+            vals[step] = ValRow(
+                step=step,
+                total=total,
+                val_loss=float(low_train_val.group("val_loss")),
+                val_bpb=float(low_train_val.group("val_bpb")),
+                train_time_ms=train_time_ms,
+                step_avg_ms=float("nan"),
+            )
+            if step not in train or train[step].train_bpb is None:
+                train[step] = TrainRow(
+                    step=step,
+                    total=total,
+                    train_loss=float("nan"),
+                    train_time_ms=train_time_ms,
+                    step_avg_ms=float("nan"),
+                    train_bpb=train_bpb,
+                )
+            continue
         train_match = TRAIN_RE.search(line)
         if train_match:
             step = int(train_match.group("step"))
@@ -195,6 +229,25 @@ def parse_seq4096_log(path: Path) -> Seq4096TrainingLog:
         train_rows=[train[key] for key in sorted(train)],
         val_rows=[vals[key] for key in sorted(vals)],
     )
+
+
+def write_checkpoint_scoped_log(source: Path, output_dir: Path, max_step: int) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dest = output_dir / "checkpoint_scoped_training.log"
+    if not source.exists():
+        dest.write_text("", encoding="utf-8")
+        return dest
+    scoped_lines: list[str] = []
+    for line in source.read_text(encoding="utf-8", errors="replace").splitlines():
+        step_match = LOG_LINE_STEP_RE.search(line)
+        if step_match and int(step_match.group("step")) > int(max_step):
+            continue
+        checkpoint_match = LOG_LINE_CHECKPOINT_STEP_RE.search(line)
+        if checkpoint_match and int(checkpoint_match.group("step")) > int(max_step):
+            continue
+        scoped_lines.append(line)
+    dest.write_text("\n".join(scoped_lines) + ("\n" if scoped_lines else ""), encoding="utf-8")
+    return dest
 
 
 def training_dataframe(parsed: Seq4096TrainingLog, target_bpb: float = 1.2) -> pd.DataFrame:
@@ -278,6 +331,28 @@ def find_latest_checkpoint(checkpoint_dir: Path) -> Path | None:
     if not candidates:
         return None
     return sorted(candidates)[-1][2]
+
+
+def find_next_checkpoint_at_or_after(
+    checkpoint_dir: Path,
+    step: int,
+    processed: set[int] | None = None,
+) -> Path | None:
+    if not checkpoint_dir.exists():
+        return None
+    processed_steps = processed or set()
+    steps: set[int] = set()
+    for path in checkpoint_dir.glob("*.pt"):
+        checkpoint_step = extract_checkpoint_step(path)
+        if checkpoint_step is None:
+            continue
+        if checkpoint_step >= step and checkpoint_step not in processed_steps:
+            steps.add(checkpoint_step)
+    for checkpoint_step in sorted(steps):
+        checkpoint = find_checkpoint_at_step(checkpoint_dir, checkpoint_step)
+        if checkpoint is not None:
+            return checkpoint
+    return None
 
 
 def finite_xy(frame: pd.DataFrame, y_field: str) -> tuple[np.ndarray, np.ndarray]:
@@ -2421,6 +2496,7 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
     env.setdefault("WANDB_PROJECT", args.project)
     env.setdefault("WANDB_ENTITY", args.entity)
     run_id = args.run_id or args.run_path.split("/")[-1]
+    checkpoint_log = write_checkpoint_scoped_log(Path(args.log), logs_dir, step)
 
     command_status: dict[str, int] = {}
     diagnostic_payload: dict[str, Any] = {}
@@ -2430,7 +2506,7 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
             args.python,
             str(root / "scripts" / "mirror_fineweb_full_diagnostics_to_wandb.py"),
             "--log",
-            str(args.log),
+            str(checkpoint_log),
             "--project",
             args.project,
             "--entity",
@@ -2492,7 +2568,7 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
             python_bin=args.python,
             repo_root=root,
             checkpoint=checkpoint,
-            log_path=Path(args.log),
+            log_path=checkpoint_log,
             output_dir=output_dir,
             run_path=args.run_path,
             target_bpb=args.target_bpb,
@@ -2508,7 +2584,7 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
             env,
         )
 
-    parsed = parse_seq4096_log(Path(args.log))
+    parsed = parse_seq4096_log(checkpoint_log)
     artifact_report = compute_seq4096_artifact_report(
         checkpoint,
         root,
@@ -2658,21 +2734,29 @@ def main() -> None:
     while True:
         parsed = parse_seq4096_log(log_path)
         latest = parsed.latest_step
+        analysis_step = target_step
         checkpoint = find_checkpoint_at_step(checkpoint_dir, target_step)
-        if checkpoint is not None and latest >= target_step:
-            print(f"analysis_start step={target_step} checkpoint={checkpoint}", flush=True)
-            report = run_periodic_analysis(args, checkpoint, target_step)
+        if checkpoint is None:
+            checkpoint = find_next_checkpoint_at_or_after(checkpoint_dir, target_step, processed)
+            checkpoint_step = extract_checkpoint_step(checkpoint) if checkpoint is not None else None
+            if checkpoint_step is not None:
+                analysis_step = checkpoint_step
+        if checkpoint is not None and latest >= analysis_step:
+            print(f"analysis_start step={analysis_step} checkpoint={checkpoint}", flush=True)
+            report = run_periodic_analysis(args, checkpoint, analysis_step)
             print(
                 "analysis_done "
-                f"step={target_step} state={report.get('state')} "
+                f"step={analysis_step} state={report.get('state')} "
                 f"best_val_bpb={report.get('best_val_bpb')} gap={report.get('target_gap')}",
                 flush=True,
             )
-            processed.add(target_step)
+            processed.add(analysis_step)
             completed += 1
             if args.once or (args.max_checkpoints and completed >= args.max_checkpoints):
                 break
-            target_step = next_interval_step(args.start_step, args.interval_steps, processed)
+            target_step = analysis_step + args.interval_steps
+            while target_step in processed:
+                target_step += args.interval_steps
             continue
         latest_checkpoint = find_latest_checkpoint(checkpoint_dir)
         latest_checkpoint_step = extract_checkpoint_step(latest_checkpoint) if latest_checkpoint else None

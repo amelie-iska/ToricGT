@@ -11971,3 +11971,53 @@ loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
           BPB_LOOP_STOP_FILE=logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/bpb_codex_loop_stop,
           BPB_LOOP_NAME=all_phases_supervised_watchdog
 ```
+## 2026-06-04 R79 Low-Train-BPB Trigger Capture And R80 Rollback
+
+R79 replayed the R77-style low train-BPB dips from the step-3600 checkpoint and
+now saves forced checkpoints whenever `train_bpb <= 1.13`.
+
+Captured forced checkpoints:
+
+- step 3608: `train_bpb=1.1149`, trigger val BPB `1.2180`,
+  sampled OAI BPB `1.215465`;
+- step 3641: `train_bpb=1.1270`, trigger val BPB `1.2177`,
+  sampled OAI BPB `1.212380`;
+- step 3658: `train_bpb=1.1273`, trigger val BPB `1.2173`,
+  sampled OAI BPB `1.206637`;
+- step 3674: `train_bpb=1.0955`, trigger val BPB `1.2171`,
+  sampled OAI BPB `1.210648`.
+
+Conclusion: the dips are real and useful for checkpoint capture, but they are
+train-side/generalization-gap events, not validation breakthroughs.  The best
+deterministic validation BPB in this branch remains step 3600 at `1.2169`.
+W&B now exposes the trigger rows through `trigger/train_bpb`,
+`trigger/val_bpb`, `trigger/low_train_bpb`,
+`trigger/low_train_bpb_threshold`, and
+`checkpoint/reason_low_train_bpb`.
+
+Implementation update: `scripts/watch_seq4096_analysis.py` and
+`scripts/mirror_fineweb_full_diagnostics_to_wandb.py` now parse
+`low_train_bpb_trigger_val` rows, checkpoint-scoped analysis logs are written
+for replayed check-ins, and sparse interval watchers jump to the next actual
+forced checkpoint instead of waiting on nonexistent intermediate steps.
+
+Operational decision: R79 served its capture purpose.  The active optimizer
+handoff is R80, a rollback from the step-3600 best checkpoint with W&B enabled,
+non-interrupting analysis, forced low-train-BPB checkpoints still active, and
+the BPB target unchanged at `<= 1.2`.
+
+```text
+active run: toricgt_seq4096_4k_recovery_r80_rollback3600_20260604T190756Z
+resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r75_20260604T182013Z/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
+W&B: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r80_rollback3600_20260604T190756Z
+training tmux: toricgt_seq4096_4k_recovery_r80_rollback3600_20260604T190756Z
+analysis tmux: toricgt_seq4096_4k_analysis_r80_rollback3600_20260604T190756Z
+gate tmux: toricgt_seq4096_4k_gate_r80_rollback3600_20260604T190756Z
+```
+
+Next review rule: if R80 repeats the R79 pattern where low train-BPB dips do
+not reduce deterministic validation BPB by the next scheduled checkpoint,
+prefer a damped-auxiliary replay from step 3600 over another high-aux replay:
+lower `ADVANCED_LOSS_SCALE`, `GRAPHCG_LOSS_WEIGHT`, `SLEPIAN_LOSS_WEIGHT`, and
+`ADVANCED_LOSS_MAX_CE_RATIO`, or make the advanced losses log-only until the
+validation BPB slope turns negative again.

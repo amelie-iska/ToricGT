@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import json
+import math
 import sys
 
 import pytest
@@ -90,6 +91,68 @@ def test_parse_seq4096_log_captures_train_val_and_train_bpb(tmp_path: Path) -> N
     assert frame.loc[frame["step"] == 500, "val_bpb"].iloc[0] == pytest.approx(1.3641)
 
 
+def test_parse_seq4096_log_captures_low_train_bpb_trigger_validation(tmp_path: Path) -> None:
+    module = load_module()
+    log_path = tmp_path / "low_bpb_trigger.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "step:3600/4000 val_loss:2.0547 val_bpb:1.2169 train_time:9781627ms step_avg:2717.12ms",
+                (
+                    "low_train_bpb_trigger_val step:3608/4000 train_bpb:1.1149 "
+                    "threshold:1.1300 val_loss:2.0565 val_bpb:1.2180 train_time:9810449ms"
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    parsed = module.parse_seq4096_log(log_path)
+    frame = module.training_dataframe(parsed, target_bpb=1.2)
+
+    assert parsed.latest_step == 3608
+    assert parsed.val_rows[-1].step == 3608
+    assert parsed.val_rows[-1].val_bpb == pytest.approx(1.2180)
+    assert parsed.train_rows[-1].train_bpb == pytest.approx(1.1149)
+    assert math.isnan(parsed.train_rows[-1].train_loss)
+    trigger_row = frame.loc[frame["step"] == 3608].iloc[0]
+    assert trigger_row["train_bpb"] == pytest.approx(1.1149)
+    assert trigger_row["val_bpb"] == pytest.approx(1.2180)
+    assert trigger_row["generalization_gap"] == pytest.approx(1.2180 - 1.1149)
+
+
+def test_write_checkpoint_scoped_log_drops_future_checkpoint_rows(tmp_path: Path) -> None:
+    module = load_module()
+    log_path = tmp_path / "train.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "setup line",
+                "step:3600/4000 val_loss:2.0547 val_bpb:1.2169 train_time:1ms step_avg:1ms",
+                "low_train_bpb_trigger_val step:3608/4000 train_bpb:1.1149 threshold:1.1300 val_loss:2.0565 val_bpb:1.2180 train_time:2ms",
+                "checkpoint_saved:/ckpt/run_step_003608.pt bytes:1 reason:low_train_bpb",
+                "step:3650/4000 val_loss:2.0550 val_bpb:1.2171 train_time:3ms step_avg:1ms",
+                "checkpoint_saved:/ckpt/run_step_003650.pt bytes:1 reason:scheduled",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    scoped_log = module.write_checkpoint_scoped_log(log_path, tmp_path / "analysis" / "logs", 3608)
+    scoped = scoped_log.read_text(encoding="utf-8")
+    parsed = module.parse_seq4096_log(scoped_log)
+
+    assert "setup line" in scoped
+    assert "step:3608/4000" in scoped
+    assert "run_step_003608.pt" in scoped
+    assert "step:3650/4000" not in scoped
+    assert "run_step_003650.pt" not in scoped
+    assert parsed.latest_step == 3608
+    assert parsed.val_rows[-1].val_bpb == pytest.approx(1.2180)
+
+
 def test_checkpoint_step_detection_uses_seq4096_filename_pattern(tmp_path: Path) -> None:
     module = load_module()
     checkpoint = tmp_path / "toricgt_seq4096_run_step_000500.pt"
@@ -100,6 +163,20 @@ def test_checkpoint_step_detection_uses_seq4096_filename_pattern(tmp_path: Path)
     assert module.extract_checkpoint_step(checkpoint) == 500
     assert module.find_checkpoint_at_step(tmp_path, 500) == checkpoint
     assert module.find_latest_checkpoint(tmp_path).name == checkpoint.name
+
+
+def test_find_next_checkpoint_at_or_after_skips_missing_sparse_steps(tmp_path: Path) -> None:
+    module = load_module()
+    (tmp_path / "run_step_003600.pt").write_bytes(b"start")
+    forced = tmp_path / "run_step_003608.pt"
+    forced.write_bytes(b"forced")
+    (tmp_path / "run_step_003650.pt").write_bytes(b"scheduled")
+
+    assert module.find_next_checkpoint_at_or_after(tmp_path, 3601, processed={3600}) == forced
+    assert module.find_next_checkpoint_at_or_after(tmp_path, 3609, processed={3600, 3608}).name.endswith(
+        "003650.pt"
+    )
+    assert module.find_next_checkpoint_at_or_after(tmp_path, 3651, processed=set()) is None
 
 
 def test_initial_target_step_can_analyze_resume_checkpoint_first() -> None:
@@ -492,6 +569,41 @@ def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
     assert payload["diagnostics/families/slepian_pollak_prolate_available"] == 1.0
     assert payload["tropical/bpb_best_so_far"] == pytest.approx(1.3641)
     assert payload["metrics_status/fineweb_curve_diagnostics_available"] == 1.0
+
+
+def test_full_diagnostics_parse_low_train_bpb_trigger_validation(tmp_path: Path) -> None:
+    module = load_full_diag_module()
+    log_path = tmp_path / "low_bpb_trigger.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "step:3600/4000 val_loss:2.0547 val_bpb:1.2169 train_time:9781627ms step_avg:2717.12ms",
+                (
+                    "low_train_bpb_trigger_val step:3608/4000 train_bpb:1.1149 "
+                    "threshold:1.1300 val_loss:2.0565 val_bpb:1.2180 train_time:9810449ms"
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = module.run_once_without_wandb(
+        log_path=log_path,
+        output_json=tmp_path / "diagnostics.json",
+        target_bpb=1.2,
+        max_points=16,
+    )
+    parsed = module.parse_log(log_path)
+
+    assert payload["trainer/step"] == 3608
+    assert payload["fineweb_curve/latest_train_bpb"] == pytest.approx(1.1149)
+    assert payload["fineweb_curve/latest_val_bpb"] == pytest.approx(1.2180)
+    assert payload["fineweb_curve/latest_generalization_gap_bpb"] == pytest.approx(1.2180 - 1.1149)
+    assert payload["fineweb_curve/transfer_pairs"] == pytest.approx(1.0)
+    assert payload["diagnostics/latest/train_bpb"] == pytest.approx(1.1149)
+    assert payload["diagnostics/latest/val_bpb"] == pytest.approx(1.2180)
+    assert math.isfinite(parsed["train"][3608]["train_loss"])
 
 
 def test_full_diagnostics_reports_transfer_efficiency_aliases(tmp_path: Path) -> None:
