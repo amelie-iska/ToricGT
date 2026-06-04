@@ -707,6 +707,138 @@ loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
           BPB_LOOP_NAME=all_phases_supervised_watchdog
 ```
 
+## Seq4096 R74 Step-3500 BPB Review
+
+Analysis directory:
+
+```text
+outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r74_20260604T180722Z/step-00003500
+```
+
+Analyzed checkpoint:
+
+```text
+amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r74_20260604T180722Z/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_step_003500.pt
+```
+
+Primary BPB gate status: not reached.  The loop primary metric is
+`openai_parameter_golf/bpb=1.2198282837822922` at step 3500, so the active
+target gap is `0.019828283782292267` against `BPB_TARGET=1.2`.  W&B
+`fineweb/val_bpb` and `val/bpb` agree with the primary signal.  Validation loss
+is `2.0596289606362665`; train BPB at the validation checkpoint is `1.2156`.
+
+Official-style FineWeb/OAI calibration is high variance at this checkpoint.  The
+generated compact OAI eval used one 256-token validation sequence and reported
+`oai_competition/bpb=1.2017869051762973`, which is near the threshold but not a
+promotion-grade estimate.  A CPU rerun over 16 sampled 256-token sequences
+reported `oai_competition/bpb=1.328491831232304`.  Treat the one-sequence result
+as evidence that some validation slices are nearly solved, not as proof that the
+competition BPB gate has crossed 1.2.  Controls are still needed against
+tokenizer, n-gram/context-tree, and validation-slice easiness explanations.
+
+Metric categories from the W&B/statistical export:
+
+- Desired: 51 metrics.  BPB and validation loss are descending, artifact export
+  remains legal (`15,883,737` bytes, `116,263` bytes under the 16 MB limit), the
+  compact geometry suite is non-collapsed, BGG/Koszul `d2` residuals are zero in
+  the proxy records, and GraphCG off-diagonal coherence is near numerical zero.
+- Desired but too weak or slow: 25 metrics.  Validation BPB improvement is real
+  but marginal: `3400 -> 3450` drops `0.0013`, and `3450 -> 3500` drops
+  `0.0019`.  The sparse second difference is favorable (`-0.0006`), but the
+  projected target crossing is still about step `4119`, after the 4K gate.
+  Train-to-validation transfer is weak: train BPB drops `0.0155` while
+  validation BPB drops `0.0019`, for transfer efficiency `0.1226`.
+- Undesirable: 3 metrics.  Two are stable advanced-control toggles logged under
+  an undesirable stable category; the third is `bpb/improvement_from_initial`,
+  whose category appears sign-inverted for an improvement metric.  The stronger
+  undesirable signal is qualitative/statistical: broader sampled OAI BPB is much
+  worse than the one-sequence result, so the near-threshold OAI point is not
+  robust.
+
+Plot review covered the BPB descent/target-zone plots, velocity requirement,
+transfer efficiency, advanced metric evidence/control maps, simplex
+triangles/tetrahedra, 3D reasoning trajectories, Ramachandran-style phase-energy
+plots, topology/persistence audits, GraphCG basis plots, tropical chamber plots,
+and energy/tetrahedron landscapes.  The plots are structured and nonblank.
+Behavior is mixed: BPB geometry is moving in the right direction, but transfer
+efficiency, analogical transport, layer/attention MST efficiency, and trajectory
+smoothness are not yet strong.
+
+Reasoning-gate read:
+
+- GFlowNet/GoT branch quality is not directly available as a full training
+  metric in this Seq4096 export; the geometry proxy is the available sidecar.
+  It does not justify increasing branch/reasoning loss weight before the BPB
+  gate clears.
+- Kolmogorov proxies are useful but not yet decisive.  Recent full-log
+  `NCD_lzma=0.8892497009058281`; geometry relative-K values range from about
+  `0.642` to `0.811`, with relative-K gain mostly zero except layer/attention
+  controls.  Compression structure exists, but it is not yet transferring
+  cleanly into validation BPB.
+- GraphCG basis behavior is good for embeddings and memory
+  (`disentanglement_score` about `0.93-0.95` for embedding trajectories and
+  `0.819` for bigram memory) but weak for layer/attention control records
+  (`0.448-0.505`) with very large basis condition numbers.  Keep it as a tiny
+  sidecar/controller signal, not a larger objective.
+- Persistence/simplex/Koszul/BGG topology is coherent as a proxy:
+  `bgg_resolution_consistency` is `~1.0`, `bgg_gale_dual_consistency=1.0`,
+  `koszul_d2_residual=0`, and standard leakage is moderate (`0.0886-0.1319`).
+  This supports preserving diagnostics, not changing scalar weights.
+- MST and trajectory geometry are uneven.  Embedding MST efficiency is usable
+  (`0.341-0.351`) and smoother for the norm-ordered trajectory
+  (`path_smoothness=0.0968`), while layer and attention controls have low MST
+  efficiency (`0.0568-0.0653`) and rough paths.  Bigram memory has the longest
+  trajectory (`1310.64`) and strong terminal confidence, but low smoothness.
+- Toric/tropical behavior is active rather than collapsed.  Toric fan entropy
+  ranges from `0.626` to `0.925`; tropical chamber crossing rates are high
+  (`0.75-0.963`), and the FineWeb curve diagnostic has active-face entropy
+  `0.3271` with zero plateau pressure.  This is desired exploration, but too
+  noisy to use as a heavier pre-threshold loss.
+- Hessian/sharpness probes were not present in this analysis directory.  The
+  checkpoint finite differences do not show a floor-bounce basin: validation
+  first differences are negative and the sparse second difference is negative.
+
+`scripts/propose_training_adjustments.py` was rerun on the analysis directory.
+It recommended `restart_from_best_checkpoint_with_damped_structural_sidecars`.
+I treat that as evidence of velocity risk, not as authority: the proposal is
+driven by projected miss of the 4K gate, while the actual sparse validation
+finite differences are still descending and there is no positive-curvature
+rollback signal.  The BPB transfer controller also recommends a pre-threshold
+BPB-clean objective with advanced families in sidecar mode.
+
+Decision: `CONTINUE`.
+
+No code or config scalar was changed, and the better-strategy stop sentinel was
+not written.  The active continuation is R75:
+
+```text
+training tmux: toricgt_seq4096_4k_recovery_r75_20260604T182013Z
+training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z.txt
+resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r74_20260604T180722Z/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_step_003500.pt
+new checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r75_20260604T182013Z
+W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r75_20260604T182013Z
+resume controls: reset_optimizer=0, reset_rng=0, reset_loader=0
+```
+
+No active `scripts/supervise_parameter_golf_training.py` process was observed;
+the Seq4096 tmux bundle is the active training owner.  A non-interrupting
+Seq4096 sidecar watcher was launched for the next checkpoint because the generic
+`watch_training_analysis.py` only matches native `random_order_step_*.pt`
+checkpoints and would not see compact Seq4096 `*_step_*.pt` files:
+
+```text
+watcher tmux: toricgt_seq4096_4k_recovery_r75_nonblocking_watch_3550
+target step: 3550
+watcher log: logs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z.nonblocking_3550_analysis.txt
+output root: outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_nonblocking
+pause behavior: non-interrupting; no training pause signal
+compact OAI eval: cpu, seq_len=256, val_max_sequences=16
+loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
+          BPB_LOOP_STATE=outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_state.json,
+          BPB_LOOP_STOP_FILE=outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_stop,
+          BPB_LOOP_NAME=parameter_golf_bpb_target
+```
+
 ## 2026-06-03 Revealed FineWeb BPB Recovery Step-5250 Review
 
 Run:
