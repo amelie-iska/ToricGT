@@ -12232,18 +12232,23 @@ VAL_ON_TRAIN_BPB_CHECKPOINT=1
 The low-BPB trigger is confirmed live on R81:
 
 ```text
-forced checkpoint: toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z_step_003608.pt
-trigger step: 3608
-trigger train BPB: 1.1142
-trigger validation BPB: 1.2170
-reason: low_train_bpb
+step 3608 forced checkpoint: train BPB 1.1142, validation BPB 1.2170
+step 3625 forced checkpoint: train BPB 1.1290, validation BPB 1.2164
+step 3641 forced checkpoint: train BPB 1.1256, validation BPB 1.2161
+step 3650 scheduled checkpoint: train BPB 1.2461, validation BPB 1.2155
 ```
 
-The validation result again shows a train-side low-BPB transient rather than a
-competition-BPB breakthrough. Keep the forced checkpoints and analyses because
-they are useful for transfer diagnostics, but do not promote a low-train-BPB
-checkpoint unless deterministic validation or sampled OAI competition BPB also
-improves. If the 3650 validation checkpoint does not beat the step-3600
-validation baseline, prefer an even cleaner BPB branch with advanced losses
+The validation result improved modestly from `1.2169` to `1.2155`, but it is
+still not a competition-BPB breakthrough. Keep the forced checkpoints and
+analyses because they are useful for transfer diagnostics, but do not promote a
+low-train-BPB checkpoint unless deterministic validation or sampled OAI
+competition BPB also improves. The dense W&B mirror now parses
+`low_train_bpb_trigger_val` lines directly and mirrors `trigger/train_bpb`,
+`trigger/val_bpb`, `trigger/low_train_bpb_threshold`, and
+`checkpoint/reason_low_train_bpb` so the run history and summary expose these
+events without waiting for the trainer-side W&B writer.
+
+Next decision rule: if the step-3700/3750 validation slope does not accelerate
+toward the `<= 1.2` gate, prefer an even cleaner BPB branch with advanced losses
 log-only or lower tied-embedding/bigram-bias velocity rather than another
 high-auxiliary replay.

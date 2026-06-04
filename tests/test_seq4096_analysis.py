@@ -745,6 +745,22 @@ def test_dense_wandb_mirror_loads_train_bpb_and_diagnostic_aliases(tmp_path: Pat
     assert "toric/shadow_fan_cell_entropy" not in aliases
 
 
+def test_dense_wandb_mirror_parses_low_train_bpb_trigger_validation() -> None:
+    module = load_log_mirror_module()
+
+    trigger_match = module.LOW_TRAIN_BPB_TRIGGER_VAL_RE.search(
+        "low_train_bpb_trigger_val step:3608/4000 train_bpb:1.1142 "
+        "threshold:1.1300 val_loss:2.0549 val_bpb:1.2170 train_time:9810418ms"
+    )
+
+    assert trigger_match is not None
+    assert int(trigger_match.group("step")) == 3608
+    assert float(trigger_match.group("train_bpb")) == pytest.approx(1.1142)
+    assert float(trigger_match.group("threshold")) == pytest.approx(1.13)
+    assert float(trigger_match.group("val_loss")) == pytest.approx(2.0549)
+    assert float(trigger_match.group("val_bpb")) == pytest.approx(1.2170)
+
+
 def test_dense_wandb_mirror_builds_diagnostics_summary_pin_payload(tmp_path: Path) -> None:
     module = load_log_mirror_module()
     diagnostics_json = tmp_path / "latest.json"

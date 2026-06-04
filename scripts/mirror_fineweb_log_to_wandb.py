@@ -27,6 +27,14 @@ VAL_RE = re.compile(
     r"\s+val_bpb:(?P<bpb>[0-9.]+)\s+train_time:(?P<ms>[0-9.]+)ms"
     r"\s+step_avg:(?P<avg>[0-9.]+)ms"
 )
+LOW_TRAIN_BPB_TRIGGER_VAL_RE = re.compile(
+    r"low_train_bpb_trigger_val\s+step:(?P<step>\d+)/(?P<total>\d+)"
+    r"\s+train_bpb:(?P<train_bpb>[0-9.]+)"
+    r"\s+threshold:(?P<threshold>[0-9.]+)"
+    r"\s+val_loss:(?P<val_loss>[0-9.]+)"
+    r"\s+val_bpb:(?P<val_bpb>[0-9.]+)"
+    r"\s+train_time:(?P<ms>[0-9.]+)ms"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -321,6 +329,122 @@ def main() -> None:
             text = path.read_text(encoding="utf-8", errors="replace")
             text_tail = "\n".join(text.splitlines()[-20:])
             for line in text.splitlines():
+                trigger_val = LOW_TRAIN_BPB_TRIGGER_VAL_RE.search(line)
+                if trigger_val:
+                    step = int(trigger_val.group("step"))
+                    latest_seen_step = max(latest_seen_step, step)
+                    key = ("low_train_bpb_trigger_val", step)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    total = int(trigger_val.group("total"))
+                    train_bpb = float(trigger_val.group("train_bpb"))
+                    threshold = float(trigger_val.group("threshold"))
+                    bpb = float(trigger_val.group("val_bpb"))
+                    val_loss = float(trigger_val.group("val_loss"))
+                    train_time_ms = float(trigger_val.group("ms"))
+                    best_bpb = bpb if best_bpb is None else min(best_bpb, bpb)
+                    if initial_bpb is None:
+                        initial_bpb = bpb
+                    target_gap = bpb - args.target_bpb
+                    payload = {
+                        "trainer/step": step,
+                        "trainer/total_steps": total,
+                        "trainer/progress": step / max(total, 1),
+                        "time/train_ms": train_time_ms,
+                        "time/train_seconds": train_time_ms / 1000.0,
+                        "progress/step": step,
+                        "progress/total_steps": total,
+                        "progress/fraction": step / max(total, 1),
+                        "progress/remaining_steps": max(total - step, 0),
+                        "fineweb/train_bpb": train_bpb,
+                        "fineweb/val_loss": val_loss,
+                        "fineweb/val_bpb": bpb,
+                        "fineweb/best_val_bpb": best_bpb,
+                        "fineweb/target_bpb": args.target_bpb,
+                        "fineweb/target_gap_bpb": target_gap,
+                        "fineweb/target_reached": float(best_bpb <= args.target_bpb),
+                        "fineweb/train_time_ms": train_time_ms,
+                        "train/bpb": train_bpb,
+                        "train_bpb": train_bpb,
+                        "val/loss": val_loss,
+                        "val/perplexity": math.exp(min(val_loss, 20.0)),
+                        "val/bpb": bpb,
+                        "val_bpb": bpb,
+                        "bpb": bpb,
+                        "bpb/train": train_bpb,
+                        "bpb/val": bpb,
+                        "bpb/best": best_bpb,
+                        "bpb/target": args.target_bpb,
+                        "bpb/gap_to_target": target_gap,
+                        "bpb/improvement_from_initial": (
+                            0.0 if initial_bpb is None else initial_bpb - bpb
+                        ),
+                        "bpb/target_reached": float(best_bpb <= args.target_bpb),
+                        "openai_parameter_golf/bpb": bpb,
+                        "openai_parameter_golf/best_bpb": best_bpb,
+                        "openai_parameter_golf/train_bpb": train_bpb,
+                        "openai_parameter_golf/target_bpb": args.target_bpb,
+                        "openai_parameter_golf/gap_to_target": target_gap,
+                        "trigger/low_train_bpb": 1.0,
+                        "trigger/low_train_bpb_threshold": threshold,
+                        "trigger/train_bpb": train_bpb,
+                        "trigger/val_loss": val_loss,
+                        "trigger/val_bpb": bpb,
+                        "trigger/best_val_bpb": best_bpb,
+                        "checkpoint/reason_low_train_bpb": 1.0,
+                    }
+                    diagnostic_payload = latest_diagnostics_aliases(diagnostics_json, step)
+                    gate_payload = latest_gate_state_aliases(gate_state_json, step, args.target_bpb)
+                    payload.update(diagnostic_payload)
+                    payload.update(gate_payload)
+                    wandb.log(payload)
+                    summary_payload = {
+                        "fineweb/train_bpb": train_bpb,
+                        "fineweb/val_bpb": bpb,
+                        "fineweb/best_val_bpb": best_bpb,
+                        "fineweb/target_bpb": args.target_bpb,
+                        "train/bpb": train_bpb,
+                        "train_bpb": train_bpb,
+                        "val/bpb": bpb,
+                        "val/loss": val_loss,
+                        "val_bpb": bpb,
+                        "bpb": bpb,
+                        "bpb/train": train_bpb,
+                        "bpb/val": bpb,
+                        "bpb/best": best_bpb,
+                        "bpb/target": args.target_bpb,
+                        "bpb/gap_to_target": target_gap,
+                        "openai_parameter_golf/bpb": bpb,
+                        "openai_parameter_golf/best_bpb": best_bpb,
+                        "openai_parameter_golf/train_bpb": train_bpb,
+                        "openai_parameter_golf/target_bpb": args.target_bpb,
+                        "openai_parameter_golf/gap_to_target": target_gap,
+                        "trigger/low_train_bpb": 1.0,
+                        "trigger/low_train_bpb_threshold": threshold,
+                        "trigger/train_bpb": train_bpb,
+                        "trigger/val_bpb": bpb,
+                        "trigger/best_val_bpb": best_bpb,
+                        "checkpoint/reason_low_train_bpb": 1.0,
+                        "progress/step": step,
+                        "progress/fraction": step / max(total, 1),
+                    }
+                    summary_payload.update(diagnostic_payload)
+                    summary_payload.update(gate_payload)
+                    run.summary.update(summary_payload)
+                    sync_public_summary(
+                        wandb,
+                        entity=args.entity,
+                        project=args.project,
+                        run_id=args.run_id,
+                        summary_payload=summary_payload,
+                    )
+                    print(
+                        "wandb_low_train_bpb_trigger "
+                        f"step={step} train_bpb={train_bpb:.4f} val_bpb={bpb:.4f} best={best_bpb:.4f}",
+                        flush=True,
+                    )
+                    continue
                 val = VAL_RE.search(line)
                 if val:
                     step = int(val.group("step"))
