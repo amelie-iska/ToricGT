@@ -75,6 +75,9 @@ class PreemptiveGateRisk:
     latest_projected_target_step: float
     latest_best_val_bpb: float
     latest_recent_val_slope: float
+    latest_projected_gate_overrun_steps: float
+    latest_velocity_shortfall_pressure: float
+    latest_val_velocity_shortfall: float
     missed_projection_count: int
     required_patience: int
     gate_step: int
@@ -277,21 +280,36 @@ def load_preemptive_gate_risk(
         projected = finite_float(payload.get("projected_target_step_from_val"))
         best_val = finite_float(payload.get("best_val_bpb"))
         recent_slope = finite_float(payload.get("val_bpb_recent_slope_per_100_steps"))
+        projected_overrun = projected - float(gate_step) if math.isfinite(projected) else float("nan")
+        velocity_shortfall_pressure = finite_float(payload.get("bpb_velocity_shortfall_pressure"))
+        val_velocity_shortfall = finite_float(payload.get("val_velocity_shortfall_to_gate_per_100_steps"))
+        material_projected_miss = projected > float(gate_step) and (
+            not math.isfinite(velocity_shortfall_pressure)
+            or projected_overrun >= 50.0
+            or velocity_shortfall_pressure >= 0.10
+            or (math.isfinite(val_velocity_shortfall) and val_velocity_shortfall >= 0.0005)
+        )
         is_risk = (
             best_val > float(target_bpb)
             and recent_slope < 0.0
-            and projected > float(gate_step)
+            and material_projected_miss
         )
         if not is_risk:
             break
         missed += 1
     latest_step, latest = rows[-1]
+    latest_projected = finite_float(latest.get("projected_target_step_from_val"))
     return PreemptiveGateRisk(
         analysis_root=str(root),
         latest_analysis_step=int(latest_step),
-        latest_projected_target_step=finite_float(latest.get("projected_target_step_from_val")),
+        latest_projected_target_step=latest_projected,
         latest_best_val_bpb=finite_float(latest.get("best_val_bpb")),
         latest_recent_val_slope=finite_float(latest.get("val_bpb_recent_slope_per_100_steps")),
+        latest_projected_gate_overrun_steps=(
+            latest_projected - float(gate_step) if math.isfinite(latest_projected) else float("nan")
+        ),
+        latest_velocity_shortfall_pressure=finite_float(latest.get("bpb_velocity_shortfall_pressure")),
+        latest_val_velocity_shortfall=finite_float(latest.get("val_velocity_shortfall_to_gate_per_100_steps")),
         missed_projection_count=int(missed),
         required_patience=max(1, int(patience)),
         gate_step=int(gate_step),

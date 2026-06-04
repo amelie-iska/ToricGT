@@ -208,6 +208,39 @@ def test_preemptive_gate_risk_ignores_single_noisy_projected_miss(tmp_path: Path
     assert not should_preempt_for_gate_risk(risk)
 
 
+def test_preemptive_gate_risk_ignores_tiny_gate_overrun_when_velocity_shortfall_is_near_zero(tmp_path: Path):
+    analysis_root = tmp_path / "analysis"
+    step_dir = analysis_root / "step-00003250"
+    step_dir.mkdir(parents=True)
+    (step_dir / "analysis_status.json").write_text(
+        (
+            "{"
+            "\"checkpoint_step\": 3250,"
+            "\"state\": \"near_target\","
+            "\"best_val_bpb\": 1.2341,"
+            "\"target_bpb\": 1.2,"
+            "\"val_bpb_recent_slope_per_100_steps\": -0.00452,"
+            "\"projected_target_step_from_val\": 4004.4248,"
+            "\"val_velocity_shortfall_to_gate_per_100_steps\": 0.0000267,"
+            "\"bpb_velocity_shortfall_pressure\": 0.0053"
+            "}"
+        ),
+        encoding="utf-8",
+    )
+
+    risk = load_preemptive_gate_risk(
+        analysis_root,
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3250,
+        patience=1,
+    )
+
+    assert risk is not None
+    assert risk.missed_projection_count == 0
+    assert not should_preempt_for_gate_risk(risk)
+
+
 def test_seq4096_log_parses_train_bpb_for_validation_gap_controls(tmp_path: Path):
     log = tmp_path / "train.log"
     log.write_text(
