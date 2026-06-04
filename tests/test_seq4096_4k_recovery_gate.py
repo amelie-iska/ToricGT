@@ -7,6 +7,7 @@ from scripts.watch_seq4096_4k_recovery import (
     checkpoint_for_step,
     load_advanced_diagnostics,
     load_failed_trajectory_analogue_risk,
+    load_train_wave_analogue_risk,
     load_preemptive_gate_risk,
     plan_metric_driven_recovery_controls,
     parse_seq4096_log,
@@ -331,6 +332,57 @@ def test_failed_trajectory_analogue_risk_preempts_on_on_track_replay(tmp_path: P
 
     assert risk is not None
     assert risk.risk_source == "failed_trajectory_analogue"
+    assert risk.missed_projection_count == 2
+    assert risk.latest_projected_target_step > 4000
+    assert risk.analogue_failed_count == 2
+    assert risk.analogue_train_rmse_mean < 0.001
+    assert should_preempt_for_gate_risk(risk)
+
+
+def test_train_wave_analogue_risk_preempts_before_next_validation(tmp_path: Path):
+    current_log = tmp_path / "current.log"
+    current_log.write_text(
+        "\n".join(
+            [
+                "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+                "step:3300/20000 train_loss:2.0719 train_time:1ms step_avg:1ms train_bpb:1.2409",
+                "step:3350/20000 train_loss:2.0315 train_time:1ms step_avg:1ms train_bpb:1.2064",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    history_logs = []
+    for index, val_3500 in enumerate((1.2336, 1.2339), start=1):
+        path = tmp_path / f"failed_structural_{index}.log"
+        path.write_text(
+            "\n".join(
+                [
+                    "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+                    "step:3300/20000 train_loss:2.0722 train_time:1ms step_avg:1ms train_bpb:1.2411",
+                    "step:3350/20000 train_loss:2.0316 train_time:1ms step_avg:1ms train_bpb:1.2064",
+                    "step:3500/20000 train_loss:2.1093 train_time:1ms step_avg:1ms train_bpb:1.2383",
+                    f"step:3500/20000 val_loss:2.0834 val_bpb:{val_3500} train_time:1ms step_avg:1ms",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        history_logs.append(path)
+
+    risk = load_train_wave_analogue_risk(
+        current_log,
+        history_logs=history_logs,
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3350,
+        train_rmse_threshold=0.001,
+        min_failed_analogues=2,
+    )
+
+    assert risk is not None
+    assert risk.risk_source == "failed_train_wave_analogue"
+    assert risk.latest_analysis_step == 3350
     assert risk.missed_projection_count == 2
     assert risk.latest_projected_target_step > 4000
     assert risk.analogue_failed_count == 2
