@@ -1089,6 +1089,120 @@ loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
           BPB_LOOP_NAME=all_phases_supervised_watchdog
 ```
 
+## 2026-06-04 r77 Step 3650 BPB Review
+
+Analyzed checkpoint:
+
+```text
+amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r77_20260604T183710Z/toricgt_seq4096_4k_recovery_r77_20260604T183710Z_step_003650.pt
+```
+
+Analysis directory:
+
+```text
+outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r77_20260604T183710Z_watch_training_analysis/step-00003650
+```
+
+The BPB gate is still the binding constraint.  The official-style FineWeb/OAI
+signal is `openai_parameter_golf/bpb = 1.2171306166080218` at step `3650`,
+above the active target `1.2`.  The best loop BPB remains
+`1.2169196232244919` at step `3600`, so the finite difference over the
+available validation points is positive:
+
+```text
+3600 -> 3650: delta BPB = +0.000230617, about +0.000461 per 100 steps
+required to hit 1.2 by step 4000: about -0.00489 per 100 steps
+```
+
+There are only two validation points in this export, so there is no reliable
+second-difference or Hessian evidence.  The first derivative is nevertheless
+positive at the gate boundary, and the train-side series is worse: `train/bpb`,
+`fineweb/train_bpb`, and `openai_parameter_golf/train_bpb` are all categorized
+`not_as_desired`, with median train BPB moving from `1.19101` to `1.21579`
+and recent slope about `+0.44999` per 1k steps.  `train/loss` and
+`train/total_loss` also moved up.  The core metric plot shows oscillatory train
+loss/BPB with an upward moving average, while validation BPB is nearly flat but
+slightly rising from the prior best.
+
+Metric behavior categories:
+
+```text
+desired: 44
+desired but too weak or slow: 21
+undesirable: 14
+```
+
+Desired: auxiliary clamps are active and non-explosive; BGG standard leakage,
+GraphCG off-diagonal coherence, Slepian leakage, and tropical active-face
+margin are stable enough as probes; target metadata and checkpoint/runtime
+signals are healthy.
+
+Desired but too weak or slow: FineWeb/OAI validation BPB, validation loss,
+best-val BPB, BPB gap-to-target, GraphCG spectral entropy, toric fan entropy,
+Slepian/Pollak loss, Koszul/BGG loss, and weighted unscaled auxiliary loss are
+not collapsing, but the improvement is too slow to satisfy the target gate.
+
+Undesirable: train BPB/loss/total loss are rising; GraphCG loss and auxiliary
+loss are moving against the intended lower-is-better objective.  This is
+consistent with a local floor bounce rather than a clean descent basin.
+
+Reasoning gate coverage is incomplete for this checkpoint.  Simplex and
+geometry diagnostics both failed while loading the configless checkpoint
+(`KeyError: 'config'`), so there are no valid generated simplex plots, 3D GoT
+trajectories, Ramachandran-style phase plots, MST/smoothness/trajectory-length
+summaries, energy/fitness landscapes, persistence topology plots, or branch
+replay diagnostics to promote from.  The available W&B structural diagnostics
+show low absolute structural pressure (`structural_recapture_score ~= 0.0495`),
+with tropical/complexity pressure the largest family in the W&B summary and
+the proposal compressing the missing geometry/topology evidence into a
+trajectory-memory pressure.  That is too incomplete to override the BPB gate.
+
+FineWeb exposure is direct here (`train_loader: fineweb10B_sp1024`,
+`fineweb/val_bpb` present), so this checkpoint is not evidence for OOD transfer
+from hard ToricGT reasoning data.  Any later transfer claim still needs
+tokenizer controls, n-gram/context controls, dataset-easiness controls,
+FineWeb-only controls, hard-data-only controls, and equal-budget mixed controls.
+
+`scripts/propose_training_adjustments.py` was rerun on the analysis directory
+with target `1.2`, gate step `4000`, and checkpoint step `3650`.  It reported
+`status=off_track`, current primary BPB `1.2171306166080218`,
+required drop `0.004894` per 100 steps, recent drop `0.0`, and primary action
+`prepare_midrun_recovery_branch`.  I used this as evidence, not authority.  Its
+`restart_policy=no_restart_until_next_gate` is weaker than the explicit handoff
+rule to roll back before the first positive BPB derivative.
+
+Decision: `ROLLBACK`.
+
+No code or config scalar was changed, and the better-strategy stop sentinel was
+not written.  The selected rollback point is the dense step-3600 checkpoint
+before the positive first derivative.  The active successor run is already
+training from that point under the same Parameter-Golf architecture and scalar
+family:
+
+```text
+gate/supervisor tmux: toricgt_seq4096_4k_gate_r79_low_bpb_capture_20260604T185003Z
+training tmux: toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z
+training config: config/train.parameter_golf_random_order_dense.yaml
+resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r75_20260604T182013Z/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
+training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z.txt
+gate log: logs/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z.4k_gate.txt
+W&B run path: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z
+```
+
+The non-interrupting next analysis sidecar is active with
+`scripts/watch_training_analysis.py` on CPU/fp32, target step `3650`, and no
+`--pause-training-before-analysis` flag:
+
+```text
+watcher tmux: toricgt_watch_training_analysis_r79_3650
+watcher log: logs/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z.watch_training_analysis_3650.txt
+watcher output root: outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r79_low_bpb_capture_20260604T185003Z_watch_training_analysis
+loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
+          BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_state.json,
+          BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_stop,
+          BPB_LOOP_NAME=parameter_golf_bpb_target
+```
+
 ## Seq4096 R74 Step-3500 BPB Review
 
 Analysis directory:
