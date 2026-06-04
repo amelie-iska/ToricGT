@@ -74,6 +74,14 @@ CONTROL_POLICY_IDS = {
     "structural_pressure_damped": 2.0,
     "curvature_aware_velocity_recovery": 3.0,
     "velocity_shortfall_recovery": 4.0,
+    "validation_gap_recapture": 5.0,
+    "lexical_transition_bias_recapture": 6.0,
+    "curvature_aware_structural_relief_velocity_recapture": 7.0,
+    "structural_relief_velocity_recapture": 8.0,
+    "structural_pressure_recapture": 9.0,
+    "post_hot_probe_damped_transfer": 10.0,
+    "bpb_velocity_recapture": 11.0,
+    "failed_train_wave_damped_transfer_probe": 12.0,
 }
 
 ADVANCED_METRIC_POLICY_IDS = {
@@ -81,11 +89,20 @@ ADVANCED_METRIC_POLICY_IDS = {
     "monitor_structural_sidecars": 1.0,
     "damp_structural_pressure": 2.0,
     "curvature_recovery": 3.0,
+    "graphcg_slepian_sidecar_primary_bpb_clean": 4.0,
+    "bigram_bias_primary_bpb_clean_structural_sidecars": 5.0,
+    "gate_velocity_shortfall_structural_relief_bpb_velocity": 6.0,
+    "guarded_transfer_relief_bpb_velocity": 7.0,
+    "toric_topology_slepian_guarded_bpb_recapture": 8.0,
+    "hot_probe_failed_validation_damping_structural_sidecars": 9.0,
+    "proposal_guided_bpb_recapture_structural_sidecars": 10.0,
+    "failed_train_wave_analogue_damp_graphcg_slepian_sidecars": 11.0,
 }
 
 RISK_SOURCE_IDS = {
     "validation_projection": 1.0,
     "failed_trajectory_analogue": 2.0,
+    "failed_train_wave_analogue": 3.0,
 }
 
 
@@ -477,6 +494,12 @@ def main() -> None:
             )
             if diagnostics_summary_pin:
                 fingerprint = summary_payload_fingerprint(diagnostics_summary_pin)
+                changed = fingerprint != last_diagnostics_summary_pin
+                if changed:
+                    history_payload = dict(diagnostics_summary_pin)
+                    history_payload["trainer/step"] = latest_seen_step
+                    history_payload["progress/step"] = latest_seen_step
+                    wandb.log(history_payload)
                 run.summary.update(diagnostics_summary_pin)
                 if sync_public_summary(
                     wandb,
@@ -484,7 +507,7 @@ def main() -> None:
                     project=args.project,
                     run_id=args.run_id,
                     summary_payload=diagnostics_summary_pin,
-                ) and fingerprint != last_diagnostics_summary_pin:
+                ) and changed:
                     print(
                         "wandb_diagnostics_summary_pin "
                         f"step={latest_seen_step} keys={len(diagnostics_summary_pin)}",
