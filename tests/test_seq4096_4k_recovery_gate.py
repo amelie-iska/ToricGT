@@ -6,6 +6,7 @@ from scripts.watch_seq4096_4k_recovery import (
     build_recovery_run_id,
     checkpoint_for_step,
     load_advanced_diagnostics,
+    load_failed_trajectory_analogue_risk,
     load_preemptive_gate_risk,
     plan_metric_driven_recovery_controls,
     parse_seq4096_log,
@@ -239,6 +240,65 @@ def test_preemptive_gate_risk_ignores_tiny_gate_overrun_when_velocity_shortfall_
     assert risk is not None
     assert risk.missed_projection_count == 0
     assert not should_preempt_for_gate_risk(risk)
+
+
+def test_failed_trajectory_analogue_risk_preempts_on_on_track_replay(tmp_path: Path):
+    current_log = tmp_path / "current.log"
+    current_log.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+                "step:3050/20000 train_loss:2.0877 train_time:1ms step_avg:1ms train_bpb:1.2504",
+                "step:3100/20000 train_loss:2.0395 train_time:1ms step_avg:1ms train_bpb:1.2111",
+                "step:3150/20000 train_loss:1.9998 train_time:1ms step_avg:1ms train_bpb:1.1750",
+                "step:3200/20000 train_loss:2.0769 train_time:1ms step_avg:1ms train_bpb:1.2363",
+                "step:3250/20000 train_loss:2.1088 train_time:1ms step_avg:1ms train_bpb:1.2383",
+                "step:3250/20000 val_loss:2.0838 val_bpb:1.2339 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    history_logs = []
+    for index, val_3250 in enumerate((1.2338, 1.2340), start=1):
+        path = tmp_path / f"failed_{index}.log"
+        path.write_text(
+            "\n".join(
+                [
+                    "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+                    "step:3050/20000 train_loss:2.0875 train_time:1ms step_avg:1ms train_bpb:1.2501",
+                    "step:3100/20000 train_loss:2.0391 train_time:1ms step_avg:1ms train_bpb:1.2108",
+                    "step:3150/20000 train_loss:1.9996 train_time:1ms step_avg:1ms train_bpb:1.1749",
+                    "step:3200/20000 train_loss:2.0766 train_time:1ms step_avg:1ms train_bpb:1.2361",
+                    "step:3250/20000 train_loss:2.1083 train_time:1ms step_avg:1ms train_bpb:1.2377",
+                    f"step:3250/20000 val_loss:2.0836 val_bpb:{val_3250} train_time:1ms step_avg:1ms",
+                    "step:3500/20000 train_loss:2.0939 train_time:1ms step_avg:1ms train_bpb:1.2551",
+                    "step:3500/20000 val_loss:2.0751 val_bpb:1.2290 train_time:1ms step_avg:1ms",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        history_logs.append(path)
+
+    risk = load_failed_trajectory_analogue_risk(
+        current_log,
+        history_logs=history_logs,
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3250,
+        train_rmse_threshold=0.001,
+        min_failed_analogues=2,
+        current_projection_gate_margin_steps=100,
+    )
+
+    assert risk is not None
+    assert risk.risk_source == "failed_trajectory_analogue"
+    assert risk.missed_projection_count == 2
+    assert risk.latest_projected_target_step > 4000
+    assert risk.analogue_failed_count == 2
+    assert risk.analogue_train_rmse_mean < 0.001
+    assert should_preempt_for_gate_risk(risk)
 
 
 def test_seq4096_log_parses_train_bpb_for_validation_gap_controls(tmp_path: Path):

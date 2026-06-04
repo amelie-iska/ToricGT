@@ -82,6 +82,12 @@ class PreemptiveGateRisk:
     required_patience: int
     gate_step: int
     target_bpb: float
+    risk_source: str = "validation_projection"
+    analogue_failed_count: int = 0
+    analogue_train_rmse_mean: float = float("nan")
+    analogue_train_rmse_min: float = float("nan")
+    analogue_projected_target_step_mean: float = float("nan")
+    analogue_matched_runs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -334,6 +340,152 @@ def latest_train_bpb_at_or_before(parsed: ParsedLog, step: int) -> float:
         if row.step <= int(step) and math.isfinite(row.train_bpb)
     ]
     return candidates[-1] if candidates else float("nan")
+
+
+def projected_target_step_from_validation(rows: list[ValRow], target_bpb: float) -> tuple[float, float]:
+    """Project the target step from the last two validation points."""
+
+    candidates = [row for row in rows if math.isfinite(row.val_bpb)]
+    if len(candidates) < 2:
+        return float("nan"), float("nan")
+    previous, latest = candidates[-2], candidates[-1]
+    step_delta = latest.step - previous.step
+    if step_delta <= 0:
+        return float("nan"), float("nan")
+    slope_per_100 = (latest.val_bpb - previous.val_bpb) / (float(step_delta) / 100.0)
+    velocity_per_100 = -slope_per_100
+    if velocity_per_100 <= 0.0:
+        return float("nan"), slope_per_100
+    steps_to_target = (latest.val_bpb - float(target_bpb)) / velocity_per_100 * 100.0
+    return float(latest.step) + steps_to_target, slope_per_100
+
+
+def train_profile_rmse(current: ParsedLog, history: ParsedLog, steps: list[int]) -> float:
+    current_by_step = {
+        row.step: row.train_bpb
+        for row in current.train_rows
+        if math.isfinite(row.train_bpb)
+    }
+    history_by_step = {
+        row.step: row.train_bpb
+        for row in history.train_rows
+        if math.isfinite(row.train_bpb)
+    }
+    diffs = [
+        (current_by_step[step] - history_by_step[step]) ** 2
+        for step in steps
+        if step in current_by_step and step in history_by_step
+    ]
+    return math.sqrt(sum(diffs) / float(len(diffs))) if diffs else float("nan")
+
+
+def load_failed_trajectory_analogue_risk(
+    current_log: Path | str,
+    *,
+    history_logs: list[Path | str] | None = None,
+    gate_step: int,
+    target_bpb: float,
+    min_step: int = 3250,
+    train_rmse_threshold: float = 0.001,
+    min_failed_analogues: int = 2,
+    current_projection_gate_margin_steps: float = 100.0,
+    min_profile_points: int = 4,
+) -> PreemptiveGateRisk | None:
+    """Preempt runs replaying prior train-BPB trajectories that later missed the gate."""
+
+    current_path = Path(current_log)
+    current = parse_seq4096_log(current_path)
+    latest_val = current.val_rows[-1] if current.val_rows else None
+    if latest_val is None or latest_val.step < int(min_step) or latest_val.step >= int(gate_step):
+        return None
+    best_current = select_best_validation(current.val_rows, gate_step)
+    if best_current is None or best_current.val_bpb <= float(target_bpb):
+        return None
+    current_projected, current_slope = projected_target_step_from_validation(current.val_rows, target_bpb)
+    if not math.isfinite(current_projected):
+        return None
+    if current_projected < float(gate_step) - float(current_projection_gate_margin_steps):
+        return None
+
+    current_train_steps = [
+        row.step
+        for row in current.train_rows
+        if row.step <= latest_val.step and row.step >= latest_val.step - 250 and math.isfinite(row.train_bpb)
+    ]
+    profile_steps = sorted(current_train_steps)[-5:]
+    if len(profile_steps) < int(min_profile_points):
+        return None
+
+    if history_logs is None:
+        history_logs = sorted(current_path.parent.glob("toricgt_seq4096_4k_recovery_r*.txt"))
+    matched: list[dict[str, Any]] = []
+    for history_log in history_logs:
+        history_path = Path(history_log)
+        if history_path.resolve() == current_path.resolve():
+            continue
+        history = parse_seq4096_log(history_path)
+        if len(history.val_rows) < 2:
+            continue
+        history_after_current = [
+            row
+            for row in history.val_rows
+            if row.step > latest_val.step and row.step <= int(gate_step)
+        ]
+        if not history_after_current:
+            continue
+        projected_history, _history_slope = projected_target_step_from_validation(
+            [row for row in history.val_rows if row.step <= history_after_current[-1].step],
+            target_bpb,
+        )
+        best_history = select_best_validation(
+            [row for row in history.val_rows if row.step <= history_after_current[-1].step],
+            gate_step,
+        )
+        if (
+            best_history is None
+            or best_history.val_bpb <= float(target_bpb)
+            or not math.isfinite(projected_history)
+            or projected_history <= float(gate_step)
+        ):
+            continue
+        rmse = train_profile_rmse(current, history, profile_steps)
+        if math.isfinite(rmse) and rmse <= float(train_rmse_threshold):
+            matched.append(
+                {
+                    "path": str(history_path),
+                    "rmse": rmse,
+                    "projected_target_step": projected_history,
+                    "latest_history_step": history_after_current[-1].step,
+                    "latest_history_val_bpb": history_after_current[-1].val_bpb,
+                }
+            )
+
+    if len(matched) < int(min_failed_analogues):
+        return None
+    rmse_values = [float(item["rmse"]) for item in matched]
+    projected_values = [float(item["projected_target_step"]) for item in matched]
+    analogue_projected = sum(projected_values) / float(len(projected_values))
+    return PreemptiveGateRisk(
+        analysis_root=str(current_path.parent),
+        latest_analysis_step=int(latest_val.step),
+        latest_projected_target_step=max(float(current_projected), float(analogue_projected)),
+        latest_best_val_bpb=float(best_current.val_bpb),
+        latest_recent_val_slope=float(current_slope),
+        latest_projected_gate_overrun_steps=max(float(current_projected), float(analogue_projected))
+        - float(gate_step),
+        latest_velocity_shortfall_pressure=0.0,
+        latest_val_velocity_shortfall=0.0,
+        missed_projection_count=int(len(matched)),
+        required_patience=max(1, int(min_failed_analogues)),
+        gate_step=int(gate_step),
+        target_bpb=float(target_bpb),
+        risk_source="failed_trajectory_analogue",
+        analogue_failed_count=int(len(matched)),
+        analogue_train_rmse_mean=sum(rmse_values) / float(len(rmse_values)),
+        analogue_train_rmse_min=min(rmse_values),
+        analogue_projected_target_step_mean=analogue_projected,
+        analogue_matched_runs=tuple(str(item["path"]) for item in matched),
+    )
 
 
 def load_advanced_diagnostics(repo_root: Path | str, run_id: str) -> dict[str, Any]:
@@ -1111,6 +1263,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preempt-on-projected-miss", action="store_true")
     parser.add_argument("--preempt-min-step", type=int, default=2500)
     parser.add_argument("--preempt-patience", type=int, default=2)
+    parser.add_argument("--no-analogue-risk", action="store_true")
+    parser.add_argument("--analogue-risk-min-step", type=int, default=3250)
+    parser.add_argument("--analogue-risk-train-rmse-threshold", type=float, default=0.001)
+    parser.add_argument("--analogue-risk-min-failed", type=int, default=2)
+    parser.add_argument("--analogue-risk-gate-margin-steps", type=float, default=100.0)
     parser.add_argument("--no-advanced-metric-controls", action="store_true")
     parser.add_argument("--recovery-max-train-batch-tokens", type=int, default=983_040)
     parser.add_argument("--validation-gap-threshold", type=float, default=0.04)
@@ -1142,7 +1299,7 @@ def main() -> None:
         )
         advanced_diagnostics = load_advanced_diagnostics(repo_root, args.run_id)
         advanced_diagnostics_summary = summarize_advanced_diagnostics(advanced_diagnostics)
-        preemptive_risk = (
+        projection_gate_risk = (
             load_preemptive_gate_risk(
                 analysis_root,
                 gate_step=args.gate_step,
@@ -1153,6 +1310,23 @@ def main() -> None:
             if args.preempt_on_projected_miss
             else None
         )
+        analogue_gate_risk = (
+            load_failed_trajectory_analogue_risk(
+                log_path,
+                history_logs=sorted(log_path.parent.glob("toricgt_seq4096_4k_recovery_r*.txt")),
+                gate_step=args.gate_step,
+                target_bpb=args.target_bpb,
+                min_step=args.analogue_risk_min_step,
+                train_rmse_threshold=args.analogue_risk_train_rmse_threshold,
+                min_failed_analogues=args.analogue_risk_min_failed,
+                current_projection_gate_margin_steps=args.analogue_risk_gate_margin_steps,
+            )
+            if args.preempt_on_projected_miss and not args.no_analogue_risk
+            else None
+        )
+        preemptive_risk = projection_gate_risk
+        if not should_preempt_for_gate_risk(preemptive_risk) and should_preempt_for_gate_risk(analogue_gate_risk):
+            preemptive_risk = analogue_gate_risk
         preempt_for_gate_risk = (
             bool(latest_val)
             and latest_val.step >= int(args.preempt_min_step)
@@ -1207,6 +1381,9 @@ def main() -> None:
             "min_recovery_runway_steps": args.min_recovery_runway_steps,
             "preempt_on_projected_miss": bool(args.preempt_on_projected_miss),
             "preemptive_gate_risk": None if preemptive_risk is None else preemptive_risk.__dict__,
+            "projection_gate_risk": None if projection_gate_risk is None else projection_gate_risk.__dict__,
+            "analogue_gate_risk": None if analogue_gate_risk is None else analogue_gate_risk.__dict__,
+            "analogue_risk_enabled": not args.no_analogue_risk,
             "base_recovery_launch_controls": base_controls.launch_dict(),
             "recovery_launch_controls": recovery_controls.launch_dict(),
             "advanced_metric_controls_enabled": not args.no_advanced_metric_controls,
