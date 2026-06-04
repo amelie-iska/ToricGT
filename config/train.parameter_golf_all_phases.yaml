@@ -218,8 +218,10 @@ fineweb_calibration:
 training:
   checkpoint_dir: checkpoints/parameter_golf_all_phases_fineweb_from0
   max_steps: 60000
-  batch_size: 2
-  grad_accum_steps: 16
+  # 4096-context tropical-ring attention exceeds 24 GB at microbatch 2.
+  # Keep the long-context surface active while preserving the effective batch.
+  batch_size: 1
+  grad_accum_steps: 32
   lr: 0.000036
   weight_decay: 0.03
   warmup_steps: 4000
