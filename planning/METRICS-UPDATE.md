@@ -1210,6 +1210,25 @@ full diagnostics active, and schedules periodic analysis/check-in bundles every
 checkpoint will be carried forward into full training rather than causing the
 gate watcher to stop.
 
+PolarQuant implementation update: KV-cache quantization is now tracked as a
+first-class memory-efficiency family rather than only a perturbation toggle.
+The attention modules apply deterministic sign-Hadamard preconditioning before
+recursive polar angle quantization and invert it afterward, matching the
+preconditioned PolarQuant methodology while preserving a cheap orthogonal
+transform for power-of-two head dimensions. The trainer estimates packed
+PolarQuant KV-cache memory from `(batch, layers * recurrent_passes * K/V,
+heads, sequence, head_dim)` and logs `polarquant/*` plus primary aliases:
+`00_primary/polarquant_kv_cache_compression_ratio`,
+`00_primary/polarquant_kv_cache_mb`, and `00_primary/polarquant_saved_mb`.
+The medium-conservative full-dataset config now uses `polarquant_kv_bits=8`,
+`polarquant_radius_bits=16`, `polarquant_precondition=true`,
+`polarquant_train_sample_tokens=32`, and
+`polarquant_eval_sample_tokens=256`. Tuning rule: keep 8-bit angles during
+the fragile BPB descent; after a stable `<1.2` checkpoint, sweep 6-bit and
+4-bit KV perturbation plus larger contexts and only spend the saved memory on
+larger context/parameters when validation BPB or post-threshold reasoning BPB
+improves without violating the 16MB exported artifact cap.
+
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
 Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, verify code+weights <=16,000,000 bytes, then start post-threshold advanced reasoning/memory phases.

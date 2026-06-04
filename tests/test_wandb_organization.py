@@ -59,6 +59,23 @@ def test_category_aliases_route_advanced_losses_once() -> None:
     assert organized["16_status/metrics_status/hessian_enabled"] == 1.0
 
 
+def test_polarquant_metrics_promote_to_primary_and_artifact_size() -> None:
+    payload = {
+        "trainer/step": 12,
+        "polarquant/estimated_compression_ratio": 1.75,
+        "polarquant/estimated_polarquant_kv_cache_mb": 92.4,
+        "polarquant/estimated_saved_mb": 69.3,
+    }
+
+    organized = organize_wandb_payload(payload)
+
+    assert organized["00_primary/polarquant_kv_cache_compression_ratio"] == 1.75
+    assert organized["00_primary/polarquant_kv_cache_mb"] == 92.4
+    assert organized["00_primary/polarquant_saved_mb"] == 69.3
+    assert organized["11_artifact_size/polarquant/estimated_compression_ratio"] == 1.75
+    assert organized["11_artifact_size/polarquant/estimated_polarquant_kv_cache_mb"] == 92.4
+
+
 def test_primary_aliases_do_not_emit_missing_metrics() -> None:
     aliases = primary_metric_aliases({"trainer/step": 1})
 

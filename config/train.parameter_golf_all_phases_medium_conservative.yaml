@@ -24,6 +24,10 @@ model:
   polarquant_kv_bits: 8
   polarquant_train: true
   polarquant_train_sample_tokens: 32
+  polarquant_eval_sample_tokens: 256
+  polarquant_precondition: true
+  polarquant_radius_bits: 16
+  polarquant_seed: 271828
 
   use_gflownet_policy: true
   gflownet_num_actions: 16

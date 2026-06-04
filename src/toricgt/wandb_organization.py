@@ -55,6 +55,7 @@ RAW_HIDDEN_PATTERNS = (
     "advanced_control/*",
     "artifact/*",
     "model/*",
+    "polarquant/*",
     "metrics_status/*",
     "system/*",
     "analysis/*",
@@ -87,6 +88,7 @@ MINIMIZE_PATTERNS = (
     "07_topology_geometry/*loss*",
     "08_toric_tropical_bgg/*loss*",
     "09_complexity/*ncd*",
+    "11_artifact_size/polarquant/*cache_mb*",
     "12_optimization/*grad_norm*",
 )
 
@@ -97,6 +99,7 @@ MAXIMIZE_PATTERNS = (
     "06_graphcg/*basis*",
     "07_topology_geometry/*stability*",
     "08_toric_tropical_bgg/*entropy*",
+    "11_artifact_size/polarquant/*compression_ratio*",
     "10_data_curriculum/*active*",
     "11_artifact_size/*within_limit*",
 )
@@ -173,6 +176,8 @@ def _category_alias(key: str) -> str | None:
         return f"12_optimization/hessian/{key.split('/', 1)[1]}"
     if key.startswith("data/"):
         return f"10_data_curriculum/{key.split('/', 1)[1]}"
+    if key.startswith("polarquant/"):
+        return f"11_artifact_size/polarquant/{key.split('/', 1)[1]}"
     if key.startswith(("artifact/", "model/")):
         return f"11_artifact_size/{key}"
     if key.startswith(("phase/", "adaptive/", "advanced_control/", "eval/")):
@@ -237,6 +242,19 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/complexity_prediction_target_ncd", ("complexity/val/prediction_target_ncd_lzma_mean",))
     _add_first(out, payload, "00_primary/vram_allocated_gb", ("system/vram_allocated_gb",))
     _add_first(out, payload, "00_primary/artifact_within_limit", ("artifact/within_limit",))
+    _add_first(
+        out,
+        payload,
+        "00_primary/polarquant_kv_cache_compression_ratio",
+        ("polarquant/estimated_compression_ratio",),
+    )
+    _add_first(
+        out,
+        payload,
+        "00_primary/polarquant_kv_cache_mb",
+        ("polarquant/estimated_polarquant_kv_cache_mb",),
+    )
+    _add_first(out, payload, "00_primary/polarquant_saved_mb", ("polarquant/estimated_saved_mb",))
 
     bytes_value = _first_numeric(payload, ("artifact/initial_bytes", "artifact/final_bytes"))
     if bytes_value is not None:

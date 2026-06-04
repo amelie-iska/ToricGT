@@ -100,6 +100,10 @@ class RandomOrderLMConfig:
     polarquant_kv_bits: int = 0
     polarquant_train: bool = False
     polarquant_train_sample_tokens: int = 0
+    polarquant_eval_sample_tokens: int = 0
+    polarquant_precondition: bool = False
+    polarquant_radius_bits: int = 16
+    polarquant_seed: int = 271828
     use_gflownet_policy: bool = True
     gflownet_num_actions: int = 8
     gflownet_hidden_dim: int = 128
@@ -434,6 +438,10 @@ class DenseRandomOrderToricLM(nn.Module):
                     polarquant_kv_bits=config.polarquant_kv_bits,
                     polarquant_train=config.polarquant_train,
                     polarquant_train_sample_tokens=config.polarquant_train_sample_tokens,
+                    polarquant_eval_sample_tokens=config.polarquant_eval_sample_tokens,
+                    polarquant_precondition=config.polarquant_precondition,
+                    polarquant_radius_bits=config.polarquant_radius_bits,
+                    polarquant_seed=config.polarquant_seed,
                 )
                 for layer_idx in range(config.num_layers)
             ]

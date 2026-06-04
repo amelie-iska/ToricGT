@@ -25,6 +25,7 @@ from tqdm.auto import tqdm
 
 from toricgt.complexity import random_order_complexity_metrics
 from toricgt.parameter_golf_export import PARAMETER_GOLF_BYTE_LIMIT, write_artifact
+from toricgt.polar_cache import polarquant_memory_estimate
 from toricgt.random_order_lm import (
     DenseRandomOrderToricLM,
     RandomOrderLMConfig,
@@ -2013,6 +2014,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--polarquant-kv-bits", type=int)
     parser.add_argument("--polarquant-train", action="store_true")
     parser.add_argument("--polarquant-train-sample-tokens", type=int)
+    parser.add_argument("--polarquant-eval-sample-tokens", type=int)
+    parser.add_argument("--polarquant-precondition", action="store_true")
+    parser.add_argument("--no-polarquant-precondition", action="store_true")
+    parser.add_argument("--polarquant-radius-bits", type=int)
+    parser.add_argument("--polarquant-seed", type=int)
     parser.add_argument("--special-token-mode", choices=["none", "reasoning_memory"])
     parser.add_argument("--advanced-reasoning-tokens", action="store_true")
     parser.add_argument("--no-advanced-reasoning-tokens", action="store_true")
@@ -2159,6 +2165,29 @@ def main() -> None:
             args.polarquant_train_sample_tokens
             if args.polarquant_train_sample_tokens is not None
             else config_get(file_config, "model", "polarquant_train_sample_tokens", 0)
+        ),
+        polarquant_eval_sample_tokens=(
+            args.polarquant_eval_sample_tokens
+            if args.polarquant_eval_sample_tokens is not None
+            else config_get(file_config, "model", "polarquant_eval_sample_tokens", 0)
+        ),
+        polarquant_precondition=(
+            False
+            if args.no_polarquant_precondition
+            else bool(
+                args.polarquant_precondition
+                or config_get(file_config, "model", "polarquant_precondition", False)
+            )
+        ),
+        polarquant_radius_bits=(
+            args.polarquant_radius_bits
+            if args.polarquant_radius_bits is not None
+            else config_get(file_config, "model", "polarquant_radius_bits", 16)
+        ),
+        polarquant_seed=(
+            args.polarquant_seed
+            if args.polarquant_seed is not None
+            else config_get(file_config, "model", "polarquant_seed", 271828)
         ),
         use_gflownet_policy=(
             False
@@ -2963,6 +2992,49 @@ def main() -> None:
     )
     if report.bytes_total > PARAMETER_GOLF_BYTE_LIMIT:
         raise RuntimeError(f"initial artifact exceeds Parameter-Golf cap: {report.bytes_total} bytes")
+    dtype_bits = 32 if precision == "fp32" else 16
+    polarquant_head_dim = int(model_config.d_model) // max(int(model_config.num_heads), 1)
+    polarquant_metrics: dict[str, float] = {
+        "polarquant/enabled": float(model_config.polarquant_kv_bits > 0),
+        "polarquant/kv_bits": float(model_config.polarquant_kv_bits),
+        "polarquant/radius_bits": float(model_config.polarquant_radius_bits),
+        "polarquant/precondition_enabled": float(model_config.polarquant_precondition),
+        "polarquant/train_sample_tokens": float(model_config.polarquant_train_sample_tokens),
+        "polarquant/eval_sample_tokens": float(model_config.polarquant_eval_sample_tokens),
+        "polarquant/seed": float(model_config.polarquant_seed),
+        "polarquant/head_dim": float(polarquant_head_dim),
+        "polarquant/dtype_bits": float(dtype_bits),
+    }
+    if (
+        model_config.polarquant_kv_bits > 0
+        and polarquant_head_dim >= 2
+        and not (polarquant_head_dim & (polarquant_head_dim - 1))
+    ):
+        kv_estimate = polarquant_memory_estimate(
+            (
+                max(int(batch_size), 1),
+                max(int(model_config.num_layers), 1) * max(int(model_config.recurrent_passes), 1) * 2,
+                max(int(model_config.num_heads), 1),
+                max(int(model_config.max_seq_len), 1),
+                polarquant_head_dim,
+            ),
+            angle_bits=int(model_config.polarquant_kv_bits),
+            radius_bits=int(model_config.polarquant_radius_bits),
+            dtype_bits=dtype_bits,
+            include_sign_bits=True,
+        )
+        polarquant_metrics.update(
+            {
+                "polarquant/estimated_fp_kv_cache_bytes": float(kv_estimate.fp_bytes),
+                "polarquant/estimated_polarquant_kv_cache_bytes": float(kv_estimate.polarquant_bytes),
+                "polarquant/estimated_fp_kv_cache_mb": float(kv_estimate.fp_bytes) / 1_000_000.0,
+                "polarquant/estimated_polarquant_kv_cache_mb": float(kv_estimate.polarquant_bytes) / 1_000_000.0,
+                "polarquant/estimated_saved_mb": float(kv_estimate.saved_bytes) / 1_000_000.0,
+                "polarquant/estimated_compression_ratio": float(kv_estimate.compression_ratio),
+                "polarquant/estimated_vectors": float(kv_estimate.vectors),
+                "polarquant/estimated_values_per_vector": float(kv_estimate.values_per_vector),
+            }
+        )
 
     curated_train_files = sorted(glob.glob(train_glob))
     curated_val_files = sorted(glob.glob(val_glob))
@@ -3174,6 +3246,24 @@ def main() -> None:
                     "max_parameters": hessian_max_parameters,
                     "role": "diagnostic_only",
                 },
+                "polarquant": {
+                    "enabled": bool(model_config.polarquant_kv_bits > 0),
+                    "kv_bits": model_config.polarquant_kv_bits,
+                    "radius_bits": model_config.polarquant_radius_bits,
+                    "precondition_enabled": bool(model_config.polarquant_precondition),
+                    "train_sample_tokens": model_config.polarquant_train_sample_tokens,
+                    "eval_sample_tokens": model_config.polarquant_eval_sample_tokens,
+                    "seed": model_config.polarquant_seed,
+                    "head_dim": polarquant_head_dim,
+                    "dtype_bits": dtype_bits,
+                    "estimated_fp_kv_cache_mb": polarquant_metrics.get("polarquant/estimated_fp_kv_cache_mb"),
+                    "estimated_polarquant_kv_cache_mb": polarquant_metrics.get(
+                        "polarquant/estimated_polarquant_kv_cache_mb"
+                    ),
+                    "estimated_compression_ratio": polarquant_metrics.get(
+                        "polarquant/estimated_compression_ratio"
+                    ),
+                },
                 "oai_competition": {
                     "enabled": oai_competition_eval_enabled,
                     "available": oai_competition_available,
@@ -3214,6 +3304,7 @@ def main() -> None:
                         "bgg_category_o",
                         "category_o",
                         "slepian_pollak",
+                        "polarquant",
                         "oai_competition",
                         "hessian",
                     ],
@@ -3306,6 +3397,7 @@ def main() -> None:
                 "fineweb_calibration/enabled": float(fineweb_calibration_enabled),
                 "fineweb_calibration/available": float(fineweb_calibration_available),
                 "fineweb_calibration/mix_ratio": float(fineweb_mix_ratio),
+                **polarquant_metrics,
             }),
             step=start_step,
         )
@@ -3317,6 +3409,11 @@ def main() -> None:
             "artifact_bytes": report.bytes_total,
             "estimated_tensor_bytes": estimated_tensor_bytes,
             "artifact_limit": PARAMETER_GOLF_BYTE_LIMIT,
+            "polarquant": {
+                key.split("/", 1)[1]: value
+                for key, value in polarquant_metrics.items()
+                if key.startswith("polarquant/")
+            },
             "device": str(device),
             "precision": precision,
             "train_glob": train_glob,
@@ -4718,6 +4815,7 @@ def main() -> None:
                 "metrics_status/fineweb_calibration_enabled": float(fineweb_calibration_enabled),
                 "metrics_status/fineweb_calibration_available": float(fineweb_calibration_available),
             }
+            metrics.update(polarquant_metrics)
             metrics.update(adaptive_controller.log_metrics())
             if audit_error is not None:
                 metrics["audit/future_permutation_logit_error"] = audit_error
@@ -5020,6 +5118,7 @@ def main() -> None:
                 "artifact/final_deployment_parameters": final_artifact.deployment_parameters,
                 "artifact/final_excluded_tensors": final_artifact.excluded_tensors,
                 "val/best_bpb": best_val,
+                **polarquant_metrics,
             }),
             step=steps,
         )

@@ -9,7 +9,14 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from .polar_cache import recursive_polar_decode, recursive_polar_encode, uniform_quantize_angles
+from .polar_cache import (
+    deterministic_signs,
+    hadamard_precondition,
+    inverse_hadamard_precondition,
+    recursive_polar_decode,
+    recursive_polar_encode,
+    uniform_quantize_angles,
+)
 from .soft_moe import GraphTokenSoftMoE
 
 
@@ -150,6 +157,10 @@ class MultiHeadTropicalAttention(nn.Module):
         polarquant_kv_bits: int = 0,
         polarquant_train: bool = False,
         polarquant_train_sample_tokens: int = 0,
+        polarquant_eval_sample_tokens: int = 0,
+        polarquant_precondition: bool = False,
+        polarquant_radius_bits: int = 16,
+        polarquant_seed: int = 271828,
     ) -> None:
         super().__init__()
         if d_model % num_heads != 0:
@@ -162,6 +173,12 @@ class MultiHeadTropicalAttention(nn.Module):
         self.polarquant_kv_bits = polarquant_kv_bits
         self.polarquant_train = polarquant_train
         self.polarquant_train_sample_tokens = int(polarquant_train_sample_tokens)
+        self.polarquant_eval_sample_tokens = int(polarquant_eval_sample_tokens)
+        self.polarquant_precondition = bool(polarquant_precondition)
+        self.polarquant_radius_bits = int(polarquant_radius_bits)
+        self.polarquant_seed = int(polarquant_seed)
+        signs = deterministic_signs(self.head_dim, seed=self.polarquant_seed)
+        self.register_buffer("_polarquant_signs", signs, persistent=False)
         self.qkv = nn.Linear(d_model, 3 * d_model)
         self.out = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(dropout)
@@ -184,9 +201,15 @@ class MultiHeadTropicalAttention(nn.Module):
 
     def _polarquant_full(self, x: torch.Tensor) -> torch.Tensor:
         original_dtype = x.dtype
-        encoded = recursive_polar_encode(x.float())
+        x_float = x.float()
+        if self.polarquant_precondition:
+            x_float = hadamard_precondition(x_float, self._polarquant_signs)
+        encoded = recursive_polar_encode(x_float)
         quantized = uniform_quantize_angles(encoded, bits=self.polarquant_kv_bits)
-        return recursive_polar_decode(quantized).to(dtype=original_dtype)
+        decoded = recursive_polar_decode(quantized)
+        if self.polarquant_precondition:
+            decoded = inverse_hadamard_precondition(decoded, self._polarquant_signs)
+        return decoded.to(dtype=original_dtype)
 
     def _maybe_polarquant(self, x: torch.Tensor) -> torch.Tensor:
         if self.polarquant_kv_bits <= 0:
@@ -195,10 +218,11 @@ class MultiHeadTropicalAttention(nn.Module):
             return x
         if self.head_dim < 2 or self.head_dim & (self.head_dim - 1):
             return x
-        if self.training and self.polarquant_train_sample_tokens > 0 and x.shape[-2] > self.polarquant_train_sample_tokens:
+        sample_tokens = self.polarquant_train_sample_tokens if self.training else self.polarquant_eval_sample_tokens
+        if sample_tokens > 0 and x.shape[-2] > sample_tokens:
             index = self._sample_token_indices(
                 int(x.shape[-2]),
-                int(self.polarquant_train_sample_tokens),
+                int(sample_tokens),
                 x.device,
             )
             sampled = x.index_select(-2, index)
@@ -268,6 +292,10 @@ class TransformerBlock(nn.Module):
         polarquant_kv_bits: int = 0,
         polarquant_train: bool = False,
         polarquant_train_sample_tokens: int = 0,
+        polarquant_eval_sample_tokens: int = 0,
+        polarquant_precondition: bool = False,
+        polarquant_radius_bits: int = 16,
+        polarquant_seed: int = 271828,
     ) -> None:
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
@@ -280,6 +308,10 @@ class TransformerBlock(nn.Module):
             polarquant_kv_bits=polarquant_kv_bits,
             polarquant_train=polarquant_train,
             polarquant_train_sample_tokens=polarquant_train_sample_tokens,
+            polarquant_eval_sample_tokens=polarquant_eval_sample_tokens,
+            polarquant_precondition=polarquant_precondition,
+            polarquant_radius_bits=polarquant_radius_bits,
+            polarquant_seed=polarquant_seed,
         )
         self.ln2 = nn.LayerNorm(d_model)
         hidden = ffn_multiplier * d_model

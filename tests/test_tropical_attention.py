@@ -59,3 +59,29 @@ def test_sampled_polarquant_attention_preserves_shape_and_gradients():
     assert torch.isfinite(result).all()
     assert x.grad is not None
     assert torch.isfinite(x.grad).all()
+
+
+def test_preconditioned_polarquant_attention_preserves_shape_and_gradients():
+    torch.manual_seed(2)
+    attn = MultiHeadTropicalAttention(
+        d_model=16,
+        num_heads=2,
+        mode="softmax",
+        polarquant_kv_bits=4,
+        polarquant_train=True,
+        polarquant_train_sample_tokens=5,
+        polarquant_precondition=True,
+        polarquant_radius_bits=16,
+        polarquant_seed=42,
+    )
+    attn.train()
+    x = torch.randn(2, 11, 16, requires_grad=True)
+
+    result = attn(x).output
+    loss = result.square().mean()
+    loss.backward()
+
+    assert result.shape == x.shape
+    assert torch.isfinite(result).all()
+    assert x.grad is not None
+    assert torch.isfinite(x.grad).all()
