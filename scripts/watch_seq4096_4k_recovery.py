@@ -362,22 +362,63 @@ def should_hold_train_wave_for_validation_probe(
     *,
     tied_embed_lr: float,
     hot_probe_lr: float = 0.037,
+    damped_probe_lr: float = 0.034,
 ) -> bool:
-    """Let a high-velocity probe reach validation instead of relaunching again.
+    """Let explicit probe settings reach validation instead of relaunching again.
 
     Failed train-wave analogues are useful early branch-rejection signals, but
     repeated replays can otherwise ladder through near-identical 3250 restarts
-    without ever producing a validation point for the altered high-velocity
-    controls.  Once the tied embedding LR is in the explicit probe band, hold
-    the train-wave risk for the next validation checkpoint and let validation
-    velocity decide.
+    without ever producing a validation point for altered controls.  Once the
+    tied embedding LR is in an explicit hot-velocity or damped-transfer probe
+    band, hold the train-wave risk for the next validation checkpoint and let
+    validation velocity decide.
     """
 
     return bool(
         risk
         and risk.risk_source == "failed_train_wave_analogue"
         and should_preempt_for_gate_risk(risk)
-        and float(tied_embed_lr) >= float(hot_probe_lr)
+        and (
+            float(tied_embed_lr) >= float(hot_probe_lr)
+            or float(tied_embed_lr) <= float(damped_probe_lr)
+        )
+    )
+
+
+def plan_failed_train_wave_recovery_controls(
+    base: RecoveryControls,
+    *,
+    parsed: ParsedLog,
+    risk: PreemptiveGateRisk,
+    gate_step: int,
+) -> RecoveryControls:
+    """Turn a repeated failed train-wave analogue into a transfer-stability probe."""
+
+    latest_val = parsed.val_rows[-1] if parsed.val_rows else None
+    latest_step = latest_val.step if latest_val is not None else max(parsed.latest_step, 0)
+    return replace(
+        base,
+        tied_embed_lr=round(max(0.032, min(base.tied_embed_lr * 0.92, base.tied_embed_lr - 0.001)), 6),
+        matrix_lr=base.matrix_lr,
+        scalar_lr=base.scalar_lr,
+        muon_momentum_warmup_steps=max(
+            base.muon_momentum_warmup_steps,
+            int(gate_step) + 500,
+            int(latest_step) + 1000,
+        ),
+        bigram_bias=True,
+        bigram_bias_lr=round(max(0.012, min(base.bigram_bias_lr, base.bigram_bias_lr * 0.55)), 6),
+        bigram_bias_init_from_data=False,
+        policy="failed_train_wave_damped_transfer_probe",
+        advanced_metric_policy="failed_train_wave_analogue_damp_graphcg_slepian_sidecars",
+        rationale=(
+            "failed train-wave analogue matched "
+            f"{risk.analogue_failed_count} prior runs before a new validation point",
+            f"matched analogue family projects target near step {risk.latest_projected_target_step:.1f}, "
+            f"beyond gate {gate_step}",
+            "damp tied-embedding and bigram transition LR instead of replaying another velocity escalation",
+            "hold matrix/scalar LR fixed and keep GraphCG/Slepian/topology/toric/BGG/Koszul signals as sidecar transfer diagnostics",
+        ),
     )
 
 
@@ -1577,6 +1618,18 @@ def main() -> None:
             enabled=not args.no_advanced_metric_controls,
             advanced_diagnostics=advanced_diagnostics,
         )
+        if (
+            preemptive_risk is not None
+            and preemptive_risk.risk_source == "failed_train_wave_analogue"
+            and should_preempt_for_gate_risk(preemptive_risk)
+            and not train_wave_validation_probe_hold
+        ):
+            recovery_controls = plan_failed_train_wave_recovery_controls(
+                base_controls,
+                parsed=parsed,
+                risk=preemptive_risk,
+                gate_step=args.gate_step,
+            )
         status: dict[str, Any] = {
             "run_id": args.run_id,
             "log": str(log_path),

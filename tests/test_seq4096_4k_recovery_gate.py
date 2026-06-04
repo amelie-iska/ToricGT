@@ -9,6 +9,7 @@ from scripts.watch_seq4096_4k_recovery import (
     load_failed_trajectory_analogue_risk,
     load_train_wave_analogue_risk,
     load_preemptive_gate_risk,
+    plan_failed_train_wave_recovery_controls,
     plan_metric_driven_recovery_controls,
     parse_seq4096_log,
     should_hold_train_wave_for_validation_probe,
@@ -485,8 +486,77 @@ def test_train_wave_analogue_risk_can_be_held_for_hot_velocity_validation_probe(
     assert risk is not None
     assert risk.risk_source == "failed_train_wave_analogue"
     assert should_preempt_for_gate_risk(risk)
+    assert should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.0335)
     assert not should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.0357)
     assert should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.037485)
+
+
+def test_failed_train_wave_analogue_uses_damped_transfer_controls(tmp_path: Path):
+    current_log = tmp_path / "current.log"
+    current_log.write_text(
+        "\n".join(
+            [
+                "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+                "step:3300/20000 train_loss:2.0716 train_time:1ms step_avg:1ms train_bpb:1.2407",
+                "step:3350/20000 train_loss:2.0312 train_time:1ms step_avg:1ms train_bpb:1.2062",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    failed = tmp_path / "failed.log"
+    failed.write_text(
+        "\n".join(
+            [
+                "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+                "step:3300/20000 train_loss:2.0719 train_time:1ms step_avg:1ms train_bpb:1.2409",
+                "step:3350/20000 train_loss:2.0315 train_time:1ms step_avg:1ms train_bpb:1.2064",
+                "step:3500/20000 train_loss:2.1093 train_time:1ms step_avg:1ms train_bpb:1.2383",
+                "step:3500/20000 val_loss:2.0834 val_bpb:1.2339 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    risk = load_train_wave_analogue_risk(
+        current_log,
+        history_logs=[failed, failed],
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3350,
+        train_rmse_threshold=0.001,
+        min_failed_analogues=1,
+    )
+    assert risk is not None
+    parsed = parse_seq4096_log(current_log)
+    base = RecoveryControls(
+        train_batch_tokens=983_040,
+        tied_embed_lr=0.036408,
+        matrix_lr=0.018,
+        scalar_lr=0.018,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=4250,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+        bigram_bias=True,
+        bigram_bias_lr=0.02,
+    )
+
+    planned = plan_failed_train_wave_recovery_controls(
+        base,
+        parsed=parsed,
+        risk=risk,
+        gate_step=4000,
+    )
+
+    assert planned.policy == "failed_train_wave_damped_transfer_probe"
+    assert planned.tied_embed_lr < base.tied_embed_lr
+    assert planned.bigram_bias_lr < base.bigram_bias_lr
+    assert planned.bigram_bias_lr == 0.012
+    assert planned.matrix_lr == base.matrix_lr
+    assert planned.scalar_lr == base.scalar_lr
+    assert planned.muon_momentum_warmup_steps > parsed.val_rows[-1].step
+    assert planned.advanced_metric_policy == "failed_train_wave_analogue_damp_graphcg_slepian_sidecars"
 
 
 def test_seq4096_log_parses_train_bpb_for_validation_gap_controls(tmp_path: Path):
