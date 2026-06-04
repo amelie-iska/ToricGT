@@ -97,13 +97,17 @@ def run(command: list[str], check: bool = False) -> subprocess.CompletedProcess[
     return subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=check)
 
 
+def tmux_exact_target(session: str) -> str:
+    return f"={session}"
+
+
 def tmux_has(session: str) -> bool:
-    return run(["tmux", "has-session", "-t", session]).returncode == 0
+    return run(["tmux", "has-session", "-t", tmux_exact_target(session)]).returncode == 0
 
 
 def tmux_kill(session: str) -> None:
     if tmux_has(session):
-        run(["tmux", "kill-session", "-t", session])
+        run(["tmux", "kill-session", "-t", tmux_exact_target(session)])
 
 
 def tmux_start(session: str, command: str, dry_run: bool) -> None:
