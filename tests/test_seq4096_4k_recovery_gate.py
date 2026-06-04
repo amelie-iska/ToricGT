@@ -760,8 +760,14 @@ def test_repeated_damped_train_wave_uses_stronger_diversity_controls(tmp_path: P
     assert planned.graphcg_loss_weight > 0.0
     assert planned.toric_tropical_loss_weight > 0.0
     assert planned.slepian_loss_weight > 0.0
-    assert planned.koszul_bgg_loss_weight > 0.0
-    assert planned.analogy_loss_weight > 0.0
+    assert planned.koszul_bgg_loss_weight == 0.0
+    assert planned.analogy_loss_weight == 0.0
+    assert planned.advanced_loss_log_only is True
+    assert planned.advanced_loss_start_step == 3900
+    assert planned.advanced_loss_every == 4
+    assert planned.advanced_loss_warmup_steps == 100
+    assert planned.advanced_loss_min_best_val_bpb == 1.205
+    assert planned.advanced_loss_max_ce_ratio == 0.001
 
     advanced_base = RecoveryControls(
         train_batch_tokens=917_504,

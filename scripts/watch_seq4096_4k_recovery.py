@@ -118,6 +118,13 @@ class RecoveryControls:
     analogy_loss_weight: float = 0.0
     advanced_loss_sample_tokens: int = 256
     toric_tropical_fan_bins: int = 8
+    advanced_loss_log_only: bool = False
+    advanced_loss_start_step: int = 0
+    advanced_loss_end_step: int = 0
+    advanced_loss_every: int = 1
+    advanced_loss_warmup_steps: int = 0
+    advanced_loss_min_best_val_bpb: float = 0.0
+    advanced_loss_max_ce_ratio: float = 0.0
 
     def launch_dict(self) -> dict[str, Any]:
         return {
@@ -147,6 +154,13 @@ class RecoveryControls:
             "analogy_loss_weight": float(self.analogy_loss_weight),
             "advanced_loss_sample_tokens": int(self.advanced_loss_sample_tokens),
             "toric_tropical_fan_bins": int(self.toric_tropical_fan_bins),
+            "advanced_loss_log_only": bool(self.advanced_loss_log_only),
+            "advanced_loss_start_step": int(self.advanced_loss_start_step),
+            "advanced_loss_end_step": int(self.advanced_loss_end_step),
+            "advanced_loss_every": int(self.advanced_loss_every),
+            "advanced_loss_warmup_steps": int(self.advanced_loss_warmup_steps),
+            "advanced_loss_min_best_val_bpb": float(self.advanced_loss_min_best_val_bpb),
+            "advanced_loss_max_ce_ratio": float(self.advanced_loss_max_ce_ratio),
         }
 
 
@@ -427,7 +441,7 @@ def plan_failed_train_wave_recovery_controls(
     """Turn a repeated failed train-wave analogue into a transfer-stability probe."""
 
     latest_val = parsed.val_rows[-1] if parsed.val_rows else None
-    latest_step = latest_val.step if latest_val is not None else max(parsed.latest_step, 0)
+    latest_step = max(parsed.latest_step, latest_val.step if latest_val is not None else 0)
     repeated_damped_branch = base.tied_embed_lr <= 0.0325 and base.bigram_bias_lr <= 0.0065
     if repeated_damped_branch:
         previous_advanced_probe = base.advanced_loss_scale > 0.0
@@ -439,21 +453,26 @@ def plan_failed_train_wave_recovery_controls(
             slepian_loss_weight = max(0.005, min(0.01, base.slepian_loss_weight * 0.50))
             koszul_bgg_loss_weight = 0.0
             analogy_loss_weight = max(0.0, min(0.005, base.analogy_loss_weight * 0.50))
+            advanced_loss_every = 8
+            advanced_loss_max_ce_ratio = 0.0005
             advanced_rationale = (
                 "previous advanced-loss branch produced a low train BPB but worsened validation transfer",
-                "reduce auxiliary pressure to a lightweight GraphCG/Slepian transfer probe and hold Koszul/BGG for post-threshold",
+                "reduce auxiliary pressure to a scheduled GraphCG/Slepian transfer probe and hold Koszul/BGG for post-threshold",
             )
         else:
             advanced_metric_policy = "guarded_graphcg_toric_slepian_koszul_analogy_losses"
-            advanced_loss_scale = 0.20
-            graphcg_loss_weight = 0.05
-            toric_tropical_loss_weight = 0.03
-            slepian_loss_weight = 0.02
-            koszul_bgg_loss_weight = 0.01
-            analogy_loss_weight = 0.01
+            advanced_loss_scale = 0.02
+            graphcg_loss_weight = 0.02
+            toric_tropical_loss_weight = 0.005
+            slepian_loss_weight = 0.01
+            koszul_bgg_loss_weight = 0.0
+            analogy_loss_weight = 0.0
+            advanced_loss_every = 4
+            advanced_loss_max_ce_ratio = 0.001
             advanced_rationale = (
-                "begin guarded lightweight advanced-loss training: GraphCG basis disentanglement, toric/tropical chamber pressure, "
-                "Slepian/Pollak trajectory concentration, Koszul/BGG exactness, and analogical transport consistency",
+                "begin bounded advanced-loss microprobe: GraphCG basis disentanglement, toric/tropical chamber pressure, and "
+                "Slepian/Pollak trajectory concentration with CE-ratio clipping and log-only sidecar metrics",
+                "hold Koszul/BGG exactness and analogy transport losses for the post-threshold reasoning-memory phase",
             )
         return replace(
             base,
@@ -480,6 +499,12 @@ def plan_failed_train_wave_recovery_controls(
             analogy_loss_weight=analogy_loss_weight,
             advanced_loss_sample_tokens=max(base.advanced_loss_sample_tokens, 256),
             toric_tropical_fan_bins=max(base.toric_tropical_fan_bins, 8),
+            advanced_loss_log_only=True,
+            advanced_loss_start_step=max(0, int(latest_step) + 50),
+            advanced_loss_every=advanced_loss_every,
+            advanced_loss_warmup_steps=100,
+            advanced_loss_min_best_val_bpb=1.205,
+            advanced_loss_max_ce_ratio=advanced_loss_max_ce_ratio,
             rationale=(
                 "failed damped train-wave branch has reached the tied/bigram LR floor without validation transfer",
                 "matched failed analogue count "
@@ -1336,6 +1361,13 @@ def build_recovery_launch(
     analogy_loss_weight: float = 0.0,
     advanced_loss_sample_tokens: int = 256,
     toric_tropical_fan_bins: int = 8,
+    advanced_loss_log_only: bool = False,
+    advanced_loss_start_step: int = 0,
+    advanced_loss_end_step: int = 0,
+    advanced_loss_every: int = 1,
+    advanced_loss_warmup_steps: int = 0,
+    advanced_loss_min_best_val_bpb: float = 0.0,
+    advanced_loss_max_ce_ratio: float = 0.0,
 ) -> RecoveryLaunch:
     _ = repo_root
     env = {
@@ -1378,6 +1410,13 @@ def build_recovery_launch(
         "ANALOGY_LOSS_WEIGHT": analogy_loss_weight,
         "ADVANCED_LOSS_SAMPLE_TOKENS": advanced_loss_sample_tokens,
         "TORIC_TROPICAL_FAN_BINS": toric_tropical_fan_bins,
+        "ADVANCED_LOSS_LOG_ONLY": 1 if advanced_loss_log_only else 0,
+        "ADVANCED_LOSS_START_STEP": advanced_loss_start_step,
+        "ADVANCED_LOSS_END_STEP": advanced_loss_end_step,
+        "ADVANCED_LOSS_EVERY": advanced_loss_every,
+        "ADVANCED_LOSS_WARMUP_STEPS": advanced_loss_warmup_steps,
+        "ADVANCED_LOSS_MIN_BEST_VAL_BPB": advanced_loss_min_best_val_bpb,
+        "ADVANCED_LOSS_MAX_CE_RATIO": advanced_loss_max_ce_ratio,
     }
     if grad_clip_norm is not None:
         env["GRAD_CLIP_NORM"] = grad_clip_norm
@@ -1533,6 +1572,13 @@ def build_gate_shell(
     recovery_analogy_loss_weight: float,
     recovery_advanced_loss_sample_tokens: int,
     recovery_toric_tropical_fan_bins: int,
+    recovery_advanced_loss_log_only: bool,
+    recovery_advanced_loss_start_step: int,
+    recovery_advanced_loss_end_step: int,
+    recovery_advanced_loss_every: int,
+    recovery_advanced_loss_warmup_steps: int,
+    recovery_advanced_loss_min_best_val_bpb: float,
+    recovery_advanced_loss_max_ce_ratio: float,
     preempt_on_projected_miss: bool,
     preempt_min_step: int,
     preempt_patience: int,
@@ -1581,7 +1627,15 @@ def build_gate_shell(
         f"--recovery-analogy-loss-weight {float(recovery_analogy_loss_weight)} "
         f"--recovery-advanced-loss-sample-tokens {int(recovery_advanced_loss_sample_tokens)} "
         f"--recovery-toric-tropical-fan-bins {int(recovery_toric_tropical_fan_bins)} "
+        f"--recovery-advanced-loss-start-step {int(recovery_advanced_loss_start_step)} "
+        f"--recovery-advanced-loss-end-step {int(recovery_advanced_loss_end_step)} "
+        f"--recovery-advanced-loss-every {int(recovery_advanced_loss_every)} "
+        f"--recovery-advanced-loss-warmup-steps {int(recovery_advanced_loss_warmup_steps)} "
+        f"--recovery-advanced-loss-min-best-val-bpb {float(recovery_advanced_loss_min_best_val_bpb)} "
+        f"--recovery-advanced-loss-max-ce-ratio {float(recovery_advanced_loss_max_ce_ratio)} "
     )
+    if recovery_advanced_loss_log_only:
+        advanced_loss_arg += "--recovery-advanced-loss-log-only "
     return (
         f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src && "
         f"{shlex.quote(str(python))} scripts/watch_seq4096_4k_recovery.py "
@@ -1652,6 +1706,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recovery-analogy-loss-weight", type=float, default=0.0)
     parser.add_argument("--recovery-advanced-loss-sample-tokens", type=int, default=256)
     parser.add_argument("--recovery-toric-tropical-fan-bins", type=int, default=8)
+    parser.add_argument("--recovery-advanced-loss-log-only", action="store_true")
+    parser.add_argument("--recovery-advanced-loss-start-step", type=int, default=0)
+    parser.add_argument("--recovery-advanced-loss-end-step", type=int, default=0)
+    parser.add_argument("--recovery-advanced-loss-every", type=int, default=1)
+    parser.add_argument("--recovery-advanced-loss-warmup-steps", type=int, default=0)
+    parser.add_argument("--recovery-advanced-loss-min-best-val-bpb", type=float, default=0.0)
+    parser.add_argument("--recovery-advanced-loss-max-ce-ratio", type=float, default=0.0)
     parser.add_argument("--analysis-root", default="")
     parser.add_argument("--preempt-on-projected-miss", action="store_true")
     parser.add_argument("--preempt-min-step", type=int, default=2500)
@@ -1775,6 +1836,13 @@ def main() -> None:
             analogy_loss_weight=args.recovery_analogy_loss_weight,
             advanced_loss_sample_tokens=args.recovery_advanced_loss_sample_tokens,
             toric_tropical_fan_bins=args.recovery_toric_tropical_fan_bins,
+            advanced_loss_log_only=args.recovery_advanced_loss_log_only,
+            advanced_loss_start_step=args.recovery_advanced_loss_start_step,
+            advanced_loss_end_step=args.recovery_advanced_loss_end_step,
+            advanced_loss_every=args.recovery_advanced_loss_every,
+            advanced_loss_warmup_steps=args.recovery_advanced_loss_warmup_steps,
+            advanced_loss_min_best_val_bpb=args.recovery_advanced_loss_min_best_val_bpb,
+            advanced_loss_max_ce_ratio=args.recovery_advanced_loss_max_ce_ratio,
         )
         projected_target_step = (
             float("nan")
@@ -1928,6 +1996,13 @@ def main() -> None:
             analogy_loss_weight=recovery_controls.analogy_loss_weight,
             advanced_loss_sample_tokens=recovery_controls.advanced_loss_sample_tokens,
             toric_tropical_fan_bins=recovery_controls.toric_tropical_fan_bins,
+            advanced_loss_log_only=recovery_controls.advanced_loss_log_only,
+            advanced_loss_start_step=recovery_controls.advanced_loss_start_step,
+            advanced_loss_end_step=recovery_controls.advanced_loss_end_step,
+            advanced_loss_every=recovery_controls.advanced_loss_every,
+            advanced_loss_warmup_steps=recovery_controls.advanced_loss_warmup_steps,
+            advanced_loss_min_best_val_bpb=recovery_controls.advanced_loss_min_best_val_bpb,
+            advanced_loss_max_ce_ratio=recovery_controls.advanced_loss_max_ce_ratio,
         )
         command_dir = repo_root / "logs" / recovery_run_id / "supervisor"
         command_dir.mkdir(parents=True, exist_ok=True)
@@ -1993,6 +2068,13 @@ def main() -> None:
             recovery_analogy_loss_weight=recovery_controls.analogy_loss_weight,
             recovery_advanced_loss_sample_tokens=recovery_controls.advanced_loss_sample_tokens,
             recovery_toric_tropical_fan_bins=recovery_controls.toric_tropical_fan_bins,
+            recovery_advanced_loss_log_only=recovery_controls.advanced_loss_log_only,
+            recovery_advanced_loss_start_step=recovery_controls.advanced_loss_start_step,
+            recovery_advanced_loss_end_step=recovery_controls.advanced_loss_end_step,
+            recovery_advanced_loss_every=recovery_controls.advanced_loss_every,
+            recovery_advanced_loss_warmup_steps=recovery_controls.advanced_loss_warmup_steps,
+            recovery_advanced_loss_min_best_val_bpb=recovery_controls.advanced_loss_min_best_val_bpb,
+            recovery_advanced_loss_max_ce_ratio=recovery_controls.advanced_loss_max_ce_ratio,
             preempt_on_projected_miss=args.preempt_on_projected_miss,
             preempt_min_step=args.preempt_min_step,
             preempt_patience=args.preempt_patience,

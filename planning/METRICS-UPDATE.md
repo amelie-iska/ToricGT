@@ -977,6 +977,31 @@ and 50-step validation/checkpointing. The advanced topology, toric, tropical,
 Slepian/Pollak, GraphCG, analogical, and BGG/Koszul analyses remain attached as
 sidecar diagnostics and controller evidence.
 
+Guarded advanced-loss update (2026-06-04): R69 also regressed immediately
+(`val_bpb=1.2240` at step 3550), and R70 preserved the R56 optimizer/RNG/loader
+from the step-3750 checkpoint but still worsened (`val_bpb=1.2252` at step
+3800 and `1.2260` at step 3850). This shows the step-3750 basin is not fixed by
+optimizer-state preservation alone. The Seq4096 runner now supports staged
+advanced losses:
+
+- `ADVANCED_LOSS_LOG_ONLY=1` computes GraphCG, toric/tropical, Slepian/Pollak,
+  Koszul/BGG, and analogy metrics for W&B even when runtime backprop scale is
+  zero;
+- `ADVANCED_LOSS_START_STEP`, `ADVANCED_LOSS_END_STEP`,
+  `ADVANCED_LOSS_EVERY`, and `ADVANCED_LOSS_WARMUP_STEPS` schedule microprobes;
+- `ADVANCED_LOSS_MIN_BEST_VAL_BPB` prevents structural pressure before the
+  validation curve is close enough to the target;
+- `ADVANCED_LOSS_MAX_CE_RATIO` clips any auxiliary contribution to a tiny
+  fraction of cross-entropy so BPB remains dominant.
+
+R71 (`toricgt_seq4096_4k_recovery_r71_20260604T172807Z`) is the current live
+experiment. It resumes the R52 step-3500 checkpoint with optimizer/RNG/loader
+preserved, validates every 50 steps, logs advanced metrics continuously, and
+enables a bounded GraphCG/Slepian/toric microprobe after step 3550 only while
+the best validation BPB is at or below `1.22`. Koszul/BGG and analogy losses
+remain held for the post-threshold reasoning-memory phase unless future
+50-step analyses show positive authoritative validation transfer.
+
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
 Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, verify code+weights <=16,000,000 bytes, then start post-threshold advanced reasoning/memory phases.
