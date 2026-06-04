@@ -203,7 +203,10 @@ checkpoint.
 
 Implementation note: the generic watcher uses its invoking Python interpreter
 for child analysis subprocesses, avoiding tmux environments where a plain
-`python` executable is not present on `PATH`.
+`python` executable is not present on `PATH`.  It also treats simplex and
+geometry suites as optional so a RandomOrderLM-only diagnostic can fail cleanly
+on compact Seq4096 GPT checkpoints while BPB/W&B analysis and the proposal
+still complete.
 
 ## 2026-06-04 Seq4096 R75 Step-3600 BPB Gate Review
 

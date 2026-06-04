@@ -29,6 +29,8 @@ compact Markdown synopsis after W&B metrics, budget simplices, branch
 trajectories, Ramachandran-style phase plots, and energy landscapes complete.
 The geometry suite also writes directed nested-simplicial diagnostics for the
 noncommutative topology induced by hidden-state relation arrows.
+Reasoning simplex and geometry diagnostics are best-effort so checkpoint-family
+format mismatches do not turn a sidecar review into a training blocker.
 """
 
 from __future__ import annotations
@@ -407,7 +409,7 @@ def main() -> None:
             cwd=repo,
             log_path=base / "logs" / "oai_competition.log",
         )
-    run_command(
+    run_optional_command(
         [
             sys.executable,
             "scripts/evaluate_reasoning_simplex.py",
@@ -440,7 +442,7 @@ def main() -> None:
         cwd=repo,
         log_path=base / "logs" / "simplex.log",
     )
-    run_command(
+    run_optional_command(
         [
             sys.executable,
             "scripts/evaluate_reasoning_geometry_suite.py",
