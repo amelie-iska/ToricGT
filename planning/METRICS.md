@@ -143,6 +143,8 @@ r90 step-3950 validation BPB/loss: 1.2088 / 2.0409
 r90 projection after step 3950: target step 4438.9, still beyond gate 4000
 supervisor action: launched r91 from r90 step-3950 checkpoint
 active training tmux: toricgt_seq4096_4k_recovery_r91_20260604T203732Z
+active supervisor tmux: toricgt_seq4096_4k_gate_r91_20260604T203732Z
+active supervisor log: logs/toricgt_seq4096_4k_recovery_r91_20260604T203732Z.4k_gate.txt
 active W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r91_20260604T203732Z
 active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r91_20260604T203732Z.txt
 active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r91_20260604T203732Z
