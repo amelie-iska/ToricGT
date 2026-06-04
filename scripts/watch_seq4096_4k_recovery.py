@@ -77,6 +77,14 @@ class RecoveryLaunch:
 
 
 @dataclass(frozen=True)
+class HistoricalRecoveryCandidate:
+    val: ValRow
+    checkpoint: Path
+    run_id: str
+    log_path: str
+
+
+@dataclass(frozen=True)
 class PreemptiveGateRisk:
     analysis_root: str
     latest_analysis_step: int
@@ -296,6 +304,115 @@ def select_recovery_validation(
     if best_before_gate is not None:
         return best_before_gate
     return select_best_validation(rows, gate_step)
+
+
+def validation_at_step(rows: list[ValRow], step: int) -> ValRow | None:
+    matches = [row for row in rows if row.step == int(step) and math.isfinite(row.val_bpb)]
+    return matches[-1] if matches else None
+
+
+def latest_gate_validation(rows: list[ValRow], gate_step: int) -> ValRow | None:
+    candidates = [row for row in rows if row.step >= int(gate_step) and math.isfinite(row.val_bpb)]
+    return candidates[-1] if candidates else None
+
+
+def detect_late_recovery_replay(
+    selected_val: ValRow,
+    *,
+    current_log: Path | str,
+    history_logs: list[Path | str],
+    gate_step: int,
+    target_bpb: float,
+    late_window_steps: int = 75,
+    bpb_epsilon: float = 2.0e-4,
+    min_matches: int = 3,
+) -> dict[str, Any]:
+    """Detect repeated short replays from the same late checkpoint.
+
+    Near 4K, restarting from step 3950 can degenerate into many almost identical
+    50-step branches.  Those branches are useful once; after several misses they
+    become evidence that we need a roomier historical checkpoint and a reset.
+    """
+
+    if selected_val.step < int(gate_step) - max(1, int(late_window_steps)):
+        return {"detected": False, "matched_count": 0, "matched_runs": []}
+    matched: list[dict[str, Any]] = []
+    current_path = Path(current_log).resolve()
+    seen: set[Path] = set()
+    for history_log in [current_path, *[Path(path) for path in history_logs]]:
+        path = Path(history_log)
+        try:
+            resolved = path.resolve()
+        except Exception:
+            resolved = path
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        parsed = parse_seq4096_log(path)
+        selected_match = validation_at_step(parsed.val_rows, selected_val.step)
+        gate_match = latest_gate_validation(parsed.val_rows, gate_step)
+        if selected_match is None or gate_match is None:
+            continue
+        if abs(selected_match.val_bpb - selected_val.val_bpb) > max(0.0, float(bpb_epsilon)):
+            continue
+        if gate_match.val_bpb <= float(target_bpb):
+            continue
+        matched.append(
+            {
+                "run_id": path.stem,
+                "log_path": str(path),
+                "selected_step": int(selected_match.step),
+                "selected_val_bpb": float(selected_match.val_bpb),
+                "gate_step": int(gate_match.step),
+                "gate_val_bpb": float(gate_match.val_bpb),
+            }
+        )
+    return {
+        "detected": len(matched) >= max(1, int(min_matches)),
+        "matched_count": int(len(matched)),
+        "matched_runs": matched,
+        "selected_step": int(selected_val.step),
+        "selected_val_bpb": float(selected_val.val_bpb),
+        "late_window_steps": int(late_window_steps),
+        "bpb_epsilon": float(bpb_epsilon),
+        "min_matches": int(min_matches),
+    }
+
+
+def select_historical_recovery_candidate(
+    history_logs: list[Path | str],
+    *,
+    checkpoint_root: Path | str,
+    gate_step: int,
+    min_recovery_runway_steps: int,
+    exclude_steps: set[int] | None = None,
+) -> HistoricalRecoveryCandidate | None:
+    """Find the best checkpoint across prior recovery dirs with enough runway."""
+
+    checkpoint_root = Path(checkpoint_root)
+    max_step = int(gate_step) - max(1, int(min_recovery_runway_steps))
+    exclude_steps = {int(step) for step in (exclude_steps or set())}
+    candidates: list[HistoricalRecoveryCandidate] = []
+    for log_path in sorted(Path(path) for path in history_logs):
+        run_id = log_path.stem
+        parsed = parse_seq4096_log(log_path)
+        for row in parsed.val_rows:
+            if row.step > max_step or row.step in exclude_steps or not math.isfinite(row.val_bpb):
+                continue
+            checkpoint = checkpoint_for_step(checkpoint_root / run_id, run_id, row.step)
+            if checkpoint is None:
+                continue
+            candidates.append(
+                HistoricalRecoveryCandidate(
+                    val=row,
+                    checkpoint=checkpoint,
+                    run_id=run_id,
+                    log_path=str(log_path),
+                )
+            )
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item.val.val_bpb, -item.val.step, item.run_id))
 
 
 def checkpoint_for_step(checkpoint_dir: Path | str, run_id: str, step: int) -> Path | None:
@@ -1383,6 +1500,55 @@ def plan_metric_driven_recovery_controls(
     )
 
 
+def plan_late_replay_escape_controls(
+    base: RecoveryControls,
+    *,
+    selected_val: ValRow,
+    replay_summary: dict[str, Any],
+    gate_step: int,
+) -> RecoveryControls:
+    """Diversify after repeated same-checkpoint 4K misses."""
+
+    matched_count = int(replay_summary.get("matched_count") or 0)
+    return replace(
+        base,
+        tied_embed_lr=round(max(0.034, min(0.0372, base.tied_embed_lr * 0.965)), 6),
+        matrix_lr=round(max(0.017, min(base.matrix_lr, 0.018)), 6),
+        scalar_lr=round(max(0.017, min(base.scalar_lr, 0.018)), 6),
+        muon_momentum_warmup_steps=max(
+            base.muon_momentum_warmup_steps,
+            int(gate_step) + 900,
+            int(selected_val.step) + 1200,
+        ),
+        bigram_bias=True,
+        bigram_bias_lr=round(max(0.014, min(0.022, base.bigram_bias_lr * 0.80)), 6),
+        bigram_bias_init_from_data=False,
+        advanced_loss_scale=round(max(base.advanced_loss_scale, 0.012), 6),
+        graphcg_loss_weight=round(max(base.graphcg_loss_weight, 0.03), 6),
+        toric_tropical_loss_weight=round(max(base.toric_tropical_loss_weight, 0.004), 6),
+        slepian_loss_weight=round(max(base.slepian_loss_weight, 0.012), 6),
+        koszul_bgg_loss_weight=round(max(base.koszul_bgg_loss_weight, 0.00015), 8),
+        analogy_loss_weight=round(max(base.analogy_loss_weight, 0.00012), 8),
+        advanced_loss_sample_tokens=max(base.advanced_loss_sample_tokens, 256),
+        advanced_loss_every=min(base.advanced_loss_every, 6) if base.advanced_loss_every > 0 else 6,
+        advanced_loss_warmup_steps=max(base.advanced_loss_warmup_steps, 220),
+        advanced_loss_max_ce_ratio=max(base.advanced_loss_max_ce_ratio, 0.00035),
+        reset_optimizer_on_resume=True,
+        reset_rng_on_resume=True,
+        reset_loader_on_resume=True,
+        policy="late_replay_escape_reset",
+        advanced_metric_policy="graphcg_slepian_toric_koszul_analogy_replay_escape",
+        rationale=(
+            f"detected {matched_count} repeated late recovery replay misses from step "
+            f"{replay_summary.get('selected_step')}",
+            "restart from a roomier historical checkpoint instead of replaying the same 3950-to-4000 segment",
+            "reset optimizer/RNG/loader so the branch explores a new minibatch and optimizer trajectory",
+            "slightly increase bounded GraphCG, Slepian/Pollak, toric/tropical, Koszul/BGG, and analogy losses",
+            "keep the advanced loss CE-ratio cap small so BPB remains the primary objective",
+        ),
+    )
+
+
 def shell_env(env: dict[str, Any]) -> str:
     return " ".join(f"{key}={shlex.quote(str(value))}" for key, value in env.items())
 
@@ -1685,6 +1851,10 @@ def build_gate_shell(
     recovery_max_train_batch_tokens: int,
     validation_gap_threshold: float,
     low_train_bpb_margin: float,
+    replay_detection_min_matches: int,
+    replay_detection_bpb_epsilon: float,
+    replay_detection_late_window_steps: int,
+    replay_recovery_runway_steps: int,
     python: str,
 ) -> str:
     gate_log = repo_root / "logs" / f"{run_id}.4k_gate.txt"
@@ -1783,6 +1953,10 @@ def build_gate_shell(
         f"--recovery-max-train-batch-tokens {int(recovery_max_train_batch_tokens)} "
         f"--validation-gap-threshold {float(validation_gap_threshold)} "
         f"--low-train-bpb-margin {float(low_train_bpb_margin)} "
+        f"--replay-detection-min-matches {int(replay_detection_min_matches)} "
+        f"--replay-detection-bpb-epsilon {float(replay_detection_bpb_epsilon)} "
+        f"--replay-detection-late-window-steps {int(replay_detection_late_window_steps)} "
+        f"--replay-recovery-runway-steps {int(replay_recovery_runway_steps)} "
         f"--state {shlex.quote(str(state_path))} "
         f"2>&1 | tee -a {shlex.quote(str(gate_log))}"
     )
@@ -1861,6 +2035,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recovery-max-train-batch-tokens", type=int, default=983_040)
     parser.add_argument("--validation-gap-threshold", type=float, default=0.04)
     parser.add_argument("--low-train-bpb-margin", type=float, default=0.0)
+    parser.add_argument("--replay-detection-min-matches", type=int, default=3)
+    parser.add_argument("--replay-detection-bpb-epsilon", type=float, default=2.0e-4)
+    parser.add_argument("--replay-detection-late-window-steps", type=int, default=75)
+    parser.add_argument("--replay-recovery-runway-steps", type=int, default=350)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -1888,6 +2066,7 @@ def main() -> None:
             if args.analysis_root
             else repo_root / "outputs" / "post_resume_analysis" / args.run_id
         )
+        history_logs = sorted(log_path.parent.glob("toricgt_seq4096_4k_recovery_r*.txt"))
         advanced_diagnostics = load_advanced_diagnostics(repo_root, args.run_id)
         advanced_diagnostics_summary = summarize_advanced_diagnostics(advanced_diagnostics)
         projection_gate_risk = (
@@ -1904,7 +2083,7 @@ def main() -> None:
         analogue_gate_risk = (
             load_failed_trajectory_analogue_risk(
                 log_path,
-                history_logs=sorted(log_path.parent.glob("toricgt_seq4096_4k_recovery_r*.txt")),
+                history_logs=history_logs,
                 gate_step=args.gate_step,
                 target_bpb=args.target_bpb,
                 min_step=args.analogue_risk_min_step,
@@ -1918,7 +2097,7 @@ def main() -> None:
         train_wave_gate_risk = (
             load_train_wave_analogue_risk(
                 log_path,
-                history_logs=sorted(log_path.parent.glob("toricgt_seq4096_4k_recovery_r*.txt")),
+                history_logs=history_logs,
                 gate_step=args.gate_step,
                 target_bpb=args.target_bpb,
                 min_step=max(args.analogue_risk_min_step, 3350),
@@ -2039,6 +2218,12 @@ def main() -> None:
             "recovery_max_train_batch_tokens": args.recovery_max_train_batch_tokens,
             "validation_gap_threshold": args.validation_gap_threshold,
             "low_train_bpb_margin": args.low_train_bpb_margin,
+            "replay_detection": {
+                "min_matches": args.replay_detection_min_matches,
+                "bpb_epsilon": args.replay_detection_bpb_epsilon,
+                "late_window_steps": args.replay_detection_late_window_steps,
+                "recovery_runway_steps": args.replay_recovery_runway_steps,
+            },
             "updated_unix": time.time(),
         }
         rendered = json.dumps(status, sort_keys=True)
@@ -2081,10 +2266,48 @@ def main() -> None:
             time.sleep(max(1.0, args.poll_seconds))
             continue
 
-        resume_checkpoint = checkpoint_for_step(checkpoint_dir, args.run_id, recovery_val.step)
+        replay_summary = detect_late_recovery_replay(
+            recovery_val,
+            current_log=log_path,
+            history_logs=history_logs,
+            gate_step=args.gate_step,
+            target_bpb=args.target_bpb,
+            late_window_steps=args.replay_detection_late_window_steps,
+            bpb_epsilon=args.replay_detection_bpb_epsilon,
+            min_matches=args.replay_detection_min_matches,
+        )
+        historical_replay_candidate: HistoricalRecoveryCandidate | None = None
+        if replay_summary.get("detected"):
+            historical_replay_candidate = select_historical_recovery_candidate(
+                history_logs,
+                checkpoint_root=checkpoint_dir.parent,
+                gate_step=args.gate_step,
+                min_recovery_runway_steps=max(
+                    args.min_recovery_runway_steps,
+                    args.replay_recovery_runway_steps,
+                ),
+                exclude_steps={recovery_val.step},
+            )
+            if historical_replay_candidate is not None:
+                recovery_val = replace(
+                    historical_replay_candidate.val,
+                    source=f"historical_replay_escape:{historical_replay_candidate.run_id}",
+                )
+                recovery_controls = plan_late_replay_escape_controls(
+                    recovery_controls,
+                    selected_val=recovery_val,
+                    replay_summary=replay_summary,
+                    gate_step=args.gate_step,
+                )
+
+        if historical_replay_candidate is not None:
+            resume_checkpoint = historical_replay_candidate.checkpoint
+        else:
+            resume_checkpoint = checkpoint_for_step(checkpoint_dir, args.run_id, recovery_val.step)
         if resume_checkpoint is None:
             status["event"] = "waiting_for_best_checkpoint"
             status["best_checkpoint_step"] = recovery_val.step
+            status["late_replay_detection"] = replay_summary
             write_state(state_path, status)
             time.sleep(max(1.0, args.poll_seconds))
             continue
@@ -2234,6 +2457,10 @@ def main() -> None:
             recovery_max_train_batch_tokens=args.recovery_max_train_batch_tokens,
             validation_gap_threshold=args.validation_gap_threshold,
             low_train_bpb_margin=args.low_train_bpb_margin,
+            replay_detection_min_matches=args.replay_detection_min_matches,
+            replay_detection_bpb_epsilon=args.replay_detection_bpb_epsilon,
+            replay_detection_late_window_steps=args.replay_detection_late_window_steps,
+            replay_recovery_runway_steps=args.replay_recovery_runway_steps,
             python=args.python,
         )
         (command_dir / "analysis_command.sh").write_text(analysis_shell + "\n", encoding="utf-8")
@@ -2248,6 +2475,15 @@ def main() -> None:
                 else "launching_4k_recovery",
                 "selected_recovery_validation": recovery_val.__dict__,
                 "resume_checkpoint": str(resume_checkpoint),
+                "late_replay_detection": replay_summary,
+                "historical_replay_candidate": None
+                if historical_replay_candidate is None
+                else {
+                    "run_id": historical_replay_candidate.run_id,
+                    "log_path": historical_replay_candidate.log_path,
+                    "checkpoint": str(historical_replay_candidate.checkpoint),
+                    "validation": historical_replay_candidate.val.__dict__,
+                },
                 "recovery_run_id": recovery_run_id,
                 "recovery_train_tmux": recovery_train_tmux,
                 "recovery_log": str(recovery_log),

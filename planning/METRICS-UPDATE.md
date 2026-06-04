@@ -1183,6 +1183,22 @@ stack: `ADVANCED_LOSS_SCALE=0.015`, `ADVANCED_LOSS_MAX_CE_RATIO=0.001`,
 pressure while removing pre-threshold analogy/Koszul gradient budget and
 halving the auxiliary CE cap.
 
+R90-R100 late replay update: the 4K gate reached a repeated short-branch
+failure mode. R90 improved to `val_bpb=1.2088` at step 3950, then R91-R100
+repeated the same 3950-to-4000 segment and landed around `val_bpb=1.2085`,
+with train BPB near `1.1958` but validation still above target. This is a
+classic validation-transfer replay rather than a useful new experiment. The
+gate now detects repeated late checkpoint replays by matching several failed
+same-step, same-BPB 3950 branches. When detected, it selects the best historical
+checkpoint with a 350-step runway, excludes the repeated 3950 checkpoint, resets
+optimizer/RNG/loader, and launches a bounded advanced replay-escape branch:
+`ADVANCED_LOSS_SCALE>=0.012`, `GRAPHCG>=0.03`,
+`TORIC_TROPICAL>=0.004`, `SLEPIAN>=0.012`, `KOSZUL_BGG>=0.00015`,
+`ANALOGY>=0.00012`, `ADVANCED_LOSS_SAMPLE_TOKENS>=256`, and
+`ADVANCED_LOSS_MAX_CE_RATIO>=0.00035`. This is the first explicit
+near-threshold experiment that promotes the advanced families during the BPB
+phase while keeping the CE-ratio cap small enough for BPB to remain primary.
+
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
 Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, verify code+weights <=16,000,000 bytes, then start post-threshold advanced reasoning/memory phases.

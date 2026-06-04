@@ -239,6 +239,75 @@ def test_4k_recovery_selection_keeps_roomy_checkpoint_for_tiny_late_gain() -> No
     assert selected.val_bpb == pytest.approx(1.2131)
 
 
+def test_4k_gate_replay_detection_selects_roomier_historical_checkpoint(tmp_path: Path) -> None:
+    module = load_gate_module()
+    log_root = tmp_path / "logs"
+    checkpoint_root = tmp_path / "checkpoints"
+    log_root.mkdir()
+    checkpoint_root.mkdir()
+
+    def write_run(run_id: str, lines: list[str], checkpoint_steps: list[int]) -> Path:
+        log_path = log_root / f"{run_id}.txt"
+        log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        ckpt_dir = checkpoint_root / run_id
+        ckpt_dir.mkdir()
+        for step in checkpoint_steps:
+            (ckpt_dir / f"{run_id}_step_{step:06d}.pt").write_bytes(b"checkpoint")
+        return log_path
+
+    historical = write_run(
+        "toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z",
+        [
+            "step:3650/4000 val_loss:2.0475 val_bpb:1.2155 train_time:1ms step_avg:1ms",
+        ],
+        [3650],
+    )
+    replay_logs = [
+        write_run(
+            f"toricgt_seq4096_4k_recovery_r9{i}_20260604T20{i}000Z",
+            [
+                "step:3950/4000 val_loss:2.0409 val_bpb:1.2088 train_time:1ms step_avg:1ms",
+                "step:4000/4000 val_loss:2.0405 val_bpb:1.2085 train_time:2ms step_avg:1ms",
+            ],
+            [3950, 4000],
+        )
+        for i in range(1, 4)
+    ]
+    current = write_run(
+        "toricgt_seq4096_4k_recovery_r99_20260604T213023Z",
+        [
+            "step:3950/4000 val_loss:2.0409 val_bpb:1.2088 train_time:1ms step_avg:1ms",
+            "step:4000/4000 val_loss:2.0405 val_bpb:1.2085 train_time:2ms step_avg:1ms",
+        ],
+        [3950, 4000],
+    )
+
+    selected = module.ValRow(step=3950, total=4000, val_loss=2.0409, val_bpb=1.2088)
+    replay = module.detect_late_recovery_replay(
+        selected,
+        current_log=current,
+        history_logs=[historical, *replay_logs],
+        gate_step=4000,
+        target_bpb=1.2,
+        min_matches=3,
+    )
+    candidate = module.select_historical_recovery_candidate(
+        [historical, *replay_logs, current],
+        checkpoint_root=checkpoint_root,
+        gate_step=4000,
+        min_recovery_runway_steps=350,
+        exclude_steps={selected.step},
+    )
+
+    assert replay["detected"]
+    assert replay["matched_count"] == 4
+    assert candidate is not None
+    assert candidate.run_id == "toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z"
+    assert candidate.val.step == 3650
+    assert candidate.val.val_bpb == pytest.approx(1.2155)
+    assert candidate.checkpoint.exists()
+
+
 def test_write_checkpoint_scoped_log_drops_future_checkpoint_rows(tmp_path: Path) -> None:
     module = load_module()
     log_path = tmp_path / "train.log"

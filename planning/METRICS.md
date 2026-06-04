@@ -12791,3 +12791,30 @@ manual review hook was launched for the already-completed step-3850 analysis.
 This keeps future periodic plots, geometry diagnostics, simplex/tetrahedron
 artifacts, and training-adjustment proposals flowing into the automated Codex
 review loop without interrupting training.
+
+## 2026-06-04 R90-R100 Late-Replay Escape
+
+R90 reached the best late validation so far but did not cross the target:
+
+```text
+R90 step 3950 scheduled: train BPB 1.2034, validation BPB 1.2088
+R91/R92-style step 4000 completions: train BPB about 1.1958, validation BPB about 1.2085
+artifact export: about 15.89MB total with export_prune_fraction=0.10, under the 16MB limit
+```
+
+The repeated R91-R100 restarts showed that the gate was replaying the same
+3950 checkpoint with too little runway and nearly identical validation outcome.
+The controller now detects repeated late recovery replays by matching failed
+same-step, same-BPB 3950 branches. On detection it selects the best historical
+checkpoint with a 350-step runway, excludes the replayed 3950 checkpoint, resets
+optimizer/RNG/loader, and applies a bounded advanced replay-escape profile:
+`ADVANCED_LOSS_SCALE>=0.012`, `GRAPHCG>=0.03`,
+`TORIC_TROPICAL>=0.004`, `SLEPIAN>=0.012`, `KOSZUL_BGG>=0.00015`,
+`ANALOGY>=0.00012`, `ADVANCED_LOSS_SAMPLE_TOKENS>=256`, and
+`ADVANCED_LOSS_MAX_CE_RATIO>=0.00035`.
+
+This is an intentional shift from pure late-checkpoint BPB replay into a
+near-threshold advanced-method experiment. The CE-ratio cap remains tiny, so
+the branch should still be judged by validation BPB first; the advanced family
+metrics should be used as branch-selection and transfer diagnostics unless they
+produce clear held-out BPB improvement.
