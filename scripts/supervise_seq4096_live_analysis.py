@@ -197,10 +197,20 @@ def build_watcher_launch(
     command_file = supervisor_dir / "live_periodic_full_analysis_command.sh"
     watcher_log = root / "logs" / f"{run_id}.live_periodic_full_analysis.txt"
     session = sanitize_session_name(f"{tmux_prefix}{run_id}")
+    loop_env = {
+        "BPB_TARGET": os.environ.get("BPB_TARGET", str(target_bpb)),
+        "BPB_MAX_REVIEW_ITERATIONS": os.environ.get("BPB_MAX_REVIEW_ITERATIONS", "100"),
+        "BPB_LOOP_NAME": os.environ.get("BPB_LOOP_NAME", "parameter_golf_bpb_target"),
+    }
+    for optional_key in ("BPB_LOOP_STATE", "BPB_LOOP_STOP_FILE"):
+        optional_value = os.environ.get(optional_key)
+        if optional_value:
+            loop_env[optional_key] = optional_value
+    loop_exports = " ".join(f"{key}={quote(value)}" for key, value in loop_env.items())
     lines = [
         "#!/usr/bin/env bash",
         f"cd {quote(root)} || exit 1",
-        f"export PYTHONPATH=src WANDB_PROJECT={quote(project)} WANDB_ENTITY={quote(entity)}",
+        f"export PYTHONPATH=src WANDB_PROJECT={quote(project)} WANDB_ENTITY={quote(entity)} {loop_exports}",
         " ".join(
             [
                 "exec",

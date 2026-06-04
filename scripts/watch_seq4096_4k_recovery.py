@@ -1330,7 +1330,7 @@ def build_recovery_launch(
     seed: int,
     target_bpb: float,
     python: str = "/home/iska/miniconda3/envs/tokengt/bin/python",
-    iterations: int = 20_000,
+    iterations: int = 4_000,
     train_seq_len: int = 4096,
     train_batch_tokens: int = 393_216,
     tied_embed_lr: float = 0.032,
@@ -1340,10 +1340,10 @@ def build_recovery_launch(
     muon_momentum_warmup_steps: int = 600,
     muon_momentum_warmup_start: float = 0.90,
     grad_clip_norm: float | None = None,
-    warmdown_iters: int = 2500,
-    val_loss_every: int = 250,
+    warmdown_iters: int = 1000,
+    val_loss_every: int = 50,
     train_log_every: int = 50,
-    checkpoint_every: int = 250,
+    checkpoint_every: int = 50,
     wandb_project: str = "toricgt-parameter-golf",
     wandb_entity: str = "amelie-iska-math",
     bigram_bias: bool = False,
@@ -1487,12 +1487,17 @@ def build_analysis_shell(
 ) -> str:
     analysis_log = repo_root / "logs" / f"{run_id}.analysis_watcher.txt"
     output_root = repo_root / "outputs" / "post_resume_analysis" / run_id
+    default_loop_state = repo_root / "outputs" / f"{run_id}_bpb_codex_loop_state.json"
+    default_loop_stop_file = repo_root / "outputs" / f"{run_id}_bpb_codex_loop_stop"
     env = {
         "PYTHONPATH": "src",
         "WANDB_PROJECT": wandb_project,
         "WANDB_ENTITY": wandb_entity,
-        "BPB_LOOP_STATE": repo_root / "outputs" / f"{run_id}_bpb_codex_loop_state.json",
-        "BPB_LOOP_STOP_FILE": repo_root / "outputs" / f"{run_id}_bpb_codex_loop_stop",
+        "BPB_TARGET": os.environ.get("BPB_TARGET", str(target_bpb)),
+        "BPB_MAX_REVIEW_ITERATIONS": os.environ.get("BPB_MAX_REVIEW_ITERATIONS", "100"),
+        "BPB_LOOP_STATE": os.environ.get("BPB_LOOP_STATE", str(default_loop_state)),
+        "BPB_LOOP_STOP_FILE": os.environ.get("BPB_LOOP_STOP_FILE", str(default_loop_stop_file)),
+        "BPB_LOOP_NAME": os.environ.get("BPB_LOOP_NAME", "parameter_golf_bpb_target"),
     }
     command = (
         f"cd {shlex.quote(str(repo_root))} && export {shell_env(env)} && "
@@ -1501,7 +1506,7 @@ def build_analysis_shell(
         f"--log {shlex.quote(str(log_path))} "
         f"--run-path {shlex.quote(f'{wandb_entity}/{wandb_project}/{run_id}')} "
         f"--output-root {shlex.quote(str(output_root))} "
-        f"--start-step {int(start_step)} --interval-steps 250 --poll-seconds 30 "
+        f"--start-step {int(start_step)} --interval-steps 50 --poll-seconds 30 "
         f"--analyze-start-step "
         f"--target-bpb {float(target_bpb)} --training-tmux {shlex.quote(train_tmux)} "
         f"2>&1 | tee -a {shlex.quote(str(analysis_log))}"

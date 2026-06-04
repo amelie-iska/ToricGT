@@ -554,7 +554,7 @@ timeout "\$TIMEOUT_SECONDS" "\$HOOK_LOG_DIR/codex_resume_command.sh" || CODEX_EX
 sleep "\$POST_EXIT_GRACE_SECONDS"
 
 TRAINING_ACTIVE=0
-if pgrep -f 'scripts/train_parameter_golf_random_order.py' >/dev/null 2>&1; then
+if pgrep -f 'scripts/train_parameter_golf_random_order.py|records/.*/train_gpt.py|train_gpt.py' >/dev/null 2>&1; then
   TRAINING_ACTIVE=1
 fi
 

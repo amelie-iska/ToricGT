@@ -994,13 +994,42 @@ advanced losses:
 - `ADVANCED_LOSS_MAX_CE_RATIO` clips any auxiliary contribution to a tiny
   fraction of cross-entropy so BPB remains dominant.
 
-R71 (`toricgt_seq4096_4k_recovery_r71_20260604T172807Z`) is the current live
-experiment. It resumes the R52 step-3500 checkpoint with optimizer/RNG/loader
-preserved, validates every 50 steps, logs advanced metrics continuously, and
-enables a bounded GraphCG/Slepian/toric microprobe after step 3550 only while
-the best validation BPB is at or below `1.22`. Koszul/BGG and analogy losses
-remain held for the post-threshold reasoning-memory phase unless future
-50-step analyses show positive authoritative validation transfer.
+R71/R72 result and response: both step-3500 recovery branches reproduced an
+immediate validation spike instead of continuing the R52 descent. R71 preserved
+optimizer/RNG/loader and rose to `val_bpb=1.2267` at step 3550; R72 reset the
+optimizer/RNG/loader and rose to `val_bpb=1.2282` at step 3550. This shows the
+post-3500 restart itself is too late and that log-only structural sidecars
+cannot correct the transfer failure once the branch has already entered that
+bad continuation.
+
+R73 (`toricgt_seq4096_4k_recovery_r73_20260604T174607Z`) is the current live
+advanced-methods experiment. It restarts earlier from the R52 step-3250
+checkpoint (`val_bpb=1.2290`) because the original R52 branch then improved to
+`1.2198` at step 3500 and `1.2131` at step 3750. The controller was corrected
+so pre-4K recovery defaults now keep the successful competition warmdown
+schedule (`ITERATIONS=4000`, `WARMDOWN_ITERS=1000`) instead of accidentally
+launching long-run `ITERATIONS=20000` recoveries before the BPB gate. R73 keeps
+optimizer/RNG/loader state, validates/checkpoints every 50 steps, and turns the
+advanced stack on from step 3250 with real backprop rather than log-only
+metrics:
+
+- `ADVANCED_LOSS_SCALE=0.03`, `ADVANCED_LOSS_LOG_ONLY=0`;
+- `GRAPHCG_LOSS_WEIGHT=0.03`, `TORIC_TROPICAL_LOSS_WEIGHT=0.008`,
+  `SLEPIAN_LOSS_WEIGHT=0.015`;
+- tiny exploratory `KOSZUL_BGG_LOSS_WEIGHT=0.0015` and
+  `ANALOGY_LOSS_WEIGHT=0.001`;
+- `ADVANCED_LOSS_WARMUP_STEPS=150`, `ADVANCED_LOSS_EVERY=4`;
+- `ADVANCED_LOSS_MIN_BEST_VAL_BPB=1.235`;
+- `ADVANCED_LOSS_MAX_CE_RATIO=0.002`, so the auxiliary gradient cannot exceed
+  0.2% of CE loss.
+
+Review rule for R73: if validation improves at 3300/3350/3400 while
+`advanced/backprop_enabled=1`, keep the branch and let the 50-step analyses
+propose selective increases. If validation spikes like R71/R72, reduce the
+auxiliary cap and keep only GraphCG/Slepian/toric active until the 4K BPB gate
+is passed. Koszul/BGG and analogy should graduate from tiny exploratory terms
+to full reasoning-memory losses only after they show positive authoritative
+validation transfer or after the <=1.2 BPB checkpoint has been preserved.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
