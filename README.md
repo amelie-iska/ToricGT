@@ -25,17 +25,20 @@ Current validated status:
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
-  `toricgt_seq4096_4k_recovery_r10_20260603T235714Z`.
-  It is a compact-id, W&B-reporting BPB-velocity recapture from the R9
-  step-3000 checkpoint after the R9 step-3250 analysis projected the validation
-  target crossing at about step `6439.4`, beyond the step-4000 gate. R10 resumes
-  from validation BPB `1.2453678313891468`, resets optimizer/RNG/loader, uses
-  `983040` train tokens per step, `TIED_EMBED_LR=0.038808`, matrix/scalar LR
-  held at `0.02`, Muon momentum `0.985`, and gradient clipping `1.0`. Its W&B
-  run is <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r10_20260603T235714Z>.
+  `toricgt_seq4096_4k_recovery_r13_20260604T002649Z`.
+  It is a compact-id, W&B-reporting lexical-transition-bias recapture from the
+  R10 step-3000 checkpoint after repeated tied-LR recaptures stayed flat at
+  the step-3250 validation gate. R13 resumes from validation BPB
+  `1.245367828628834`, resets optimizer/RNG/loader, uses `983040` train tokens
+  per step, `TIED_EMBED_LR=0.04`, matrix/scalar LR held at `0.02`, Muon
+  momentum `0.985`, gradient clipping `1.0`, and a zero-initialized learned
+  `BIGRAM_BIAS=1` head with `BIGRAM_BIAS_LR=0.05`. Data-initialized bigram
+  bias was tested in R12 and rejected because it worsened initial validation
+  BPB to `1.2680636231146791`. R13's W&B run is
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r13_20260604T002649Z>.
   Latest confirmed W&B summary while this README was refreshed: trainer step
-  `3022`, train BPB `1.217222628158844`, validation/OpenAI BPB
-  `1.2453678313891468`, target gap `0.04536783138914679`, target not yet
+  `3033`, train BPB `1.208815731785608`, validation/OpenAI BPB
+  `1.245367828628834`, target gap `0.04536782862883415`, target not yet
   reached.
 - Seq4096 recovery automation now uses metric-driven launch controls. Repeated
   validation ETA misses trigger pre-gate recovery; projected-miss cases use a
@@ -44,8 +47,10 @@ Current validated status:
   GraphCG, Slepian/Pollak, topology, toric, BGG Category O, Koszul, tropical,
   complexity, and persistent-homology signals are used as sidecar transfer and
   decision diagnostics until the <1.2 BPB competition checkpoint is preserved.
-  Recovery run ids are compacted to avoid W&B `CommError` failures from
-  recursively long names.
+  At the tied-LR cap, the recovery watcher now switches to a zero-initialized
+  bigram transition-bias recapture instead of repeating the same LR-only
+  restart. Recovery run ids are compacted to avoid W&B `CommError` failures
+  from recursively long names.
 - Advanced reasoning/memory branch: the live auxiliary run is
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   It trains the random-order ToricGT adapter with explicit graph-of-thought,

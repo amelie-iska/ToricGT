@@ -307,6 +307,77 @@ def test_metric_controls_accelerate_projected_miss_without_heavy_structural_loss
     assert planned.advanced_metric_policy == "proposal_guided_bpb_recapture_structural_sidecars"
 
 
+def test_metric_controls_turn_on_bigram_bias_when_tied_lr_is_capped(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 train_loss:2.0296 train_time:1ms step_avg:1ms train_bpb:1.2206",
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_seq4096_log(log)
+    base = RecoveryControls(
+        train_batch_tokens=983_040,
+        tied_embed_lr=0.040,
+        matrix_lr=0.020,
+        scalar_lr=0.020,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=400,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+    )
+
+    planned = plan_metric_driven_recovery_controls(
+        base,
+        parsed=parsed,
+        target_bpb=1.2,
+        gate_step=4000,
+        projected_target_step=6500.0,
+        max_train_batch_tokens=983_040,
+    )
+
+    assert planned.policy == "lexical_transition_bias_recapture"
+    assert planned.bigram_bias is True
+    assert planned.bigram_bias_init_from_data is False
+    assert planned.bigram_bias_lr == 0.05
+    assert planned.tied_embed_lr == base.tied_embed_lr
+    assert planned.advanced_metric_policy == "bigram_bias_primary_bpb_clean_structural_sidecars"
+
+
+def test_recovery_launch_exports_bigram_bias_env_when_enabled(tmp_path: Path):
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+
+    launch = build_recovery_launch(
+        repo_root=tmp_path,
+        parameter_golf_root=tmp_path / "parameter-golf",
+        run_id="unit_bigram_recovery",
+        checkpoint_dir=tmp_path / "recovery_checkpoints",
+        log_path=tmp_path / "unit_recovery.log",
+        resume_checkpoint=checkpoint,
+        seed=7331,
+        target_bpb=1.2,
+        bigram_bias=True,
+        bigram_bias_lr=0.05,
+        bigram_bias_init_from_data=True,
+        bigram_bias_init_tokens=12_345,
+        bigram_bias_init_alpha=0.2,
+        bigram_bias_init_strength=0.4,
+    )
+    rendered = " ".join(launch.training_command)
+
+    assert "BIGRAM_BIAS=1" in rendered
+    assert "BIGRAM_BIAS_LR=0.05" in rendered
+    assert "BIGRAM_BIAS_INIT_FROM_DATA=1" in rendered
+    assert "BIGRAM_BIAS_INIT_TOKENS=12345" in rendered
+    assert "BIGRAM_BIAS_INIT_ALPHA=0.2" in rendered
+    assert "BIGRAM_BIAS_INIT_STRENGTH=0.4" in rendered
+
+
 def test_metric_controls_hold_when_projection_is_on_track(tmp_path: Path):
     log = tmp_path / "train.log"
     log.write_text(

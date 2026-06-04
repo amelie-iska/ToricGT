@@ -94,6 +94,13 @@ class RecoveryControls:
     policy: str = "base_controls"
     advanced_metric_policy: str = "primary_bpb_clean"
     rationale: tuple[str, ...] = ()
+    bigram_bias: bool = False
+    bigram_bias_lr: float = 0.05
+    bigram_bias_init_from_data: bool = False
+    bigram_bias_init_tokens: int = 100_000_000
+    bigram_bias_init_alpha: float = 0.1
+    bigram_bias_init_strength: float = 0.35
+    bigram_bias_scale: float = 1.0
 
     def launch_dict(self) -> dict[str, Any]:
         return {
@@ -108,6 +115,13 @@ class RecoveryControls:
             "policy": self.policy,
             "advanced_metric_policy": self.advanced_metric_policy,
             "rationale": list(self.rationale),
+            "bigram_bias": bool(self.bigram_bias),
+            "bigram_bias_lr": float(self.bigram_bias_lr),
+            "bigram_bias_init_from_data": bool(self.bigram_bias_init_from_data),
+            "bigram_bias_init_tokens": int(self.bigram_bias_init_tokens),
+            "bigram_bias_init_alpha": float(self.bigram_bias_init_alpha),
+            "bigram_bias_init_strength": float(self.bigram_bias_init_strength),
+            "bigram_bias_scale": float(self.bigram_bias_scale),
         }
 
 
@@ -383,6 +397,21 @@ def plan_metric_driven_recovery_controls(
             else int(base.train_batch_tokens)
         )
         raised_batch = round_up_to_multiple(base.train_batch_tokens * 1.07, 65_536)
+        if not base.bigram_bias and base.tied_embed_lr >= 0.0395:
+            return replace(
+                base,
+                train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
+                bigram_bias=True,
+                bigram_bias_init_from_data=False,
+                policy="lexical_transition_bias_recapture",
+                advanced_metric_policy="bigram_bias_primary_bpb_clean_structural_sidecars",
+                rationale=(
+                    f"validation projects target at step {projected_target_step:.1f}, beyond gate {gate_step}",
+                    "tied-embedding LR is already at the recapture cap",
+                    "enable a zero-initialized learned bigram transition-bias head so initial BPB is preserved",
+                    "keep GraphCG/Slepian/topology losses in sidecar transfer while adding only BPB-native lexical bias",
+                ),
+            )
         return replace(
             base,
             train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
@@ -436,6 +465,13 @@ def build_recovery_launch(
     checkpoint_every: int = 250,
     wandb_project: str = "toricgt-parameter-golf",
     wandb_entity: str = "amelie-iska-math",
+    bigram_bias: bool = False,
+    bigram_bias_lr: float = 0.05,
+    bigram_bias_init_from_data: bool = False,
+    bigram_bias_init_tokens: int = 100_000_000,
+    bigram_bias_init_alpha: float = 0.1,
+    bigram_bias_init_strength: float = 0.35,
+    bigram_bias_scale: float = 1.0,
 ) -> RecoveryLaunch:
     _ = repo_root
     env = {
@@ -473,6 +509,18 @@ def build_recovery_launch(
     }
     if grad_clip_norm is not None:
         env["GRAD_CLIP_NORM"] = grad_clip_norm
+    if bigram_bias:
+        env.update(
+            {
+                "BIGRAM_BIAS": 1,
+                "BIGRAM_BIAS_LR": bigram_bias_lr,
+                "BIGRAM_BIAS_SCALE": bigram_bias_scale,
+                "BIGRAM_BIAS_INIT_FROM_DATA": 1 if bigram_bias_init_from_data else 0,
+                "BIGRAM_BIAS_INIT_TOKENS": int(bigram_bias_init_tokens),
+                "BIGRAM_BIAS_INIT_ALPHA": bigram_bias_init_alpha,
+                "BIGRAM_BIAS_INIT_STRENGTH": bigram_bias_init_strength,
+            }
+        )
     training_command = [f"{key}={value}" for key, value in env.items()] + [
         python,
         "-u",
@@ -595,6 +643,13 @@ def build_gate_shell(
     recovery_muon_momentum_warmup_steps: int,
     recovery_muon_momentum_warmup_start: float,
     recovery_grad_clip_norm: float | None,
+    recovery_bigram_bias: bool,
+    recovery_bigram_bias_lr: float,
+    recovery_bigram_bias_init_from_data: bool,
+    recovery_bigram_bias_init_tokens: int,
+    recovery_bigram_bias_init_alpha: float,
+    recovery_bigram_bias_init_strength: float,
+    recovery_bigram_bias_scale: float,
     preempt_on_projected_miss: bool,
     preempt_min_step: int,
     preempt_patience: int,
@@ -622,6 +677,18 @@ def build_gate_shell(
         if advanced_metric_controls
         else "--no-advanced-metric-controls "
     )
+    bigram_arg = ""
+    if recovery_bigram_bias:
+        bigram_arg = (
+            f"--recovery-bigram-bias "
+            f"--recovery-bigram-bias-lr {float(recovery_bigram_bias_lr)} "
+            f"--recovery-bigram-bias-init-tokens {int(recovery_bigram_bias_init_tokens)} "
+            f"--recovery-bigram-bias-init-alpha {float(recovery_bigram_bias_init_alpha)} "
+            f"--recovery-bigram-bias-init-strength {float(recovery_bigram_bias_init_strength)} "
+            f"--recovery-bigram-bias-scale {float(recovery_bigram_bias_scale)} "
+        )
+        if recovery_bigram_bias_init_from_data:
+            bigram_arg += "--recovery-bigram-bias-init-from-data "
     return (
         f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src && "
         f"{shlex.quote(str(python))} scripts/watch_seq4096_4k_recovery.py "
@@ -638,6 +705,7 @@ def build_gate_shell(
         f"--recovery-muon-momentum-warmup-steps {int(recovery_muon_momentum_warmup_steps)} "
         f"--recovery-muon-momentum-warmup-start {float(recovery_muon_momentum_warmup_start)} "
         f"{grad_clip_arg}"
+        f"{bigram_arg}"
         f"{preempt_arg}"
         f"{advanced_metric_arg}"
         f"--recovery-max-train-batch-tokens {int(recovery_max_train_batch_tokens)} "
@@ -675,6 +743,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recovery-muon-momentum-warmup-steps", type=int, default=600)
     parser.add_argument("--recovery-muon-momentum-warmup-start", type=float, default=0.90)
     parser.add_argument("--recovery-grad-clip-norm", type=float, default=None)
+    parser.add_argument("--recovery-bigram-bias", action="store_true")
+    parser.add_argument("--recovery-bigram-bias-lr", type=float, default=0.05)
+    parser.add_argument("--recovery-bigram-bias-init-from-data", action="store_true")
+    parser.add_argument("--recovery-bigram-bias-init-tokens", type=int, default=100_000_000)
+    parser.add_argument("--recovery-bigram-bias-init-alpha", type=float, default=0.1)
+    parser.add_argument("--recovery-bigram-bias-init-strength", type=float, default=0.35)
+    parser.add_argument("--recovery-bigram-bias-scale", type=float, default=1.0)
     parser.add_argument("--analysis-root", default="")
     parser.add_argument("--preempt-on-projected-miss", action="store_true")
     parser.add_argument("--preempt-min-step", type=int, default=2500)
@@ -734,6 +809,13 @@ def main() -> None:
             muon_momentum_warmup_steps=args.recovery_muon_momentum_warmup_steps,
             muon_momentum_warmup_start=args.recovery_muon_momentum_warmup_start,
             grad_clip_norm=args.recovery_grad_clip_norm,
+            bigram_bias=args.recovery_bigram_bias,
+            bigram_bias_lr=args.recovery_bigram_bias_lr,
+            bigram_bias_init_from_data=args.recovery_bigram_bias_init_from_data,
+            bigram_bias_init_tokens=args.recovery_bigram_bias_init_tokens,
+            bigram_bias_init_alpha=args.recovery_bigram_bias_init_alpha,
+            bigram_bias_init_strength=args.recovery_bigram_bias_init_strength,
+            bigram_bias_scale=args.recovery_bigram_bias_scale,
         )
         projected_target_step = (
             float("nan")
@@ -847,6 +929,13 @@ def main() -> None:
             grad_clip_norm=recovery_controls.grad_clip_norm,
             wandb_project=args.wandb_project,
             wandb_entity=args.wandb_entity,
+            bigram_bias=recovery_controls.bigram_bias,
+            bigram_bias_lr=recovery_controls.bigram_bias_lr,
+            bigram_bias_init_from_data=recovery_controls.bigram_bias_init_from_data,
+            bigram_bias_init_tokens=recovery_controls.bigram_bias_init_tokens,
+            bigram_bias_init_alpha=recovery_controls.bigram_bias_init_alpha,
+            bigram_bias_init_strength=recovery_controls.bigram_bias_init_strength,
+            bigram_bias_scale=recovery_controls.bigram_bias_scale,
         )
         command_dir = repo_root / "logs" / recovery_run_id / "supervisor"
         command_dir.mkdir(parents=True, exist_ok=True)
@@ -897,6 +986,13 @@ def main() -> None:
             recovery_muon_momentum_warmup_steps=recovery_controls.muon_momentum_warmup_steps,
             recovery_muon_momentum_warmup_start=recovery_controls.muon_momentum_warmup_start,
             recovery_grad_clip_norm=recovery_controls.grad_clip_norm,
+            recovery_bigram_bias=recovery_controls.bigram_bias,
+            recovery_bigram_bias_lr=recovery_controls.bigram_bias_lr,
+            recovery_bigram_bias_init_from_data=recovery_controls.bigram_bias_init_from_data,
+            recovery_bigram_bias_init_tokens=recovery_controls.bigram_bias_init_tokens,
+            recovery_bigram_bias_init_alpha=recovery_controls.bigram_bias_init_alpha,
+            recovery_bigram_bias_init_strength=recovery_controls.bigram_bias_init_strength,
+            recovery_bigram_bias_scale=recovery_controls.bigram_bias_scale,
             preempt_on_projected_miss=args.preempt_on_projected_miss,
             preempt_min_step=args.preempt_min_step,
             preempt_patience=args.preempt_patience,
