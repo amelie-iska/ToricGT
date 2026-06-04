@@ -218,6 +218,7 @@ def build_watcher_launch(
                 quote(output_root),
                 "--start-step",
                 quote(start_step),
+                "--analyze-start-step",
                 "--interval-steps",
                 quote(interval_steps),
                 "--poll-seconds",

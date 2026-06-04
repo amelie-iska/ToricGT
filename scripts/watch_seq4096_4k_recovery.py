@@ -1391,6 +1391,7 @@ def build_analysis_shell(
         f"--run-path {shlex.quote(f'{wandb_entity}/{wandb_project}/{run_id}')} "
         f"--output-root {shlex.quote(str(output_root))} "
         f"--start-step {int(start_step)} --interval-steps 250 --poll-seconds 30 "
+        f"--analyze-start-step "
         f"--target-bpb {float(target_bpb)} --training-tmux {shlex.quote(train_tmux)} "
         f"2>&1 | tee -a {shlex.quote(str(analysis_log))}"
     )

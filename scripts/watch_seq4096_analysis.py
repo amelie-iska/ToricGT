@@ -108,6 +108,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--start-step", type=int, default=0)
     parser.add_argument("--interval-steps", type=int, default=500)
+    parser.add_argument(
+        "--analyze-start-step",
+        action="store_true",
+        help="Analyze --start-step itself before advancing to the next interval.",
+    )
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--target-bpb", type=float, default=1.2)
     parser.add_argument("--gate-step", type=int, default=4000)
@@ -2608,13 +2613,30 @@ def next_interval_step(start_step: int, interval_steps: int, processed: set[int]
     return step
 
 
+def initial_target_step(
+    start_step: int,
+    interval_steps: int,
+    processed: set[int],
+    *,
+    analyze_start_step: bool,
+) -> int:
+    if analyze_start_step and int(start_step) > 0:
+        return int(start_step)
+    return next_interval_step(start_step, interval_steps, processed)
+
+
 def main() -> None:
     args = parse_args()
     checkpoint_dir = Path(args.checkpoint_dir)
     log_path = Path(args.log)
     processed: set[int] = set()
     completed = 0
-    target_step = next_interval_step(args.start_step, args.interval_steps, processed)
+    target_step = initial_target_step(
+        args.start_step,
+        args.interval_steps,
+        processed,
+        analyze_start_step=args.analyze_start_step,
+    )
     print(
         f"seq4096_analysis_watcher run_path={args.run_path} checkpoint_dir={checkpoint_dir} "
         f"target_step={target_step} interval={args.interval_steps}",

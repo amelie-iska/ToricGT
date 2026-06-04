@@ -98,6 +98,7 @@ def test_build_watcher_launch_renders_seq4096_analysis_command(tmp_path: Path) -
     assert launch.start_step == 3250
     assert "scripts/watch_seq4096_analysis.py" in launch.shell_text
     assert "--start-step 3250" in launch.shell_text
+    assert "--analyze-start-step" in launch.shell_text
     assert "--gate-step 4000" in launch.shell_text
     assert "--codex-review-hook" in launch.shell_text
     assert "scripts/codex_training_review_resume.sh" in launch.shell_text

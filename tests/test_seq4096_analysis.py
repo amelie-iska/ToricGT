@@ -102,6 +102,23 @@ def test_checkpoint_step_detection_uses_seq4096_filename_pattern(tmp_path: Path)
     assert module.find_latest_checkpoint(tmp_path).name == checkpoint.name
 
 
+def test_initial_target_step_can_analyze_resume_checkpoint_first() -> None:
+    module = load_module()
+
+    assert module.initial_target_step(
+        3750,
+        250,
+        set(),
+        analyze_start_step=False,
+    ) == 4000
+    assert module.initial_target_step(
+        3750,
+        250,
+        set(),
+        analyze_start_step=True,
+    ) == 3750
+
+
 def test_compact_oai_eval_command_uses_sampled_cpu_probe(tmp_path: Path) -> None:
     module = load_module()
     checkpoint = tmp_path / "run_step_000500.pt"
