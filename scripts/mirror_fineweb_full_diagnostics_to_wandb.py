@@ -56,6 +56,20 @@ LOW_TRAIN_BPB_TRIGGER_VAL_RE = re.compile(
     r"\s+val_bpb:(?P<val_bpb>[0-9.eE+-]+)"
     r"\s+train_time:(?P<ms>[0-9.eE+-]+)ms"
 )
+ADVANCED_LOSSES_RE = re.compile(r"advanced_losses:(?P<body>.*)")
+
+
+def parse_colon_metrics(body: str) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for token in body.strip().split():
+        if ":" not in token:
+            continue
+        key, raw_value = token.split(":", 1)
+        try:
+            metrics[key] = float(raw_value)
+        except ValueError:
+            continue
+    return metrics
 
 
 def parse_args() -> argparse.Namespace:
@@ -78,9 +92,14 @@ def parse_args() -> argparse.Namespace:
 def parse_log(path: Path) -> dict[str, Any]:
     train: dict[int, dict[str, float]] = {}
     vals: dict[int, dict[str, float]] = {}
+    advanced_losses: dict[str, float] = {}
     if not path.exists():
-        return {"train": train, "vals": vals, "latest_step": 0, "total": 0}
+        return {"train": train, "vals": vals, "advanced_losses": advanced_losses, "latest_step": 0, "total": 0}
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        advanced_match = ADVANCED_LOSSES_RE.search(line)
+        if advanced_match:
+            advanced_losses.update(parse_colon_metrics(advanced_match.group("body")))
+            continue
         val = VAL_RE.search(line)
         if val:
             step = int(val.group("step"))
@@ -130,7 +149,7 @@ def parse_log(path: Path) -> dict[str, Any]:
             }
     latest_step = max([0, *train.keys(), *vals.keys()])
     total = int(max([0.0, *[row["total"] for row in train.values()], *[row["total"] for row in vals.values()]]))
-    return {"train": train, "vals": vals, "latest_step": latest_step, "total": total}
+    return {"train": train, "vals": vals, "advanced_losses": advanced_losses, "latest_step": latest_step, "total": total}
 
 
 def _last_at_or_before(rows: dict[int, dict[str, float]], step: int, field: str, default: float) -> float:
@@ -731,6 +750,57 @@ def complexity_metrics(log_path: Path) -> dict[str, float]:
     return metrics
 
 
+def advanced_training_control_metrics(parsed: dict[str, Any]) -> dict[str, float]:
+    controls = {str(k): float(v) for k, v in dict(parsed.get("advanced_losses") or {}).items()}
+    scale = controls.get("scale", 0.0)
+    log_only = controls.get("log_only", 0.0) > 0.5
+    enabled = scale > 0.0 and not log_only
+    family_weights = {
+        "graphcg": controls.get("graphcg", 0.0),
+        "toric_tropical": controls.get("toric_tropical", 0.0),
+        "slepian_pollak_prolate": controls.get("slepian", 0.0),
+        "koszul_bgg": controls.get("koszul_bgg", 0.0),
+        "analogical_reasoning": controls.get("analogy", 0.0),
+    }
+    metrics: dict[str, float] = {
+        "metrics_status/advanced_loss_controls_available": 1.0 if controls else 0.0,
+        "metrics_status/advanced_loss_training_enabled": 1.0 if enabled else 0.0,
+        "metrics_status/full_toricgt_training_metrics_available": 1.0 if enabled and any(v > 0.0 for v in family_weights.values()) else 0.0,
+        "metrics_status/toric_bgg_training_enabled": 1.0
+        if enabled and (family_weights["toric_tropical"] > 0.0 or family_weights["koszul_bgg"] > 0.0)
+        else 0.0,
+        "metrics_status/graphcg_training_enabled": 1.0 if enabled and family_weights["graphcg"] > 0.0 else 0.0,
+        "metrics_status/toric_tropical_training_enabled": 1.0
+        if enabled and family_weights["toric_tropical"] > 0.0
+        else 0.0,
+        "metrics_status/slepian_pollak_training_enabled": 1.0
+        if enabled and family_weights["slepian_pollak_prolate"] > 0.0
+        else 0.0,
+        "metrics_status/koszul_bgg_training_enabled": 1.0 if enabled and family_weights["koszul_bgg"] > 0.0 else 0.0,
+        "metrics_status/analogical_reasoning_training_enabled": 1.0
+        if enabled and family_weights["analogical_reasoning"] > 0.0
+        else 0.0,
+        "diagnostics/families/graphcg_training_enabled": 1.0 if enabled and family_weights["graphcg"] > 0.0 else 0.0,
+        "diagnostics/families/toric_tropical_training_enabled": 1.0
+        if enabled and family_weights["toric_tropical"] > 0.0
+        else 0.0,
+        "diagnostics/families/slepian_pollak_training_enabled": 1.0
+        if enabled and family_weights["slepian_pollak_prolate"] > 0.0
+        else 0.0,
+        "diagnostics/families/koszul_bgg_training_enabled": 1.0
+        if enabled and family_weights["koszul_bgg"] > 0.0
+        else 0.0,
+        "diagnostics/families/analogical_reasoning_training_enabled": 1.0
+        if enabled and family_weights["analogical_reasoning"] > 0.0
+        else 0.0,
+    }
+    for key, value in controls.items():
+        metrics[f"advanced_control/log/{key}"] = value
+    for key, value in family_weights.items():
+        metrics[f"advanced_control/log/{key}_effective_weight"] = scale * value if enabled else 0.0
+    return metrics
+
+
 def compute_payload(
     parsed: dict[str, Any],
     log_path: Path,
@@ -747,6 +817,7 @@ def compute_payload(
         "metrics_status/metric_scope_fineweb_curve_proxy": 1.0,
         "diagnostics/source_code": 1.0,
     }
+    payload.update(advanced_training_control_metrics(parsed))
     if hidden.shape[1] >= 4:
         topology = reasoning_step_topology_loss(
             hidden,
@@ -925,11 +996,17 @@ def main() -> None:
                 "metrics_status/fineweb_curve_diagnostics_available": payload[
                     "metrics_status/fineweb_curve_diagnostics_available"
                 ],
+                "metrics_status/full_toricgt_training_metrics_available": payload[
+                    "metrics_status/full_toricgt_training_metrics_available"
+                ],
+                "metrics_status/toric_bgg_training_enabled": payload["metrics_status/toric_bgg_training_enabled"],
                 "bgg_category_o/late_phase_toggle_enabled": 0.0,
                 "toric/shadow_fan_cell_entropy": payload.get("toric/shadow_fan_cell_entropy", 0.0),
                 "topology/topology_loss": payload.get("topology/topology_loss", 0.0),
                 "tropical/bpb_best_so_far": payload.get("tropical/bpb_best_so_far", 0.0),
             }
+            summary_payload.update({key: value for key, value in payload.items() if key.startswith("metrics_status/")})
+            summary_payload.update({key: value for key, value in payload.items() if key.startswith("advanced_control/log/")})
             summary_payload.update({key: value for key, value in payload.items() if key.startswith("diagnostics/latest/")})
             summary_payload.update({key: value for key, value in payload.items() if key.startswith("diagnostics/families/")})
             summary_payload.update(

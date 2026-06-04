@@ -12410,3 +12410,32 @@ least `5e-4`. This would select R86 step 3800 (`1.2121`) over R86 step 3750
 (`1.2131`), while still keeping the roomier checkpoint for tiny late gains that
 are likely noise. The active R87 gate was hot-restarted with this selector so
 future branches can use materially better late checkpoints.
+
+## 2026-06-04 R88 Damped Transfer and Advanced-Control Diagnostics
+
+R87 and R88 validated the late-checkpoint selector: R88 was launched from the
+materially better step-3800 checkpoint rather than falling back to an older
+roomier checkpoint. R88 continued improving but not quickly enough for a safe
+4K target hit:
+
+```text
+R88 step 3800 scheduled: validation BPB 1.2120
+R88 step 3850 scheduled: train BPB 1.2321, validation BPB 1.2108
+R88 step 3850 analysis: projected target step 4300, velocity shortfall 0.0048 BPB/100 steps
+```
+
+The gate launched R89 from the R88 step-3850 checkpoint with
+`policy=post_hot_probe_damped_transfer`. The branch lowers tied-embedding LR
+from `0.037485` to `0.034486`, holds matrix/scalar LR at `0.018`, preserves
+optimizer/RNG/loader state, and keeps the low-train-BPB forced checkpoint trigger
+enabled (`<=1.13`, cooldown 10 steps, max 6).
+
+The full-diagnostics sidecar now parses the trainer's `advanced_losses:` config
+line and emits explicit `metrics_status/*_training_enabled`,
+`diagnostics/families/*_training_enabled`, and
+`advanced_control/log/*_effective_weight` metrics. This keeps W&B honest about
+the difference between an advanced paradigm being actively trained and a full
+hidden-state analysis family being available for that checkpoint. R88's patched
+step-3850 summary, for example, correctly reports Slepian/Pollak training
+enabled while leaving `diagnostics/families/slepian_pollak_prolate_available=0`
+until the hidden-state/geometry analysis emits that family.
