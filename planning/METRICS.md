@@ -12476,3 +12476,476 @@ loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
           BPB_LOOP_STOP_FILE=logs/parameter_golf_all_phases/toricgt-fineweb-revealed-bpb-recovery-20260603T124202Z/supervisor/bpb_codex_loop_stop,
           BPB_LOOP_NAME=all_phases_supervised_watchdog
 ```
+## 2026-06-04 R79 Low-Train-BPB Trigger Capture And R80 Rollback
+
+R79 replayed the R77-style low train-BPB dips from the step-3600 checkpoint and
+now saves forced checkpoints whenever `train_bpb <= 1.13`.
+
+Captured forced checkpoints:
+
+- step 3608: `train_bpb=1.1149`, trigger val BPB `1.2180`,
+  sampled OAI BPB `1.215465`;
+- step 3641: `train_bpb=1.1270`, trigger val BPB `1.2177`,
+  sampled OAI BPB `1.212380`;
+- step 3658: `train_bpb=1.1273`, trigger val BPB `1.2173`,
+  sampled OAI BPB `1.206637`;
+- step 3674: `train_bpb=1.0955`, trigger val BPB `1.2171`,
+  sampled OAI BPB `1.210648`.
+
+Conclusion: the dips are real and useful for checkpoint capture, but they are
+train-side/generalization-gap events, not validation breakthroughs.  The best
+deterministic validation BPB in this branch remains step 3600 at `1.2169`.
+W&B now exposes the trigger rows through `trigger/train_bpb`,
+`trigger/val_bpb`, `trigger/low_train_bpb`,
+`trigger/low_train_bpb_threshold`, and
+`checkpoint/reason_low_train_bpb`.
+
+Implementation update: `scripts/watch_seq4096_analysis.py` and
+`scripts/mirror_fineweb_full_diagnostics_to_wandb.py` now parse
+`low_train_bpb_trigger_val` rows, checkpoint-scoped analysis logs are written
+for replayed check-ins, and sparse interval watchers jump to the next actual
+forced checkpoint instead of waiting on nonexistent intermediate steps.
+
+Operational decision: R79 served its capture purpose.  The active optimizer
+handoff is R80, a rollback from the step-3600 best checkpoint with W&B enabled,
+non-interrupting analysis, forced low-train-BPB checkpoints still active, and
+the BPB target unchanged at `<= 1.2`.
+
+```text
+active run: toricgt_seq4096_4k_recovery_r80_rollback3600_20260604T190756Z
+resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r75_20260604T182013Z/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
+W&B: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r80_rollback3600_20260604T190756Z
+training tmux: toricgt_seq4096_4k_recovery_r80_rollback3600_20260604T190756Z
+analysis tmux: toricgt_seq4096_4k_analysis_r80_rollback3600_20260604T190756Z
+gate tmux: toricgt_seq4096_4k_gate_r80_rollback3600_20260604T190756Z
+```
+
+Next review rule: if R80 repeats the R79 pattern where low train-BPB dips do
+not reduce deterministic validation BPB by the next scheduled checkpoint,
+prefer a damped-auxiliary replay from step 3600 over another high-aux replay:
+lower `ADVANCED_LOSS_SCALE`, `GRAPHCG_LOSS_WEIGHT`, `SLEPIAN_LOSS_WEIGHT`, and
+`ADVANCED_LOSS_MAX_CE_RATIO`, or make the advanced losses log-only until the
+validation BPB slope turns negative again.
+
+## 2026-06-04 R80 High-Aux Rejected; R81 Low-BPB Trigger Confirmed
+
+R80 tested whether resetting RNG/loader while preserving optimizer state would
+make the R79 low-train-BPB behavior transfer to validation. It did not.
+
+Observed R80 transfer checkpoint:
+
+- step 3600: deterministic validation BPB `1.2169`;
+- step 3650: train BPB `1.2121`, validation BPB `1.2184`.
+
+Decision: stop R80 as an unhelpful high-auxiliary branch. The train curve
+improved modestly but validation BPB moved in the wrong direction, so this
+branch widened the train/validation gap instead of approaching the OpenAI
+FineWeb BPB gate.
+
+R81 is the damped-auxiliary replay from the same step-3600 checkpoint. It keeps
+advanced methods active for evidence and gentle shaping, but lowers auxiliary
+pressure and the CE cap:
+
+```text
+run: toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z
+resume checkpoint: toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
+TIED_EMBED_LR=0.0340
+BIGRAM_BIAS_LR=0.0120
+ADVANCED_LOSS_SCALE=0.010
+GRAPHCG_LOSS_WEIGHT=0.020
+TORIC_TROPICAL_LOSS_WEIGHT=0.003
+SLEPIAN_LOSS_WEIGHT=0.010
+KOSZUL_BGG_LOSS_WEIGHT=0.00010
+ANALOGY_LOSS_WEIGHT=0.00008
+ADVANCED_LOSS_SAMPLE_TOKENS=192
+ADVANCED_LOSS_EVERY=8
+ADVANCED_LOSS_WARMUP_STEPS=160
+ADVANCED_LOSS_MAX_CE_RATIO=0.00025
+CHECKPOINT_ON_TRAIN_BPB_BELOW=1.13
+VAL_ON_TRAIN_BPB_CHECKPOINT=1
+```
+
+The low-BPB trigger is confirmed live on R81:
+
+```text
+step 3608 forced checkpoint: train BPB 1.1142, validation BPB 1.2170
+step 3625 forced checkpoint: train BPB 1.1290, validation BPB 1.2164
+step 3641 forced checkpoint: train BPB 1.1256, validation BPB 1.2161
+step 3650 scheduled checkpoint: train BPB 1.2461, validation BPB 1.2155
+```
+
+The validation result improved modestly from `1.2169` to `1.2155`, but it is
+still not a competition-BPB breakthrough. Keep the forced checkpoints and
+analyses because they are useful for transfer diagnostics, but do not promote a
+low-train-BPB checkpoint unless deterministic validation or sampled OAI
+competition BPB also improves. The dense W&B mirror now parses
+`low_train_bpb_trigger_val` lines directly and mirrors `trigger/train_bpb`,
+`trigger/val_bpb`, `trigger/low_train_bpb_threshold`, and
+`checkpoint/reason_low_train_bpb` so the run history and summary expose these
+events without waiting for the trainer-side W&B writer.
+
+Next decision rule: if the step-3700/3750 validation slope does not accelerate
+toward the `<= 1.2` gate, prefer an even cleaner BPB branch with advanced losses
+log-only or lower tied-embedding/bigram-bias velocity rather than another
+high-auxiliary replay.
+
+## 2026-06-04 R82 Supervisor Trigger Propagation Fix
+
+The 4K gate auto-launched R82 from the R81 step-3650 checkpoint after the
+step-3650 analysis classified the branch as still off-track. The initial R82
+command preserved the damped-auxiliary settings but did not inherit the
+low-train-BPB forced checkpoint settings. The recovery supervisor has been
+updated so every future recovery launch includes:
+
+```text
+CHECKPOINT_ON_TRAIN_BPB_BELOW=1.13
+CHECKPOINT_ON_TRAIN_BPB_COOLDOWN_STEPS=10
+CHECKPOINT_ON_TRAIN_BPB_MAX=6
+VAL_ON_TRAIN_BPB_CHECKPOINT=1
+```
+
+Recovery analysis watchers now use `--interval-steps 1`, which still analyzes
+only saved checkpoints but catches sparse forced checkpoints immediately instead
+of waiting for the next 50-step scheduled checkpoint.
+
+R82 was restarted in place from the same R81 step-3650 checkpoint with the
+corrected command set:
+
+```text
+run: toricgt_seq4096_4k_recovery_r82_20260604T192647Z
+resume checkpoint: toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z_step_003650.pt
+analysis start: 3650
+analysis interval: 1
+low-train-BPB checkpoint trigger: enabled
+```
+
+Because R82 had already written no-trigger rows up to the 3700 region before
+the in-place correction, it was superseded by a fresh clean R83 run rather than
+continuing with a mixed log:
+
+```text
+active run: toricgt_seq4096_4k_recovery_r83_low_bpb_trigger_20260604T193357Z
+resume checkpoint: toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z_step_003650.pt
+reset_optimizer: 0
+reset_rng: 0
+reset_loader: 0
+low-train-BPB checkpoint trigger: enabled
+analysis start: 3650
+analysis interval: 1
+W&B: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r83_low_bpb_trigger_20260604T193357Z
+```
+
+R82 training and R82 sidecars were stopped after the R83 handoff. R81/R82
+checkpoints and analysis artifacts were left intact.
+
+## 2026-06-04 Low-BPB Probe Gate Hold
+
+R83 and R84 confirmed that the low-train-BPB trigger is operational: forced
+checkpoints are saved, immediate validation runs, the analysis watcher consumes
+the sparse checkpoint, and W&B mirrors `trigger/*` and checkpoint-reason fields.
+The first probes showed strong train-side dips but weak transfer:
+
+```text
+R83 step 3658: train BPB 1.1260, validation BPB 1.2157, sampled OAI BPB 1.2093
+R84 step 3658: train BPB 1.1260, validation BPB 1.2156
+```
+
+The original preemptive gate treated a single forced probe as sufficient
+evidence to branch. That caused R84 to hand off to R85 before the scheduled
+3700 validation interval could measure transfer. The 4K recovery watcher now
+marks validation rows by source (`scheduled` or `low_train_bpb`) and refuses to
+launch a preemptive recovery from a low-BPB probe or from stale analysis that
+predates the latest validation row. Low-BPB probes still save checkpoints,
+run validation, launch full analyses, and report to W&B; they just no longer
+cause immediate restart churn.
+
+The patched gate was hot-restarted on R85 without interrupting training. R85
+then held through multiple probes and reached a scheduled 3700 validation:
+
+```text
+R85 step 3658 forced probe: train BPB 1.1259, validation BPB 1.2156
+R85 step 3674 forced probe: train BPB 1.0940, validation BPB 1.2153
+R85 step 3691 forced probe: train BPB 1.1027, validation BPB 1.2148
+R85 step 3700 scheduled: train BPB 1.2343, validation BPB 1.2142
+```
+
+This gives a real validation slope from the lower-LR validation-gap recapture
+branch rather than a noisy single-probe decision. The analysis at step 3700
+projects target around step 4049.5, so R85 is closer but still not safely inside
+the 4K gate. Continue dense low-BPB checkpoint capture and scheduled validation;
+only branch after scheduled checkpoints or current analyses show the target is
+unreachable again.
+
+R85 continued to the next scheduled checkpoint and improved again:
+
+```text
+R85 step 3750 scheduled: train BPB 1.2481, validation BPB 1.2131
+```
+
+The 3750 analysis projected the target around step 4244 and showed guarded/high
+structural pressure dominated by the toric/Slepian family:
+
+```text
+dominant structural family: toric_slepian
+toric_slepian pressure: 0.312
+structural recapture score: 0.720
+latest validation slope: -0.00265 BPB per 100 steps
+velocity shortfall to 4K gate: 0.00304 BPB per 100 steps
+```
+
+The gate therefore launched R86 from the R85 step-3750 checkpoint with
+`policy=structural_pressure_recapture`, preserving optimizer/RNG/loader state,
+the low-BPB checkpoint trigger, and the lightweight advanced losses. R86 is the
+current branch for testing whether toric/Slepian/topology-guided recapture can
+turn the improving but too-slow R85 validation slope into a <1.2 BPB 4K finish.
+
+## 2026-06-04 Robust OAI Probe Default
+
+The R86 step-3750 periodic analysis produced a one-sequence sampled OAI probe
+below target:
+
+```text
+R86 step 3750 compact OAI probe: seq_len 256, val_max_sequences 1, BPB 1.1968
+```
+
+That checkpoint was hardlinked into
+`amelie-iska/parameter-golf/checkpoints/oai_bpb_candidates/` for preservation,
+but a stronger CPU sidecar evaluation over 64 validation sequences did not
+confirm the threshold:
+
+```text
+R86 step 3750 robust OAI check: seq_len 256, val_max_sequences 64, BPB 1.4089
+output: outputs/oai_candidate_evals/toricgt_seq4096_4k_recovery_r86_20260604T195914Z/step-003750/oai_seq256_valmax64.json
+```
+
+Conclusion: do not promote the one-sequence `1.1968` as the OpenAI
+competition checkpoint. Treat it as a noisy candidate signal only. The periodic
+Seq4096 analysis watcher now defaults compact OAI evaluation to
+`val_max_sequences=64` and `val_batch_size=65536`, so future sub-1.2 OAI
+alerts require a more robust sampled check rather than a single sampled
+sequence. Keep regular FineWeb validation BPB and robust OAI BPB as the
+authoritative pre-threshold gates.
+
+## 2026-06-04 Late Checkpoint Recovery Selection
+
+R86 improved scheduled validation again:
+
+```text
+R86 step 3800 scheduled: train BPB 1.1910, validation BPB 1.2121
+```
+
+The preemptive gate correctly identified that the projected target step was
+still too late, but the recovery selector chose the older step-3750 checkpoint
+because the fixed `min_recovery_runway_steps=250` made step 3800 ineligible.
+That conflicts with the intended "restart from the best checkpoint" behavior
+once a later pre-gate checkpoint is materially better.
+
+The 4K recovery selector now keeps the runway preference but allows a later
+pre-gate checkpoint to override it when the later checkpoint improves BPB by at
+least `5e-4`. This would select R86 step 3800 (`1.2121`) over R86 step 3750
+(`1.2131`), while still keeping the roomier checkpoint for tiny late gains that
+are likely noise. The active R87 gate was hot-restarted with this selector so
+future branches can use materially better late checkpoints.
+
+## 2026-06-04 R88 Damped Transfer and Advanced-Control Diagnostics
+
+R87 and R88 validated the late-checkpoint selector: R88 was launched from the
+materially better step-3800 checkpoint rather than falling back to an older
+roomier checkpoint. R88 continued improving but not quickly enough for a safe
+4K target hit:
+
+```text
+R88 step 3800 scheduled: validation BPB 1.2120
+R88 step 3850 scheduled: train BPB 1.2321, validation BPB 1.2108
+R88 step 3850 analysis: projected target step 4300, velocity shortfall 0.0048 BPB/100 steps
+```
+
+The gate launched R89 from the R88 step-3850 checkpoint with
+`policy=post_hot_probe_damped_transfer`. The branch lowers tied-embedding LR
+from `0.037485` to `0.034486`, holds matrix/scalar LR at `0.018`, preserves
+optimizer/RNG/loader state, and keeps the low-train-BPB forced checkpoint trigger
+enabled (`<=1.13`, cooldown 10 steps, max 6).
+
+The full-diagnostics sidecar now parses the trainer's `advanced_losses:` config
+line and emits explicit `metrics_status/*_training_enabled`,
+`diagnostics/families/*_training_enabled`, and
+`advanced_control/log/*_effective_weight` metrics. This keeps W&B honest about
+the difference between an advanced paradigm being actively trained and a full
+hidden-state analysis family being available for that checkpoint. R88's patched
+step-3850 summary, for example, correctly reports Slepian/Pollak training
+enabled while leaving `diagnostics/families/slepian_pollak_prolate_available=0`
+until the hidden-state/geometry analysis emits that family.
+
+R89 resumed from the R88 step-3850 checkpoint and reproduced the same starting
+validation value:
+
+```text
+R89 step 3850 scheduled: validation BPB 1.2108
+R89 step 3850 analysis: off_track_unreachable, gap 0.0108
+```
+
+The recovery watcher now adds `scripts/codex_training_review_resume.sh` to the
+analysis watcher command whenever the hook exists. The active R89 analysis
+watcher was hot-restarted from target step 3851 with the hook attached, and a
+manual review hook was launched for the already-completed step-3850 analysis.
+This keeps future periodic plots, geometry diagnostics, simplex/tetrahedron
+artifacts, and training-adjustment proposals flowing into the automated Codex
+review loop without interrupting training.
+
+## 2026-06-04 R90-R100 Late-Replay Escape
+
+R90 reached the best late validation so far but did not cross the target:
+
+```text
+R90 step 3950 scheduled: train BPB 1.2034, validation BPB 1.2088
+R91/R92-style step 4000 completions: train BPB about 1.1958, validation BPB about 1.2085
+artifact export: about 15.89MB total with export_prune_fraction=0.10, under the 16MB limit
+```
+
+The repeated R91-R100 restarts showed that the gate was replaying the same
+3950 checkpoint with too little runway and nearly identical validation outcome.
+The controller now detects repeated late recovery replays by matching failed
+same-step, same-BPB 3950 branches. On detection it selects the best historical
+checkpoint with a 350-step runway, excludes the replayed 3950 checkpoint, resets
+optimizer/RNG/loader, and applies a bounded advanced replay-escape profile:
+`ADVANCED_LOSS_SCALE>=0.012`, `GRAPHCG>=0.03`,
+`TORIC_TROPICAL>=0.004`, `SLEPIAN>=0.012`, `KOSZUL_BGG>=0.00015`,
+`ANALOGY>=0.00012`, `ADVANCED_LOSS_SAMPLE_TOKENS>=256`, and
+`ADVANCED_LOSS_MAX_CE_RATIO>=0.00035`.
+
+This is an intentional shift from pure late-checkpoint BPB replay into a
+near-threshold advanced-method experiment. The CE-ratio cap remains tiny, so
+the branch should still be judged by validation BPB first; the advanced family
+metrics should be used as branch-selection and transfer diagnostics unless they
+produce clear held-out BPB improvement.
+
+R100 tied the incumbent best at step 4000:
+
+```text
+R100 step 4000 scheduled: train BPB 1.1959, validation BPB 1.2085
+R100 export: 15,893,080 bytes total, under the 16MB competition limit
+```
+
+User steering update: any validation BPB strictly below `1.2085` should continue
+past the 4K mark rather than cycling through another 4K recovery branch. The
+gate now treats `1.2085` as a strict continuation threshold. If a checkpoint
+beats it, the watcher launches a `toricgt_seq4096_full_continue_*` run with
+`ITERATIONS=20000`, preserves optimizer/RNG/loader state, keeps the current
+advanced-loss controls, and starts W&B mirroring, full diagnostics, and
+periodic analyses every 250 steps. Exact ties at `1.2085` do not trigger this;
+they remain in the near-threshold experiment loop.
+
+## 2026-06-04 R102 Step-3700 BPB-Clean Restart
+
+Post-resume review used
+`outputs/post_resume_analysis/toricgt_seq4096_4k_recovery_r102_20260604T215111Z/step-00003700`
+and the analyzed checkpoint
+`amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r102_20260604T215111Z/toricgt_seq4096_4k_recovery_r102_20260604T215111Z_step_003700.pt`.
+The active target remains BPB `<= 1.2`, review iteration `6 / 100`.
+
+Gate status:
+
+```text
+r102 step 3700 W&B FineWeb/openai_parameter_golf BPB/loss: 1.2149 / 2.0513
+r102 step 3700 target gap: 0.0149
+required validation drop to 4000: 0.00497 BPB per 100 steps
+r102 step 3750 validation after the paused handoff resumed: 1.2152, positive first derivative
+r102 step 3800 validation: 1.2139, still far below required velocity
+best loop BPB: 1.2087519815330863 at r90 step 3950
+sampled local OAI/FineWeb BPB at r102 step 3700: 1.4100 on 64 sampled seq_len=256 sequences
+metric categories at r102 step 3700: desired=28, weak_or_slow=9, undesirable=2
+```
+
+Metric and plot behavior:
+
+- Desired: hard-reasoning sidecar structure is alive enough to preserve.
+  Geometry reported `koszul_d2_residual = 0.0`, BGG/Gale consistency near 1,
+  Slepian concentration about `0.726`, and useful GraphCG separation in the
+  stronger embedding and memory records. Persistence, simplex, BGG/Koszul,
+  toric/tropical, phase, energy, and trajectory plots were generated.
+- Desired but too weak or slow: train BPB dipped below target (`1.1933`,
+  `1.1939`, and later `1.1432` in the resumed r102 log), but validation stayed
+  above target and moved too slowly. Historical best r90 step 3950 was close at
+  `1.2088`, but its slope projected target only near step `4439`. MST
+  efficiency averaged about `0.205`; layer/attention records were much weaker
+  than embedding records. Analogical transport was weak (`~0.217`), and the
+  memory graph had strong concentration but excessive trajectory length.
+- Undesirable: the BPB phase/velocity plots had no valid descent trend at the
+  analyzed checkpoint, the r102 3700-to-3750 finite difference was positive,
+  and `advanced/backprop_enabled` plus `advanced/runtime_scale_applied` were
+  the two automatic undesirable metrics. Tropical chamber crossing rate was
+  high (`~0.906`), toric mean bend was high (`~2.26`), and the sampled
+  64-sequence OAI/FineWeb evaluator remained around `1.41`, so low-sample
+  smoke wins cannot be treated as OOD transfer without tokenizer, n-gram,
+  dataset-easiness, and fixed-slice controls.
+
+`scripts/propose_training_adjustments.py` was rerun on the r102 step-3700
+analysis. It classified the BPB gate as `off_track`, reported
+`current_primary_bpb = 1.2149`, `gap_to_target = 0.0149`,
+`recent_drop_per_100_steps = 0.0`, and `required_drop_per_100_steps = 0.004967`.
+Its recommended action was `prepare_midrun_recovery_branch`. I used that as
+evidence, not authority: the data justified a minimal scalar restart, but not
+an architecture change or JEPA-style replacement.
+
+Mathematical interpretation:
+
+- `CONTINUE` was rejected because same-config r102 continuation had already
+  turned on advanced auxiliary gradients before the BPB gate and produced a
+  positive first validation derivative from 3700 to 3750.
+- Pure `ROLLBACK` was insufficient because the fix is not just checkpoint
+  selection; the scalar control causing pre-threshold auxiliary gradient
+  pressure also needed to change. The selected checkpoint is nevertheless the
+  last dense checkpoint before the positive derivative, r102 step 3700.
+- The two-gate rule points to BPB-clean scalar control. FineWeb/OAI BPB remains
+  the competition gate, while GraphCG, topology, toric/tropical, memory, BGG,
+  Kolmogorov, and reasoning trajectories remain sidecar reasoning gates. The
+  hard-reasoning objective is preserved, but auxiliary gradients are held out of
+  the BPB optimization path until calibration improves.
+
+Decision: `EDIT_AND_RESTART`.
+
+Active handoff:
+
+```text
+active run: toricgt_seq4096_4k_recovery_r103_bpbclean_20260604T220342Z
+active W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r103_bpbclean_20260604T220342Z
+active training tmux: toricgt_seq4096_4k_recovery_r103_bpbclean_20260604T220342Z
+active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r103_bpbclean_20260604T220342Z.txt
+active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r103_bpbclean_20260604T220342Z
+selected resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r102_20260604T215111Z/toricgt_seq4096_4k_recovery_r102_20260604T215111Z_step_003700.pt
+scalar edit: ADVANCED_LOSS_SCALE=0.0 and ADVANCED_LOSS_LOG_ONLY=1; GraphCG/toric/Slepian/Koszul/analogy weights retained for log-only metrics
+unchanged controls: seq_len=4096, batch tokens=1048576, tied_embed_lr=0.036983, matrix_lr=0.018, scalar_lr=0.018, bigram_bias=1, optimizer/RNG/loader reset
+gate monitor tmux: toricgt_seq4096_4k_gate_r103_bpbclean_20260604T220342Z
+gate monitor mode: max-restarts=0, so it records status but does not launch ordinary proxy-BPB cliff replays
+dense W&B mirror tmux: toricgt_seq4096_4k_mirror_r103_bpbclean_20260604T220342Z
+full diagnostics tmux: toricgt_seq4096_4k_full_diag_r103_bpbclean_20260604T220342Z
+```
+
+The better-strategy stop sentinel exists at
+`outputs/toricgt_seq4096_4k_recovery_r90_20260604T203009Z_bpb_codex_loop_stop`.
+It stops ordinary proxy-BPB cliff replays and promotes fixed multi-sequence
+official-style OAI/FineWeb BPB, then full calibration where feasible, to the
+primary BPB review gate. Proxy BPB remains within-run telemetry until calibrated
+against that gate.
+
+Non-blocking next analysis:
+
+```text
+watcher tmux: toricgt_watch_training_analysis_r103_bpbclean_3750
+watcher script: scripts/watch_training_analysis.py
+watcher log: logs/toricgt_seq4096_4k_recovery_r103_bpbclean_20260604T220342Z.watch_training_analysis_3750.txt
+watcher output root: outputs/post_resume_analysis/toricgt_seq4096_4k_recovery_r103_bpbclean_20260604T220342Z
+watcher target: fresh checkpoint >= 3750
+watcher device/precision: cpu / fp32
+pause behavior: non-interrupting; no --pause-training-before-analysis
+```
+
+The preserved loop environment is:
+
+```text
+BPB_TARGET=1.2
+BPB_MAX_REVIEW_ITERATIONS=100
+BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r90_20260604T203009Z_bpb_codex_loop_state.json
+BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r90_20260604T203009Z_bpb_codex_loop_stop
+BPB_LOOP_NAME=parameter_golf_bpb_target
+```
