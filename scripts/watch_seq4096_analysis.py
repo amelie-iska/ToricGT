@@ -1398,6 +1398,301 @@ def plot_advanced_metric_control_map(report: dict[str, Any], out: Path) -> None:
     plt.close(fig)
 
 
+def parse_analysis_step_dir(path: Path, payload: dict[str, Any]) -> int:
+    for key in ("checkpoint_step", "latest_step", "latest_val_step"):
+        try:
+            return int(payload.get(key))
+        except (TypeError, ValueError):
+            pass
+    match = re.search(r"step-(\d+)", str(path))
+    return int(match.group(1)) if match else 0
+
+
+def load_historical_analysis_statuses(history_root: Path | str | None) -> list[dict[str, Any]]:
+    """Load prior periodic analysis statuses grouped by run for evidence scoring."""
+
+    if history_root is None:
+        return []
+    root = Path(history_root)
+    if not root.exists():
+        return []
+    statuses: list[dict[str, Any]] = []
+    for path in sorted(root.glob("*/step-*/analysis_status.json")):
+        payload = load_json(path)
+        if not payload:
+            continue
+        run_id = path.parts[-3] if len(path.parts) >= 3 else ""
+        item = dict(payload)
+        item["_status_path"] = str(path)
+        item["_run_id"] = run_id
+        item["_analysis_step"] = parse_analysis_step_dir(path, payload)
+        statuses.append(item)
+    return statuses
+
+
+def historical_next_validation_rows(statuses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pair each analysis status with the next validation status from the same run."""
+
+    by_run: dict[str, list[dict[str, Any]]] = {}
+    for status in statuses:
+        run_id = str(status.get("_run_id") or "")
+        if not run_id:
+            continue
+        by_run.setdefault(run_id, []).append(status)
+
+    rows: list[dict[str, Any]] = []
+    for run_id, run_statuses in by_run.items():
+        ordered = sorted(run_statuses, key=lambda item: int(item.get("_analysis_step", 0)))
+        for current, nxt in zip(ordered[:-1], ordered[1:]):
+            current_val = finite_payload_value(current, "latest_val_bpb", "best_val_bpb")
+            next_val = finite_payload_value(nxt, "latest_val_bpb", "best_val_bpb")
+            current_step = int(current.get("_analysis_step", 0))
+            next_step = int(nxt.get("_analysis_step", 0))
+            if (
+                not math.isfinite(current_val)
+                or not math.isfinite(next_val)
+                or next_step <= current_step
+            ):
+                continue
+            family_pressures = current.get("structural_family_pressures") or {}
+            if not isinstance(family_pressures, dict):
+                family_pressures = {}
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "step": current_step,
+                    "next_step": next_step,
+                    "val_bpb": current_val,
+                    "next_val_bpb": next_val,
+                    "next_val_drop_bpb": current_val - next_val,
+                    "next_val_drop_per_100_steps": (current_val - next_val)
+                    / max(1.0, float(next_step - current_step))
+                    * 100.0,
+                    "bpb_velocity_shortfall_pressure": finite_payload_value(
+                        current,
+                        "bpb_velocity_shortfall_pressure",
+                        default=0.0,
+                    ),
+                    "dominant_structural_pressure_family": str(
+                        current.get("dominant_structural_pressure_family") or "none"
+                    ),
+                    "structural_family_pressures": {
+                        str(key): finite_payload_value(family_pressures, str(key), default=0.0)
+                        for key in family_pressures
+                    },
+                }
+            )
+    return rows
+
+
+def evidence_action(
+    *,
+    observations: int,
+    active_count: int,
+    active_lift: float,
+    pressure_outcome_corr: float,
+) -> str:
+    if observations < 3 or active_count == 0:
+        return "insufficient_history"
+    supportive = (
+        (math.isfinite(active_lift) and active_lift >= 0.001)
+        or (math.isfinite(pressure_outcome_corr) and pressure_outcome_corr >= 0.45)
+    )
+    adverse = (
+        (math.isfinite(active_lift) and active_lift <= -0.001)
+        or (math.isfinite(pressure_outcome_corr) and pressure_outcome_corr <= -0.45)
+    )
+    if supportive and not adverse:
+        return "supports_guarded_velocity"
+    if adverse and not supportive:
+        return "sidecar_or_damp"
+    return "monitor_as_context"
+
+
+def pressure_outcome_correlation(pressures: np.ndarray, outcomes: np.ndarray) -> float:
+    finite = np.isfinite(pressures) & np.isfinite(outcomes)
+    if int(finite.sum()) < 2:
+        return float("nan")
+    x = pressures[finite]
+    y = outcomes[finite]
+    if float(np.std(x)) <= 1e-12 or float(np.std(y)) <= 1e-12:
+        return float("nan")
+    return float(np.corrcoef(x, y)[0, 1])
+
+
+def advanced_metric_evidence_report(
+    history_root: Path | str | None,
+    *,
+    current_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Score advanced metric families by historical next-validation BPB transfer."""
+
+    statuses = load_historical_analysis_statuses(history_root)
+    rows = historical_next_validation_rows(statuses)
+    current_report = current_report or {}
+    families = sorted(
+        {
+            str(key)
+            for row in rows
+            for key in (row.get("structural_family_pressures") or {}).keys()
+        }
+        | {
+            str(key)
+            for key in (current_report.get("structural_family_pressures") or {}).keys()
+        }
+    )
+    outcomes = np.asarray([float(row["next_val_drop_bpb"]) for row in rows], dtype=float)
+    baseline = float(np.nanmean(outcomes)) if outcomes.size else float("nan")
+    family_evidence: dict[str, dict[str, Any]] = {}
+    for family in families:
+        pressures = np.asarray(
+            [
+                float((row.get("structural_family_pressures") or {}).get(family, 0.0))
+                for row in rows
+            ],
+            dtype=float,
+        )
+        if outcomes.size == 0:
+            family_evidence[family] = {
+                "observations": 0,
+                "active_observations": 0,
+                "mean_pressure": float("nan"),
+                "mean_next_val_drop_bpb": float("nan"),
+                "active_mean_next_val_drop_bpb": float("nan"),
+                "inactive_mean_next_val_drop_bpb": float("nan"),
+                "active_lift_next_val_drop_bpb": float("nan"),
+                "pressure_outcome_corr": float("nan"),
+                "evidence_action": "insufficient_history",
+            }
+            continue
+        active_threshold = 0.20
+        active = np.isfinite(pressures) & (pressures >= active_threshold)
+        inactive = np.isfinite(pressures) & ~active
+        active_mean = float(np.nanmean(outcomes[active])) if int(active.sum()) else float("nan")
+        inactive_mean = float(np.nanmean(outcomes[inactive])) if int(inactive.sum()) else float("nan")
+        active_lift = (
+            active_mean - inactive_mean
+            if math.isfinite(active_mean) and math.isfinite(inactive_mean)
+            else float("nan")
+        )
+        corr = pressure_outcome_correlation(pressures, outcomes)
+        action = evidence_action(
+            observations=int(outcomes.size),
+            active_count=int(active.sum()),
+            active_lift=active_lift,
+            pressure_outcome_corr=corr,
+        )
+        weighted_mean = (
+            float(np.nansum(pressures * outcomes) / max(float(np.nansum(pressures)), 1e-12))
+            if int(np.isfinite(pressures).sum())
+            else float("nan")
+        )
+        family_evidence[family] = {
+            "observations": int(outcomes.size),
+            "active_observations": int(active.sum()),
+            "active_threshold": active_threshold,
+            "mean_pressure": float(np.nanmean(pressures)) if pressures.size else float("nan"),
+            "mean_next_val_drop_bpb": baseline,
+            "pressure_weighted_next_val_drop_bpb": weighted_mean,
+            "active_mean_next_val_drop_bpb": active_mean,
+            "inactive_mean_next_val_drop_bpb": inactive_mean,
+            "active_lift_next_val_drop_bpb": active_lift,
+            "pressure_outcome_corr": corr,
+            "evidence_action": action,
+        }
+
+    current_families = current_report.get("structural_family_pressures") or {}
+    if not isinstance(current_families, dict):
+        current_families = {}
+    current_dominant = str(current_report.get("dominant_structural_pressure_family") or "none")
+    current_pressure = finite_payload_value(current_families, current_dominant, default=0.0)
+    current_velocity_shortfall_pressure = finite_payload_value(
+        current_report,
+        "bpb_velocity_shortfall_pressure",
+        default=0.0,
+    )
+    current_action = family_evidence.get(current_dominant, {}).get(
+        "evidence_action",
+        "insufficient_history",
+    )
+    if current_action == "supports_guarded_velocity" and current_velocity_shortfall_pressure >= 0.35:
+        current_policy = "metric_supported_velocity_push"
+    elif current_action == "sidecar_or_damp" and current_pressure >= 0.20:
+        current_policy = "metric_pressure_requires_sidecar_or_damping"
+    elif current_action == "insufficient_history":
+        current_policy = "bpb_velocity_primary_until_history_accumulates"
+    else:
+        current_policy = "monitor_metric_context_keep_bpb_primary"
+
+    return {
+        "history_root": str(history_root or ""),
+        "evidence_observations": int(len(rows)),
+        "baseline_next_val_drop_bpb": baseline,
+        "family_evidence": family_evidence,
+        "current_dominant_family": current_dominant,
+        "current_dominant_pressure": current_pressure,
+        "current_family_evidence_action": current_action,
+        "current_velocity_shortfall_pressure": current_velocity_shortfall_pressure,
+        "current_evidence_policy": current_policy,
+        "rows": rows[-32:],
+    }
+
+
+def plot_advanced_metric_evidence_map(report: dict[str, Any], out: Path) -> None:
+    """Plot historical next-validation evidence for advanced metric families."""
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    evidence = report.get("family_evidence") or {}
+    evidence = {str(key): value for key, value in evidence.items() if isinstance(value, dict)}
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6), constrained_layout=True)
+
+    ax = axes[0]
+    if evidence:
+        ordered = sorted(
+            evidence.items(),
+            key=lambda item: finite_payload_value(item[1], "active_lift_next_val_drop_bpb", default=-999.0),
+        )
+        labels = [item[0] for item in ordered]
+        lifts = [
+            finite_payload_value(item[1], "active_lift_next_val_drop_bpb", default=0.0)
+            for item in ordered
+        ]
+        colors = ["#16a34a" if value >= 0 else "#dc2626" for value in lifts]
+        y = np.arange(len(ordered))
+        ax.barh(y, lifts, color=colors)
+        ax.set_yticks(y, labels, fontsize=9)
+        ax.axvline(0.0, color="#111827", linewidth=0.9)
+        ax.set_xlabel("active-family lift in next validation BPB drop")
+        ax.grid(axis="x", alpha=0.25)
+    else:
+        ax.text(0.5, 0.5, "need prior paired analyses", ha="center", va="center")
+        ax.set_xticks([])
+        ax.set_yticks([])
+    ax.set_title("Historical Transfer Evidence")
+
+    ax = axes[1]
+    ax.axis("off")
+    lines = [
+        f"observations: {report.get('evidence_observations')}",
+        f"baseline next-val drop: {report.get('baseline_next_val_drop_bpb')}",
+        f"current dominant family: {report.get('current_dominant_family')}",
+        f"current dominant pressure: {report.get('current_dominant_pressure')}",
+        f"current family evidence: {report.get('current_family_evidence_action')}",
+        f"velocity shortfall pressure: {report.get('current_velocity_shortfall_pressure')}",
+        f"evidence policy: {report.get('current_evidence_policy')}",
+        "",
+        "reading:",
+        "- positive lift: pressure historically preceded validation BPB drops",
+        "- negative lift: use as sidecar/damping context",
+        "- insufficient history: keep BPB velocity primary",
+    ]
+    ax.text(0.02, 0.96, "\n".join(lines), va="top", ha="left", fontsize=10, wrap=True)
+    ax.set_title("Evidence-Gated Controller Readout")
+    fig.suptitle("Advanced Metric Evidence Map", fontsize=15)
+    fig.savefig(out, dpi=180)
+    plt.close(fig)
+
+
 def phase_bpb_breakdown_plan(target_bpb: float) -> dict[str, Any]:
     return {
         "target_bpb": float(target_bpb),
@@ -1524,6 +1819,8 @@ def write_synopsis(
         f"- dominant structural pressure family: `{report.get('dominant_structural_pressure_family')}`",
         f"- dominant structural pressure value: `{report.get('dominant_structural_pressure_value')}`",
         f"- structural control prior: `{report.get('structural_control_prior')}`",
+        f"- advanced metric evidence policy: `{report.get('current_evidence_policy')}`",
+        f"- current family evidence action: `{report.get('current_family_evidence_action')}`",
         "",
         "## Plots",
         "",
@@ -1540,6 +1837,7 @@ def write_synopsis(
         "- `bpb/diagnostic_proxy_geometry.png`: topology, toric, Slepian, BGG, tropical, and complexity proxy readout.",
         "- `bpb/bpb_structural_recapture_map.png`: BPB Structural Recapture Map showing which advanced metrics should shape the next restart.",
         "- `bpb/advanced_metric_control_map.png`: Advanced Metric Control Map showing family-level pressure used to decide velocity, damping, or transfer stabilization.",
+        "- `bpb/advanced_metric_evidence_map.png`: Advanced Metric Evidence Map showing whether each advanced metric family historically predicted the next validation BPB drop.",
         "- `training_adjustment_proposal.json` and `.md`: conservative intervention recommendation combining BPB trajectory, W&B metric statistics, and structural diagnostics.",
         "",
         "## Recommendations",
@@ -1594,6 +1892,7 @@ def write_bpb_analysis_artifacts(
     checkpoint_path: Path | None = None,
     run_path: str = "",
     diagnostic_payload: dict[str, Any] | None = None,
+    history_root: Path | None = None,
 ) -> dict[str, Any]:
     diagnostic_payload = diagnostic_payload or {}
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1613,6 +1912,18 @@ def write_bpb_analysis_artifacts(
     report.update(structural_report)
     report.update(transfer_report)
     report.update(velocity_report)
+    evidence_report = advanced_metric_evidence_report(history_root, current_report=report)
+    report.update(
+        {
+            "advanced_metric_evidence_policy": evidence_report.get("current_evidence_policy"),
+            "current_evidence_policy": evidence_report.get("current_evidence_policy"),
+            "current_family_evidence_action": evidence_report.get("current_family_evidence_action"),
+            "advanced_metric_evidence_observations": evidence_report.get("evidence_observations"),
+            "advanced_metric_evidence_baseline_next_val_drop_bpb": evidence_report.get(
+                "baseline_next_val_drop_bpb"
+            ),
+        }
+    )
     report["recommendations"] = list(report.get("recommendations", [])) + list(
         transfer_report.get("transfer_recommendations", [])
     )
@@ -1621,6 +1932,7 @@ def write_bpb_analysis_artifacts(
     write_json(bpb_dir / "structural_recapture_report.json", structural_report)
     write_json(bpb_dir / "bpb_transfer_efficiency_report.json", transfer_report)
     write_json(bpb_dir / "bpb_gate_velocity_requirement_report.json", velocity_report)
+    write_json(bpb_dir / "advanced_metric_evidence_report.json", evidence_report)
     write_json(
         bpb_dir / "checkpoint_manifest.json",
         {
@@ -1646,6 +1958,7 @@ def write_bpb_analysis_artifacts(
     plot_diagnostic_proxy_geometry(diagnostic_payload, bpb_dir / "diagnostic_proxy_geometry.png")
     plot_structural_recapture_map(report, bpb_dir / "bpb_structural_recapture_map.png")
     plot_advanced_metric_control_map(report, bpb_dir / "advanced_metric_control_map.png")
+    plot_advanced_metric_evidence_map(evidence_report, bpb_dir / "advanced_metric_evidence_map.png")
     write_synopsis(output_dir, report, run_path, checkpoint_path, diagnostic_payload)
     return report
 
@@ -1740,6 +2053,7 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
         checkpoint_path=checkpoint,
         run_path=args.run_path,
         diagnostic_payload=diagnostic_payload,
+        history_root=Path(args.output_root).parent,
     )
     proposal_cmd = [
         args.python,

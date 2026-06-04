@@ -222,6 +222,8 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_efficiency.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_efficiency_report.json").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_gate_velocity_requirement.png").exists()
+    assert (tmp_path / "analysis" / "bpb" / "advanced_metric_evidence_map.png").exists()
+    assert (tmp_path / "analysis" / "bpb" / "advanced_metric_evidence_report.json").exists()
     assert "required_val_velocity_to_gate_per_100_steps" in report
     assert "bpb_velocity_shortfall_pressure" in report
     phase_plan_path = tmp_path / "analysis" / "bpb" / "phase_bpb_breakdown_plan.json"
@@ -246,6 +248,57 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert "Train-To-Validation BPB Transfer Efficiency" in synopsis
     assert "Advanced Metric Control Map" in synopsis
     assert "Gate Velocity Requirement" in synopsis
+    assert "Advanced Metric Evidence Map" in synopsis
+
+
+def test_advanced_metric_evidence_report_scores_next_validation_transfer(tmp_path: Path) -> None:
+    module = load_module()
+    history_root = tmp_path / "post_resume_analysis"
+
+    def write_status(run: str, step: int, val_bpb: float, family: dict[str, float]) -> None:
+        step_dir = history_root / run / f"step-{step:08d}"
+        step_dir.mkdir(parents=True)
+        (step_dir / "analysis_status.json").write_text(
+            json.dumps(
+                {
+                    "checkpoint_step": step,
+                    "latest_val_bpb": val_bpb,
+                    "best_val_bpb": val_bpb,
+                    "gate_step": 4000,
+                    "bpb_velocity_shortfall_pressure": 0.5,
+                    "structural_family_pressures": family,
+                    "dominant_structural_pressure_family": max(family, key=family.get),
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    write_status("run_good_a", 3250, 1.2340, {"topology_directed": 0.31, "toric_slepian": 0.08})
+    write_status("run_good_a", 3500, 1.2280, {"topology_directed": 0.20, "toric_slepian": 0.10})
+    write_status("run_good_b", 3250, 1.2350, {"topology_directed": 0.28, "toric_slepian": 0.05})
+    write_status("run_good_b", 3500, 1.2300, {"topology_directed": 0.18, "toric_slepian": 0.10})
+    write_status("run_bad_a", 3250, 1.2338, {"topology_directed": 0.05, "toric_slepian": 0.36})
+    write_status("run_bad_a", 3500, 1.2336, {"topology_directed": 0.04, "toric_slepian": 0.34})
+
+    report = module.advanced_metric_evidence_report(
+        history_root,
+        current_report={
+            "dominant_structural_pressure_family": "topology_directed",
+            "structural_family_pressures": {"topology_directed": 0.30, "toric_slepian": 0.07},
+            "bpb_velocity_shortfall_pressure": 0.7,
+        },
+    )
+
+    topology = report["family_evidence"]["topology_directed"]
+    toric = report["family_evidence"]["toric_slepian"]
+
+    assert report["evidence_observations"] == 3
+    assert topology["active_mean_next_val_drop_bpb"] > topology["inactive_mean_next_val_drop_bpb"]
+    assert topology["evidence_action"] == "supports_guarded_velocity"
+    assert toric["active_mean_next_val_drop_bpb"] < toric["inactive_mean_next_val_drop_bpb"]
+    assert toric["evidence_action"] == "sidecar_or_damp"
+    assert report["current_evidence_policy"] == "metric_supported_velocity_push"
 
 
 def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
