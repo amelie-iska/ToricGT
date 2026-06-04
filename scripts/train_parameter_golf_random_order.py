@@ -2438,6 +2438,15 @@ def main() -> None:
         if args.oai_competition_eval_batches is not None
         else config_get(file_config, "oai_competition", "eval_batches", max(1, min(8, int(eval_batches))))
     )
+    oai_competition_order_samples = int(
+        config_get(file_config, "oai_competition", "order_samples", max(1, int(eval_order_samples)))
+    )
+    oai_competition_gflownet_samples = int(
+        config_get(file_config, "oai_competition", "gflownet_samples", max(1, int(eval_gflownet_samples)))
+    )
+    oai_competition_score_first_enabled = bool(
+        config_get(file_config, "oai_competition", "score_first_enabled", True)
+    )
     oai_competition_sp_tokens_per_decode = (
         args.oai_competition_sp_tokens_per_decode
         if args.oai_competition_sp_tokens_per_decode is not None
@@ -2824,6 +2833,7 @@ def main() -> None:
     start_step = 0
     best_val = float("inf")
     best_oai_competition_bpb = float("inf")
+    best_oai_competition_tts_bpb = float("inf")
     optimizer_state_loaded = False
     if args.resume:
         payload = torch.load(args.resume, map_location=device)
@@ -2900,6 +2910,12 @@ def main() -> None:
                 resume_metrics.get("best_oai_competition_bpb", best_oai_competition_bpb),
             )
         )
+        best_oai_competition_tts_bpb = float(
+            resume_metrics.get(
+                "oai_competition/best_test_time_scaled_bpb",
+                resume_metrics.get("best_oai_competition_tts_bpb", best_oai_competition_tts_bpb),
+            )
+        )
     if resume_aware_stream_seed:
         stream_origin_step = int(
             configured_stream_origin_step
@@ -2947,6 +2963,11 @@ def main() -> None:
     if report.bytes_total > PARAMETER_GOLF_BYTE_LIMIT:
         raise RuntimeError(f"initial artifact exceeds Parameter-Golf cap: {report.bytes_total} bytes")
 
+    curated_train_files = sorted(glob.glob(train_glob))
+    curated_val_files = sorted(glob.glob(val_glob))
+    fineweb_train_files = sorted(glob.glob(fineweb_train_token_glob))
+    oai_competition_val_files = sorted(glob.glob(oai_competition_token_glob))
+
     train_loader = build_loader(
         parquet_glob=train_glob,
         batch_size=batch_size,
@@ -2970,7 +2991,7 @@ def main() -> None:
         special_token_mode=model_config.special_token_mode,
     )
     medium_train_loader = None
-    if difficulty_curriculum_enabled and int(medium_start_step or 0) > 0:
+    if difficulty_curriculum_enabled and (int(medium_start_step or 0) > 0 or float(medium_mix_ratio or 0.0) > 0.0):
         medium_train_loader = build_loader(
             parquet_glob=train_glob,
             batch_size=batch_size,
@@ -2994,7 +3015,7 @@ def main() -> None:
             special_token_mode=model_config.special_token_mode,
         )
     complex_train_loader = None
-    if int(complex_start_step or 0) > 0:
+    if int(complex_start_step or 0) > 0 or float(complex_mix_ratio or 0.0) > 0.0:
         complex_train_loader = build_loader(
             parquet_glob=train_glob,
             batch_size=batch_size,
@@ -3159,6 +3180,9 @@ def main() -> None:
                     "tokenizer_path": oai_competition_tokenizer_path,
                     "eval_interval": oai_competition_eval_interval,
                     "eval_batches": oai_competition_eval_batches,
+                    "order_samples": oai_competition_order_samples,
+                    "gflownet_samples": oai_competition_gflownet_samples,
+                    "score_first_enabled": oai_competition_score_first_enabled,
                     "sp_tokens_per_decode": oai_competition_sp_tokens_per_decode,
                     "workers": oai_competition_workers,
                     "metric_namespace": "oai_competition",
@@ -3169,6 +3193,7 @@ def main() -> None:
                     "enabled": fineweb_calibration_enabled,
                     "available": fineweb_calibration_available,
                     "train_token_glob": fineweb_train_token_glob,
+                    "train_shards": len(fineweb_train_files),
                     "tokenizer_path": fineweb_tokenizer_path,
                     "mix_ratio": fineweb_mix_ratio,
                     "sp_tokens_per_decode": fineweb_sp_tokens_per_decode,
@@ -3205,6 +3230,13 @@ def main() -> None:
                 },
                 "data": {
                     "include_graph_projection": include_graph_projection,
+                    "train_parquet_glob": train_glob,
+                    "val_parquet_glob": val_glob,
+                    "full_curated_train_split_active": bool(curated_train_files and not task_family_keywords and not dataset_keywords),
+                    "curated_train_shards": len(curated_train_files),
+                    "curated_val_shards": len(curated_val_files),
+                    "fineweb_train_shards": len(fineweb_train_files),
+                    "oai_competition_val_shards": len(oai_competition_val_files),
                     "graph_projection_max_chars": graph_projection_max_chars,
                     "coprime_row_stride": coprime_row_stride,
                     "interleave_row_groups": interleave_row_groups,
@@ -3333,6 +3365,9 @@ def main() -> None:
             "oai_competition_tokenizer_path": oai_competition_tokenizer_path,
             "oai_competition_eval_interval": oai_competition_eval_interval,
             "oai_competition_eval_batches": oai_competition_eval_batches,
+            "oai_competition_order_samples": oai_competition_order_samples,
+            "oai_competition_gflownet_samples": oai_competition_gflownet_samples,
+            "oai_competition_score_first_enabled": oai_competition_score_first_enabled,
             "oai_competition_sp_tokens_per_decode": oai_competition_sp_tokens_per_decode,
             "oai_competition_error": oai_competition_error,
             "fineweb_calibration_enabled": fineweb_calibration_enabled,
@@ -4266,11 +4301,17 @@ def main() -> None:
             model.parameters(),
             max_norm=effective_grad_clip_norm if effective_grad_clip_norm > 0 else float("inf"),
         )
+        grad_norm_is_finite = bool(torch.isfinite(grad_norm).detach().cpu())
+        step_loss_is_finite = math.isfinite(float(step_loss))
+        nonfinite_update_skip = 0.0
         shock_guard_active = 0.0
         shock_guard_scale = 1.0
         shock_guard_loss_delta_value = 0.0
         shock_guard_loss_ratio_value = 1.0
-        if shock_guard_enabled and running_loss > 0.0:
+        if not grad_norm_is_finite or not step_loss_is_finite:
+            nonfinite_update_skip = 1.0
+            optimizer.zero_grad(set_to_none=True)
+        elif shock_guard_enabled and running_loss > 0.0:
             in_shock_window = step >= shock_guard_start_step and (
                 shock_guard_end_step <= 0 or step < shock_guard_end_step
             )
@@ -4288,11 +4329,14 @@ def main() -> None:
                     for parameter in model.parameters():
                         if parameter.grad is not None:
                             parameter.grad.mul_(shock_guard_scale)
-        optimizer.step()
-        running_loss = 0.97 * running_loss + 0.03 * step_loss if running_loss else step_loss
-        bpb = step_loss / math.log(2)
+        if nonfinite_update_skip < 0.5:
+            optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+        finite_step_loss = float(step_loss) if step_loss_is_finite else float(running_loss or 0.0)
+        running_loss = 0.97 * running_loss + 0.03 * finite_step_loss if running_loss else finite_step_loss
+        bpb = finite_step_loss / math.log(2) if math.isfinite(finite_step_loss) else float("nan")
         neural_bpb = step_neural_loss / math.log(2)
-        progress.set_postfix(loss=f"{step_loss:.4f}", bpb=f"{bpb:.3f}", gfn=f"{step_gflownet_loss:.3f}", lr=f"{lr_step:.2e}")
+        progress.set_postfix(loss=f"{finite_step_loss:.4f}", bpb=f"{bpb:.3f}", gfn=f"{step_gflownet_loss:.3f}", lr=f"{lr_step:.2e}")
         audit_error = None
         if causal_audit_interval > 0 and step % causal_audit_interval == 0:
             audit_error = causal_audit(model, tokens)
@@ -4318,14 +4362,16 @@ def main() -> None:
         if step % log_interval == 0:
             metrics = {
                 "trainer/step": float(step),
-                "train/loss": step_loss,
+                "train/loss": finite_step_loss,
                 "train/neural_loss": step_neural_loss,
                 "train/total_loss": step_total_loss,
                 "train/loss_ema": running_loss,
                 "train/bpb": bpb,
                 "train/neural_bpb": neural_bpb,
                 "train/lr": lr_step,
-                "train/grad_norm": float(grad_norm.detach().cpu()),
+                "train/grad_norm": float(torch.nan_to_num(grad_norm.detach().cpu(), nan=0.0, posinf=1.0e9, neginf=0.0)),
+                "train/grad_norm_finite": float(grad_norm_is_finite),
+                "train/nonfinite_update_skip": nonfinite_update_skip,
                 "train/shock_guard_active": shock_guard_active,
                 "train/shock_guard_update_scale": shock_guard_scale,
                 "train/shock_guard_loss_delta": shock_guard_loss_delta_value,
@@ -4624,6 +4670,13 @@ def main() -> None:
                     - float(step_complex_microbatches),
                 ),
                 "data/fineweb_calibration_active": float(fineweb_iterator is not None),
+                "data/full_curated_train_split_active": float(
+                    bool(curated_train_files and not task_family_keywords and not dataset_keywords)
+                ),
+                "data/curated_train_shards": float(len(curated_train_files)),
+                "data/curated_val_shards": float(len(curated_val_files)),
+                "data/fineweb_train_shards": float(len(fineweb_train_files)),
+                "data/oai_competition_val_shards": float(len(oai_competition_val_files)),
                 "data/fineweb_microbatch_fraction": step_fineweb_microbatches,
                 "data/fineweb_mix_ratio": effective_fineweb_mix_ratio,
                 "data/medium_curriculum_active": float(
@@ -4755,22 +4808,70 @@ def main() -> None:
                         score_first_bias_decay=eval_score_first_bias_decay,
                         score_first_bias_clip=eval_score_first_bias_clip,
                     )
+                    oai_gflownet = evaluate(
+                        model,
+                        oai_competition_loader,
+                        device=device,
+                        batches=int(oai_competition_eval_batches),
+                        precision=precision,
+                        pass_id=seed + 50_000 + step,
+                        order_samples=max(1, int(oai_competition_order_samples)),
+                        gflownet_samples=max(1, int(oai_competition_gflownet_samples)),
+                        score_first_bias_lr=0.0,
+                        score_first_bias_decay=eval_score_first_bias_decay,
+                        score_first_bias_clip=eval_score_first_bias_clip,
+                    )
+                    if oai_competition_score_first_enabled:
+                        oai_score_first = evaluate(
+                            model,
+                            oai_competition_loader,
+                            device=device,
+                            batches=int(oai_competition_eval_batches),
+                            precision=precision,
+                            pass_id=seed + 60_000 + step,
+                            order_samples=max(1, int(oai_competition_order_samples)),
+                            gflownet_samples=max(1, int(oai_competition_gflownet_samples)),
+                            score_first_bias_lr=eval_score_first_bias_lr,
+                            score_first_bias_decay=eval_score_first_bias_decay,
+                            score_first_bias_clip=eval_score_first_bias_clip,
+                        )
+                    else:
+                        oai_score_first = oai_deterministic
+                    oai_test_time_scaled_bpb = min(
+                        float(oai_deterministic["bpb"]),
+                        float(oai_gflownet["bpb"]),
+                        float(oai_score_first["bpb"]),
+                    )
                     best_oai_competition_bpb = min(
                         best_oai_competition_bpb,
                         float(oai_deterministic["bpb"]),
                     )
+                    best_oai_competition_tts_bpb = min(best_oai_competition_tts_bpb, oai_test_time_scaled_bpb)
                     metrics.update(
                         {
                             "oai_competition/loss": oai_deterministic["loss"],
                             "oai_competition/bpb": oai_deterministic["bpb"],
                             "oai_competition/deterministic_loss": oai_deterministic["loss"],
                             "oai_competition/deterministic_bpb": oai_deterministic["bpb"],
+                            "oai_competition/gflownet_loss": oai_gflownet["loss"],
+                            "oai_competition/gflownet_bpb": oai_gflownet["bpb"],
+                            "oai_competition/score_first_loss": oai_score_first["loss"],
+                            "oai_competition/score_first_bpb": oai_score_first["bpb"],
+                            "oai_competition/test_time_scaled_bpb": oai_test_time_scaled_bpb,
+                            "oai_competition/best_test_time_scaled_bpb": best_oai_competition_tts_bpb,
+                            "oai_competition/test_time_scaling_delta_bpb": float(oai_deterministic["bpb"])
+                            - oai_test_time_scaled_bpb,
+                            "oai_competition/order_samples": float(oai_competition_order_samples),
+                            "oai_competition/gflownet_samples": float(oai_competition_gflownet_samples),
+                            "oai_competition/score_first_enabled": float(oai_competition_score_first_enabled),
                             "oai_competition/best_bpb": best_oai_competition_bpb,
                             "oai_competition/eval_batches": float(oai_competition_eval_batches),
                             "oai_competition/available": 1.0,
                             "oai_competition/source_sp1024_decoded_bytes": 1.0,
                             "competition/oai_bpb": oai_deterministic["bpb"],
+                            "competition/oai_test_time_scaled_bpb": oai_test_time_scaled_bpb,
                             "bpb/oai_competition": oai_deterministic["bpb"],
+                            "bpb/oai_competition_test_time_scaled": oai_test_time_scaled_bpb,
                         }
                     )
                 except Exception as exc:
@@ -4893,7 +4994,9 @@ def main() -> None:
                     "train_bpb": bpb,
                     "best_val_bpb": best_val,
                     "best_oai_competition_bpb": best_oai_competition_bpb,
+                    "best_oai_competition_tts_bpb": best_oai_competition_tts_bpb,
                     "oai_competition/best_bpb": best_oai_competition_bpb,
+                    "oai_competition/best_test_time_scaled_bpb": best_oai_competition_tts_bpb,
                 },
             )
 

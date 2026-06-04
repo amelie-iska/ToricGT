@@ -1,0 +1,510 @@
+model:
+  # Reserve graph-of-thought, reasoning-step, memory, and analogy markers
+  # before byte IDs so directed reasoning/memory trajectories can be trained
+  # and audited without colliding with ordinary UTF-8 bytes.
+  special_token_mode: reasoning_memory
+  use_advanced_reasoning_tokens: true
+  vocab_size: 272
+  byte_offset: 16
+  # 3072-4096 OOMs on the current 24 GB card at this model width; warm up in
+  # a 2048-token long-context basin, then expand to 4096+ after BPB stabilizes.
+  max_seq_len: 2048
+  d_model: 384
+  num_heads: 6
+  num_layers: 7
+  # Second recurrent pass is reintroduced after the BPB warmup basin; with
+  # full GraphCG/reasoning-memory heads it OOMs at step 0 on the 24 GB card.
+  recurrent_passes: 1
+  ffn_multiplier: 4
+  dropout: 0.0
+  attention: hybrid
+  # Smaller tropical-ring blocks keep 4096-context training under 24 GB.
+  # This trades throughput for a long-context run that can actually stay alive.
+  ring_block_size: 64
+  polarquant_kv_bits: 8
+  polarquant_train: true
+  polarquant_train_sample_tokens: 32
+
+  use_gflownet_policy: true
+  gflownet_num_actions: 16
+  gflownet_hidden_dim: 192
+  gflownet_action_scale: 0.10
+
+  use_bigram_hash: true
+  bigram_hash_buckets: 4096
+  bigram_hash_weight: 0.35
+  use_caseops_features: true
+  caseops_weight: 0.35
+  # BPB recovery path: these are score-before-update legal because they use
+  # only bytes already revealed by the random-order prefix.
+  use_revealed_context_prior: true
+  revealed_context_prior_alpha: 0.25
+  revealed_context_prior_mode: mixture
+  revealed_context_prior_weight: 0.10
+  use_revealed_neighbor_context: true
+  revealed_neighbor_radius: 2
+  revealed_neighbor_context_weight: 0.45
+  use_smear_gate: true
+  smear_temperature_min: 0.55
+  smear_temperature_max: 1.75
+  use_toric_memory: true
+  toric_memory_slots: 32
+  toric_memory_weight: 0.08
+
+  use_toric_geometry_tasks: true
+  toric_geometry_num_exponents: 16
+  toric_geometry_exponent_dim: 4
+  toric_geometry_probe_rank: 12
+  toric_geometry_quant_bits: 6
+  toric_geometry_teacher_temperature: 0.55
+  toric_geometry_margin: 0.18
+  toric_geometry_fan_weight: 1.0
+  toric_geometry_bend_weight: 0.30
+  toric_geometry_binom_weight: 0.30
+  toric_geometry_moment_weight: 0.50
+  toric_geometry_coxeter_weight: 0.20
+  toric_geometry_braid_weight: 0.10
+  toric_geometry_leaf_weight: 0.25
+  toric_geometry_max_positions: 256
+
+  use_graphcg: true
+  # Medium-conservative GraphCG: broad enough to shape the embedding basis, but
+  # below full rank to avoid early unstable covariance/SVD-style gradients.
+  graphcg_num_directions: 192
+  graphcg_min_directions: 192
+  graphcg_max_directions: 192
+  graphcg_memory_fraction: 0.09
+  graphcg_direction_safety: 0.90
+  graphcg_alpha: 0.10
+  graphcg_temperature: 0.20
+  graphcg_max_codes: 128
+  graphcg_orthogonal_weight: 0.10
+  graphcg_covariance_weight: 0.05
+  graphcg_sparsity_weight: 0.00005
+
+  use_analogy_lattice: true
+  analogy_lattice_max_pairs: 256
+  analogy_lattice_stride: 1
+  analogy_lattice_temperature: 0.20
+  analogy_lattice_basis_weight: 0.50
+  analogy_lattice_parallelogram_weight: 0.35
+  analogy_lattice_topology_weight: 0.35
+  analogy_topology_max_points_per_group: 16
+  analogy_topology_max_groups: 24
+  analogy_topology_k: 4
+  analogy_topology_filtration_levels: 4
+  analogy_topology_radius_min: 0.55
+  analogy_topology_radius_max: 1.65
+  analogy_topology_chain_weight: 0.25
+  analogy_topology_inclusion_weight: 0.10
+  analogy_topology_directed: true
+  analogy_topology_directed_weight: 0.35
+  analogy_topology_skew_scale: 0.35
+  analogy_topology_cycle_weight: 0.10
+  analogy_hdbscan_enabled: true
+  analogy_hdbscan_weight: 0.20
+  analogy_hdbscan_min_cluster_size: 4
+  analogy_hdbscan_min_samples: 4
+  analogy_hdbscan_stability_threshold: 0.18
+  analogy_step_topology_weight: 0.25
+  analogy_step_topology_max_points: 24
+  analogy_step_topology_max_windows: 6
+  analogy_step_topology_window_size: 32
+  analogy_step_topology_step_stride: 8
+  analogy_step_topology_time_bias: 0.18
+
+  use_koszul_persistence: true
+  koszul_max_points: 24
+  koszul_max_windows: 4
+  koszul_window_size: 32
+  koszul_step_stride: 8
+  koszul_num_parameters: 3
+  koszul_temperature: 0.12
+  koszul_chart_exponents: 12
+  koszul_rank_temperature: 0.05
+
+  # Pollak/prolate Slepian trajectory concentration is active from step 0 in
+  # this medium-conservative profile, but with a small BPB-safe loss weight.
+  use_slepian_pollak: true
+  slepian_pollak_max_positions: 192
+  slepian_pollak_modes: 8
+  slepian_pollak_bandwidth: 0.075
+  slepian_pollak_target_concentration: 0.72
+
+  use_trajectory_memory_head: true
+  trajectory_memory_projection_dim: 128
+  trajectory_memory_teacher_temperature: 0.20
+  trajectory_memory_retrieval_temperature: 0.20
+  trajectory_memory_distill_weight: 0.25
+  trajectory_memory_quality_weight: 0.10
+  trajectory_memory_topology_weight: 0.20
+  trajectory_memory_graphcg_weight: 0.30
+  trajectory_memory_toric_weight: 0.20
+
+  # Instantiated and trained from the start with a small Category O/Koszul
+  # pressure, then gently increased once OAI BPB stabilizes.
+  use_toric_bgg: true
+  toric_bgg_num_standard_tokens: 8
+  toric_bgg_probe_rank: 8
+  toric_bgg_signature_dim: 16
+  toric_bgg_max_positions: 64
+  toric_bgg_d2_weight: 1.0
+  toric_bgg_standard_weight: 0.25
+  toric_bgg_koszul_weight: 0.15
+  toric_bgg_gale_weight: 0.10
+  toric_bgg_signature_weight: 0.10
+
+  contrastive_temperature: 0.20
+  trajectory_flow_viscosity: 0.05
+  aux_mtp_offsets: 2
+  target_artifact_bytes: 15600000
+
+data:
+  train_parquet_glob: data/curated_hf_shards/train/*.parquet
+  val_parquet_glob: data/curated_hf_shards/validation/*.parquet
+  rows_per_batch: 128
+  num_workers: 2
+  include_graph_projection: true
+  complex_include_graph_projection: true
+  graph_projection_max_chars: 4096
+  coprime_row_stride: true
+  interleave_row_groups: true
+  resume_aware_stream_seed: true
+  document_separator: "\n\n"
+  difficulty_curriculum_enabled: true
+  easy_min_estimated_tokens: 0
+  easy_max_estimated_tokens: 0
+  medium_start_step: 0
+  medium_mix_ratio: 0.18
+  medium_min_estimated_tokens: 129
+  medium_max_estimated_tokens: 384
+  medium_include_graph_projection: true
+  hard_start_step: 0
+  hard_mix_ratio: 0.12
+  hard_min_estimated_tokens: 385
+  hard_include_graph_projection: true
+  hard_task_family_keywords:
+    - math
+    - code
+    - graph
+    - got
+    - reasoning
+    - health
+    - physics
+    - biomed
+    - biochem
+  complex_start_step: 0
+  complex_mix_ratio: 0.12
+  complex_min_estimated_tokens: 385
+  complex_task_family_keywords:
+    - math
+    - code
+    - graph
+    - got
+    - reasoning
+    - health
+    - physics
+    - biomed
+    - biochem
+
+oai_competition:
+  enabled: true
+  # Native ToricGT checkpoint metric: decode the local Parameter-Golf
+  # fineweb10B_sp1024 validation shard back to UTF-8 and score the byte model.
+  # This is intentionally logged as oai_competition/*, not fineweb/*; fineweb/*
+  # is reserved for the separate scaffold launcher.
+  val_token_glob: amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_val_*.bin
+  tokenizer_path: amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model
+  eval_interval: 250
+  eval_batches: 8
+  order_samples: 2
+  gflownet_samples: 4
+  score_first_enabled: true
+  sp_tokens_per_decode: 4096
+  workers: 0
+
+fineweb_calibration:
+  enabled: true
+  train_token_glob: amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_train_*.bin
+  tokenizer_path: amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model
+  # Keep OAI BPB as the largest single stream while making the full curated
+  # GoT/ToT/CoT/memory graph-reasoning dataset active from step 0.
+  mix_ratio: 0.60
+  sp_tokens_per_decode: 4096
+  workers: 0
+
+training:
+  checkpoint_dir: checkpoints/parameter_golf_all_phases_medium_conservative
+  max_steps: 60000
+  # 4096-context tropical-ring attention exceeds 24 GB at microbatch 2.
+  # Keep the long-context surface active while preserving the effective batch.
+  batch_size: 1
+  grad_accum_steps: 32
+  lr: 0.000036
+  weight_decay: 0.03
+  warmup_steps: 4000
+  grad_clip_norm: 0.85
+  precision: bf16
+  device: cuda
+  seed: 29
+  log_interval: 5
+  eval_interval: 250
+  eval_batches: 20
+  eval_order_samples: 2
+  eval_gflownet_samples: 4
+  ckpt_interval: 250
+  resize_position_embedding: true
+  causal_audit_interval: 250
+
+  # Medium-conservative base weights: every advanced loss is active, but each
+  # is small enough that CE/BPB remains the dominant optimization signal.
+  gflownet_loss_weight: 0.00012
+  gflownet_entropy_weight: 0.00004
+  gflownet_entropy_target: 2.0
+  graphcg_loss_weight: 0.00004
+  analogy_lattice_loss_weight: 0.00002
+  toric_geometry_loss_weight: 0.000015
+  toric_bgg_loss_weight: 0.000002
+  koszul_persistence_loss_weight: 0.000002
+  slepian_pollak_loss_weight: 0.000006
+  trajectory_memory_loss_weight: 0.000010
+  trajectory_flow_loss_weight: 0.000020
+  contrastive_loss_weight: 0.00015
+  mtp_loss_weight: 0.001
+  toric_entropy_floor: 0.20
+  toric_entropy_loss_weight: 0.000015
+  qat_loss_weight: 0.00000002
+  qat_bits: 6
+  qat_max_tensors: 2
+  qat_start_step: 2000
+  qat_warmup_steps: 2000
+  eval_score_first_bias_lr: 0.025
+  eval_score_first_bias_decay: 0.98
+  eval_score_first_bias_clip: 3.0
+
+  shock_guard_enabled: true
+  shock_guard_start_step: 0
+  shock_guard_end_step: 6000
+  shock_guard_loss_ratio: 1.05
+  shock_guard_loss_delta: 0.10
+  shock_guard_grad_norm: 0.55
+  shock_guard_update_scale: 0.12
+  robust_micro_loss_guard_enabled: true
+  robust_micro_loss_guard_start_step: 0
+  robust_micro_loss_guard_end_step: 6000
+  robust_micro_loss_guard_ratio: 1.10
+  robust_micro_loss_guard_delta: 0.18
+  robust_micro_loss_guard_min_scale: 0.45
+
+complexity:
+  enabled: true
+  eval_every: 10
+  eval_samples: 4
+  compressors:
+    - zlib
+    - lzma
+
+hessian:
+  enabled: true
+  eval_every: 250
+  max_tokens: 128
+  trace_samples: 1
+  power_iters: 1
+  max_tensors: 4
+  max_parameters: 1500000
+
+adaptive_training:
+  enabled: true
+  gflownet_loss_min: 0.00015
+  gflownet_loss_max: 0.00100
+  gflownet_gap_step: 0.00004
+  gflownet_relax_step: 0.00002
+  complex_mix_min: 0.08
+  complex_mix_max: 0.18
+  complex_down_step: 0.005
+  complex_up_step: 0.002
+  train_drift_threshold: 0.03
+  gflownet_increase_drift_guard: 0.025
+  recovery_mode_enabled: true
+  recovery_train_drift_threshold: 0.06
+  recovery_complex_down_step: 0.010
+  recovery_gflownet_down_step: 0.00005
+  structural_loss_min: 0.70
+  structural_loss_max: 1.20
+  structural_loss_up_step: 0.025
+  structural_loss_down_step: 0.080
+  structural_signal_threshold: 0.10
+  structural_train_drift_guard: 0.020
+
+phase_curriculum:
+  enabled: true
+  phases:
+    - name: medium_conservative_all_metrics_warmup
+      start_step: 0
+      end_step: 4000
+      lr_multiplier: 0.75
+      grad_clip_norm: 0.75
+      fineweb_mix_ratio: 0.60
+      medium_mix_ratio: 0.18
+      hard_mix_ratio: 0.12
+      complex_mix_ratio: 0.12
+      gflownet_loss_weight: 0.00012
+      gflownet_entropy_weight: 0.00004
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.00004
+      analogy_lattice_loss_weight: 0.00002
+      toric_geometry_loss_weight: 0.000015
+      toric_bgg_loss_weight: 0.000002
+      koszul_persistence_loss_weight: 0.000002
+      slepian_pollak_loss_weight: 0.000006
+      trajectory_flow_loss_weight: 0.000020
+      trajectory_memory_loss_weight: 0.000010
+      contrastive_loss_weight: 0.00015
+      mtp_loss_weight: 0.001
+      toric_entropy_loss_weight: 0.000015
+      qat_loss_weight: 0.0
+    - name: graphcg_toric_slepian_probe
+      start_step: 4000
+      end_step: 12000
+      lr_multiplier: 0.85
+      grad_clip_norm: 0.85
+      fineweb_mix_ratio: 0.58
+      medium_mix_ratio: 0.20
+      hard_mix_ratio: 0.14
+      complex_mix_ratio: 0.14
+      gflownet_loss_weight: 0.00035
+      gflownet_entropy_weight: 0.00015
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.00010
+      analogy_lattice_loss_weight: 0.00008
+      toric_geometry_loss_weight: 0.00006
+      toric_bgg_loss_weight: 0.000018
+      koszul_persistence_loss_weight: 0.000020
+      slepian_pollak_loss_weight: 0.000035
+      trajectory_flow_loss_weight: 0.00010
+      trajectory_memory_loss_weight: 0.000035
+      contrastive_loss_weight: 0.00070
+      mtp_loss_weight: 0.006
+      toric_entropy_loss_weight: 0.00008
+      qat_loss_weight: 0.00000002
+    - name: topology_koszul
+      start_step: 12000
+      end_step: 26000
+      lr_multiplier: 0.95
+      grad_clip_norm: 0.90
+      fineweb_mix_ratio: 0.55
+      medium_mix_ratio: 0.22
+      hard_mix_ratio: 0.16
+      complex_mix_ratio: 0.16
+      gflownet_loss_weight: 0.00055
+      gflownet_entropy_weight: 0.00025
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.00012
+      analogy_lattice_loss_weight: 0.00010
+      toric_geometry_loss_weight: 0.00008
+      toric_bgg_loss_weight: 0.000022
+      koszul_persistence_loss_weight: 0.000030
+      slepian_pollak_loss_weight: 0.000035
+      trajectory_flow_loss_weight: 0.00012
+      trajectory_memory_loss_weight: 0.000050
+      contrastive_loss_weight: 0.001
+      mtp_loss_weight: 0.010
+      toric_entropy_loss_weight: 0.00015
+      qat_loss_weight: 0.00000002
+    - name: memory_reasoning
+      start_step: 26000
+      end_step: 42000
+      lr_multiplier: 1.0
+      grad_clip_norm: 0.90
+      fineweb_mix_ratio: 0.52
+      medium_mix_ratio: 0.24
+      hard_mix_ratio: 0.18
+      complex_mix_ratio: 0.18
+      gflownet_loss_weight: 0.00075
+      gflownet_entropy_weight: 0.00035
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.00018
+      analogy_lattice_loss_weight: 0.00012
+      toric_geometry_loss_weight: 0.00010
+      toric_bgg_loss_weight: 0.000025
+      koszul_persistence_loss_weight: 0.000035
+      slepian_pollak_loss_weight: 0.00005
+      trajectory_flow_loss_weight: 0.00025
+      trajectory_memory_loss_weight: 0.00008
+      contrastive_loss_weight: 0.0015
+      mtp_loss_weight: 0.015
+      toric_entropy_loss_weight: 0.00025
+      qat_loss_weight: 0.00000003
+    - name: toric_bgg_category_o
+      start_step: 42000
+      end_step: 56000
+      lr_multiplier: 0.80
+      grad_clip_norm: 0.80
+      fineweb_mix_ratio: 0.50
+      medium_mix_ratio: 0.25
+      hard_mix_ratio: 0.20
+      complex_mix_ratio: 0.20
+      gflownet_loss_weight: 0.00085
+      gflownet_entropy_weight: 0.0005
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.00018
+      analogy_lattice_loss_weight: 0.00014
+      toric_geometry_loss_weight: 0.00010
+      toric_bgg_loss_weight: 0.000025
+      koszul_persistence_loss_weight: 0.000025
+      slepian_pollak_loss_weight: 0.00005
+      trajectory_flow_loss_weight: 0.00025
+      trajectory_memory_loss_weight: 0.00010
+      contrastive_loss_weight: 0.0015
+      mtp_loss_weight: 0.015
+      toric_entropy_loss_weight: 0.00025
+      qat_loss_weight: 0.00000003
+    - name: compression_qat_export
+      start_step: 56000
+      end_step:
+      lr_multiplier: 0.60
+      grad_clip_norm: 0.70
+      fineweb_mix_ratio: 0.60
+      medium_mix_ratio: 0.20
+      hard_mix_ratio: 0.12
+      complex_mix_ratio: 0.12
+      gflownet_loss_weight: 0.0008
+      gflownet_entropy_weight: 0.0004
+      gflownet_entropy_target: 2.0
+      graphcg_loss_weight: 0.00012
+      analogy_lattice_loss_weight: 0.00010
+      toric_geometry_loss_weight: 0.00008
+      toric_bgg_loss_weight: 0.000015
+      koszul_persistence_loss_weight: 0.000020
+      slepian_pollak_loss_weight: 0.00003
+      trajectory_flow_loss_weight: 0.00020
+      trajectory_memory_loss_weight: 0.00008
+      contrastive_loss_weight: 0.0010
+      mtp_loss_weight: 0.010
+      toric_entropy_loss_weight: 0.00015
+      qat_loss_weight: 0.00000005
+      qat_start_step: 56000
+      qat_warmup_steps: 4000
+
+checkpoint_publishing:
+  enabled: false
+  repo_id: AmelieSchreiber/toricgt-checkpoints
+  repo_type: model
+  checkpoint_filename: parameter_golf_all_phases_best.pt
+  manifest_filename: parameter_golf_all_phases_best.json
+  state_path: checkpoints/parameter_golf_all_phases/hf_best_publish_state.json
+  complexity_metric: complexity/val/prediction_target_ncd_lzma_mean
+  complexity_weight: 0.05
+  min_score_delta: 0.0
+  max_complexity_regression: 0.10
+  private: false
+
+export:
+  bits: 6
+  quantization_mode: row
+  compression: lzma
+
+logging:
+  wandb: true
+  project: toricgt-parameter-golf
+  run_name: all-phases-medium-conservative

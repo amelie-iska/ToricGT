@@ -172,8 +172,95 @@ BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq40
 BPB_LOOP_NAME=parameter_golf_bpb_target
 ```
 
-No better-strategy stop sentinel was written; the ordinary BPB recovery loop
-continues under the corrected supervisor environment.
+## 2026-06-04 Medium-Conservative Full-Dataset All-Phases Activation
+
+The proxy-BPB replay path above was superseded after the request for full
+dataset utilization and active advanced losses. R103 was launched by the
+automatic review path with `ADVANCED_LOSS_SCALE=0.0`/log-only and occupied the
+GPU, so it was stopped to free the card for the native all-phases run. The
+first all-phases launch
+`toricgt-all-phases-medium-conservative-20260604T220638Z` reached step 1, then
+showed NaN loss by step 2; it was stopped and the trainer/config were tightened
+before relaunch.
+
+The trainer now skips nonfinite optimizer updates rather than allowing
+SVD/topology/geometry gradient instability to corrupt weights. It logs
+`train/grad_norm_finite` and `train/nonfinite_update_skip`, zeroes gradients on
+nonfinite grad/loss, and only calls `optimizer.step()` for finite updates.
+
+Full dataset utilization is explicit in
+`config/train.parameter_golf_all_phases_medium_conservative.yaml`:
+
+- curated train stream: `data/curated_hf_shards/train/*.parquet`, all 117
+  matched train shards, no main-stream task-family or dataset-keyword filter;
+- curated validation stream: `data/curated_hf_shards/validation/*.parquet`, all
+  15 matched validation shards;
+- FineWeb calibration stream: all 10 local
+  `fineweb10B_sp1024/fineweb_train_*.bin` shards;
+- OAI/FineWeb validation stream: the local `fineweb_val_*.bin` shard decoded
+  with the competition SentencePiece tokenizer.
+
+The trainer logs `data/full_curated_train_split_active`,
+`data/curated_train_shards`, `data/curated_val_shards`,
+`data/fineweb_train_shards`, and `data/oai_competition_val_shards` so W&B makes
+the full-dataset state auditable. The opening phase keeps OAI BPB as the
+largest single stream while using the full curated GoT/ToT/CoT,
+graph-reasoning, memory, and analogy split from step 0:
+`fineweb_mix_ratio=0.60`, `medium_mix_ratio=0.18`, and
+`hard/complex_mix_ratio=0.12`.
+
+Every implemented advanced loss family is active in the opening phase, but the
+SVD- and topology-adjacent weights are now deliberately tiny until the
+finite-gradient guard shows stable updates:
+
+- `gflownet_loss_weight=0.00012`,
+  `gflownet_entropy_weight=0.00004`;
+- `graphcg_loss_weight=0.00004`;
+- `analogy_lattice_loss_weight=0.00002`;
+- `toric_geometry_loss_weight=0.000015`;
+- `toric_bgg_loss_weight=0.000002`;
+- `koszul_persistence_loss_weight=0.000002`;
+- `slepian_pollak_loss_weight=0.000006`;
+- `trajectory_flow_loss_weight=0.000020`;
+- `trajectory_memory_loss_weight=0.000010`;
+- `contrastive_loss_weight=0.00015`;
+- `mtp_loss_weight=0.001`;
+- `toric_entropy_loss_weight=0.000015`.
+
+QAT is present with a tiny delayed weight, and PolarQuant KV perturbation is
+enabled in the model config (`polarquant_kv_bits=8`,
+`polarquant_train=true`, `polarquant_train_sample_tokens=32`). GraphCG uses 192
+directions in this profile, a medium-conservative basis wide enough to shape
+the embedding space without full-rank early instability.
+
+The OAI validation path now reports deterministic BPB plus inference/test-time
+scaled alternatives: `oai_competition/gflownet_bpb`,
+`oai_competition/score_first_bpb`,
+`oai_competition/test_time_scaled_bpb`,
+`oai_competition/best_test_time_scaled_bpb`, and
+`oai_competition/test_time_scaling_delta_bpb`. The deterministic
+`oai_competition/bpb` remains the official-style gate.
+
+
+Active guarded relaunch after stale-session cleanup:
+
+```text
+run id: toricgt-all-phases-full-dataset-mc-20260604T221815Z
+W&B: https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt-all-phases-full-dataset-mc-20260604T221815Z
+config: config/train.parameter_golf_all_phases_medium_conservative.yaml
+training tmux: toricgt_all_phases_full_dataset_mc_20260604T221815Z
+supervisor tmux: toricgt_all_phases_full_dataset_mc_20260604T221815Z_supervisor
+analysis tmux: toricgt_all_phases_full_dataset_mc_20260604T221815Z_analysis
+checkpoint dir: checkpoints/parameter_golf_all_phases_medium_conservative
+analysis root: outputs/post_resume_analysis/toricgt-all-phases-full-dataset-mc-20260604T221815Z
+train log: logs/parameter_golf_all_phases/toricgt-all-phases-full-dataset-mc-20260604T221815Z/supervisor/restart_000_20260604T221816Z/train.log
+```
+
+The guarded relaunch cleared the previous two-step NaN failure point: steps 1,
+2, and 3 were finite, with step 3 at `bpb=6.557`, `gfn=6.968`, and
+`loss=4.5449`. The first W&B log interval is step 5, where the data-count and
+full-dataset activation metrics should become visible alongside train BPB and
+all active auxiliary-loss telemetry.
 
 ## 2026-06-04 Seq4096 R89 Step-3850/3900 BPB Gate Review
 
