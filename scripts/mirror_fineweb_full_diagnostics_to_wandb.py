@@ -250,6 +250,117 @@ def add_fineweb_curve_status(payload: dict[str, float], parsed: dict[str, Any], 
         payload["fineweb_curve/latest_generalization_gap_bpb"] = latest_val_bpb - latest_train_bpb
 
 
+def _slope_per_100_steps(steps: np.ndarray, values: np.ndarray) -> float:
+    if values.size < 2:
+        return float("nan")
+    x = steps.astype(np.float64) / 100.0
+    y = values.astype(np.float64)
+    x = x - float(x.mean())
+    denom = float(np.sum(x * x))
+    if denom <= 0.0:
+        return float("nan")
+    return float(np.sum(x * (y - float(y.mean()))) / denom)
+
+
+def fineweb_transfer_metrics(parsed: dict[str, Any], target_bpb: float) -> dict[str, float]:
+    train: dict[int, dict[str, float]] = parsed["train"]
+    vals: dict[int, dict[str, float]] = parsed["vals"]
+    rows: list[tuple[float, float, float]] = []
+    for step in sorted(vals):
+        val_bpb = _latest_at_or_before(vals, step, "val_bpb")
+        train_bpb = _latest_at_or_before(train, step, "train_bpb")
+        if val_bpb is None or train_bpb is None:
+            continue
+        rows.append((float(step), float(train_bpb), float(val_bpb)))
+    if not rows:
+        return {"fineweb_curve/transfer_pairs": 0.0}
+
+    arr = np.asarray(rows, dtype=np.float64)
+    steps = arr[:, 0]
+    train_bpb = arr[:, 1]
+    val_bpb = arr[:, 2]
+    gaps = val_bpb - train_bpb
+    metrics: dict[str, float] = {
+        "fineweb_curve/transfer_pairs": float(len(rows)),
+        "fineweb_curve/latest_train_bpb_at_validation": float(train_bpb[-1]),
+        "fineweb_curve/latest_val_bpb_for_transfer": float(val_bpb[-1]),
+        "fineweb_curve/latest_generalization_gap_bpb": float(gaps[-1]),
+        "fineweb_curve/generalization_gap_slope_per_100_steps": _slope_per_100_steps(steps, gaps),
+    }
+    if len(rows) < 2:
+        metrics.update(
+            {
+                "fineweb_curve/cumulative_train_drop_bpb": 0.0,
+                "fineweb_curve/cumulative_val_drop_bpb": 0.0,
+                "fineweb_curve/validation_transfer_pressure": 0.0,
+            }
+        )
+        return metrics
+
+    train_drop = train_bpb[:-1] - train_bpb[1:]
+    val_drop = val_bpb[:-1] - val_bpb[1:]
+    valid = np.isfinite(train_drop) & np.isfinite(val_drop) & (train_drop > 1e-9)
+    efficiencies = np.full_like(train_drop, np.nan, dtype=np.float64)
+    efficiencies[valid] = val_drop[valid] / train_drop[valid]
+    recent_efficiency = float(efficiencies[np.isfinite(efficiencies)][-1]) if np.isfinite(efficiencies).any() else float("nan")
+    recent_train_drop = float(train_drop[-1])
+    recent_val_drop = float(val_drop[-1])
+    cumulative_train_drop = float(train_bpb[0] - train_bpb[-1])
+    cumulative_val_drop = float(val_bpb[0] - val_bpb[-1])
+    cumulative_efficiency = (
+        cumulative_val_drop / cumulative_train_drop
+        if cumulative_train_drop > 1e-9
+        else float("nan")
+    )
+    transfer_pressure = max(0.0, recent_train_drop - recent_val_drop)
+    lag_pressure = max(0.0, gaps[-1] - 0.04) + max(0.0, 0.55 - recent_efficiency if math.isfinite(recent_efficiency) else 0.0)
+    metrics.update(
+        {
+            "fineweb_curve/recent_train_drop_bpb": recent_train_drop,
+            "fineweb_curve/recent_val_drop_bpb": recent_val_drop,
+            "fineweb_curve/transfer_efficiency_recent": recent_efficiency,
+            "fineweb_curve/cumulative_train_drop_bpb": cumulative_train_drop,
+            "fineweb_curve/cumulative_val_drop_bpb": cumulative_val_drop,
+            "fineweb_curve/transfer_efficiency_cumulative": cumulative_efficiency,
+            "fineweb_curve/validation_transfer_pressure": transfer_pressure,
+            "fineweb_curve/validation_lag_pressure": lag_pressure,
+            "fineweb_curve/target_gap_at_transfer_step": float(val_bpb[-1] - float(target_bpb)),
+        }
+    )
+    return metrics
+
+
+def _latest_step_and_value(rows: dict[int, dict[str, float]], field: str) -> tuple[int, float]:
+    if not rows:
+        return 0, float("nan")
+    step = max(rows)
+    value = rows[step].get(field, float("nan"))
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = float("nan")
+    return int(step), numeric if math.isfinite(numeric) else float("nan")
+
+
+def diagnostic_log_signature(parsed: dict[str, Any]) -> tuple[int, int, int, float, float, int, int]:
+    """Detect a same-step validation row arriving after the train row."""
+
+    train: dict[int, dict[str, float]] = parsed["train"]
+    vals: dict[int, dict[str, float]] = parsed["vals"]
+    latest_step = int(parsed.get("latest_step") or 0)
+    latest_train_step, latest_train_bpb = _latest_step_and_value(train, "train_bpb")
+    latest_val_step, latest_val_bpb = _latest_step_and_value(vals, "val_bpb")
+    return (
+        latest_step,
+        latest_train_step,
+        latest_val_step,
+        round(latest_train_bpb, 8) if math.isfinite(latest_train_bpb) else float("nan"),
+        round(latest_val_bpb, 8) if math.isfinite(latest_val_bpb) else float("nan"),
+        len(train),
+        len(vals),
+    )
+
+
 DIAGNOSTIC_ALIAS_KEYS = {
     "topology/topology_loss": "diagnostics/latest/topology_loss",
     "topology/directed_topology_loss": "diagnostics/latest/directed_topology_loss",
@@ -284,6 +395,15 @@ DIAGNOSTIC_ALIAS_KEYS = {
     "fineweb_curve/latest_train_bpb": "diagnostics/latest/train_bpb",
     "fineweb_curve/latest_val_bpb": "diagnostics/latest/val_bpb",
     "fineweb_curve/latest_generalization_gap_bpb": "diagnostics/latest/generalization_gap_bpb",
+    "fineweb_curve/latest_train_bpb_at_validation": "diagnostics/latest/train_bpb_at_validation",
+    "fineweb_curve/latest_val_bpb_for_transfer": "diagnostics/latest/val_bpb_for_transfer",
+    "fineweb_curve/generalization_gap_slope_per_100_steps": "diagnostics/latest/generalization_gap_slope_per_100_steps",
+    "fineweb_curve/transfer_efficiency_recent": "diagnostics/latest/transfer_efficiency_recent",
+    "fineweb_curve/transfer_efficiency_cumulative": "diagnostics/latest/transfer_efficiency_cumulative",
+    "fineweb_curve/recent_train_drop_bpb": "diagnostics/latest/recent_train_drop_bpb",
+    "fineweb_curve/recent_val_drop_bpb": "diagnostics/latest/recent_val_drop_bpb",
+    "fineweb_curve/validation_transfer_pressure": "diagnostics/latest/validation_transfer_pressure",
+    "fineweb_curve/validation_lag_pressure": "diagnostics/latest/validation_lag_pressure",
 }
 
 
@@ -544,6 +664,7 @@ def compute_payload(parsed: dict[str, Any], log_path: Path, target_bpb: float, m
     payload.update(tropical_curve_metrics(val_bpbs, target_bpb))
     payload.update(complexity_metrics(log_path))
     add_fineweb_curve_status(payload, parsed, target_bpb)
+    payload.update(fineweb_transfer_metrics(parsed, target_bpb))
     payload.update(diagnostic_alias_payload(payload))
     payload.update(structural_recapture_payload(payload))
     return payload
@@ -635,12 +756,13 @@ def main() -> None:
     )
     wandb.define_metric("*", step_metric="trainer/step")
     log_path = Path(args.log)
-    seen_steps: set[int] = set()
+    seen_signatures: set[tuple[int, int, int, float, float, int, int]] = set()
     while True:
         parsed = parse_log(log_path)
         latest_step = int(parsed.get("latest_step") or 0)
         total = int(parsed.get("total") or 0)
-        should_log = latest_step > 0 and latest_step not in seen_steps
+        signature = diagnostic_log_signature(parsed)
+        should_log = latest_step > 0 and signature not in seen_signatures
         if should_log:
             payload = compute_payload(parsed, log_path, args.target_bpb, args.max_points)
             payload.update(
@@ -691,7 +813,7 @@ def main() -> None:
                 f"structural_recapture={payload.get('diagnostics/latest/structural_recapture_score', 0.0):.4f}",
                 flush=True,
             )
-            seen_steps.add(latest_step)
+            seen_signatures.add(signature)
             if args.once:
                 break
         if log_path.exists():

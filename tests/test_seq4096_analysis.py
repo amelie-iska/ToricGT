@@ -59,6 +59,21 @@ def write_sample_log(path: Path) -> None:
     )
 
 
+def write_transfer_lag_log(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 train_loss:1.9942 train_time:7600000ms step_avg:2533.33ms train_bpb:1.1432",
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:7600100ms step_avg:2533.36ms",
+                "step:3250/20000 train_loss:1.9520 train_time:8250000ms step_avg:2538.46ms train_bpb:1.1200",
+                "step:3250/20000 val_loss:2.0922 val_bpb:1.2391 train_time:8250100ms step_avg:2538.49ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_parse_seq4096_log_captures_train_val_and_train_bpb(tmp_path: Path) -> None:
     module = load_module()
     log_path = tmp_path / "train.log"
@@ -104,6 +119,23 @@ def test_bpb_acceleration_report_marks_near_target_descent(tmp_path: Path) -> No
     assert any("validation" in item.lower() or "checkpoint" in item.lower() for item in report["recommendations"])
 
 
+def test_transfer_efficiency_report_identifies_train_descent_validation_lag(tmp_path: Path) -> None:
+    module = load_module()
+    log_path = tmp_path / "transfer_lag.log"
+    write_transfer_lag_log(log_path)
+    parsed = module.parse_seq4096_log(log_path)
+    frame = module.training_dataframe(parsed, target_bpb=1.2)
+
+    report = module.transfer_efficiency_report(frame, target_bpb=1.2)
+
+    assert report["transfer_pairs"] == 2
+    assert report["transfer_regime"] == "train_descent_validation_lag"
+    assert report["recent_transfer_efficiency"] == pytest.approx((1.2454 - 1.2391) / (1.1432 - 1.1200))
+    assert report["latest_generalization_gap_bpb"] == pytest.approx(1.2391 - 1.1200)
+    assert report["generalization_gap_slope_per_100_steps"] > 0.0
+    assert any("validation bpb" in item.lower() for item in report["transfer_recommendations"])
+
+
 def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Path) -> None:
     module = load_module()
     log_path = tmp_path / "train.log"
@@ -146,6 +178,8 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert (tmp_path / "analysis" / "bpb" / "bpb_rockfall_dashboard.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_structural_recapture_map.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "structural_recapture_report.json").exists()
+    assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_efficiency.png").exists()
+    assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_efficiency_report.json").exists()
     phase_plan_path = tmp_path / "analysis" / "bpb" / "phase_bpb_breakdown_plan.json"
     assert phase_plan_path.exists()
     phase_plan = json.loads(phase_plan_path.read_text(encoding="utf-8"))
@@ -165,6 +199,7 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert "analogical-transfer BPB" in synopsis
     assert "structural recapture score" in synopsis
     assert "BPB Structural Recapture Map" in synopsis
+    assert "Train-To-Validation BPB Transfer Efficiency" in synopsis
 
 
 def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
@@ -204,6 +239,74 @@ def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
     assert payload["diagnostics/families/slepian_pollak_prolate_available"] == 1.0
     assert payload["tropical/bpb_best_so_far"] == pytest.approx(1.3641)
     assert payload["metrics_status/fineweb_curve_diagnostics_available"] == 1.0
+
+
+def test_full_diagnostics_reports_transfer_efficiency_aliases(tmp_path: Path) -> None:
+    module = load_full_diag_module()
+    log_path = tmp_path / "transfer_lag.log"
+    write_transfer_lag_log(log_path)
+    output_json = tmp_path / "diagnostics.json"
+
+    payload = module.run_once_without_wandb(
+        log_path=log_path,
+        output_json=output_json,
+        target_bpb=1.2,
+        max_points=16,
+    )
+
+    expected_efficiency = (1.2454 - 1.2391) / (1.1432 - 1.1200)
+    assert payload["fineweb_curve/transfer_pairs"] == pytest.approx(2.0)
+    assert payload["fineweb_curve/transfer_efficiency_recent"] == pytest.approx(expected_efficiency)
+    assert payload["diagnostics/latest/transfer_efficiency_recent"] == pytest.approx(expected_efficiency)
+    assert payload["diagnostics/latest/generalization_gap_slope_per_100_steps"] > 0.0
+    assert payload["diagnostics/latest/validation_transfer_pressure"] > 0.0
+
+
+def test_full_diagnostics_signature_changes_when_validation_arrives_after_train(tmp_path: Path) -> None:
+    module = load_full_diag_module()
+    log_path = tmp_path / "late_val.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:7600000ms step_avg:2533.33ms",
+                "step:3250/20000 train_loss:2.1083 train_time:8627503ms step_avg:2654.62ms train_bpb:1.2377",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    train_only = module.parse_log(log_path)
+    train_only_signature = module.diagnostic_log_signature(train_only)
+    train_only_payload = module.run_once_without_wandb(
+        log_path=log_path,
+        output_json=tmp_path / "train_only.json",
+        target_bpb=1.2,
+        max_points=16,
+    )
+
+    assert train_only_payload["trainer/step"] == 3250
+    assert train_only_payload["fineweb_curve/latest_val_bpb"] == pytest.approx(1.2454)
+    assert train_only_payload["fineweb_curve/transfer_pairs"] == pytest.approx(0.0)
+
+    log_path.write_text(
+        log_path.read_text(encoding="utf-8")
+        + "step:3250/20000 val_loss:2.0836 val_bpb:1.2340 train_time:8627508ms step_avg:2654.62ms\n",
+        encoding="utf-8",
+    )
+    with_validation = module.parse_log(log_path)
+    validation_signature = module.diagnostic_log_signature(with_validation)
+    validation_payload = module.run_once_without_wandb(
+        log_path=log_path,
+        output_json=tmp_path / "with_validation.json",
+        target_bpb=1.2,
+        max_points=16,
+    )
+
+    assert validation_signature != train_only_signature
+    assert validation_payload["trainer/step"] == 3250
+    assert validation_payload["fineweb_curve/latest_val_bpb"] == pytest.approx(1.2340)
+    assert validation_payload["fineweb_curve/transfer_pairs"] == pytest.approx(1.0)
+    assert validation_payload["diagnostics/latest/val_bpb_for_transfer"] == pytest.approx(1.2340)
 
 
 def test_dense_wandb_mirror_loads_train_bpb_and_diagnostic_aliases(tmp_path: Path) -> None:

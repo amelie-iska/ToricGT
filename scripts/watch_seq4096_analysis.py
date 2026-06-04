@@ -401,6 +401,151 @@ def bpb_acceleration_report(
     }
 
 
+def validation_transfer_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Pair validation checkpoints with the latest train BPB at the same step."""
+
+    columns = [
+        "step",
+        "train_bpb_at_val",
+        "val_bpb",
+        "generalization_gap",
+        "train_drop_bpb",
+        "val_drop_bpb",
+        "transfer_efficiency",
+        "transfer_pressure",
+    ]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    work = frame.copy()
+    work["train_bpb_filled"] = pd.to_numeric(work.get("train_bpb_filled"), errors="coerce").ffill()
+    work["val_bpb"] = pd.to_numeric(work.get("val_bpb"), errors="coerce")
+    paired = work.dropna(subset=["val_bpb", "train_bpb_filled"]).copy()
+    if paired.empty:
+        return pd.DataFrame(columns=columns)
+    paired["train_bpb_at_val"] = paired["train_bpb_filled"]
+    paired["generalization_gap"] = paired["val_bpb"] - paired["train_bpb_at_val"]
+    paired["train_drop_bpb"] = paired["train_bpb_at_val"].shift(1) - paired["train_bpb_at_val"]
+    paired["val_drop_bpb"] = paired["val_bpb"].shift(1) - paired["val_bpb"]
+    train_drop = paired["train_drop_bpb"].to_numpy(dtype=float)
+    val_drop = paired["val_drop_bpb"].to_numpy(dtype=float)
+    efficiency = np.full_like(train_drop, np.nan, dtype=float)
+    valid = np.isfinite(train_drop) & np.isfinite(val_drop) & (train_drop > 1e-9)
+    efficiency[valid] = val_drop[valid] / train_drop[valid]
+    paired["transfer_efficiency"] = efficiency
+    paired["transfer_pressure"] = np.maximum(0.0, paired["train_drop_bpb"] - paired["val_drop_bpb"])
+    return paired[columns].reset_index(drop=True)
+
+
+def transfer_efficiency_report(frame: pd.DataFrame, target_bpb: float = 1.2) -> dict[str, Any]:
+    """Measure how much train BPB descent transfers to validation BPB."""
+
+    paired = validation_transfer_frame(frame)
+    if paired.empty:
+        return {
+            "transfer_regime": "insufficient_data",
+            "transfer_pairs": 0,
+            "latest_generalization_gap_bpb": float("nan"),
+            "generalization_gap_slope_per_100_steps": float("nan"),
+            "cumulative_train_drop_bpb": float("nan"),
+            "cumulative_val_drop_bpb": float("nan"),
+            "cumulative_transfer_efficiency": float("nan"),
+            "recent_train_drop_bpb": float("nan"),
+            "recent_val_drop_bpb": float("nan"),
+            "recent_transfer_efficiency": float("nan"),
+            "validation_transfer_pressure": float("nan"),
+            "transfer_recommendations": [
+                "Wait for paired train/validation BPB checkpoints before judging transfer."
+            ],
+        }
+
+    steps = paired["step"].to_numpy(dtype=float)
+    gaps = paired["generalization_gap"].to_numpy(dtype=float)
+    latest_gap = float(gaps[-1]) if len(gaps) else float("nan")
+    gap_slope = slope_per_steps(steps, gaps, unit_steps=100.0) if len(gaps) >= 2 else float("nan")
+    latest_val = float(paired["val_bpb"].iloc[-1])
+    latest_train = float(paired["train_bpb_at_val"].iloc[-1])
+
+    if len(paired) >= 2:
+        cumulative_train_drop = float(
+            paired["train_bpb_at_val"].iloc[0] - paired["train_bpb_at_val"].iloc[-1]
+        )
+        cumulative_val_drop = float(paired["val_bpb"].iloc[0] - paired["val_bpb"].iloc[-1])
+    else:
+        cumulative_train_drop = 0.0
+        cumulative_val_drop = 0.0
+    cumulative_efficiency = (
+        cumulative_val_drop / cumulative_train_drop
+        if cumulative_train_drop > 1e-9
+        else float("nan")
+    )
+    recent_train_drop = (
+        float(paired["train_drop_bpb"].dropna().iloc[-1])
+        if paired["train_drop_bpb"].notna().any()
+        else float("nan")
+    )
+    recent_val_drop = (
+        float(paired["val_drop_bpb"].dropna().iloc[-1])
+        if paired["val_drop_bpb"].notna().any()
+        else float("nan")
+    )
+    recent_efficiency = (
+        recent_val_drop / recent_train_drop
+        if math.isfinite(recent_train_drop) and recent_train_drop > 1e-9
+        else float("nan")
+    )
+    recent_pressure = (
+        max(0.0, recent_train_drop - recent_val_drop)
+        if math.isfinite(recent_train_drop) and math.isfinite(recent_val_drop)
+        else float("nan")
+    )
+
+    if latest_val <= target_bpb:
+        regime = "target_reached"
+    elif len(paired) < 2:
+        regime = "single_validation_pair"
+    elif math.isfinite(recent_efficiency) and recent_efficiency < 0.35 and latest_gap >= 0.04:
+        regime = "train_descent_validation_lag"
+    elif math.isfinite(gap_slope) and gap_slope > 0.0 and latest_gap >= 0.03:
+        regime = "generalization_gap_widening"
+    elif math.isfinite(cumulative_efficiency) and cumulative_efficiency >= 0.55 and latest_val > target_bpb:
+        regime = "healthy_transfer"
+    else:
+        regime = "watch_transfer"
+
+    recommendations: list[str] = []
+    if regime == "target_reached":
+        recommendations.append("Preserve this checkpoint before adding advanced reasoning or memory losses.")
+    elif regime in {"train_descent_validation_lag", "generalization_gap_widening"}:
+        recommendations.append(
+            "Treat low train BPB as insufficient; prefer batch/regularity and structural-transfer controls that improve validation BPB."
+        )
+        recommendations.append(
+            "Use topology/Slepian/toric/BGG sidecars to choose guarded restarts rather than raising the primary LR blindly."
+        )
+    elif regime == "healthy_transfer":
+        recommendations.append("Keep the current schedule while validation transfer remains healthy.")
+    else:
+        recommendations.append("Keep transfer checkpoints dense until two or more paired validation intervals are available.")
+
+    return {
+        "transfer_regime": regime,
+        "transfer_pairs": int(len(paired)),
+        "latest_transfer_step": int(steps[-1]),
+        "latest_train_bpb_at_validation": latest_train,
+        "latest_val_bpb_for_transfer": latest_val,
+        "latest_generalization_gap_bpb": latest_gap,
+        "generalization_gap_slope_per_100_steps": gap_slope,
+        "cumulative_train_drop_bpb": cumulative_train_drop,
+        "cumulative_val_drop_bpb": cumulative_val_drop,
+        "cumulative_transfer_efficiency": cumulative_efficiency,
+        "recent_train_drop_bpb": recent_train_drop,
+        "recent_val_drop_bpb": recent_val_drop,
+        "recent_transfer_efficiency": recent_efficiency,
+        "validation_transfer_pressure": recent_pressure,
+        "transfer_recommendations": recommendations,
+    }
+
+
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
@@ -845,6 +990,63 @@ def plot_bpb_phase_plane(frame: pd.DataFrame, out: Path, target_bpb: float) -> N
     plt.close(fig)
 
 
+def plot_bpb_transfer_efficiency(frame: pd.DataFrame, out: Path, report: dict[str, Any]) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    paired = validation_transfer_frame(frame)
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8), constrained_layout=True)
+
+    ax = axes[0]
+    intervals = paired.dropna(subset=["train_drop_bpb", "val_drop_bpb"]) if not paired.empty else paired
+    if not intervals.empty:
+        x = np.arange(len(intervals))
+        width = 0.36
+        labels = [str(int(row.step)) for row in intervals.itertuples()]
+        ax.bar(x - width / 2, intervals["train_drop_bpb"], width=width, color="#2563eb", label="train BPB drop")
+        ax.bar(x + width / 2, intervals["val_drop_bpb"], width=width, color="#dc2626", label="validation BPB drop")
+        ax.set_xticks(x, labels)
+        ax.legend(loc="best")
+    else:
+        ax.text(0.5, 0.5, "need at least two paired validation checkpoints", ha="center", va="center")
+        ax.set_xticks([])
+    ax.axhline(0.0, color="#111827", linewidth=0.9)
+    ax.set_ylabel("BPB drop over interval")
+    ax.set_title("Train-To-Validation BPB Transfer")
+    ax.grid(axis="y", alpha=0.25)
+
+    ax = axes[1]
+    if not paired.empty:
+        steps = paired["step"].to_numpy(dtype=float)
+        ax.plot(steps, paired["generalization_gap"], color="#7c3aed", marker="o", linewidth=1.8, label="generalization gap")
+        if "transfer_efficiency" in paired:
+            eff = paired[["step", "transfer_efficiency"]].replace([np.inf, -np.inf], np.nan).dropna()
+            if not eff.empty:
+                ax2 = ax.twinx()
+                ax2.plot(
+                    eff["step"],
+                    eff["transfer_efficiency"],
+                    color="#16a34a",
+                    marker="s",
+                    linewidth=1.6,
+                    label="transfer efficiency",
+                )
+                ax2.axhline(0.55, color="#16a34a", linestyle="--", linewidth=0.9, alpha=0.7)
+                ax2.set_ylabel("validation drop / train drop")
+                ax2.set_ylim(min(-0.2, float(eff["transfer_efficiency"].min()) - 0.1), max(1.2, float(eff["transfer_efficiency"].max()) + 0.1))
+                ax2.legend(loc="upper right")
+        ax.legend(loc="upper left")
+    else:
+        ax.text(0.5, 0.5, "transfer report unavailable", ha="center", va="center")
+        ax.set_xticks([])
+    ax.axhline(0.04, color="#dc2626", linestyle="--", linewidth=0.9, alpha=0.75)
+    ax.set_xlabel("validation checkpoint step")
+    ax.set_ylabel("validation BPB minus train BPB")
+    ax.set_title(f"Transfer Regime: {report.get('transfer_regime')}")
+    ax.grid(alpha=0.25)
+
+    fig.savefig(out, dpi=180)
+    plt.close(fig)
+
+
 def plot_diagnostic_proxy_geometry(payload: dict[str, Any], out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     preferred = [
@@ -1053,6 +1255,9 @@ def write_synopsis(
         f"- recent validation BPB slope per 100 steps: `{report.get('val_bpb_recent_slope_per_100_steps')}`",
         f"- validation-projected steps to target: `{report.get('projected_steps_to_target_from_val')}`",
         f"- validation-projected target step: `{report.get('projected_target_step_from_val')}`",
+        f"- train-to-validation transfer regime: `{report.get('transfer_regime')}`",
+        f"- recent transfer efficiency: `{report.get('recent_transfer_efficiency')}`",
+        f"- latest generalization gap BPB: `{report.get('latest_generalization_gap_bpb')}`",
         f"- structural recapture score: `{report.get('structural_recapture_score')}`",
         f"- structural recapture band: `{report.get('structural_recapture_band')}`",
         f"- structural control prior: `{report.get('structural_control_prior')}`",
@@ -1067,6 +1272,7 @@ def write_synopsis(
         "- `bpb/bpb_eta_to_target.png`: rolling projection of steps remaining to the target from train and validation BPB slopes.",
         "- `bpb/bpb_rockfall_dashboard.png`: combined intervention readout for deciding whether to leave the run alone or adjust scalar controls.",
         "- `bpb/bpb_phase_plane.png`: train BPB versus validation BPB trajectory.",
+        "- `bpb/bpb_transfer_efficiency.png`: Train-To-Validation BPB Transfer Efficiency, showing whether train BPB gains are becoming validation BPB gains.",
         "- `bpb/diagnostic_proxy_geometry.png`: topology, toric, Slepian, BGG, tropical, and complexity proxy readout.",
         "- `bpb/bpb_structural_recapture_map.png`: BPB Structural Recapture Map showing which advanced metrics should shape the next restart.",
         "- `training_adjustment_proposal.json` and `.md`: conservative intervention recommendation combining BPB trajectory, W&B metric statistics, and structural diagnostics.",
@@ -1076,6 +1282,11 @@ def write_synopsis(
     ]
     for item in report.get("recommendations", []):
         lines.append(f"- {item}")
+    transfer_items = report.get("transfer_recommendations", [])
+    if transfer_items:
+        lines.extend(["", "## Transfer Readout", ""])
+        for item in transfer_items:
+            lines.append(f"- {item}")
     lines.extend(
         [
             "",
@@ -1126,10 +1337,16 @@ def write_bpb_analysis_artifacts(
     checkpoint_step = extract_checkpoint_step(checkpoint_path) if checkpoint_path else None
     report = bpb_acceleration_report(frame, target_bpb=target_bpb, checkpoint_step=checkpoint_step)
     structural_report = structural_recapture_report(diagnostic_payload)
+    transfer_report = transfer_efficiency_report(frame, target_bpb=target_bpb)
     report.update(structural_report)
+    report.update(transfer_report)
+    report["recommendations"] = list(report.get("recommendations", [])) + list(
+        transfer_report.get("transfer_recommendations", [])
+    )
     frame.to_csv(bpb_dir / "seq4096_training_log_metrics.csv", index=False)
     write_json(bpb_dir / "bpb_acceleration_report.json", report)
     write_json(bpb_dir / "structural_recapture_report.json", structural_report)
+    write_json(bpb_dir / "bpb_transfer_efficiency_report.json", transfer_report)
     write_json(
         bpb_dir / "checkpoint_manifest.json",
         {
@@ -1150,6 +1367,7 @@ def write_bpb_analysis_artifacts(
     plot_bpb_eta_to_target(frame, bpb_dir / "bpb_eta_to_target.png", target_bpb)
     plot_bpb_rockfall_dashboard(frame, bpb_dir / "bpb_rockfall_dashboard.png", target_bpb, report)
     plot_bpb_phase_plane(frame, bpb_dir / "bpb_phase_plane.png", target_bpb)
+    plot_bpb_transfer_efficiency(frame, bpb_dir / "bpb_transfer_efficiency.png", report)
     plot_diagnostic_proxy_geometry(diagnostic_payload, bpb_dir / "diagnostic_proxy_geometry.png")
     plot_structural_recapture_map(report, bpb_dir / "bpb_structural_recapture_map.png")
     write_synopsis(output_dir, report, run_path, checkpoint_path, diagnostic_payload)
