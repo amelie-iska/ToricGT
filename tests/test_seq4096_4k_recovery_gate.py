@@ -814,6 +814,7 @@ def test_structural_pressure_recapture_keeps_muon_warmup_active_after_resume_ste
     )
 
     assert planned.policy == "structural_pressure_recapture"
+    assert planned.bigram_bias_lr < base.bigram_bias_lr
     assert planned.muon_momentum_warmup_steps > parsed.val_rows[-1].step
     assert any("resume-step-aware Muon warmup" in item for item in planned.rationale)
 

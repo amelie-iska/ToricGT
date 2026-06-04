@@ -1062,7 +1062,7 @@ def plan_metric_driven_recovery_controls(
                 scalar_lr=round(max(0.018, base.scalar_lr * 0.95), 6),
                 muon_momentum_warmup_steps=resume_step_aware_warmup_steps,
                 bigram_bias=True,
-                bigram_bias_lr=round(max(0.02, base.bigram_bias_lr * 0.50), 6),
+                bigram_bias_lr=round(max(0.012, base.bigram_bias_lr * 0.50), 6),
                 bigram_bias_init_from_data=False,
                 policy="structural_pressure_recapture",
                 advanced_metric_policy="toric_topology_slepian_guarded_bpb_recapture",
@@ -1078,7 +1078,7 @@ def plan_metric_driven_recovery_controls(
                     "dominant advanced-metric family is "
                     f"{dominant_family} pressure={dominant_pressure:.3f}",
                     "use resume-step-aware Muon warmup so structural recapture still changes the optimizer flow after a 3K checkpoint resume",
-                    "damp the lexical-head LR to improve validation transfer without injecting heavy structural losses",
+                    "damp tied-embedding and bigram LR to improve validation transfer without injecting heavy structural losses",
                 ),
             )
         if base.bigram_bias and base.tied_embed_lr >= 0.037:
