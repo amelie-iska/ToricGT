@@ -11,6 +11,7 @@ from scripts.watch_seq4096_4k_recovery import (
     load_preemptive_gate_risk,
     plan_metric_driven_recovery_controls,
     parse_seq4096_log,
+    should_hold_train_wave_for_validation_probe,
     should_preempt_for_gate_risk,
     select_recovery_validation,
     summarize_advanced_diagnostics,
@@ -441,6 +442,51 @@ def test_train_wave_analogue_risk_preempts_before_next_validation(tmp_path: Path
     assert risk.analogue_failed_count == 2
     assert risk.analogue_train_rmse_mean < 0.001
     assert should_preempt_for_gate_risk(risk)
+
+
+def test_train_wave_analogue_risk_can_be_held_for_hot_velocity_validation_probe(tmp_path: Path):
+    current_log = tmp_path / "current.log"
+    current_log.write_text(
+        "\n".join(
+            [
+                "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+                "step:3300/20000 train_loss:2.0719 train_time:1ms step_avg:1ms train_bpb:1.2409",
+                "step:3350/20000 train_loss:2.0315 train_time:1ms step_avg:1ms train_bpb:1.2064",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    failed = tmp_path / "failed_structural.log"
+    failed.write_text(
+        "\n".join(
+            [
+                "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+                "step:3300/20000 train_loss:2.0722 train_time:1ms step_avg:1ms train_bpb:1.2411",
+                "step:3350/20000 train_loss:2.0316 train_time:1ms step_avg:1ms train_bpb:1.2064",
+                "step:3500/20000 train_loss:2.1093 train_time:1ms step_avg:1ms train_bpb:1.2383",
+                "step:3500/20000 val_loss:2.0834 val_bpb:1.2339 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    risk = load_train_wave_analogue_risk(
+        current_log,
+        history_logs=[failed, failed],
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3350,
+        train_rmse_threshold=0.001,
+        min_failed_analogues=1,
+    )
+
+    assert risk is not None
+    assert risk.risk_source == "failed_train_wave_analogue"
+    assert should_preempt_for_gate_risk(risk)
+    assert not should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.0357)
+    assert should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.037485)
 
 
 def test_seq4096_log_parses_train_bpb_for_validation_gap_controls(tmp_path: Path):

@@ -357,6 +357,30 @@ def should_preempt_for_gate_risk(risk: PreemptiveGateRisk | None) -> bool:
     return bool(risk and risk.missed_projection_count >= risk.required_patience)
 
 
+def should_hold_train_wave_for_validation_probe(
+    risk: PreemptiveGateRisk | None,
+    *,
+    tied_embed_lr: float,
+    hot_probe_lr: float = 0.037,
+) -> bool:
+    """Let a high-velocity probe reach validation instead of relaunching again.
+
+    Failed train-wave analogues are useful early branch-rejection signals, but
+    repeated replays can otherwise ladder through near-identical 3250 restarts
+    without ever producing a validation point for the altered high-velocity
+    controls.  Once the tied embedding LR is in the explicit probe band, hold
+    the train-wave risk for the next validation checkpoint and let validation
+    velocity decide.
+    """
+
+    return bool(
+        risk
+        and risk.risk_source == "failed_train_wave_analogue"
+        and should_preempt_for_gate_risk(risk)
+        and float(tied_embed_lr) >= float(hot_probe_lr)
+    )
+
+
 def round_up_to_multiple(value: float, multiple: int) -> int:
     if multiple <= 0:
         return int(math.ceil(value))
@@ -1475,10 +1499,18 @@ def main() -> None:
             if args.preempt_on_projected_miss and not args.no_analogue_risk
             else None
         )
+        train_wave_validation_probe_hold = should_hold_train_wave_for_validation_probe(
+            train_wave_gate_risk,
+            tied_embed_lr=args.recovery_tied_embed_lr,
+        )
         preemptive_risk = projection_gate_risk
         if not should_preempt_for_gate_risk(preemptive_risk) and should_preempt_for_gate_risk(analogue_gate_risk):
             preemptive_risk = analogue_gate_risk
-        if not should_preempt_for_gate_risk(preemptive_risk) and should_preempt_for_gate_risk(train_wave_gate_risk):
+        if (
+            not train_wave_validation_probe_hold
+            and not should_preempt_for_gate_risk(preemptive_risk)
+            and should_preempt_for_gate_risk(train_wave_gate_risk)
+        ):
             preemptive_risk = train_wave_gate_risk
         preempt_for_gate_risk = (
             bool(latest_val)
@@ -1537,6 +1569,7 @@ def main() -> None:
             "projection_gate_risk": None if projection_gate_risk is None else projection_gate_risk.__dict__,
             "analogue_gate_risk": None if analogue_gate_risk is None else analogue_gate_risk.__dict__,
             "train_wave_gate_risk": None if train_wave_gate_risk is None else train_wave_gate_risk.__dict__,
+            "train_wave_validation_probe_hold": bool(train_wave_validation_probe_hold),
             "analogue_risk_enabled": not args.no_analogue_risk,
             "base_recovery_launch_controls": base_controls.launch_dict(),
             "recovery_launch_controls": recovery_controls.launch_dict(),
