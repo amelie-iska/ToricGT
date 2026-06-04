@@ -36,6 +36,7 @@ from toricgt.toric_geometry_tasks import (
     ToricGeometryConfig,
     empirical_toric_shadow_stats_np,
 )
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload, update_wandb_summary
 
 
 TRAIN_RE = re.compile(
@@ -969,7 +970,7 @@ def main() -> None:
             "diagnostic_scope": "fineweb_training_curve_proxy",
         },
     )
-    wandb.define_metric("*", step_metric="trainer/step")
+    configure_wandb_metrics(wandb)
     log_path = Path(args.log)
     seen_signatures: set[tuple[int, int, int, float, float, int, int]] = set()
     while True:
@@ -989,7 +990,7 @@ def main() -> None:
                     "progress/fraction": float(latest_step) / max(float(total), 1.0),
                 }
             )
-            wandb.log(payload)
+            wandb.log(organize_wandb_payload(payload))
             summary_payload = {
                 "diagnostics/latest_full_metrics_step": latest_step,
                 "metrics_status/model_hidden_state_available": 0.0,
@@ -1016,7 +1017,7 @@ def main() -> None:
                     if key.startswith("diagnostics/structural_recapture")
                 }
             )
-            run.summary.update(summary_payload)
+            update_wandb_summary(run, summary_payload)
             if sync_public_summary(
                 wandb,
                 entity=args.entity,

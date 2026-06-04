@@ -42,6 +42,7 @@ from toricgt.reasoning_geometry import (
     simplex_record,
     triangle_grid,
 )
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload
 
 from train_parameter_golf_random_order import build_loader, config_get, read_yaml
 
@@ -561,8 +562,11 @@ def main() -> None:
         import wandb
 
         run = wandb.init(project=args.wandb_project, name=args.wandb_run_name, config=vars(args))
+        configure_wandb_metrics(wandb, step_metric="reasoning_simplex/budget")
         for record in records:
-            run.log({f"reasoning_simplex/{key}": value for key, value in record.items()}, step=int(record["budget"]))
+            payload = {f"reasoning_simplex/{key}": value for key, value in record.items()}
+            payload["reasoning_simplex/budget"] = int(record["budget"])
+            run.log(organize_wandb_payload(payload), step=int(record["budget"]))
         run.finish()
 
 

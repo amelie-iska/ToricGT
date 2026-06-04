@@ -35,6 +35,7 @@ from toricgt.random_order_lm import (
     estimate_uncompressed_quantized_bytes,
     special_token_map_for_mode,
 )
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload
 
 
 TEXT_COLUMNS = (
@@ -3285,8 +3286,9 @@ def main() -> None:
             id=os.environ.get("WANDB_RUN_ID") or None,
             resume=os.environ.get("WANDB_RESUME") or None,
         )
+        configure_wandb_metrics(wandb)
         wandb_run.log(
-            {
+            organize_wandb_payload({
                 "trainer/step": float(start_step),
                 "metrics_status/all_metric_namespaces_always_on": 1.0,
                 "metrics_status/losses_follow_phase_curriculum": 1.0,
@@ -3304,7 +3306,7 @@ def main() -> None:
                 "fineweb_calibration/enabled": float(fineweb_calibration_enabled),
                 "fineweb_calibration/available": float(fineweb_calibration_available),
                 "fineweb_calibration/mix_ratio": float(fineweb_mix_ratio),
-            },
+            }),
             step=start_step,
         )
 
@@ -3451,13 +3453,13 @@ def main() -> None:
         )
         if wandb_run is not None:
             wandb_run.log(
-                {
+                organize_wandb_payload({
                     "data/stream_origin_step": float(stream_origin_step),
                     "data/stream_burnin_steps": float(stream_burnin_steps),
                     "data/stream_burnin_microbatches": float(burnin_result["microbatches"]),
                     "data/stream_burnin_medium_microbatches": float(burnin_result["medium_microbatches"]),
                     "data/stream_burnin_complex_microbatches": float(burnin_result["complex_microbatches"]),
-                },
+                }),
                 step=start_step,
             )
     qat_named_params = [
@@ -4725,11 +4727,11 @@ def main() -> None:
                 metrics["system/vram_reserved_gb"] = torch.cuda.memory_reserved(device) / 1e9
             last_train_metrics = dict(metrics)
             if wandb_run is not None:
-                wandb_run.log(metrics, step=step)
+                wandb_run.log(organize_wandb_payload(metrics), step=step)
         elif complexity_metrics:
             last_train_metrics.update(complexity_metrics)
             if wandb_run is not None:
-                wandb_run.log(complexity_metrics, step=step)
+                wandb_run.log(organize_wandb_payload(complexity_metrics), step=step)
 
         if step % eval_interval == 0 or step == steps:
             val_deterministic = evaluate(
@@ -4939,7 +4941,7 @@ def main() -> None:
             metrics.update(controller_metrics)
             print(json.dumps({"step": step, **metrics}, indent=2))
             if wandb_run is not None:
-                wandb_run.log(metrics, step=step)
+                wandb_run.log(organize_wandb_payload(metrics), step=step)
             if val_deterministic["bpb"] < best_val:
                 best_val = val_deterministic["bpb"]
                 best_checkpoint_path = checkpoint_dir / "best.pt"
@@ -4978,7 +4980,7 @@ def main() -> None:
                     )
                     print(json.dumps({"step": step, **publish_metrics}, indent=2))
                     if wandb_run is not None:
-                        wandb_run.log(publish_metrics, step=step)
+                        wandb_run.log(organize_wandb_payload(publish_metrics), step=step)
             model.train()
 
         if step % ckpt_interval == 0 or step == steps:
@@ -5011,14 +5013,14 @@ def main() -> None:
     print(json.dumps(asdict(final_artifact), indent=2))
     if wandb_run is not None:
         wandb_run.log(
-            {
+            organize_wandb_payload({
                 "trainer/step": float(steps),
                 "artifact/final_bytes": final_artifact.bytes_total,
                 "artifact/within_limit": float(final_artifact.within_limit),
                 "artifact/final_deployment_parameters": final_artifact.deployment_parameters,
                 "artifact/final_excluded_tensors": final_artifact.excluded_tensors,
                 "val/best_bpb": best_val,
-            },
+            }),
             step=steps,
         )
         wandb_run.finish()

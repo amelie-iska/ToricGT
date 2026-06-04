@@ -23,6 +23,7 @@ from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_ite
 from toricgt.graph_tokenizer import GraphBatch
 from toricgt.metrics import masked_mse
 from toricgt.model import ToricTokenGT
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload
 
 
 def set_seed(seed: int) -> None:
@@ -339,6 +340,7 @@ def main() -> None:
                 "expert_curriculum": curriculum_config or {"enabled": False},
             },
         )
+        configure_wandb_metrics(wandb, step_metric="train/step")
         run.summary["parameter_count"] = model.parameter_count()
         if curriculum_config is not None:
             run.summary["expert_curriculum_order"] = str(curriculum_config["expert_orders"])
@@ -480,7 +482,7 @@ def main() -> None:
                         "moe/combine_entropy": sum(item["combine_entropy"] for item in moe_diags) / len(moe_diags),
                     }
                 )
-            run.log(metrics)
+            run.log(organize_wandb_payload(metrics))
         if val_loader is not None and args.eval_every > 0 and (step + 1) % args.eval_every == 0:
             if assignment is not None:
                 model.set_active_soft_moe_experts(None)
@@ -489,7 +491,7 @@ def main() -> None:
                 model.set_active_soft_moe_experts([assignment.active_expert])
             pbar.write(f"validation step={step + 1} masked_mse={val_loss:.6f}")
             if run is not None:
-                run.log({"val/masked_mse": val_loss, "train/step": step + 1})
+                run.log(organize_wandb_payload({"val/masked_mse": val_loss, "train/step": step + 1}))
         if args.checkpoint_every > 0 and (step + 1) % args.checkpoint_every == 0:
             save_checkpoint(
                 ckpt_dir,

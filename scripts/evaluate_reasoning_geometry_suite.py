@@ -45,6 +45,8 @@ try:
 except ImportError:  # pragma: no cover - optional analysis dependency
     wandb = None
 
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload
+
 from evaluate_reasoning_simplex import blue_colormap, load_model
 from toricgt.complexity import random_order_complexity_metrics
 from toricgt.random_order_lm import DenseRandomOrderToricLM, byte_encode, random_order_batch
@@ -3953,6 +3955,7 @@ def main() -> None:
             config=vars(args),
             job_type="reasoning_geometry_analysis",
         )
+        configure_wandb_metrics(wandb)
         log_payload = {
             f"analysis/{key}": value
             for key, value in summary.items()
@@ -3975,7 +3978,7 @@ def main() -> None:
             image_paths.extend(sorted(output_dir.glob(pattern))[:8])
         for image_path in image_paths[:48]:
             log_payload[f"analysis/images/{image_path.stem}"] = wandb.Image(str(image_path))
-        wandb.log(log_payload)
+        wandb.log(organize_wandb_payload(log_payload))
         run.finish()
     print(json.dumps(summary, indent=2))
 

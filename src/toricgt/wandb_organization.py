@@ -1,0 +1,303 @@
+"""Canonical W&B metric organization for ToricGT training and analyses.
+
+The training stack emits many historical aliases because older watchdogs,
+analysis scripts, and notebooks consume them.  This module keeps those raw keys
+available while adding a smaller ordered dashboard surface:
+
+* ``00_primary/*``: the scorecard a human should inspect first.
+* ``01_oai/*`` through ``16_status/*``: stable, visible categories.
+* raw historical namespaces are marked hidden with ``wandb.define_metric``.
+"""
+
+from __future__ import annotations
+
+import math
+from collections import OrderedDict
+from typing import Any, Iterable, Mapping
+
+
+STEP_METRIC = "trainer/step"
+
+VISIBLE_METRIC_PREFIXES = (
+    "00_primary",
+    "01_oai",
+    "02_train",
+    "03_validation",
+    "04_losses",
+    "05_gflownet",
+    "06_graphcg",
+    "07_topology_geometry",
+    "08_toric_tropical_bgg",
+    "09_complexity",
+    "10_data_curriculum",
+    "11_artifact_size",
+    "12_optimization",
+    "13_system",
+    "14_phase_adaptive",
+    "15_analysis_media",
+    "16_status",
+)
+
+RAW_HIDDEN_PATTERNS = (
+    "train/*",
+    "val/*",
+    "oai_competition/*",
+    "fineweb/*",
+    "fineweb_calibration/*",
+    "openai_parameter_golf/*",
+    "competition/*",
+    "bpb/*",
+    "complexity/*",
+    "hessian/*",
+    "data/*",
+    "phase/*",
+    "adaptive/*",
+    "advanced_control/*",
+    "artifact/*",
+    "model/*",
+    "metrics_status/*",
+    "system/*",
+    "analysis/*",
+    "reasoning_simplex/*",
+    "topology/*",
+    "toric/*",
+    "tropical/*",
+    "bgg_category_o/*",
+    "category_o/*",
+    "koszul/*",
+    "slepian_pollak/*",
+    "checkpoint/*",
+    "trigger/*",
+    "progress/*",
+    "time/*",
+    "eval/*",
+    "audit/*",
+    "publish/*",
+    "diagnostics/*",
+)
+
+MINIMIZE_PATTERNS = (
+    "00_primary/*bpb*",
+    "01_oai/*bpb*",
+    "02_train/*loss*",
+    "03_validation/*loss*",
+    "04_losses/*",
+    "05_gflownet/*loss*",
+    "06_graphcg/*loss*",
+    "07_topology_geometry/*loss*",
+    "08_toric_tropical_bgg/*loss*",
+    "09_complexity/*ncd*",
+    "12_optimization/*grad_norm*",
+)
+
+MAXIMIZE_PATTERNS = (
+    "00_primary/*target_reached*",
+    "00_primary/*full_dataset*",
+    "05_gflownet/*diversity*",
+    "06_graphcg/*basis*",
+    "07_topology_geometry/*stability*",
+    "08_toric_tropical_bgg/*entropy*",
+    "10_data_curriculum/*active*",
+    "11_artifact_size/*within_limit*",
+)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+
+
+def _first_numeric(payload: Mapping[str, Any], keys: Iterable[str]) -> float | None:
+    for key in keys:
+        value = payload.get(key)
+        if _is_number(value):
+            return float(value)
+    return None
+
+
+def _add_first(out: OrderedDict[str, Any], payload: Mapping[str, Any], target: str, keys: Iterable[str]) -> None:
+    value = _first_numeric(payload, keys)
+    if value is not None:
+        out[target] = value
+
+
+def _clean_name(name: str) -> str:
+    return name.replace("//", "/").strip("/")
+
+
+def _category_alias(key: str) -> str | None:
+    if key == STEP_METRIC or key.startswith(tuple(prefix + "/" for prefix in VISIBLE_METRIC_PREFIXES)):
+        return None
+
+    if key.startswith("oai_competition/"):
+        rest = key.split("/", 1)[1]
+        rest = {
+            "bpb": "deterministic_bpb",
+            "loss": "deterministic_loss",
+            "best_bpb": "best_deterministic_bpb",
+        }.get(rest, rest)
+        return f"01_oai/{rest}"
+    if key.startswith("openai_parameter_golf/"):
+        return f"01_oai/openai_parameter_golf/{key.split('/', 1)[1]}"
+    if key.startswith("competition/"):
+        return f"01_oai/competition/{key.split('/', 1)[1]}"
+    if key.startswith("fineweb/"):
+        return f"01_oai/fineweb/{key.split('/', 1)[1]}"
+    if key.startswith("fineweb_calibration/"):
+        return f"01_oai/fineweb_calibration/{key.split('/', 1)[1]}"
+    if key.startswith("bpb/"):
+        return f"01_oai/bpb_alias/{key.split('/', 1)[1]}"
+
+    if key.startswith("val/"):
+        return f"03_validation/{key.split('/', 1)[1]}"
+
+    if key.startswith("train/"):
+        rest = key.split("/", 1)[1]
+        lower = rest.lower()
+        if "gflownet" in lower:
+            return f"05_gflownet/train/{rest}"
+        if "graphcg" in lower:
+            return f"06_graphcg/train/{rest}"
+        if any(token in lower for token in ("analogy", "topology", "hdbscan", "simplex", "trajectory")):
+            return f"07_topology_geometry/train/{rest}"
+        if any(token in lower for token in ("toric", "tropical", "bgg", "category_o", "koszul", "slepian", "pollak")):
+            return f"08_toric_tropical_bgg/train/{rest}"
+        if any(token in lower for token in ("loss", "entropy", "mtp", "contrastive")):
+            return f"04_losses/train/{rest}"
+        if any(token in lower for token in ("lr", "grad", "shock", "guard", "update")):
+            return f"12_optimization/train/{rest}"
+        return f"02_train/{rest}"
+
+    if key.startswith("complexity/"):
+        return f"09_complexity/{key.split('/', 1)[1]}"
+    if key.startswith("hessian/"):
+        return f"12_optimization/hessian/{key.split('/', 1)[1]}"
+    if key.startswith("data/"):
+        return f"10_data_curriculum/{key.split('/', 1)[1]}"
+    if key.startswith(("artifact/", "model/")):
+        return f"11_artifact_size/{key}"
+    if key.startswith(("phase/", "adaptive/", "advanced_control/", "eval/")):
+        return f"14_phase_adaptive/{key}"
+    if key.startswith(("time/", "progress/", "trainer/")):
+        return f"12_optimization/{key}"
+    if key.startswith("system/"):
+        return f"13_system/{key.split('/', 1)[1]}"
+    if key.startswith(("analysis/", "reasoning_simplex/")):
+        return f"15_analysis_media/{key}"
+    if key.startswith(("metrics_status/", "diagnostics/")):
+        return f"16_status/{key}"
+    if key.startswith(("topology/",)):
+        return f"07_topology_geometry/{key}"
+    if key.startswith(("toric/", "tropical/", "bgg_category_o/", "category_o/", "koszul/", "slepian_pollak/")):
+        return f"08_toric_tropical_bgg/{key}"
+    if key.startswith(("checkpoint/", "trigger/", "audit/", "publish/")):
+        return f"12_optimization/{key}"
+    return None
+
+
+def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
+    """Return the compact scorecard aliases for a W&B payload."""
+
+    out: OrderedDict[str, Any] = OrderedDict()
+    if STEP_METRIC in payload:
+        out[STEP_METRIC] = payload[STEP_METRIC]
+
+    _add_first(
+        out,
+        payload,
+        "00_primary/oai_bpb",
+        ("oai_competition/bpb", "openai_parameter_golf/bpb", "fineweb/val_bpb", "bpb/oai_competition"),
+    )
+    _add_first(
+        out,
+        payload,
+        "00_primary/oai_best_bpb",
+        ("oai_competition/best_bpb", "openai_parameter_golf/best_bpb", "fineweb/best_val_bpb", "bpb/best"),
+    )
+    _add_first(
+        out,
+        payload,
+        "00_primary/oai_test_time_scaled_bpb",
+        ("oai_competition/test_time_scaled_bpb", "competition/oai_test_time_scaled_bpb", "bpb/oai_competition_test_time_scaled"),
+    )
+    _add_first(out, payload, "00_primary/train_bpb", ("train/bpb", "fineweb/train_bpb", "bpb/train"))
+    _add_first(out, payload, "00_primary/validation_bpb", ("val/bpb", "fineweb/val_bpb", "bpb/val"))
+    _add_first(out, payload, "00_primary/train_loss", ("train/loss", "fineweb/train_loss"))
+    _add_first(out, payload, "00_primary/validation_loss", ("val/loss", "fineweb/val_loss"))
+    _add_first(out, payload, "00_primary/learning_rate", ("train/lr",))
+    _add_first(out, payload, "00_primary/grad_norm", ("train/grad_norm",))
+    _add_first(out, payload, "00_primary/nonfinite_update_skip", ("train/nonfinite_update_skip",))
+    _add_first(out, payload, "00_primary/full_dataset_active", ("data/full_curated_train_split_active",))
+    _add_first(out, payload, "00_primary/fineweb_mix_ratio", ("data/fineweb_mix_ratio", "fineweb_calibration/mix_ratio"))
+    _add_first(out, payload, "00_primary/gflownet_loss", ("train/gflownet_loss",))
+    _add_first(out, payload, "00_primary/graphcg_loss", ("train/graphcg_loss",))
+    _add_first(out, payload, "00_primary/toric_bgg_loss", ("train/toric_bgg_loss",))
+    _add_first(out, payload, "00_primary/koszul_persistence_loss", ("train/koszul_persistence_loss",))
+    _add_first(out, payload, "00_primary/slepian_pollak_loss", ("train/slepian_pollak_loss",))
+    _add_first(out, payload, "00_primary/trajectory_memory_loss", ("train/trajectory_memory_loss",))
+    _add_first(out, payload, "00_primary/complexity_prediction_target_ncd", ("complexity/val/prediction_target_ncd_lzma_mean",))
+    _add_first(out, payload, "00_primary/vram_allocated_gb", ("system/vram_allocated_gb",))
+    _add_first(out, payload, "00_primary/artifact_within_limit", ("artifact/within_limit",))
+
+    bytes_value = _first_numeric(payload, ("artifact/initial_bytes", "artifact/final_bytes"))
+    if bytes_value is not None:
+        out["00_primary/artifact_mb"] = bytes_value / 1_000_000.0
+
+    target = _first_numeric(payload, ("fineweb/target_bpb", "openai_parameter_golf/target_bpb", "bpb/target"))
+    oai_bpb = out.get("00_primary/oai_bpb")
+    if target is not None:
+        out["00_primary/target_bpb"] = target
+        if _is_number(oai_bpb):
+            out["00_primary/oai_gap_to_target"] = float(oai_bpb) - target
+            out["00_primary/oai_target_reached"] = float(float(oai_bpb) <= target)
+    return out
+
+
+def organize_wandb_payload(payload: Mapping[str, Any], *, include_raw: bool = True) -> OrderedDict[str, Any]:
+    """Add visible ordered aliases to a raw W&B payload.
+
+    Raw keys are retained by default for compatibility; ``configure_wandb_metrics``
+    marks those historical namespaces hidden in the W&B UI.
+    """
+
+    out = primary_metric_aliases(payload)
+    for key, value in payload.items():
+        alias = _category_alias(str(key))
+        if alias:
+            out.setdefault(_clean_name(alias), value)
+    if include_raw:
+        for key, value in payload.items():
+            out.setdefault(str(key), value)
+    return out
+
+
+def configure_wandb_metrics(wandb_module: Any, *, step_metric: str = STEP_METRIC) -> None:
+    """Define W&B metric visibility and summaries without failing training."""
+
+    def define(name: str, **kwargs: Any) -> None:
+        try:
+            wandb_module.define_metric(name, **kwargs)
+        except Exception:
+            pass
+
+    define(step_metric)
+    define("*", step_metric=step_metric, hidden=True)
+    for prefix in VISIBLE_METRIC_PREFIXES:
+        define(f"{prefix}/*", step_metric=step_metric, hidden=False)
+    for pattern in RAW_HIDDEN_PATTERNS:
+        define(pattern, step_metric=step_metric, hidden=True)
+    for pattern in MINIMIZE_PATTERNS:
+        define(pattern, step_metric=step_metric, hidden=False, summary="min", goal="minimize")
+    for pattern in MAXIMIZE_PATTERNS:
+        define(pattern, step_metric=step_metric, hidden=False, summary="max", goal="maximize")
+
+
+def update_wandb_summary(run: Any, payload: Mapping[str, Any]) -> None:
+    """Update a W&B summary with canonical aliases plus raw compatibility keys."""
+
+    try:
+        run.summary.update(organize_wandb_payload(payload))
+    except Exception:
+        try:
+            run.summary.update(dict(payload))
+        except Exception:
+            pass

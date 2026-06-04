@@ -16,6 +16,8 @@ import re
 import time
 from pathlib import Path
 
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload, update_wandb_summary
+
 
 TRAIN_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+train_loss:(?P<loss>[0-9.]+)"
@@ -314,7 +316,7 @@ def main() -> None:
             "monitor_kind": "fineweb_log_tail",
         },
     )
-    wandb.define_metric("*", step_metric="trainer/step")
+    configure_wandb_metrics(wandb)
     path = Path(args.log)
     diagnostics_json = Path(args.diagnostics_json) if args.diagnostics_json else default_diagnostics_json(path)
     gate_state_json = Path(args.gate_state_json) if args.gate_state_json else default_gate_state_json(args.run_id)
@@ -398,7 +400,7 @@ def main() -> None:
                     gate_payload = latest_gate_state_aliases(gate_state_json, step, args.target_bpb)
                     payload.update(diagnostic_payload)
                     payload.update(gate_payload)
-                    wandb.log(payload)
+                    wandb.log(organize_wandb_payload(payload))
                     summary_payload = {
                         "fineweb/train_bpb": train_bpb,
                         "fineweb/val_bpb": bpb,
@@ -431,7 +433,7 @@ def main() -> None:
                     }
                     summary_payload.update(diagnostic_payload)
                     summary_payload.update(gate_payload)
-                    run.summary.update(summary_payload)
+                    update_wandb_summary(run, summary_payload)
                     sync_public_summary(
                         wandb,
                         entity=args.entity,
@@ -504,7 +506,7 @@ def main() -> None:
                     gate_payload = latest_gate_state_aliases(gate_state_json, step, args.target_bpb)
                     payload.update(diagnostic_payload)
                     payload.update(gate_payload)
-                    wandb.log(payload)
+                    wandb.log(organize_wandb_payload(payload))
                     summary_payload = {
                         "fineweb/val_bpb": bpb,
                         "fineweb/best_val_bpb": best_bpb,
@@ -526,7 +528,7 @@ def main() -> None:
                     }
                     summary_payload.update(diagnostic_payload)
                     summary_payload.update(gate_payload)
-                    run.summary.update(summary_payload)
+                    update_wandb_summary(run, summary_payload)
                     sync_public_summary(
                         wandb,
                         entity=args.entity,
@@ -580,7 +582,7 @@ def main() -> None:
                     gate_payload = latest_gate_state_aliases(gate_state_json, step, args.target_bpb)
                     payload.update(diagnostic_payload)
                     payload.update(gate_payload)
-                    wandb.log(payload)
+                    wandb.log(organize_wandb_payload(payload))
                     summary_payload = {
                         "fineweb/train_loss": train_loss,
                         "train/loss": train_loss,
@@ -599,7 +601,7 @@ def main() -> None:
                         )
                     summary_payload.update(diagnostic_payload)
                     summary_payload.update(gate_payload)
-                    run.summary.update(summary_payload)
+                    update_wandb_summary(run, summary_payload)
                     sync_public_summary(
                         wandb,
                         entity=args.entity,
@@ -623,8 +625,8 @@ def main() -> None:
                     history_payload = dict(diagnostics_summary_pin)
                     history_payload["trainer/step"] = latest_seen_step
                     history_payload["progress/step"] = latest_seen_step
-                    wandb.log(history_payload)
-                run.summary.update(diagnostics_summary_pin)
+                    wandb.log(organize_wandb_payload(history_payload))
+                update_wandb_summary(run, diagnostics_summary_pin)
                 if sync_public_summary(
                     wandb,
                     entity=args.entity,

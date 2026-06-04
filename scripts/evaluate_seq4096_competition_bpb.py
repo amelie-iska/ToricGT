@@ -25,6 +25,9 @@ import torch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 DEFAULT_COMPACT_SCRIPT = (
     ROOT
     / "amelie-iska"
@@ -36,6 +39,8 @@ DEFAULT_COMPACT_SCRIPT = (
 )
 DEFAULT_TOKEN_GLOB = str(ROOT / "amelie-iska" / "parameter-golf" / "data" / "datasets" / "fineweb10B_sp1024" / "fineweb_val_*.bin")
 DEFAULT_TOKENIZER = str(ROOT / "amelie-iska" / "parameter-golf" / "data" / "tokenizers" / "fineweb_1024_bpe.model")
+
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -307,7 +312,8 @@ def log_to_wandb(run_path: str, metrics: dict[str, Any], step: int) -> None:
     numeric = {key: value for key, value in metrics.items() if isinstance(value, (int, float)) and math.isfinite(float(value))}
     run = wandb.init(entity=entity, project=project, id=run_id, resume="allow")
     try:
-        run.log(numeric, step=step)
+        configure_wandb_metrics(wandb)
+        run.log(organize_wandb_payload(numeric), step=step)
     finally:
         run.finish()
 

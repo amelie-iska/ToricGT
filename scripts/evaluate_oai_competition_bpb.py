@@ -37,6 +37,7 @@ from scripts.train_parameter_golf_random_order import (  # noqa: E402
     load_state_dict_with_optional_position_resize,
     read_yaml,
 )
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -90,7 +91,8 @@ def log_to_wandb(run_path: str, metrics: dict[str, float], step: int) -> None:
 
     run = wandb.init(entity=entity, project=project, id=run_id, resume="allow")
     try:
-        run.log(metrics, step=step)
+        configure_wandb_metrics(wandb)
+        run.log(organize_wandb_payload(metrics), step=step)
     finally:
         run.finish()
 

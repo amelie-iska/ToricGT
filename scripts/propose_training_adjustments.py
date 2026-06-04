@@ -20,6 +20,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload, update_wandb_summary
+
 
 ACTION_IDS = {
     "unknown": 0.0,
@@ -575,10 +577,11 @@ def maybe_log_wandb(run_path: str, proposal: dict[str, Any]) -> str:
             name=run_id,
             config={"analysis_control_source": "scripts/propose_training_adjustments.py"},
         )
-        wandb.define_metric("*", step_metric="trainer/step")
+        configure_wandb_metrics(wandb)
         payload = wandb_payload(proposal)
-        wandb.log(payload, step=int(proposal["bpb_gate"]["step"]))
-        run.summary.update({key: value for key, value in payload.items() if key.startswith("analysis_control/")})
+        organized = organize_wandb_payload(payload)
+        wandb.log(organized, step=int(proposal["bpb_gate"]["step"]))
+        update_wandb_summary(run, {key: value for key, value in payload.items() if key.startswith("analysis_control/")})
         run.finish()
         return ""
     except Exception as exc:  # pragma: no cover - W&B failures should not invalidate local analysis.

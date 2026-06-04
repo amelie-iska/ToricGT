@@ -26,6 +26,7 @@ from toricgt.complexity import (
     relative_complexity_reward,
     shortest_known_program_len,
 )
+from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload
 
 
 TEXT_FIELDS = ("text", "question", "reasoning", "solution", "answer")
@@ -136,7 +137,8 @@ def main() -> None:
         import wandb
 
         run = wandb.init(project=args.wandb_project, name=args.wandb_run_name, config=vars(args))
-        run.log(summary)
+        configure_wandb_metrics(wandb)
+        run.log(organize_wandb_payload(summary))
         run.finish()
 
 
