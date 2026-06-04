@@ -933,7 +933,8 @@ def plan_metric_driven_recovery_controls(
                 muon_momentum_warmup_steps=resume_step_aware_warmup_steps,
                 bigram_bias=True,
                 bigram_bias_lr=round(max(0.02, base.bigram_bias_lr * 0.50), 6),
-                bigram_bias_init_from_data=False,
+                bigram_bias_init_from_data=True,
+                bigram_bias_init_strength=max(base.bigram_bias_init_strength, 0.45),
                 policy="structural_pressure_recapture",
                 advanced_metric_policy="toric_topology_slepian_guarded_bpb_recapture",
                 rationale=(
@@ -948,7 +949,8 @@ def plan_metric_driven_recovery_controls(
                     "dominant advanced-metric family is "
                     f"{dominant_family} pressure={dominant_pressure:.3f}",
                     "use resume-step-aware Muon warmup so structural recapture still changes the optimizer flow after a 3K checkpoint resume",
-                    "damp the lexical-head LR to improve validation transfer without injecting heavy structural losses",
+                    "reinitialize the BPB-native bigram transition prior from training shards after checkpoint load",
+                    "damp the lexical-head LR after the transition-prior reset to improve validation transfer without injecting heavy structural losses",
                 ),
             )
         return replace(
