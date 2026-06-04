@@ -119,13 +119,24 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
         checkpoint_path=checkpoint,
         run_path="entity/project/run-id",
         diagnostic_payload={
-            "topology/topology_loss": 0.12,
+            "diagnostics/families/topology_available": 1.0,
+            "diagnostics/families/toric_available": 1.0,
+            "diagnostics/families/slepian_pollak_prolate_available": 1.0,
+            "topology/topology_loss": 1.20,
+            "topology/directed_topology_loss": 0.18,
             "toric/shadow_fan_cell_entropy": 0.84,
+            "toric/shadow_mean_bend": 1.80,
+            "toric/active_face_margin": -1.20,
+            "toric/slepian_leakage": 1.0,
             "tropical/bpb_recent_slope": -0.09,
+            "bgg_category_o/standard_leakage": 0.40,
+            "complexity/recent_full_log_ncd_lzma": 0.86,
         },
     )
 
     assert report["state"] == "near_target"
+    assert report["structural_recapture_score"] > 0.55
+    assert report["structural_recapture_band"] in {"guarded", "high"}
     assert (tmp_path / "analysis" / "bpb" / "bpb_descent_timeseries.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_descent_simplex.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_velocity.png").exists()
@@ -133,6 +144,8 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert (tmp_path / "analysis" / "bpb" / "bpb_drop_waterfall.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_eta_to_target.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_rockfall_dashboard.png").exists()
+    assert (tmp_path / "analysis" / "bpb" / "bpb_structural_recapture_map.png").exists()
+    assert (tmp_path / "analysis" / "bpb" / "structural_recapture_report.json").exists()
     phase_plan_path = tmp_path / "analysis" / "bpb" / "phase_bpb_breakdown_plan.json"
     assert phase_plan_path.exists()
     phase_plan = json.loads(phase_plan_path.read_text(encoding="utf-8"))
@@ -150,6 +163,8 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert "GoT/ToT/CoT" in synopsis
     assert "memory-retrieval BPB" in synopsis
     assert "analogical-transfer BPB" in synopsis
+    assert "structural recapture score" in synopsis
+    assert "BPB Structural Recapture Map" in synopsis
 
 
 def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
@@ -176,6 +191,13 @@ def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
     assert payload["diagnostics/latest/pollak_prolate_slepian_concentration"] == pytest.approx(
         payload["toric/slepian_concentration"]
     )
+    assert payload["diagnostics/latest/structural_recapture_score"] > 0.0
+    assert payload["diagnostics/structural_recapture_score"] == pytest.approx(
+        payload["diagnostics/latest/structural_recapture_score"]
+    )
+    assert "diagnostics/structural_recapture_components/topology_loss" in payload
+    assert "diagnostics/structural_recapture_components/slepian_leakage" in payload
+    assert payload["diagnostics/families/structural_recapture_available"] == 1.0
     assert payload["diagnostics/families/topology_available"] == 1.0
     assert payload["diagnostics/families/category_o_bgg_available"] == 1.0
     assert payload["diagnostics/families/koszul_persistence_available"] == 1.0

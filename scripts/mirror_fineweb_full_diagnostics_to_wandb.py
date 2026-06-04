@@ -185,6 +185,24 @@ def _tensor_value(value: torch.Tensor | float | int) -> float:
     return float(value)
 
 
+def bounded_pressure(value: float, scale: float, *, invert: bool = False, floor: float = 0.0) -> float:
+    if not math.isfinite(value) or scale <= 0.0:
+        return 0.0
+    measured = max(0.0, floor - value) if invert else max(0.0, value - floor)
+    return max(0.0, min(1.0, measured / float(scale)))
+
+
+def finite_metric(payload: dict[str, float], *keys: str, default: float = float("nan")) -> float:
+    for key in keys:
+        try:
+            value = float(payload.get(key, default))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            return value
+    return default
+
+
 def add_prefixed_torch_metrics(
     target: dict[str, float],
     metrics: dict[str, torch.Tensor],
@@ -311,6 +329,101 @@ def diagnostic_alias_payload(payload: dict[str, float]) -> dict[str, float]:
     return aliases
 
 
+def structural_recapture_payload(payload: dict[str, float]) -> dict[str, float]:
+    bpb_pressure = finite_metric(payload, "diagnostics/latest/bpb_intervention_pressure", default=0.0)
+    topology_loss = finite_metric(payload, "diagnostics/latest/topology_loss", "topology/topology_loss")
+    directed_topology_loss = finite_metric(
+        payload,
+        "diagnostics/latest/directed_topology_loss",
+        "topology/directed_topology_loss",
+    )
+    slepian_leakage = finite_metric(
+        payload,
+        "diagnostics/latest/slepian_leakage",
+        "diagnostics/latest/pollak_prolate_slepian_leakage",
+        "toric/slepian_leakage",
+    )
+    toric_margin = finite_metric(
+        payload,
+        "diagnostics/latest/toric_active_face_margin",
+        "toric/active_face_margin",
+    )
+    toric_bend = finite_metric(
+        payload,
+        "diagnostics/latest/toric_shadow_mean_bend",
+        "toric/shadow_mean_bend",
+    )
+    bgg_standard_leakage = finite_metric(
+        payload,
+        "diagnostics/latest/bgg_standard_leakage",
+        "bgg_category_o/standard_leakage",
+        default=0.0,
+    )
+    bgg_d2_residual = finite_metric(
+        payload,
+        "diagnostics/latest/bgg_d2_residual",
+        "bgg_category_o/d2_residual",
+        default=0.0,
+    )
+    complexity_ncd = finite_metric(
+        payload,
+        "diagnostics/latest/complexity_recent_full_log_ncd_lzma",
+        "complexity/recent_full_log_ncd_lzma",
+        default=0.0,
+    )
+    tropical_plateau = finite_metric(
+        payload,
+        "diagnostics/latest/tropical_bpb_plateau_pressure",
+        "tropical/bpb_plateau_pressure",
+        default=0.0,
+    )
+    components = {
+        "bpb_gap_pressure": 0.16 * bounded_pressure(bpb_pressure, 0.12),
+        "topology_loss": 0.17 * bounded_pressure(topology_loss, 1.40),
+        "directed_topology_loss": 0.12 * bounded_pressure(directed_topology_loss, 0.24),
+        "slepian_leakage": 0.13 * bounded_pressure(slepian_leakage, 1.0),
+        "toric_negative_margin": 0.13 * bounded_pressure(toric_margin, 2.0, invert=True),
+        "toric_shadow_bend": 0.12 * bounded_pressure(toric_bend, 2.0),
+        "bgg_standard_leakage": 0.08 * bounded_pressure(bgg_standard_leakage, 1.0),
+        "bgg_d2_residual": 0.04 * bounded_pressure(bgg_d2_residual, 0.10),
+        "complexity_ncd": 0.03 * bounded_pressure(complexity_ncd, 1.0),
+        "tropical_plateau": 0.02 * bounded_pressure(tropical_plateau, 0.04),
+    }
+    score = max(0.0, min(1.0, sum(components.values())))
+    families_available = any(
+        finite_metric(payload, key, default=0.0) >= 0.5
+        for key in (
+            "diagnostics/families/topology_available",
+            "diagnostics/families/toric_available",
+            "diagnostics/families/slepian_pollak_prolate_available",
+            "diagnostics/families/koszul_persistence_available",
+            "diagnostics/families/category_o_bgg_available",
+            "diagnostics/families/tropical_available",
+        )
+    )
+    if not families_available:
+        band_id = 1.0
+    elif score >= 0.75:
+        band_id = 4.0
+    elif score >= 0.50:
+        band_id = 3.0
+    elif score >= 0.30:
+        band_id = 2.0
+    else:
+        band_id = 0.0
+    out = {
+        "diagnostics/latest/structural_recapture_score": score,
+        "diagnostics/latest/structural_pressure_high": float(families_available and score >= 0.50),
+        "diagnostics/latest/structural_recapture_band_id": band_id,
+        "diagnostics/structural_recapture_score": score,
+        "diagnostics/structural_recapture_band_id": band_id,
+        "diagnostics/families/structural_recapture_available": 1.0 if families_available else 0.0,
+    }
+    for key, value in components.items():
+        out[f"diagnostics/structural_recapture_components/{key}"] = float(value)
+    return out
+
+
 def tropical_curve_metrics(values: np.ndarray, target_bpb: float) -> dict[str, float]:
     if values.size == 0:
         return {
@@ -432,6 +545,7 @@ def compute_payload(parsed: dict[str, Any], log_path: Path, target_bpb: float, m
     payload.update(complexity_metrics(log_path))
     add_fineweb_curve_status(payload, parsed, target_bpb)
     payload.update(diagnostic_alias_payload(payload))
+    payload.update(structural_recapture_payload(payload))
     return payload
 
 
@@ -552,6 +666,13 @@ def main() -> None:
             }
             summary_payload.update({key: value for key, value in payload.items() if key.startswith("diagnostics/latest/")})
             summary_payload.update({key: value for key, value in payload.items() if key.startswith("diagnostics/families/")})
+            summary_payload.update(
+                {
+                    key: value
+                    for key, value in payload.items()
+                    if key.startswith("diagnostics/structural_recapture")
+                }
+            )
             run.summary.update(summary_payload)
             if sync_public_summary(
                 wandb,
@@ -566,7 +687,8 @@ def main() -> None:
                 "wandb_full_diag "
                 f"step={latest_step} topology={payload.get('topology/topology_loss', 0.0):.4f} "
                 f"toric_entropy={payload.get('toric/shadow_fan_cell_entropy', 0.0):.4f} "
-                f"bgg_d2={payload.get('bgg_category_o/d2_residual', 0.0):.4f}",
+                f"bgg_d2={payload.get('bgg_category_o/d2_residual', 0.0):.4f} "
+                f"structural_recapture={payload.get('diagnostics/latest/structural_recapture_score', 0.0):.4f}",
                 flush=True,
             )
             seen_steps.add(latest_step)

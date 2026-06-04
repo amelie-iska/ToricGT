@@ -346,11 +346,18 @@ def diagnostic_available(payload: dict[str, Any] | None, key: str) -> bool:
     return diagnostic_float(payload, key, default=0.0) >= 0.5
 
 
+def bounded_pressure(value: float, scale: float, *, invert: bool = False, floor: float = 0.0) -> float:
+    if not math.isfinite(value) or scale <= 0.0:
+        return 0.0
+    measured = max(0.0, floor - value) if invert else max(0.0, value - floor)
+    return max(0.0, min(1.0, measured / float(scale)))
+
+
 def summarize_advanced_diagnostics(payload: dict[str, Any] | None) -> dict[str, Any]:
     """Compact structural-pressure summary used by the recovery controller."""
 
     if not payload:
-        return {"available": False, "structural_pressure_high": False}
+        return {"available": False, "structural_pressure_high": False, "structural_recapture_score": 0.0}
     bpb_pressure = diagnostic_float(payload, "diagnostics/latest/bpb_intervention_pressure", default=0.0)
     topology_loss = diagnostic_float(payload, "diagnostics/latest/topology_loss", "topology/topology_loss")
     directed_topology_loss = diagnostic_float(
@@ -380,6 +387,24 @@ def summarize_advanced_diagnostics(payload: dict[str, Any] | None) -> dict[str, 
         "diagnostics/latest/tropical_bpb_plateau_pressure",
         default=0.0,
     )
+    bgg_standard_leakage = diagnostic_float(
+        payload,
+        "diagnostics/latest/bgg_standard_leakage",
+        "bgg_category_o/standard_leakage",
+        default=0.0,
+    )
+    bgg_d2_residual = diagnostic_float(
+        payload,
+        "diagnostics/latest/bgg_d2_residual",
+        "bgg_category_o/d2_residual",
+        default=0.0,
+    )
+    complexity_ncd = diagnostic_float(
+        payload,
+        "diagnostics/latest/complexity_recent_full_log_ncd_lzma",
+        "complexity/recent_full_log_ncd_lzma",
+        default=0.0,
+    )
     family_available = any(
         diagnostic_available(payload, key)
         for key in (
@@ -391,22 +416,43 @@ def summarize_advanced_diagnostics(payload: dict[str, Any] | None) -> dict[str, 
             "diagnostics/families/tropical_available",
         )
     )
+    recapture_components = {
+        "bpb_gap_pressure": 0.16 * bounded_pressure(bpb_pressure, 0.12),
+        "topology_loss": 0.17 * bounded_pressure(topology_loss, 1.40),
+        "directed_topology_loss": 0.12 * bounded_pressure(directed_topology_loss, 0.24),
+        "slepian_leakage": 0.13 * bounded_pressure(slepian_leakage, 1.0),
+        "toric_negative_margin": 0.13 * bounded_pressure(toric_margin, 2.0, invert=True),
+        "toric_shadow_bend": 0.12 * bounded_pressure(toric_bend, 2.0),
+        "bgg_standard_leakage": 0.08 * bounded_pressure(bgg_standard_leakage, 1.0),
+        "bgg_d2_residual": 0.04 * bounded_pressure(bgg_d2_residual, 0.10),
+        "complexity_ncd": 0.03 * bounded_pressure(complexity_ncd, 1.0),
+        "tropical_plateau": 0.02 * bounded_pressure(tropical_plateau, 0.04),
+    }
+    structural_recapture_score = max(0.0, min(1.0, sum(recapture_components.values())))
     structural_pressure_high = bool(
         family_available
         and (
-            bpb_pressure >= 0.08
-            or (math.isfinite(topology_loss) and topology_loss >= 1.0)
-            or (math.isfinite(directed_topology_loss) and directed_topology_loss >= 0.17)
-            or (math.isfinite(slepian_leakage) and slepian_leakage >= 0.95)
-            or (math.isfinite(toric_margin) and toric_margin <= -1.0)
-            or (math.isfinite(toric_bend) and toric_bend >= 1.5)
-            or tropical_plateau >= 0.01
+            structural_recapture_score >= 0.50
+            or bpb_pressure >= 0.16
         )
     )
+    if not family_available:
+        structural_band = "bpb_curve_only"
+    elif structural_recapture_score >= 0.75:
+        structural_band = "high"
+    elif structural_recapture_score >= 0.50:
+        structural_band = "guarded"
+    elif structural_recapture_score >= 0.30:
+        structural_band = "watch"
+    else:
+        structural_band = "low"
     return {
         "available": True,
         "source_path": str(payload.get("_source_path", "")),
         "structural_pressure_high": structural_pressure_high,
+        "structural_recapture_score": structural_recapture_score,
+        "structural_recapture_band": structural_band,
+        "structural_recapture_components": recapture_components,
         "bpb_intervention_pressure": bpb_pressure,
         "topology_loss": topology_loss,
         "directed_topology_loss": directed_topology_loss,
@@ -414,6 +460,9 @@ def summarize_advanced_diagnostics(payload: dict[str, Any] | None) -> dict[str, 
         "toric_active_face_margin": toric_margin,
         "toric_shadow_mean_bend": toric_bend,
         "tropical_bpb_plateau_pressure": tropical_plateau,
+        "bgg_standard_leakage": bgg_standard_leakage,
+        "bgg_d2_residual": bgg_d2_residual,
+        "complexity_recent_full_log_ncd_lzma": complexity_ncd,
     }
 
 
@@ -514,6 +563,8 @@ def plan_metric_driven_recovery_controls(
                 ),
             )
         if base.bigram_bias and diagnostics_summary.get("structural_pressure_high"):
+            structural_score = finite_float(diagnostics_summary.get("structural_recapture_score"), default=0.0)
+            structural_band = str(diagnostics_summary.get("structural_recapture_band", "unknown"))
             return replace(
                 base,
                 train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
@@ -534,6 +585,7 @@ def plan_metric_driven_recovery_controls(
                     f"directed_topology={diagnostics_summary.get('directed_topology_loss')}, "
                     f"slepian_leakage={diagnostics_summary.get('slepian_leakage')}, "
                     f"toric_margin={diagnostics_summary.get('toric_active_face_margin')}",
+                    f"structural recapture score={structural_score:.3f} band={structural_band}",
                     "damp the lexical-head LR and lengthen warmup to improve validation transfer without injecting heavy structural losses",
                 ),
             )

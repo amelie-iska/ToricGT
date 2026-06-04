@@ -406,6 +406,150 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
 
+def finite_payload_value(payload: dict[str, Any], *keys: str, default: float = float("nan")) -> float:
+    for key in keys:
+        if key not in payload:
+            continue
+        try:
+            value = float(payload.get(key))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            return value
+    return default
+
+
+def bounded_pressure(value: float, scale: float, *, invert: bool = False, floor: float = 0.0) -> float:
+    if not math.isfinite(value) or scale <= 0.0:
+        return 0.0
+    measured = max(0.0, floor - value) if invert else max(0.0, value - floor)
+    return max(0.0, min(1.0, measured / float(scale)))
+
+
+def structural_recapture_report(diagnostic_payload: dict[str, Any]) -> dict[str, Any]:
+    """Score whether advanced diagnostics should shape the next BPB restart."""
+
+    if not diagnostic_payload:
+        return {
+            "structural_recapture_score": 0.0,
+            "structural_recapture_band": "missing",
+            "structural_control_prior": "wait_for_diagnostics",
+            "structural_recapture_components": {},
+        }
+    bpb_pressure = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/bpb_intervention_pressure",
+        default=0.0,
+    )
+    topology_loss = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/topology_loss",
+        "topology/topology_loss",
+    )
+    directed_topology_loss = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/directed_topology_loss",
+        "topology/directed_topology_loss",
+    )
+    slepian_leakage = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/slepian_leakage",
+        "diagnostics/latest/pollak_prolate_slepian_leakage",
+        "toric/slepian_leakage",
+    )
+    toric_margin = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/toric_active_face_margin",
+        "toric/active_face_margin",
+    )
+    toric_bend = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/toric_shadow_mean_bend",
+        "toric/shadow_mean_bend",
+    )
+    bgg_standard_leakage = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/bgg_standard_leakage",
+        "bgg_category_o/standard_leakage",
+        default=0.0,
+    )
+    bgg_d2_residual = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/bgg_d2_residual",
+        "bgg_category_o/d2_residual",
+        default=0.0,
+    )
+    complexity_ncd = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/complexity_recent_full_log_ncd_lzma",
+        "complexity/recent_full_log_ncd_lzma",
+        default=0.0,
+    )
+    tropical_plateau = finite_payload_value(
+        diagnostic_payload,
+        "diagnostics/latest/tropical_bpb_plateau_pressure",
+        "tropical/bpb_plateau_pressure",
+        default=0.0,
+    )
+    components = {
+        "bpb_gap_pressure": 0.16 * bounded_pressure(bpb_pressure, 0.12),
+        "topology_loss": 0.17 * bounded_pressure(topology_loss, 1.40),
+        "directed_topology_loss": 0.12 * bounded_pressure(directed_topology_loss, 0.24),
+        "slepian_leakage": 0.13 * bounded_pressure(slepian_leakage, 1.0),
+        "toric_negative_margin": 0.13 * bounded_pressure(toric_margin, 2.0, invert=True),
+        "toric_shadow_bend": 0.12 * bounded_pressure(toric_bend, 2.0),
+        "bgg_standard_leakage": 0.08 * bounded_pressure(bgg_standard_leakage, 1.0),
+        "bgg_d2_residual": 0.04 * bounded_pressure(bgg_d2_residual, 0.10),
+        "complexity_ncd": 0.03 * bounded_pressure(complexity_ncd, 1.0),
+        "tropical_plateau": 0.02 * bounded_pressure(tropical_plateau, 0.04),
+    }
+    score = max(0.0, min(1.0, sum(components.values())))
+    families_available = any(
+        finite_payload_value(diagnostic_payload, key, default=0.0) >= 0.5
+        for key in (
+            "diagnostics/families/topology_available",
+            "diagnostics/families/toric_available",
+            "diagnostics/families/slepian_pollak_prolate_available",
+            "diagnostics/families/koszul_persistence_available",
+            "diagnostics/families/category_o_bgg_available",
+            "diagnostics/families/tropical_available",
+        )
+    )
+    if not families_available:
+        band = "bpb_curve_only"
+        control_prior = "hold_primary_bpb_clean_until_structural_payload_available"
+    elif score >= 0.75:
+        band = "high"
+        control_prior = "restart_guarded_damp_lr_use_structural_sidecar_transfer"
+    elif score >= 0.50:
+        band = "guarded"
+        control_prior = "restart_guarded_warmup_bigram_lr_damping"
+    elif score >= 0.30:
+        band = "watch"
+        control_prior = "monitor_do_not_add_heavy_structural_losses"
+    else:
+        band = "low"
+        control_prior = "prefer_bpb_velocity_or_validation_gap_controls"
+    return {
+        "structural_recapture_score": score,
+        "structural_recapture_band": band,
+        "structural_control_prior": control_prior,
+        "structural_recapture_components": components,
+        "structural_raw_signals": {
+            "bpb_intervention_pressure": bpb_pressure,
+            "topology_loss": topology_loss,
+            "directed_topology_loss": directed_topology_loss,
+            "slepian_leakage": slepian_leakage,
+            "toric_active_face_margin": toric_margin,
+            "toric_shadow_mean_bend": toric_bend,
+            "bgg_standard_leakage": bgg_standard_leakage,
+            "bgg_d2_residual": bgg_d2_residual,
+            "complexity_recent_full_log_ncd_lzma": complexity_ncd,
+            "tropical_bpb_plateau_pressure": tropical_plateau,
+        },
+    }
+
+
 def plot_bpb_timeseries(frame: pd.DataFrame, out: Path, target_bpb: float) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(11, 6), constrained_layout=True)
@@ -742,6 +886,55 @@ def plot_diagnostic_proxy_geometry(payload: dict[str, Any], out: Path) -> None:
     plt.close(fig)
 
 
+def plot_structural_recapture_map(report: dict[str, Any], out: Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    components = report.get("structural_recapture_components") or {}
+    components = {
+        str(key): float(value)
+        for key, value in components.items()
+        if isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+    score = float(report.get("structural_recapture_score") or 0.0)
+    band = str(report.get("structural_recapture_band") or "unknown")
+    prior = str(report.get("structural_control_prior") or "unknown")
+    fig, axes = plt.subplots(1, 2, figsize=(13, max(5, 0.45 * max(6, len(components)))), constrained_layout=True)
+
+    ax = axes[0]
+    ax.barh([0], [score], color="#2563eb")
+    ax.axvline(0.30, color="#f59e0b", linestyle="--", linewidth=1.0, label="watch")
+    ax.axvline(0.50, color="#dc2626", linestyle="--", linewidth=1.0, label="guarded")
+    ax.axvline(0.75, color="#7c2d12", linestyle="--", linewidth=1.0, label="high")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_yticks([0], ["score"])
+    ax.set_xlabel("bounded structural recapture score")
+    ax.set_title(f"Structural Control Band: {band}")
+    ax.set_ylim(-0.9, 0.9)
+    ax.grid(axis="x", alpha=0.25)
+    ax.legend(loc="lower right", fontsize=8)
+    ax.text(0.02, -0.45, prior, ha="left", va="top", fontsize=9, wrap=True)
+
+    ax = axes[1]
+    if components:
+        ordered = sorted(components.items(), key=lambda item: item[1], reverse=True)
+        labels = [item[0] for item in ordered]
+        xs = [item[1] for item in ordered]
+        colors = ["#dc2626" if value >= 0.10 else "#2563eb" for value in xs]
+        y = np.arange(len(ordered))
+        ax.barh(y, xs, color=colors)
+        ax.set_yticks(y, labels, fontsize=8)
+        ax.invert_yaxis()
+        ax.set_xlabel("weighted contribution")
+    else:
+        ax.text(0.5, 0.5, "structural diagnostics unavailable", ha="center", va="center")
+        ax.set_xticks([])
+        ax.set_yticks([])
+    ax.set_title("Score Components")
+    ax.grid(axis="x", alpha=0.25)
+    fig.suptitle("BPB Structural Recapture Map", fontsize=15)
+    fig.savefig(out, dpi=180)
+    plt.close(fig)
+
+
 def phase_bpb_breakdown_plan(target_bpb: float) -> dict[str, Any]:
     return {
         "target_bpb": float(target_bpb),
@@ -860,6 +1053,9 @@ def write_synopsis(
         f"- recent validation BPB slope per 100 steps: `{report.get('val_bpb_recent_slope_per_100_steps')}`",
         f"- validation-projected steps to target: `{report.get('projected_steps_to_target_from_val')}`",
         f"- validation-projected target step: `{report.get('projected_target_step_from_val')}`",
+        f"- structural recapture score: `{report.get('structural_recapture_score')}`",
+        f"- structural recapture band: `{report.get('structural_recapture_band')}`",
+        f"- structural control prior: `{report.get('structural_control_prior')}`",
         "",
         "## Plots",
         "",
@@ -872,6 +1068,7 @@ def write_synopsis(
         "- `bpb/bpb_rockfall_dashboard.png`: combined intervention readout for deciding whether to leave the run alone or adjust scalar controls.",
         "- `bpb/bpb_phase_plane.png`: train BPB versus validation BPB trajectory.",
         "- `bpb/diagnostic_proxy_geometry.png`: topology, toric, Slepian, BGG, tropical, and complexity proxy readout.",
+        "- `bpb/bpb_structural_recapture_map.png`: BPB Structural Recapture Map showing which advanced metrics should shape the next restart.",
         "- `training_adjustment_proposal.json` and `.md`: conservative intervention recommendation combining BPB trajectory, W&B metric statistics, and structural diagnostics.",
         "",
         "## Recommendations",
@@ -928,8 +1125,11 @@ def write_bpb_analysis_artifacts(
     frame = training_dataframe(parsed, target_bpb=target_bpb)
     checkpoint_step = extract_checkpoint_step(checkpoint_path) if checkpoint_path else None
     report = bpb_acceleration_report(frame, target_bpb=target_bpb, checkpoint_step=checkpoint_step)
+    structural_report = structural_recapture_report(diagnostic_payload)
+    report.update(structural_report)
     frame.to_csv(bpb_dir / "seq4096_training_log_metrics.csv", index=False)
     write_json(bpb_dir / "bpb_acceleration_report.json", report)
+    write_json(bpb_dir / "structural_recapture_report.json", structural_report)
     write_json(
         bpb_dir / "checkpoint_manifest.json",
         {
@@ -951,6 +1151,7 @@ def write_bpb_analysis_artifacts(
     plot_bpb_rockfall_dashboard(frame, bpb_dir / "bpb_rockfall_dashboard.png", target_bpb, report)
     plot_bpb_phase_plane(frame, bpb_dir / "bpb_phase_plane.png", target_bpb)
     plot_diagnostic_proxy_geometry(diagnostic_payload, bpb_dir / "diagnostic_proxy_geometry.png")
+    plot_structural_recapture_map(report, bpb_dir / "bpb_structural_recapture_map.png")
     write_synopsis(output_dir, report, run_path, checkpoint_path, diagnostic_payload)
     return report
 

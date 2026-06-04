@@ -372,6 +372,8 @@ def test_advanced_diagnostics_loader_summarizes_structural_pressure(tmp_path: Pa
 
     assert summary["available"] is True
     assert summary["structural_pressure_high"] is True
+    assert summary["structural_recapture_score"] >= 0.50
+    assert summary["structural_recapture_band"] in {"guarded", "high"}
     assert summary["bpb_intervention_pressure"] == 0.12
     assert summary["topology_loss"] == 1.10
     assert summary["slepian_leakage"] == 1.0
@@ -429,6 +431,7 @@ def test_metric_controls_use_structural_pressure_after_bigram_is_already_enabled
     assert planned.scalar_lr <= base.scalar_lr
     assert planned.muon_momentum_warmup_steps > base.muon_momentum_warmup_steps
     assert planned.advanced_metric_policy == "toric_topology_slepian_guarded_bpb_recapture"
+    assert any("structural recapture score" in item for item in planned.rationale)
 
 
 def test_recovery_launch_exports_bigram_bias_env_when_enabled(tmp_path: Path):
