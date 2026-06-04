@@ -25,21 +25,25 @@ Current validated status:
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
-  `toricgt_seq4096_4k_recovery_r13_20260604T002649Z`.
-  It is a compact-id, W&B-reporting lexical-transition-bias recapture from the
-  R10 step-3000 checkpoint after repeated tied-LR recaptures stayed flat at
-  the step-3250 validation gate. R13 resumes from validation BPB
-  `1.245367828628834`, resets optimizer/RNG/loader, uses `983040` train tokens
-  per step, `TIED_EMBED_LR=0.04`, matrix/scalar LR held at `0.02`, Muon
-  momentum `0.985`, gradient clipping `1.0`, and a zero-initialized learned
-  `BIGRAM_BIAS=1` head with `BIGRAM_BIAS_LR=0.05`. Data-initialized bigram
-  bias was tested in R12 and rejected because it worsened initial validation
-  BPB to `1.2680636231146791`. R13's W&B run is
-  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r13_20260604T002649Z>.
-  Latest confirmed W&B summary while this README was refreshed: trainer step
-  `3033`, train BPB `1.208815731785608`, validation/OpenAI BPB
-  `1.245367828628834`, target gap `0.04536782862883415`, target not yet
-  reached.
+  `toricgt_seq4096_4k_recovery_r14_20260604T004756Z`.
+  R14 is a compact-id, W&B-reporting structural-pressure recovery launched
+  from the R13 step-3000 checkpoint after R13's zero-initialized bigram
+  recovery improved validation BPB to `1.2418272257606944` at step 3250 but
+  still projected the <1.2 target at about step `6152.8`, beyond the 4K gate.
+  R14 resets optimizer/RNG/loader, uses `983040` train tokens per step,
+  `TIED_EMBED_LR=0.037`, matrix/scalar LR `0.019`, Muon momentum `0.985`,
+  warmup `650`, gradient clipping `1.0`, and keeps the zero-initialized learned
+  `BIGRAM_BIAS=1` head while damping `BIGRAM_BIAS_LR` to `0.025`. The launch
+  was chosen because R13's diagnostics showed high structural pressure:
+  topology loss `1.109377384185791`, directed topology loss
+  `0.17621713876724243`, Slepian/Pollak leakage `1.0`, toric active-face
+  margin `-1.73760986328125`, and toric shadow mean bend `1.947449803352356`.
+  Data-initialized bigram bias was tested in R12 and rejected because it
+  worsened initial validation BPB to `1.2680636231146791`. R14's W&B run is
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r14_20260604T004756Z>.
+  Latest confirmed R14 status while this README was refreshed: W&B is enabled,
+  the run is loading/running from the 3000-step checkpoint, and scalar BPB
+  summaries had not yet settled.
 - Seq4096 recovery automation now uses metric-driven launch controls. Repeated
   validation ETA misses trigger pre-gate recovery; projected-miss cases use a
   small tied-embedding LR lift plus higher effective batch, while train-low /
@@ -49,8 +53,13 @@ Current validated status:
   decision diagnostics until the <1.2 BPB competition checkpoint is preserved.
   At the tied-LR cap, the recovery watcher now switches to a zero-initialized
   bigram transition-bias recapture instead of repeating the same LR-only
-  restart. Recovery run ids are compacted to avoid W&B `CommError` failures
-  from recursively long names.
+  restart. If the bigram head is already enabled and the latest full
+  diagnostics show high topology/toric/Slepian/tropical pressure, the watcher
+  now switches to a guarded structural-pressure recovery: it stops escalating
+  the tied embedding LR cap, damps the bigram LR, lengthens warmup, and keeps
+  heavy structural losses out of the compact competition scorer. Recovery run
+  ids are compacted to avoid W&B `CommError` failures from recursively long
+  names.
 - Advanced reasoning/memory branch: the live auxiliary run is
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   It trains the random-order ToricGT adapter with explicit graph-of-thought,
