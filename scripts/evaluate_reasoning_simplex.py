@@ -20,7 +20,7 @@ import csv
 import json
 import math
 import time
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -111,48 +111,62 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def config_from_yaml(config_path: str | Path) -> RandomOrderLMConfig:
+    file_config = read_yaml(config_path)
+    return RandomOrderLMConfig(
+        vocab_size=config_get(file_config, "model", "vocab_size", 260),
+        max_seq_len=config_get(file_config, "model", "max_seq_len", 1024),
+        d_model=config_get(file_config, "model", "d_model", 384),
+        num_heads=config_get(file_config, "model", "num_heads", 6),
+        num_layers=config_get(file_config, "model", "num_layers", 7),
+        recurrent_passes=config_get(file_config, "model", "recurrent_passes", 2),
+        ffn_multiplier=config_get(file_config, "model", "ffn_multiplier", 4),
+        dropout=config_get(file_config, "model", "dropout", 0.1),
+        attention=config_get(file_config, "model", "attention", "hybrid"),
+        ring_block_size=config_get(file_config, "model", "ring_block_size", 256),
+        seed=config_get(file_config, "training", "seed", 17),
+        polarquant_kv_bits=config_get(file_config, "model", "polarquant_kv_bits", 8),
+        polarquant_train=config_get(file_config, "model", "polarquant_train", False),
+        use_gflownet_policy=config_get(file_config, "model", "use_gflownet_policy", True),
+        gflownet_num_actions=config_get(file_config, "model", "gflownet_num_actions", 16),
+        gflownet_hidden_dim=config_get(file_config, "model", "gflownet_hidden_dim", 192),
+        gflownet_action_scale=config_get(file_config, "model", "gflownet_action_scale", 0.06),
+        use_bigram_hash=config_get(file_config, "model", "use_bigram_hash", True),
+        bigram_hash_buckets=config_get(file_config, "model", "bigram_hash_buckets", 4096),
+        bigram_hash_weight=config_get(file_config, "model", "bigram_hash_weight", 0.35),
+        use_caseops_features=config_get(file_config, "model", "use_caseops_features", True),
+        caseops_weight=config_get(file_config, "model", "caseops_weight", 0.35),
+        use_smear_gate=config_get(file_config, "model", "use_smear_gate", True),
+        smear_temperature_min=config_get(file_config, "model", "smear_temperature_min", 0.55),
+        smear_temperature_max=config_get(file_config, "model", "smear_temperature_max", 1.75),
+        use_toric_memory=config_get(file_config, "model", "use_toric_memory", True),
+        toric_memory_slots=config_get(file_config, "model", "toric_memory_slots", 32),
+        toric_memory_weight=config_get(file_config, "model", "toric_memory_weight", 0.08),
+        aux_mtp_offsets=config_get(file_config, "model", "aux_mtp_offsets", 2),
+        contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
+        trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
+        target_artifact_bytes=config_get(file_config, "model", "target_artifact_bytes", 15_600_000),
+    )
+
+
+def config_from_checkpoint_or_yaml(payload: dict[str, Any] | None, config_path: str | Path) -> RandomOrderLMConfig:
+    raw_config = payload.get("config") if isinstance(payload, dict) else None
+    if isinstance(raw_config, RandomOrderLMConfig):
+        return raw_config
+    if isinstance(raw_config, dict) and raw_config:
+        allowed = {field.name for field in fields(RandomOrderLMConfig)}
+        return RandomOrderLMConfig(**{key: value for key, value in raw_config.items() if key in allowed})
+    return config_from_yaml(config_path)
+
+
 def load_model(args: argparse.Namespace) -> DenseRandomOrderToricLM:
     payload: dict[str, Any] | None = None
     checkpoint = Path(args.checkpoint)
     if checkpoint.exists() and not args.random_init:
         payload = torch.load(checkpoint, map_location="cpu")
-        cfg = RandomOrderLMConfig(**payload["config"])
+        cfg = config_from_checkpoint_or_yaml(payload, args.config)
     else:
-        file_config = read_yaml(args.config)
-        cfg = RandomOrderLMConfig(
-            vocab_size=config_get(file_config, "model", "vocab_size", 260),
-            max_seq_len=config_get(file_config, "model", "max_seq_len", 1024),
-            d_model=config_get(file_config, "model", "d_model", 384),
-            num_heads=config_get(file_config, "model", "num_heads", 6),
-            num_layers=config_get(file_config, "model", "num_layers", 7),
-            recurrent_passes=config_get(file_config, "model", "recurrent_passes", 2),
-            ffn_multiplier=config_get(file_config, "model", "ffn_multiplier", 4),
-            dropout=config_get(file_config, "model", "dropout", 0.1),
-            attention=config_get(file_config, "model", "attention", "hybrid"),
-            ring_block_size=config_get(file_config, "model", "ring_block_size", 256),
-            seed=config_get(file_config, "training", "seed", 17),
-            polarquant_kv_bits=config_get(file_config, "model", "polarquant_kv_bits", 8),
-            polarquant_train=config_get(file_config, "model", "polarquant_train", False),
-            use_gflownet_policy=config_get(file_config, "model", "use_gflownet_policy", True),
-            gflownet_num_actions=config_get(file_config, "model", "gflownet_num_actions", 16),
-            gflownet_hidden_dim=config_get(file_config, "model", "gflownet_hidden_dim", 192),
-            gflownet_action_scale=config_get(file_config, "model", "gflownet_action_scale", 0.06),
-            use_bigram_hash=config_get(file_config, "model", "use_bigram_hash", True),
-            bigram_hash_buckets=config_get(file_config, "model", "bigram_hash_buckets", 4096),
-            bigram_hash_weight=config_get(file_config, "model", "bigram_hash_weight", 0.35),
-            use_caseops_features=config_get(file_config, "model", "use_caseops_features", True),
-            caseops_weight=config_get(file_config, "model", "caseops_weight", 0.35),
-            use_smear_gate=config_get(file_config, "model", "use_smear_gate", True),
-            smear_temperature_min=config_get(file_config, "model", "smear_temperature_min", 0.55),
-            smear_temperature_max=config_get(file_config, "model", "smear_temperature_max", 1.75),
-            use_toric_memory=config_get(file_config, "model", "use_toric_memory", True),
-            toric_memory_slots=config_get(file_config, "model", "toric_memory_slots", 32),
-            toric_memory_weight=config_get(file_config, "model", "toric_memory_weight", 0.08),
-            aux_mtp_offsets=config_get(file_config, "model", "aux_mtp_offsets", 2),
-            contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
-            trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
-            target_artifact_bytes=config_get(file_config, "model", "target_artifact_bytes", 15_600_000),
-        )
+        cfg = config_from_yaml(args.config)
     model = DenseRandomOrderToricLM(cfg)
     if payload is not None:
         incompatible = model.load_state_dict(payload["model"], strict=False)
