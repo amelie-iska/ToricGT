@@ -12389,3 +12389,24 @@ Seq4096 analysis watcher now defaults compact OAI evaluation to
 alerts require a more robust sampled check rather than a single sampled
 sequence. Keep regular FineWeb validation BPB and robust OAI BPB as the
 authoritative pre-threshold gates.
+
+## 2026-06-04 Late Checkpoint Recovery Selection
+
+R86 improved scheduled validation again:
+
+```text
+R86 step 3800 scheduled: train BPB 1.1910, validation BPB 1.2121
+```
+
+The preemptive gate correctly identified that the projected target step was
+still too late, but the recovery selector chose the older step-3750 checkpoint
+because the fixed `min_recovery_runway_steps=250` made step 3800 ineligible.
+That conflicts with the intended "restart from the best checkpoint" behavior
+once a later pre-gate checkpoint is materially better.
+
+The 4K recovery selector now keeps the runway preference but allows a later
+pre-gate checkpoint to override it when the later checkpoint improves BPB by at
+least `5e-4`. This would select R86 step 3800 (`1.2121`) over R86 step 3750
+(`1.2131`), while still keeping the roomier checkpoint for tiny late gains that
+are likely noise. The active R87 gate was hot-restarted with this selector so
+future branches can use materially better late checkpoints.

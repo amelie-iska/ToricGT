@@ -205,6 +205,40 @@ def test_4k_gate_preemption_waits_for_scheduled_current_analysis() -> None:
     )
 
 
+def test_4k_recovery_selection_can_use_materially_better_late_checkpoint() -> None:
+    module = load_gate_module()
+    rows = [
+        module.ValRow(step=3750, total=4000, val_loss=2.0483, val_bpb=1.2131),
+        module.ValRow(step=3800, total=4000, val_loss=2.0465, val_bpb=1.2121),
+    ]
+
+    selected = module.select_recovery_validation(
+        rows,
+        gate_step=4000,
+        min_recovery_runway_steps=250,
+    )
+
+    assert selected.step == 3800
+    assert selected.val_bpb == pytest.approx(1.2121)
+
+
+def test_4k_recovery_selection_keeps_roomy_checkpoint_for_tiny_late_gain() -> None:
+    module = load_gate_module()
+    rows = [
+        module.ValRow(step=3750, total=4000, val_loss=2.0483, val_bpb=1.2131),
+        module.ValRow(step=3800, total=4000, val_loss=2.0482, val_bpb=1.2129),
+    ]
+
+    selected = module.select_recovery_validation(
+        rows,
+        gate_step=4000,
+        min_recovery_runway_steps=250,
+    )
+
+    assert selected.step == 3750
+    assert selected.val_bpb == pytest.approx(1.2131)
+
+
 def test_write_checkpoint_scoped_log_drops_future_checkpoint_rows(tmp_path: Path) -> None:
     module = load_module()
     log_path = tmp_path / "train.log"

@@ -269,6 +269,7 @@ def select_recovery_validation(
     rows: list[ValRow],
     gate_step: int,
     min_recovery_runway_steps: int = 500,
+    late_better_margin_bpb: float = 5e-4,
 ) -> ValRow | None:
     """Select the checkpoint to restart from after a missed gate.
 
@@ -281,11 +282,19 @@ def select_recovery_validation(
 
     min_step = int(gate_step) - max(1, int(min_recovery_runway_steps))
     roomy = [row for row in rows if row.step <= min_step and math.isfinite(row.val_bpb)]
-    if roomy:
-        return min(roomy, key=lambda row: (row.val_bpb, -row.step))
     before_gate = [row for row in rows if row.step < int(gate_step) and math.isfinite(row.val_bpb)]
-    if before_gate:
-        return min(before_gate, key=lambda row: (row.val_bpb, -row.step))
+    best_before_gate = min(before_gate, key=lambda row: (row.val_bpb, -row.step)) if before_gate else None
+    if roomy:
+        roomy_best = min(roomy, key=lambda row: (row.val_bpb, -row.step))
+        if (
+            best_before_gate is not None
+            and best_before_gate.step > roomy_best.step
+            and best_before_gate.val_bpb <= roomy_best.val_bpb - max(0.0, float(late_better_margin_bpb))
+        ):
+            return best_before_gate
+        return roomy_best
+    if best_before_gate is not None:
+        return best_before_gate
     return select_best_validation(rows, gate_step)
 
 
