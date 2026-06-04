@@ -1394,8 +1394,15 @@ def plot_advanced_metric_control_map(report: dict[str, Any], out: Path) -> None:
     validation_gap = report.get("latest_generalization_gap_bpb")
     control_prior = str(report.get("structural_control_prior") or "unknown")
 
+    bg = "#020617"
+    panel = "#0f172a"
+    fg = "#e5edf5"
+    muted = "#94a3b8"
+    grid = "#334155"
     fig, axes = plt.subplots(1, 2, figsize=(13, 6), constrained_layout=True)
+    fig.patch.set_facecolor(bg)
     ax = axes[0]
+    ax.set_facecolor(panel)
     if families:
         ordered = sorted(families.items(), key=lambda item: item[1], reverse=True)
         labels = [item[0] for item in ordered]
@@ -1407,16 +1414,22 @@ def plot_advanced_metric_control_map(report: dict[str, Any], out: Path) -> None:
         ax.invert_yaxis()
         ax.axvline(0.20, color="#f59e0b", linestyle="--", linewidth=0.9, label="watch")
         ax.axvline(0.28, color="#dc2626", linestyle="--", linewidth=0.9, label="guard")
-        ax.legend(loc="lower right", fontsize=8)
+        legend = ax.legend(loc="lower right", fontsize=8, facecolor=panel, edgecolor=grid)
+        for text in legend.get_texts():
+            text.set_color(fg)
     else:
-        ax.text(0.5, 0.5, "family pressures unavailable", ha="center", va="center")
+        ax.text(0.5, 0.5, "family pressures unavailable", ha="center", va="center", color=fg)
         ax.set_xticks([])
         ax.set_yticks([])
-    ax.set_title("Advanced-Metric Family Pressure")
-    ax.set_xlabel("weighted pressure")
-    ax.grid(axis="x", alpha=0.25)
+    ax.set_title("Advanced-Metric Family Pressure", color=fg)
+    ax.set_xlabel("weighted pressure", color=fg)
+    ax.tick_params(colors=fg)
+    for spine in ax.spines.values():
+        spine.set_color(grid)
+    ax.grid(axis="x", color=grid, alpha=0.45)
 
     ax = axes[1]
+    ax.set_facecolor(bg)
     ax.axis("off")
     lines = [
         f"dominant family: {dominant}",
@@ -1433,10 +1446,10 @@ def plot_advanced_metric_control_map(report: dict[str, Any], out: Path) -> None:
         "- validation lag: batch/regularity before more LR",
         "- threshold reached: preserve checkpoint before advanced losses",
     ]
-    ax.text(0.02, 0.96, "\n".join(lines), va="top", ha="left", fontsize=10, wrap=True)
-    ax.set_title("Controller Readout")
+    ax.text(0.02, 0.96, "\n".join(lines), va="top", ha="left", fontsize=10, wrap=True, color=fg)
+    ax.set_title("Controller Readout", color=fg)
 
-    fig.suptitle("Advanced Metric Control Map", fontsize=15)
+    fig.suptitle("Advanced Metric Control Map", fontsize=15, color=fg)
     fig.savefig(out, dpi=180)
     plt.close(fig)
 

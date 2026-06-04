@@ -262,26 +262,25 @@ Operational addendum after the r72 handoff:
 ```text
 r72 step-3550 validation BPB/loss: 1.2282 / 2.0738
 r72 result: worse than the r71/r72 step-3500 gate value; target still missed
-active final recovery run: toricgt_seq4096_4k_recovery_r73_20260604T174607Z
-active W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r73_20260604T174607Z
-active training tmux: toricgt_seq4096_4k_recovery_r73_20260604T174607Z
-active gate tmux: toricgt_seq4096_4k_gate_r73_20260604T174607Z
-active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r73_20260604T174607Z.txt
-active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r73_20260604T174607Z
-active resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_warmdown_r52_20260604T125517Z/toricgt_seq4096_warmdown_r52_20260604T125517Z_step_003250.pt
-active live watcher tmux: toricgt_seq4096_live_50step_toricgt_seq4096_4k_recovery_r73_20260604T174607Z
-active live watcher loop env: original r71 live BPB loop state/stop file, BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100, BPB_LOOP_NAME=parameter_golf_bpb_target
+final active recovery run: toricgt_seq4096_4k_recovery_r73_20260604T174607Z
+final active W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r73_20260604T174607Z
+final active training tmux: toricgt_seq4096_4k_recovery_r73_20260604T174607Z
+final active gate tmux: toricgt_seq4096_4k_gate_r73_20260604T174607Z
+final active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r73_20260604T174607Z.txt
+final active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r73_20260604T174607Z
+final active resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_warmdown_r52_20260604T125517Z/toricgt_seq4096_warmdown_r52_20260604T125517Z_step_003250.pt
+final active live watcher tmux: toricgt_seq4096_live_50step_toricgt_seq4096_4k_recovery_r73_20260604T174607Z
+final active live watcher loop env: original r71 live BPB loop state/stop file, BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100, BPB_LOOP_NAME=parameter_golf_bpb_target
 ```
 
-The r73 run was already active and using the GPU when the final sanity check
-found r72 inactive.  It keeps the same model family, tokenization, dense
-FineWeb training path, GFlowNet/GraphCG/topology/toric/BGG diagnostics, and
-`TARGET_BPB=1.2`, but it is a stronger supervisor-owned recovery branch from an
-earlier warmdown checkpoint with structural sidecar losses active rather than
-log-only.  I preserved that active process instead of stopping it.  A later
-manual r73 attempt from the r71 step-3500 checkpoint exited with CUDA OOM
-because this active run already occupied the GPU; its failed sidecar watchers
-were stopped and no checkpoint was deleted.
+The final active r73 process was already using the GPU when r72 was found
+inactive.  It keeps the same compact Seq4096 model family, tokenizer, dense
+FineWeb path, Parameter-Golf BPB target, and diagnostic families, but it is a
+stronger supervisor-owned recovery from the earlier warmdown checkpoint with
+structural sidecar losses active.  I preserved that active process instead of
+stopping it.  A later manual r73 attempt from the r71 step-3500 checkpoint
+exited with CUDA OOM because this active run already occupied the GPU; its
+failed sidecar watchers were stopped and no checkpoint was deleted.
 
 ## 2026-06-03 Automated Review: Step 5,000 FineWeb-Revealed BPB Recovery Gate
 
