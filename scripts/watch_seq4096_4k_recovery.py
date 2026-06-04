@@ -1037,6 +1037,34 @@ def plan_metric_driven_recovery_controls(
                     velocity_shortfall_pressure >= 0.45
                     or val_velocity_shortfall >= 0.0025
                 )
+                toric_slepian_guarded = (
+                    dominant_family == "toric_slepian"
+                    and structural_score >= 0.65
+                    and dominant_pressure >= 0.35
+                )
+                if toric_slepian_guarded and velocity_shortfall_active:
+                    return replace(
+                        base,
+                        train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
+                        tied_embed_lr=round(max(0.034, min(0.03672, base.tied_embed_lr * 0.94)), 6),
+                        matrix_lr=base.matrix_lr,
+                        scalar_lr=base.scalar_lr,
+                        muon_momentum_warmup_steps=resume_step_aware_warmup_steps,
+                        bigram_bias=True,
+                        bigram_bias_lr=round(max(0.016, min(0.025, base.bigram_bias_lr * 0.70)), 6),
+                        bigram_bias_init_from_data=False,
+                        policy="toric_slepian_guarded_transfer_probe",
+                        advanced_metric_policy="dominant_toric_slepian_damped_transfer_bpb_velocity",
+                        rationale=(
+                            f"validation projects target at step {projected_target_step:.1f}, beyond gate {gate_step}",
+                            "guarded structural recapture is dominated by toric/Slepian pressure: "
+                            f"score={structural_score:.3f} band={structural_band} "
+                            f"pressure={dominant_pressure:.3f}",
+                            "hot tied-embedding and bigram probes have underperformed this family, so use the advanced diagnostics to switch branch families",
+                            "damp lexical transition heat while preserving the larger batch and long Muon warmup for smoother validation transfer",
+                            "keep GraphCG/Slepian/topology/toric/BGG/Koszul losses in sidecar transfer until the competition checkpoint is preserved",
+                        ),
+                    )
                 if velocity_shortfall_active:
                     return replace(
                         base,
