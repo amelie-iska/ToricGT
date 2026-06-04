@@ -14,7 +14,9 @@ model:
   ffn_multiplier: 4
   dropout: 0.0
   attention: hybrid
-  ring_block_size: 256
+  # Smaller tropical-ring blocks keep 4096-context training under 24 GB.
+  # This trades throughput for a long-context run that can actually stay alive.
+  ring_block_size: 64
   polarquant_kv_bits: 8
   polarquant_train: false
 
