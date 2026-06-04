@@ -5,6 +5,7 @@ from scripts.watch_seq4096_4k_recovery import (
     build_recovery_launch,
     build_recovery_run_id,
     checkpoint_for_step,
+    effective_restart_ceiling,
     load_advanced_diagnostics,
     load_failed_trajectory_analogue_risk,
     load_train_wave_analogue_risk,
@@ -18,6 +19,14 @@ from scripts.watch_seq4096_4k_recovery import (
     summarize_advanced_diagnostics,
     select_best_validation,
 )
+
+
+def test_effective_restart_ceiling_treats_low_positive_max_as_remaining_budget():
+    assert effective_restart_ceiling(restart_index=0, max_restarts=8) == 8
+    assert effective_restart_ceiling(restart_index=4, max_restarts=8) == 8
+    assert effective_restart_ceiling(restart_index=53, max_restarts=8) == 61
+    assert effective_restart_ceiling(restart_index=16, max_restarts=16) == 32
+    assert effective_restart_ceiling(restart_index=53, max_restarts=0) == 0
 
 
 def test_4k_recovery_selects_best_checkpoint_and_sets_resume_env(tmp_path: Path):

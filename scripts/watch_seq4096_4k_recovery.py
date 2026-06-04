@@ -357,6 +357,21 @@ def should_preempt_for_gate_risk(risk: PreemptiveGateRisk | None) -> bool:
     return bool(risk and risk.missed_projection_count >= risk.required_patience)
 
 
+def effective_restart_ceiling(restart_index: int, max_restarts: int) -> int:
+    """Return an absolute restart ceiling from mixed absolute/remaining inputs.
+
+    Older live gate commands sometimes pass an absolute restart index such as 53
+    with a small max-restarts value such as 8. Treat positive low ceilings as a
+    remaining restart budget so the gate does not silently refuse to recover.
+    """
+
+    restart_index = int(restart_index)
+    max_restarts = int(max_restarts)
+    if max_restarts <= 0 or max_restarts > restart_index:
+        return max_restarts
+    return restart_index + max(1, max_restarts)
+
+
 def should_hold_train_wave_for_validation_probe(
     risk: PreemptiveGateRisk | None,
     *,
@@ -1534,6 +1549,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    configured_max_restarts = int(args.max_restarts)
+    max_restarts = effective_restart_ceiling(args.restart_index, args.max_restarts)
     repo_root = Path(args.repo_root).resolve()
     parameter_golf_root = Path(args.parameter_golf_root)
     if not parameter_golf_root.is_absolute():
@@ -1669,6 +1686,8 @@ def main() -> None:
             "best_validation_at_or_before_gate": None if best_val is None else best_val.__dict__,
             "target_reached": target_reached,
             "restart_index": args.restart_index,
+            "configured_max_restarts": configured_max_restarts,
+            "effective_max_restarts": max_restarts,
             "min_recovery_runway_steps": args.min_recovery_runway_steps,
             "preempt_on_projected_miss": bool(args.preempt_on_projected_miss),
             "preemptive_gate_risk": None if preemptive_risk is None else preemptive_risk.__dict__,
@@ -1707,7 +1726,7 @@ def main() -> None:
             time.sleep(max(1.0, args.poll_seconds))
             continue
 
-        if args.restart_index >= args.max_restarts:
+        if args.restart_index >= max_restarts:
             status["event"] = "restart_limit_reached"
             write_state(state_path, status)
             print(json.dumps(status, sort_keys=True), flush=True)
@@ -1807,7 +1826,7 @@ def main() -> None:
             target_bpb=args.target_bpb,
             gate_step=args.gate_step,
             restart_index=next_index,
-            max_restarts=args.max_restarts,
+            max_restarts=max_restarts,
             min_recovery_runway_steps=args.min_recovery_runway_steps,
             recovery_train_batch_tokens=recovery_controls.train_batch_tokens,
             recovery_tied_embed_lr=recovery_controls.tied_embed_lr,

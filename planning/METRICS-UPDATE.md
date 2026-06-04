@@ -587,6 +587,54 @@ python -m py_compile amelie-iska/parameter-golf/records/track_10min_16mb/2026-03
 
 Expected: tests pass, compile passes.
 
+### Live Update: 2026-06-04 R52 to R54 Gate Recovery
+
+R52 reached step 3750 with validation BPB `1.2131`, but the periodic
+analysis marked the branch `off_track_unreachable`:
+
+- projected target step: `4161.9497`;
+- recent validation drop: `0.00318 BPB / 100 steps`;
+- required validation drop to hit the 4K gate: `0.00524 BPB / 100 steps`;
+- velocity shortfall: `0.00256 BPB / 100 steps`;
+- velocity shortfall pressure: `0.512`;
+- artifact export probe: `15,877,701` bytes, margin `122,299` bytes.
+
+Decision: restart before burning the final 250 steps. The live gate was
+re-run with one-step projected-miss patience and a corrected high restart
+ceiling. It launched `toricgt_seq4096_4k_recovery_r54_20260604T134941Z` from
+the R52 step-3500 checkpoint, whose validation BPB was `1.2198`.
+
+R54 recovery controls:
+
+- `TIED_EMBED_LR=0.03808`;
+- `BIGRAM_BIAS_LR=0.0162`;
+- `MATRIX_LR=0.018`;
+- `SCALAR_LR=0.018`;
+- `MUON_MOMENTUM=0.985`;
+- `TRAIN_BATCH_TOKENS=1048576`;
+- reset optimizer, RNG, and data loader on resume;
+- keep GraphCG/Slepian/topology/toric/BGG/Koszul losses in sidecar transfer
+  until a competition checkpoint <= `1.2` BPB is preserved.
+
+Rationale: the periodic diagnostics identify useful structural pressure, with
+dominant live pressure in toric/Slepian-side metrics, but the pre-threshold
+competition phase still needs clean BPB velocity. The advanced metrics should
+steer branch selection, W&B diagnostics, and sidecar-transfer decisions here,
+not add heavy primary loss terms before the <= `1.2` BPB checkpoint exists.
+
+Gate automation update: `scripts/watch_seq4096_4k_recovery.py` now normalizes
+stale low positive `max_restarts` values when they are paired with a high
+absolute `restart_index`. For example, `restart_index=53` and `max_restarts=8`
+becomes an effective ceiling of `61`, so the gate can keep launching recovery
+runs instead of silently stopping at the exact moment a recovery is needed.
+
+PolarQuant and larger-parameter policy: R52's int8+zlib export margin is tight.
+PolarQuant currently quantizes runtime K/V cache tensors and can reduce memory
+pressure for longer contexts, but it does not by itself shrink stored model
+weights. Larger-parameter competition variants are allowed only after a
+byte-accounted stored-weight export path proves code plus weights stay under
+`16,000,000` bytes and the variant improves held-out BPB.
+
 ### Task 4: Keep Live Early-Phase Training Optimized
 
 **Files:**
@@ -598,7 +646,7 @@ Expected: tests pass, compile passes.
 
 Check train/val BPB, W&B sync, checkpoint saving, GPU memory, and 16MB export report.
 
-- [ ] **Step 2: If R52 misses the required gate velocity**
+- [x] **Step 2: If R52 misses the required gate velocity**
 
 Use best checkpoint at or before 3250/3500/3750, then launch the controller-recommended branch. Prefer BPB-clean controls before structural losses:
 
@@ -610,6 +658,10 @@ Use best checkpoint at or before 3250/3500/3750, then launch the controller-reco
 - larger-parameter variants only after export byte accounting proves a
   stored-weight compression path, because PolarQuant K/V cache compression does
   not shrink model weights.
+
+Current action: R52 missed the projected gate velocity at step 3750, so R54 was
+launched from the R52 step-3500 checkpoint with the controller's guarded
+velocity-recapture controls.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
