@@ -102,6 +102,35 @@ def test_checkpoint_step_detection_uses_seq4096_filename_pattern(tmp_path: Path)
     assert module.find_latest_checkpoint(tmp_path).name == checkpoint.name
 
 
+def test_compact_oai_eval_command_uses_sampled_cpu_probe(tmp_path: Path) -> None:
+    module = load_module()
+    checkpoint = tmp_path / "run_step_000500.pt"
+    output_json = tmp_path / "analysis" / "oai_competition" / "seq4096_summary.json"
+
+    command = module.build_compact_oai_eval_command(
+        python_bin="/env/python",
+        repo_root=tmp_path,
+        checkpoint=checkpoint,
+        output_json=output_json,
+        device="cpu",
+        seq_len=256,
+        val_batch_size=256,
+        val_max_sequences=1,
+        token_glob="data/fineweb_val_*.bin",
+        tokenizer_path="data/tokenizers/fineweb_1024_bpe.model",
+    )
+
+    assert command[:2] == ["/env/python", str(tmp_path / "scripts" / "evaluate_seq4096_competition_bpb.py")]
+    assert "--checkpoint" in command
+    assert str(checkpoint) in command
+    assert "--output-json" in command
+    assert str(output_json) in command
+    assert "--device" in command
+    assert "cpu" in command
+    assert "--val-max-sequences" in command
+    assert "1" in command
+
+
 def test_bpb_acceleration_report_marks_near_target_descent(tmp_path: Path) -> None:
     module = load_module()
     log_path = tmp_path / "train.log"

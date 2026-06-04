@@ -110,6 +110,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--skip-wandb-metrics", action="store_true")
     parser.add_argument("--skip-full-diagnostics", action="store_true")
+    parser.add_argument("--skip-compact-oai-eval", action="store_true")
+    parser.add_argument("--compact-oai-eval-device", default="cpu")
+    parser.add_argument("--compact-oai-eval-seq-len", type=int, default=256)
+    parser.add_argument("--compact-oai-eval-val-batch-size", type=int, default=256)
+    parser.add_argument("--compact-oai-eval-max-sequences", type=int, default=1)
+    parser.add_argument(
+        "--compact-oai-eval-token-glob",
+        default="amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_val_*.bin",
+    )
+    parser.add_argument(
+        "--compact-oai-eval-tokenizer-path",
+        default="amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model",
+    )
     parser.add_argument("--wandb-settle-seconds", type=float, default=5.0)
     return parser.parse_args()
 
@@ -2075,6 +2088,41 @@ def run_command(command: list[str], log_path: Path, env: dict[str, str]) -> int:
     return int(result.returncode)
 
 
+def build_compact_oai_eval_command(
+    *,
+    python_bin: str,
+    repo_root: Path,
+    checkpoint: Path,
+    output_json: Path,
+    device: str,
+    seq_len: int,
+    val_batch_size: int,
+    val_max_sequences: int,
+    token_glob: str,
+    tokenizer_path: str,
+) -> list[str]:
+    return [
+        str(python_bin),
+        str(Path(repo_root) / "scripts" / "evaluate_seq4096_competition_bpb.py"),
+        "--checkpoint",
+        str(checkpoint),
+        "--output-json",
+        str(output_json),
+        "--device",
+        str(device),
+        "--seq-len",
+        str(int(seq_len)),
+        "--val-batch-size",
+        str(int(val_batch_size)),
+        "--val-max-sequences",
+        str(int(val_max_sequences)),
+        "--token-glob",
+        str(token_glob),
+        "--tokenizer-path",
+        str(tokenizer_path),
+    ]
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -2217,6 +2265,25 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
             "36",
         ]
         command_status["wandb_metrics"] = run_command(metrics_cmd, logs_dir / "analyze_wandb_metrics.log", env)
+
+    if not args.skip_compact_oai_eval:
+        oai_cmd = build_compact_oai_eval_command(
+            python_bin=args.python,
+            repo_root=root,
+            checkpoint=checkpoint,
+            output_json=output_dir / "oai_competition" / "seq4096_summary.json",
+            device=args.compact_oai_eval_device,
+            seq_len=args.compact_oai_eval_seq_len,
+            val_batch_size=args.compact_oai_eval_val_batch_size,
+            val_max_sequences=args.compact_oai_eval_max_sequences,
+            token_glob=args.compact_oai_eval_token_glob,
+            tokenizer_path=args.compact_oai_eval_tokenizer_path,
+        )
+        command_status["seq4096_oai_competition"] = run_command(
+            oai_cmd,
+            logs_dir / "seq4096_oai_competition.log",
+            env,
+        )
 
     parsed = parse_seq4096_log(Path(args.log))
     artifact_report = compute_seq4096_artifact_report(

@@ -878,6 +878,11 @@ with aliases `competition/oai_bpb` and `bpb/oai_competition`.  The native
 trainer decodes the local `fineweb10B_sp1024` validation shard through
 `fineweb_1024_bpe.model` and then scores the byte model, so this metric should
 not be expected under the separate scaffold-only `fineweb/*` namespace.
+For compact Seq4096 checkpoints, `scripts/evaluate_seq4096_competition_bpb.py`
+loads the GPT-style checkpoint directly and future live reviews write
+`oai_competition/seq4096_summary.json`. The default live-review invocation is a
+sampled CPU probe for checkpoint/alias sanity; the trainer's full validation
+BPB is still the authoritative OpenAI Parameter-Golf gate.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a

@@ -400,6 +400,15 @@ same byte-level ToricGT checkpoint.  This metric is intentionally not named
 Dashboard aliases `competition/oai_bpb` and `bpb/oai_competition` point at the
 same native checkpoint score.
 
+For compact Seq4096 competition checkpoints, the live analysis watcher uses
+`scripts/evaluate_seq4096_competition_bpb.py` instead of the native
+RandomOrderLM evaluator. The compact evaluator reconstructs the GPT-style model
+from checkpoint tensor shapes and writes `oai_competition/seq4096_summary.json`
+under each live review directory. By default this is a tiny sampled CPU probe
+so it verifies checkpoint loading and metric aliasing without competing with
+the active trainer; the trainer's full validation BPB remains the authoritative
+<=1.2 gate metric.
+
 Current operational guardrail: training should resume only after the full
 analysis suite finishes and all generated plot classes have been inspected.
 The skeptic guardrail is metric-first: every advanced geometric object needs a

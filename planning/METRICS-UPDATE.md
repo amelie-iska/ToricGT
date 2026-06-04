@@ -658,17 +658,31 @@ evaluate_reasoning_simplex.py -> evaluate_reasoning_geometry_suite.py` chain is
 not directly safe for live Seq4096 checkpoints. Those scripts load
 `RandomOrderLMConfig` / `DenseRandomOrderToricLM`; compact Seq4096 checkpoints
 contain GPT-style keys such as `tok_emb.weight` and no compatible config
-payload. Until a compact-checkpoint adapter exists, the correct live suite is
-`scripts/watch_seq4096_analysis.py` plus FineWeb diagnostics, W&B metric
-analysis, BPB descent plots, artifact-size probes, structural proxy maps, and
-training-adjustment proposals.
+payload. The correct live suite is therefore `scripts/watch_seq4096_analysis.py`
+plus FineWeb diagnostics, W&B metric analysis, BPB descent plots, artifact-size
+probes, structural proxy maps, and training-adjustment proposals.
+
+Implemented follow-up: `scripts/evaluate_seq4096_competition_bpb.py` now loads
+compact GPT-style Seq4096 checkpoints directly, infers architecture from tensor
+shapes, and emits the expected OAI aliases:
+
+- `oai_competition/bpb`;
+- `competition/oai_bpb`;
+- `bpb/oai_competition`;
+- `seq4096/oai_competition_bpb`.
+
+`scripts/watch_seq4096_analysis.py` runs this evaluator as a cheap sampled CPU
+checkpoint probe and writes `oai_competition/seq4096_summary.json` for future
+live reviews. The full validation BPB from the trainer/gate remains the
+authoritative pre-threshold competition metric; sampled sidecar BPB is a load
+and aliasing sanity check unless `val_max_sequences=0` is used for a full
+evaluation.
 
 Recommended follow-up for the advanced-analysis track: implement compact
-Seq4096 analogues of the old OAI/simplex/geometry entrypoints so
-graph-of-thought trajectory, directed simplicial, toric, Slepian/Pollak,
-BGG/Koszul, and
-memory diagnostics can run directly on compact checkpoints without converting
-them into RandomOrderLM payloads.
+Seq4096 analogues of the old simplex/geometry entrypoints so graph-of-thought
+trajectory, directed simplicial, toric, Slepian/Pollak, BGG/Koszul, and memory
+diagnostics can run directly on compact checkpoints without converting them
+into RandomOrderLM payloads.
 
 PolarQuant and larger-parameter policy: R52's int8+zlib export margin is tight.
 PolarQuant currently quantizes runtime K/V cache tensors and can reduce memory
