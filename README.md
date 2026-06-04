@@ -41,9 +41,10 @@ Current validated status:
   Data-initialized bigram bias was tested in R12 and rejected because it
   worsened initial validation BPB to `1.2680636231146791`. R14's W&B run is
   <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r14_20260604T004756Z>.
-  Latest confirmed R14 status while this README was refreshed: W&B is enabled,
-  the run is loading/running from the 3000-step checkpoint, and scalar BPB
-  summaries had not yet settled.
+  Latest confirmed R14 W&B status while this README was refreshed: trainer
+  step `3021`, train BPB `1.1966783562679195`, validation/OpenAI BPB
+  `1.245367828628834`, target gap `0.04536782862883415`, target not yet
+  reached.
 - Seq4096 recovery automation now uses metric-driven launch controls. Repeated
   validation ETA misses trigger pre-gate recovery; projected-miss cases use a
   small tied-embedding LR lift plus higher effective batch, while train-low /
