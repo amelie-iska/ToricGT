@@ -160,6 +160,23 @@ def min_positive(*values: Any) -> float:
     return min(positives) if positives else float("nan")
 
 
+def oai_bpb_value(oai: dict[str, Any]) -> float:
+    return first_positive(
+        oai.get("oai_competition/bpb"),
+        oai.get("bpb/oai_competition"),
+        oai.get("competition/oai_bpb"),
+    )
+
+
+def is_sampled_oai_eval(oai: dict[str, Any]) -> bool:
+    scope = str(oai.get("oai_competition/eval_scope", oai.get("eval_scope", ""))).lower()
+    max_sequences = first_positive(
+        oai.get("oai_competition/val_max_sequences"),
+        oai.get("val_max_sequences"),
+    )
+    return "sample" in scope or (math.isfinite(max_sequences) and max_sequences > 0.0)
+
+
 def compute_bpb_gate(
     *,
     stats_by_name: dict[str, dict[str, Any]],
@@ -170,26 +187,36 @@ def compute_bpb_gate(
     target_bpb: float,
     gate_step: int,
 ) -> dict[str, Any]:
-    train_bpb_last = metric_value(stats_by_name, ("train/bpb", "bpb/train", "fineweb/train_bpb"), default=0.0)
-    val_bpb_last = metric_value(stats_by_name, ("val/bpb", "bpb/val", "fineweb/val_bpb"), default=0.0)
-    train_bpb_best = metric_value(stats_by_name, ("train/bpb", "bpb/train", "fineweb/train_bpb"), key="best_value", default=0.0)
-    val_bpb_best = metric_value(stats_by_name, ("val/bpb", "bpb/val", "fineweb/best_val_bpb"), key="best_value", default=0.0)
-    oai_bpb = first_positive(
-        oai.get("oai_competition/bpb"),
-        oai.get("bpb/oai_competition"),
-        oai.get("competition/oai_bpb"),
+    train_bpb_last = metric_value(stats_by_name, ("train/bpb", "bpb/train", "fineweb/train_bpb"), default=float("nan"))
+    val_bpb_last = metric_value(stats_by_name, ("val/bpb", "bpb/val", "fineweb/val_bpb"), default=float("nan"))
+    train_bpb_best = metric_value(
+        stats_by_name,
+        ("train/bpb", "bpb/train", "fineweb/train_bpb"),
+        key="best_value",
+        default=float("nan"),
     )
-    best_val_bpb = first_positive(bpb_report.get("best_val_bpb"), val_bpb_best)
+    val_bpb_best = metric_value(
+        stats_by_name,
+        ("val/bpb", "bpb/val", "fineweb/best_val_bpb"),
+        key="best_value",
+        default=float("nan"),
+    )
+    oai_bpb = oai_bpb_value(oai)
+    authoritative_oai_bpb = float("nan") if is_sampled_oai_eval(oai) else oai_bpb
+    best_val_bpb = first_positive(
+        bpb_report.get("best_val_bpb"),
+        val_bpb_best,
+        bpb_report.get("latest_val_bpb"),
+        val_bpb_last,
+    )
     geometry_best_bpb = first_positive(geometry.get("best_bpb"), geometry.get("best_answer_bpb"))
     current_primary_bpb = first_positive(
-        oai_bpb,
         bpb_report.get("latest_val_bpb"),
-        bpb_report.get("best_val_bpb"),
         val_bpb_last,
-        geometry_best_bpb,
-        train_bpb_last,
+        best_val_bpb,
+        authoritative_oai_bpb,
     )
-    best_gate_bpb = min_positive(oai_bpb, best_val_bpb)
+    best_gate_bpb = min_positive(authoritative_oai_bpb, best_val_bpb)
     best_observed_bpb = min_positive(oai_bpb, best_val_bpb, geometry_best_bpb, train_bpb_best)
     if not math.isfinite(best_observed_bpb):
         best_observed_bpb = current_primary_bpb
@@ -199,7 +226,7 @@ def compute_bpb_gate(
     if not math.isfinite(val_slope_per_100):
         val_slope_per_1k = metric_value(
             stats_by_name,
-            ("val/bpb", "bpb/val", "fineweb/val_bpb", "oai_competition/bpb", "train/bpb"),
+            ("val/bpb", "bpb/val", "fineweb/val_bpb"),
             key="recent_slope_per_1k",
             default=float("nan"),
         )
@@ -246,6 +273,8 @@ def compute_bpb_gate(
         "train_bpb_last": train_bpb_last,
         "val_bpb_last": val_bpb_last,
         "oai_competition_bpb": oai_bpb,
+        "authoritative_oai_bpb": authoritative_oai_bpb,
+        "oai_competition_eval_scope": str(oai.get("oai_competition/eval_scope", oai.get("eval_scope", ""))),
         "geometry_best_bpb": geometry_best_bpb,
         "gap_to_target": gap,
         "recent_drop_per_100_steps": recent_drop_per_100,

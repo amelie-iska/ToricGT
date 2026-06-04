@@ -430,6 +430,31 @@ def plan_failed_train_wave_recovery_controls(
     latest_step = latest_val.step if latest_val is not None else max(parsed.latest_step, 0)
     repeated_damped_branch = base.tied_embed_lr <= 0.0325 and base.bigram_bias_lr <= 0.0065
     if repeated_damped_branch:
+        previous_advanced_probe = base.advanced_loss_scale > 0.0
+        if previous_advanced_probe:
+            advanced_metric_policy = "light_graphcg_slepian_transfer_probe_after_val_regression"
+            advanced_loss_scale = max(0.03, min(0.05, base.advanced_loss_scale * 0.25))
+            graphcg_loss_weight = max(0.01, min(0.02, base.graphcg_loss_weight * 0.50))
+            toric_tropical_loss_weight = max(0.0, min(0.008, base.toric_tropical_loss_weight * 0.25))
+            slepian_loss_weight = max(0.005, min(0.01, base.slepian_loss_weight * 0.50))
+            koszul_bgg_loss_weight = 0.0
+            analogy_loss_weight = max(0.0, min(0.005, base.analogy_loss_weight * 0.50))
+            advanced_rationale = (
+                "previous advanced-loss branch produced a low train BPB but worsened validation transfer",
+                "reduce auxiliary pressure to a lightweight GraphCG/Slepian transfer probe and hold Koszul/BGG for post-threshold",
+            )
+        else:
+            advanced_metric_policy = "guarded_graphcg_toric_slepian_koszul_analogy_losses"
+            advanced_loss_scale = 0.20
+            graphcg_loss_weight = 0.05
+            toric_tropical_loss_weight = 0.03
+            slepian_loss_weight = 0.02
+            koszul_bgg_loss_weight = 0.01
+            analogy_loss_weight = 0.01
+            advanced_rationale = (
+                "begin guarded lightweight advanced-loss training: GraphCG basis disentanglement, toric/tropical chamber pressure, "
+                "Slepian/Pollak trajectory concentration, Koszul/BGG exactness, and analogical transport consistency",
+            )
         return replace(
             base,
             train_batch_tokens=min(base.train_batch_tokens, 917_504),
@@ -446,13 +471,13 @@ def plan_failed_train_wave_recovery_controls(
             bigram_bias_scale=round(max(base.bigram_bias_scale, 1.15), 6),
             bigram_bias_init_from_data=False,
             policy="repeated_damped_train_wave_diversity_probe",
-            advanced_metric_policy="guarded_graphcg_toric_slepian_koszul_analogy_losses",
-            advanced_loss_scale=max(base.advanced_loss_scale, 0.20),
-            graphcg_loss_weight=max(base.graphcg_loss_weight, 0.05),
-            toric_tropical_loss_weight=max(base.toric_tropical_loss_weight, 0.03),
-            slepian_loss_weight=max(base.slepian_loss_weight, 0.02),
-            koszul_bgg_loss_weight=max(base.koszul_bgg_loss_weight, 0.01),
-            analogy_loss_weight=max(base.analogy_loss_weight, 0.01),
+            advanced_metric_policy=advanced_metric_policy,
+            advanced_loss_scale=advanced_loss_scale,
+            graphcg_loss_weight=graphcg_loss_weight,
+            toric_tropical_loss_weight=toric_tropical_loss_weight,
+            slepian_loss_weight=slepian_loss_weight,
+            koszul_bgg_loss_weight=koszul_bgg_loss_weight,
+            analogy_loss_weight=analogy_loss_weight,
             advanced_loss_sample_tokens=max(base.advanced_loss_sample_tokens, 256),
             toric_tropical_fan_bins=max(base.toric_tropical_fan_bins, 8),
             rationale=(
@@ -460,8 +485,7 @@ def plan_failed_train_wave_recovery_controls(
                 "matched failed analogue count "
                 f"{risk.analogue_failed_count} suggests this is the same recovery basin, not a fresh BPB descent",
                 "lower tied, matrix, scalar, and bigram LR and reduce batch tokens to change the optimizer trajectory",
-                "begin guarded lightweight advanced-loss training: GraphCG basis disentanglement, toric/tropical chamber pressure, "
-                "Slepian/Pollak trajectory concentration, Koszul/BGG exactness, and analogical transport consistency",
+                *advanced_rationale,
             ),
         )
     return replace(

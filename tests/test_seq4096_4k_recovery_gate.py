@@ -763,6 +763,41 @@ def test_repeated_damped_train_wave_uses_stronger_diversity_controls(tmp_path: P
     assert planned.koszul_bgg_loss_weight > 0.0
     assert planned.analogy_loss_weight > 0.0
 
+    advanced_base = RecoveryControls(
+        train_batch_tokens=917_504,
+        tied_embed_lr=0.029,
+        matrix_lr=0.0165,
+        scalar_lr=0.0165,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=5250,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+        bigram_bias=True,
+        bigram_bias_lr=0.004,
+        bigram_bias_scale=1.15,
+        advanced_loss_scale=0.20,
+        graphcg_loss_weight=0.05,
+        toric_tropical_loss_weight=0.03,
+        slepian_loss_weight=0.02,
+        koszul_bgg_loss_weight=0.01,
+        analogy_loss_weight=0.01,
+    )
+
+    light = plan_failed_train_wave_recovery_controls(
+        advanced_base,
+        parsed=parsed,
+        risk=risk,
+        gate_step=4000,
+    )
+
+    assert light.advanced_metric_policy == "light_graphcg_slepian_transfer_probe_after_val_regression"
+    assert 0.0 < light.advanced_loss_scale < advanced_base.advanced_loss_scale
+    assert 0.0 < light.graphcg_loss_weight < advanced_base.graphcg_loss_weight
+    assert 0.0 <= light.toric_tropical_loss_weight < advanced_base.toric_tropical_loss_weight
+    assert 0.0 < light.slepian_loss_weight < advanced_base.slepian_loss_weight
+    assert light.koszul_bgg_loss_weight == 0.0
+    assert 0.0 <= light.analogy_loss_weight < advanced_base.analogy_loss_weight
+
 
 def test_seq4096_log_parses_train_bpb_for_validation_gap_controls(tmp_path: Path):
     log = tmp_path / "train.log"

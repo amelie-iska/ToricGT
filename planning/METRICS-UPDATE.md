@@ -950,6 +950,21 @@ baseline restarts remain at 250. Review each 50-step validation/checkpoint for
 BPB transfer, `train/advanced_aux_loss`, and the individual `advanced/*`
 component metrics before increasing auxiliary scale.
 
+First advanced-transfer result and response: R67 at step 3800 produced
+`train_bpb=1.1875` but validation worsened to `val_bpb=1.2240`, so the
+auxiliary objective was helping the train surface more than the authoritative
+validation gate. The controller now treats a second advanced recovery as a
+lighter transfer probe rather than repeating the same `0.20` scale: total
+`ADVANCED_LOSS_SCALE=0.05`, `GRAPHCG_LOSS_WEIGHT=0.02`,
+`SLEPIAN_LOSS_WEIGHT=0.01`, `TORIC_TROPICAL_LOSS_WEIGHT=0.008`,
+`ANALOGY_LOSS_WEIGHT=0.005`, and `KOSZUL_BGG_LOSS_WEIGHT=0.0` until the
+competition threshold is preserved. R68
+(`toricgt_seq4096_4k_recovery_r68_20260604T164812Z`) is live from the preserved
+R67 step-3750 checkpoint with 50-step validation/checkpointing. The corrected
+training-adjustment proposal logic now treats sampled OAI and train BPB as
+non-gating evidence; only authoritative validation/OAI can mark the competition
+target reached.
+
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
 Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, verify code+weights <=16,000,000 bytes, then start post-threshold advanced reasoning/memory phases.
