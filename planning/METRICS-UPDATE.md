@@ -803,6 +803,16 @@ corrected so an already-low LR such as `0.01` damps to `0.006` rather than
 being raised to the old floor. This is still BPB-clean: it changes
 optimizer/transition-bias controls, not auxiliary topology/toric/BGG losses.
 
+R59 launch: after the patch was loaded into the R58 gate process, the controller
+preempted R58 at step 3900 because its train-wave profile matched failed R57
+with RMSE about `5.8e-05`. R59 launched from the R58 step-3750 checkpoint with
+`failed_train_wave_damped_transfer_probe`: tied embedding LR `0.032`, bigram
+bias LR `0.006`, matrix/scalar LR `0.018`, train batch tokens `983040`, and
+Muon warmup steps `4750`. Early train BPB moved off the exact R57/R58 replay:
+R59 has `3800 -> 1.2412` and `3850 -> 1.2087`, versus `1.2424` and `1.2101`
+for the repeated branch. This is still only a train-wave signal; the next
+authoritative decision is the R59 step-4000 validation BPB.
+
 Recommended follow-up for the advanced-analysis track: implement compact
 Seq4096 analogues of the old simplex/geometry entrypoints so graph-of-thought
 trajectory, directed simplicial, toric, Slepian/Pollak, BGG/Koszul, and memory
@@ -851,6 +861,8 @@ final artifact inventory, and dispatches the Codex review hook for sub-agent
 inspection of every current-run output family. If R58 continues the R57 train
 wave, the patched gate should now launch the damped-transfer replay-diversity
 branch before spending another full gate cycle on an already-observed miss.
+This occurred and R59 is now the active branch; let R59 reach the next
+validation unless it collapses into another exact failed-train-wave analogue.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
