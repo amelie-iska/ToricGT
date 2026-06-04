@@ -43,11 +43,78 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional latest full-diagnostics JSON to mirror into dense W&B rows.",
     )
+    parser.add_argument(
+        "--gate-state-json",
+        default="",
+        help="Optional 4K recovery gate-state JSON to mirror into dense W&B rows.",
+    )
     return parser.parse_args()
 
 
 def default_diagnostics_json(log_path: Path) -> Path:
     return Path("logs") / f"{log_path.stem}.full_diag.latest.json"
+
+
+def default_gate_state_json(run_id: str) -> Path:
+    return Path("outputs") / f"{run_id}.4k_recovery_state.json"
+
+
+STRUCTURAL_FAMILY_IDS = {
+    "none": 0.0,
+    "bpb_gap": 1.0,
+    "topology_directed": 2.0,
+    "toric_slepian": 3.0,
+    "bgg_koszul": 4.0,
+    "tropical_complexity": 5.0,
+}
+
+CONTROL_POLICY_IDS = {
+    "base_controls": 0.0,
+    "low_train_bpb_generalization_relief": 1.0,
+    "structural_pressure_damped": 2.0,
+    "curvature_aware_velocity_recovery": 3.0,
+    "velocity_shortfall_recovery": 4.0,
+}
+
+ADVANCED_METRIC_POLICY_IDS = {
+    "primary_bpb_clean": 0.0,
+    "monitor_structural_sidecars": 1.0,
+    "damp_structural_pressure": 2.0,
+    "curvature_recovery": 3.0,
+}
+
+RISK_SOURCE_IDS = {
+    "validation_projection": 1.0,
+    "failed_trajectory_analogue": 2.0,
+}
+
+
+def _finite_float(value) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    return numeric if math.isfinite(numeric) else float("nan")
+
+
+def add_finite_metric(target: dict[str, float], key: str, value) -> None:
+    numeric = _finite_float(value)
+    if math.isfinite(numeric):
+        target[key] = numeric
+
+
+def add_numeric_tree(target: dict[str, float], prefix: str, value, *, depth: int = 0) -> None:
+    if depth > 6:
+        return
+    if isinstance(value, dict):
+        for child_key, child_value in value.items():
+            clean = str(child_key).replace(" ", "_")
+            add_numeric_tree(target, f"{prefix}/{clean}", child_value, depth=depth + 1)
+        return
+    if isinstance(value, bool):
+        target[prefix] = float(value)
+        return
+    add_finite_metric(target, prefix, value)
 
 
 def latest_diagnostics_aliases(path: Path, step: int) -> dict[str, float]:
@@ -83,6 +150,84 @@ def latest_diagnostics_aliases(path: Path, step: int) -> dict[str, float]:
     return aliases
 
 
+def latest_gate_state_aliases(path: Path, step: int, target_bpb: float) -> dict[str, float]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    aliases: dict[str, float] = {"gate/state_available": 1.0}
+    add_finite_metric(aliases, "gate/latest_step", payload.get("latest_step"))
+    add_finite_metric(aliases, "gate/gate_step", payload.get("gate_step"))
+    add_finite_metric(aliases, "gate/restart_index", payload.get("restart_index"))
+    add_finite_metric(aliases, "gate/target_bpb", payload.get("target_bpb", target_bpb))
+    if isinstance(payload.get("target_reached"), bool):
+        aliases["gate/target_reached"] = float(bool(payload.get("target_reached")))
+    if isinstance(payload.get("advanced_metric_controls_enabled"), bool):
+        aliases["advanced_control/enabled"] = float(bool(payload.get("advanced_metric_controls_enabled")))
+    if isinstance(payload.get("analogue_risk_enabled"), bool):
+        aliases["advanced_control/analogue_risk_enabled"] = float(bool(payload.get("analogue_risk_enabled")))
+
+    gate_step = _finite_float(payload.get("gate_step"))
+    latest_step = _finite_float(payload.get("latest_step", step))
+    if math.isfinite(gate_step) and math.isfinite(latest_step):
+        aliases["gate/remaining_steps_to_gate"] = max(0.0, gate_step - latest_step)
+        aliases["gate/current_step_over_gate"] = latest_step / max(gate_step, 1.0)
+
+    latest_validation = payload.get("latest_validation") if isinstance(payload.get("latest_validation"), dict) else {}
+    best_validation = (
+        payload.get("best_validation_at_or_before_gate")
+        if isinstance(payload.get("best_validation_at_or_before_gate"), dict)
+        else {}
+    )
+    latest_bpb = _finite_float(latest_validation.get("val_bpb"))
+    best_bpb = _finite_float(best_validation.get("val_bpb"))
+    if math.isfinite(latest_bpb):
+        aliases["gate/latest_val_bpb"] = latest_bpb
+        aliases["gate/latest_gap_to_target"] = latest_bpb - float(target_bpb)
+    if math.isfinite(best_bpb):
+        aliases["gate/best_val_bpb"] = best_bpb
+        aliases["gate/best_gap_to_target"] = best_bpb - float(target_bpb)
+
+    diagnostics = payload.get("advanced_diagnostics")
+    if isinstance(diagnostics, dict):
+        add_numeric_tree(aliases, "gate/advanced_diagnostics", diagnostics)
+        family = str(diagnostics.get("dominant_structural_family", "none"))
+        aliases["gate/advanced_diagnostics/dominant_structural_family_id"] = STRUCTURAL_FAMILY_IDS.get(
+            family, 0.0
+        )
+        if isinstance(diagnostics.get("structural_pressure_high"), bool):
+            aliases["gate/advanced_diagnostics/structural_pressure_high"] = float(
+                bool(diagnostics.get("structural_pressure_high"))
+            )
+
+    for control_key in ("base_recovery_launch_controls", "recovery_launch_controls"):
+        controls = payload.get(control_key)
+        if not isinstance(controls, dict):
+            continue
+        prefix = "advanced_control/base" if control_key.startswith("base") else "advanced_control/recovery"
+        add_numeric_tree(aliases, prefix, controls)
+        aliases[f"{prefix}/policy_id"] = CONTROL_POLICY_IDS.get(str(controls.get("policy", "")), 0.0)
+        aliases[f"{prefix}/advanced_metric_policy_id"] = ADVANCED_METRIC_POLICY_IDS.get(
+            str(controls.get("advanced_metric_policy", "")), 0.0
+        )
+
+    for risk_key in ("preemptive_gate_risk", "projection_gate_risk", "analogue_gate_risk"):
+        risk = payload.get(risk_key)
+        prefix = f"gate/{risk_key}"
+        aliases[f"{prefix}/active"] = 1.0 if isinstance(risk, dict) else 0.0
+        if isinstance(risk, dict):
+            add_numeric_tree(aliases, prefix, risk)
+            aliases[f"{prefix}/risk_source_id"] = RISK_SOURCE_IDS.get(str(risk.get("risk_source", "")), 0.0)
+            matched_runs = risk.get("analogue_matched_runs")
+            if isinstance(matched_runs, (list, tuple)):
+                aliases[f"{prefix}/analogue_matched_run_count"] = float(len(matched_runs))
+    return aliases
+
+
 def latest_diagnostics_summary_pin_payload(path: Path, step: int) -> dict[str, float]:
     """Return latest diagnostics aliases for summary-only re-pinning.
 
@@ -95,6 +240,13 @@ def latest_diagnostics_summary_pin_payload(path: Path, step: int) -> dict[str, f
     payload = latest_diagnostics_aliases(path, step)
     if payload:
         payload["diagnostics/summary_pin_active"] = 1.0
+    return payload
+
+
+def latest_gate_state_summary_pin_payload(path: Path, step: int, target_bpb: float) -> dict[str, float]:
+    payload = latest_gate_state_aliases(path, step, target_bpb)
+    if payload:
+        payload["gate/summary_pin_active"] = 1.0
     return payload
 
 
@@ -140,6 +292,7 @@ def main() -> None:
     wandb.define_metric("*", step_metric="trainer/step")
     path = Path(args.log)
     diagnostics_json = Path(args.diagnostics_json) if args.diagnostics_json else default_diagnostics_json(path)
+    gate_state_json = Path(args.gate_state_json) if args.gate_state_json else default_gate_state_json(args.run_id)
     seen: set[tuple[str, int]] = set()
     best_bpb: float | None = None
     initial_bpb: float | None = None
@@ -207,7 +360,9 @@ def main() -> None:
                         "openai_parameter_golf/gap_to_target": target_gap,
                     }
                     diagnostic_payload = latest_diagnostics_aliases(diagnostics_json, step)
+                    gate_payload = latest_gate_state_aliases(gate_state_json, step, args.target_bpb)
                     payload.update(diagnostic_payload)
+                    payload.update(gate_payload)
                     wandb.log(payload)
                     summary_payload = {
                         "fineweb/val_bpb": bpb,
@@ -229,6 +384,7 @@ def main() -> None:
                         "progress/fraction": step / max(total, 1),
                     }
                     summary_payload.update(diagnostic_payload)
+                    summary_payload.update(gate_payload)
                     run.summary.update(summary_payload)
                     sync_public_summary(
                         wandb,
@@ -280,7 +436,9 @@ def main() -> None:
                             }
                         )
                     diagnostic_payload = latest_diagnostics_aliases(diagnostics_json, step)
+                    gate_payload = latest_gate_state_aliases(gate_state_json, step, args.target_bpb)
                     payload.update(diagnostic_payload)
+                    payload.update(gate_payload)
                     wandb.log(payload)
                     summary_payload = {
                         "fineweb/train_loss": train_loss,
@@ -299,6 +457,7 @@ def main() -> None:
                             }
                         )
                     summary_payload.update(diagnostic_payload)
+                    summary_payload.update(gate_payload)
                     run.summary.update(summary_payload)
                     sync_public_summary(
                         wandb,
@@ -313,6 +472,9 @@ def main() -> None:
             )
         if latest_seen_step > 0:
             diagnostics_summary_pin = latest_diagnostics_summary_pin_payload(diagnostics_json, latest_seen_step)
+            diagnostics_summary_pin.update(
+                latest_gate_state_summary_pin_payload(gate_state_json, latest_seen_step, args.target_bpb)
+            )
             if diagnostics_summary_pin:
                 fingerprint = summary_payload_fingerprint(diagnostics_summary_pin)
                 run.summary.update(diagnostics_summary_pin)

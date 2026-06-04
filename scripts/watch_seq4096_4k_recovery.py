@@ -1139,12 +1139,14 @@ def build_analysis_shell(
 def build_dense_mirror_shell(*, repo_root: Path, run_id: str, log_path: Path, target_bpb: float, python: str) -> str:
     mirror_log = repo_root / "logs" / f"{run_id}.wandb_mirror.txt"
     diagnostics_json = repo_root / "logs" / f"{run_id}.full_diag.latest.json"
+    gate_state_json = repo_root / "outputs" / f"{run_id}.4k_recovery_state.json"
     return (
         f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src && "
         f"{shlex.quote(str(python))} scripts/mirror_fineweb_log_to_wandb.py "
         f"--log {shlex.quote(str(log_path))} --run-id {shlex.quote(run_id)} "
         f"--target-bpb {float(target_bpb)} --poll-seconds 15 "
         f"--diagnostics-json {shlex.quote(str(diagnostics_json))} "
+        f"--gate-state-json {shlex.quote(str(gate_state_json))} "
         f"2>&1 | tee -a {shlex.quote(str(mirror_log))}"
     )
 
