@@ -34,6 +34,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.tri as mtri
 import numpy as np
 import torch
 
@@ -49,7 +50,9 @@ from toricgt.reasoning_geometry import (
     attach_normalized_scores,
     barycentric_to_cartesian,
     prim_mst_stats,
+    rbf_interpolate,
     simplex_record,
+    triangle_grid,
 )
 from toricgt.slepian_torus import ToricSlepianConfig, toric_slepian_audit
 from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step_filtration_stats_np
@@ -66,6 +69,61 @@ VAL_RE = re.compile(
     r"\s+val_bpb:(?P<bpb>[0-9.eE+-]+)\s+train_time:(?P<ms>[0-9.eE+-]+)ms"
     r"\s+step_avg:(?P<avg>[0-9.eE+-]+)ms"
 )
+
+DARK_BG = "#030712"
+DARK_PANEL = "#06111f"
+DARK_TEXT = "#e8fbff"
+DARK_GRID = "#143344"
+
+
+def blue_colormap():
+    from matplotlib.colors import LinearSegmentedColormap
+
+    return LinearSegmentedColormap.from_list(
+        "toricgt_seq4096_reasoning_blues",
+        ["#06112a", "#082f63", "#0b5ea8", "#39b8ff", "#dff8ff"],
+    )
+
+
+def flatten_axes(axes: Any) -> list[Any]:
+    if isinstance(axes, np.ndarray):
+        return [axis for axis in axes.ravel()]
+    if isinstance(axes, (list, tuple)):
+        flattened: list[Any] = []
+        for item in axes:
+            flattened.extend(flatten_axes(item))
+        return flattened
+    return [axes]
+
+
+def style_dark_axes(fig: Any, axes: Any, *, grid: bool = True) -> None:
+    fig.patch.set_facecolor(DARK_BG)
+    for ax in flatten_axes(axes):
+        ax.set_facecolor(DARK_BG)
+        ax.tick_params(colors=DARK_TEXT)
+        ax.title.set_color("white")
+        ax.xaxis.label.set_color(DARK_TEXT)
+        ax.yaxis.label.set_color(DARK_TEXT)
+        if hasattr(ax, "zaxis"):
+            ax.zaxis.label.set_color(DARK_TEXT)
+        for spine in getattr(ax, "spines", {}).values():
+            spine.set_color("#2de2e6")
+            spine.set_alpha(0.45)
+        if grid:
+            ax.grid(color=DARK_GRID, alpha=0.35)
+
+
+def style_dark_colorbar(cbar: Any) -> None:
+    cbar.set_label(cbar.ax.get_ylabel(), color=DARK_TEXT)
+    cbar.ax.yaxis.set_tick_params(color=DARK_TEXT)
+    plt.setp(cbar.ax.get_yticklabels(), color=DARK_TEXT)
+    cbar.outline.set_edgecolor("#2de2e6")
+    cbar.outline.set_alpha(0.45)
+
+
+def save_dark(fig: Any, out: Path, *, dpi: int = 180) -> None:
+    fig.savefig(out, dpi=dpi, facecolor=fig.get_facecolor())
+
 
 TRIANGLE_SPECS = {
     "reasoning_k_bpb": {
@@ -638,17 +696,19 @@ def plot_trajectory_3d(record: dict[str, Any], out: Path) -> None:
     proj = arrays["proj3"]
     energy = arrays["energy"]
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig = plt.figure(figsize=(8, 7), constrained_layout=True)
+    fig = plt.figure(figsize=(8, 7), constrained_layout=True, facecolor=DARK_BG)
     ax = fig.add_subplot(111, projection="3d")
+    style_dark_axes(fig, ax)
     if proj.shape[0] > 1:
-        ax.plot(proj[:, 0], proj[:, 1], proj[:, 2], color="#64748b", linewidth=1.0, alpha=0.8)
+        ax.plot(proj[:, 0], proj[:, 1], proj[:, 2], color="#6df6ff", linewidth=1.0, alpha=0.8)
     scatter = ax.scatter(proj[:, 0], proj[:, 1], proj[:, 2], c=energy, cmap="viridis", s=38)
-    fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.06, label="checkpoint energy")
+    cbar = fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.06, label="checkpoint energy")
+    style_dark_colorbar(cbar)
     ax.set_title(f"{record['record_id']} 3D checkpoint trajectory")
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
     ax.set_zlabel("PC3")
-    fig.savefig(out, dpi=180)
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -657,16 +717,33 @@ def plot_energy_landscape(record: dict[str, Any], out: Path) -> None:
     proj = arrays["proj3"]
     energy = arrays["energy"]
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8, 6), constrained_layout=True)
+    fig = plt.figure(figsize=(8.2, 6.8), constrained_layout=True, facecolor=DARK_BG)
+    ax = fig.add_subplot(111, projection="3d")
+    style_dark_axes(fig, ax)
     if proj.shape[0] > 2:
-        ax.tricontourf(proj[:, 0], proj[:, 1], energy, levels=12, cmap="magma", alpha=0.72)
-    scatter = ax.scatter(proj[:, 0], proj[:, 1], c=energy, cmap="viridis", s=36, edgecolor="#111827", linewidth=0.2)
-    fig.colorbar(scatter, ax=ax, label="energy")
-    ax.set_title(f"{record['record_id']} energy landscape")
+        try:
+            ax.plot_trisurf(
+                proj[:, 0],
+                proj[:, 1],
+                energy,
+                cmap="magma",
+                linewidth=0.05,
+                antialiased=True,
+                alpha=0.74,
+            )
+        except Exception:
+            pass
+    if proj.shape[0] > 1:
+        ax.plot(proj[:, 0], proj[:, 1], energy, color="#6df6ff", linewidth=1.4, alpha=0.85)
+    scatter = ax.scatter(proj[:, 0], proj[:, 1], energy, c=energy, cmap="viridis", s=42, edgecolor="#030712", linewidth=0.35)
+    cbar = fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.08, label="energy")
+    style_dark_colorbar(cbar)
+    ax.set_title(f"{record['record_id']} 3D energy landscape")
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
-    ax.grid(alpha=0.2)
-    fig.savefig(out, dpi=180)
+    ax.set_zlabel("checkpoint energy")
+    ax.view_init(elev=28, azim=-48)
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -676,18 +753,19 @@ def plot_phase_energy(record: dict[str, Any], out: Path) -> None:
     v = arrays["phase_v"]
     energy = arrays["energy"]
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(7, 6), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(7, 6), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, ax)
     if u.size > 1:
-        ax.plot(u, v, color="#64748b", linewidth=0.8, alpha=0.7)
-    scatter = ax.scatter(u, v, c=energy, cmap="plasma", s=36, edgecolor="#111827", linewidth=0.2)
-    fig.colorbar(scatter, ax=ax, label="energy")
+        ax.plot(u, v, color="#6df6ff", linewidth=0.8, alpha=0.7)
+    scatter = ax.scatter(u, v, c=energy, cmap="plasma", s=36, edgecolor="#030712", linewidth=0.2)
+    cbar = fig.colorbar(scatter, ax=ax, label="energy")
+    style_dark_colorbar(cbar)
     ax.set_xlim(0.0, 1.0)
     ax.set_ylim(0.0, 1.0)
     ax.set_xlabel("toric phase u")
     ax.set_ylabel("toric phase v")
     ax.set_title(f"{record['record_id']} toric phase energy")
-    ax.grid(alpha=0.2)
-    fig.savefig(out, dpi=180)
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -696,15 +774,19 @@ def plot_winding(record: dict[str, Any], out: Path) -> None:
     u = np.unwrap(arrays["phase_u"] * 2.0 * np.pi) / (2.0 * np.pi)
     v = np.unwrap(arrays["phase_v"] * 2.0 * np.pi) / (2.0 * np.pi)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
-    ax.plot(u, color="#2563eb", label="u winding")
-    ax.plot(v, color="#dc2626", label="v winding")
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, ax)
+    ax.plot(u, color="#39b8ff", label="u winding")
+    ax.plot(v, color="#ff4fd8", label="v winding")
     ax.set_xlabel("trajectory index")
     ax.set_ylabel("unwrapped phase")
     ax.set_title(f"{record['record_id']} toric phase winding collection")
-    ax.grid(alpha=0.25)
-    ax.legend(loc="best")
-    fig.savefig(out, dpi=180)
+    legend = ax.legend(loc="best")
+    for text in legend.get_texts():
+        text.set_color(DARK_TEXT)
+    legend.get_frame().set_facecolor(DARK_PANEL)
+    legend.get_frame().set_edgecolor("#2de2e6")
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -712,21 +794,25 @@ def plot_directed_filtration(record: dict[str, Any], out: Path) -> None:
     topology = record["_arrays"]["topology"]
     radii = np.asarray(topology.get("radii", []), dtype=float)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9, 5), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(9, 5), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, ax)
     for key, color in (
-        ("edge_density", "#2563eb"),
-        ("triangle_density", "#16a34a"),
-        ("directed_edge_density", "#dc2626"),
-        ("directed_asymmetry", "#7c3aed"),
+        ("edge_density", "#39b8ff"),
+        ("triangle_density", "#8cff6a"),
+        ("directed_edge_density", "#ff4fd8"),
+        ("directed_asymmetry", "#ad7cff"),
     ):
         values = np.asarray(topology.get(key, []), dtype=float)
         if radii.size and values.size:
             ax.plot(radii[: values.size], values, marker="o", linewidth=1.4, color=color, label=key)
     ax.set_xlabel("filtration radius")
     ax.set_title(f"{record['record_id']} directed filtration")
-    ax.grid(alpha=0.25)
-    ax.legend(loc="best", fontsize=8)
-    fig.savefig(out, dpi=180)
+    legend = ax.legend(loc="best", fontsize=8)
+    for text in legend.get_texts():
+        text.set_color(DARK_TEXT)
+    legend.get_frame().set_facecolor(DARK_PANEL)
+    legend.get_frame().set_edgecolor("#2de2e6")
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -740,13 +826,15 @@ def plot_step_radius_hierarchy(record: dict[str, Any], out: Path) -> None:
     max_len = max(len(row) for row in matrix)
     padded = np.vstack([np.pad(row, (0, max_len - len(row)), constant_values=np.nan) for row in matrix])
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, ax, grid=False)
     im = ax.imshow(padded, aspect="auto", cmap="viridis")
     ax.set_yticks(np.arange(len(keys)), keys)
     ax.set_xlabel("radius level")
     ax.set_title(f"{record['record_id']} step/radius hierarchy")
-    fig.colorbar(im, ax=ax, label="normalized value")
-    fig.savefig(out, dpi=180)
+    cbar = fig.colorbar(im, ax=ax, label="normalized value")
+    style_dark_colorbar(cbar)
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -756,15 +844,18 @@ def plot_noncommutative_heatmaps(record: dict[str, Any], out: Path) -> None:
     directed_levels = topology.get("directed_adjacency", [])
     directed = np.asarray(directed_levels[-1] if directed_levels else [[0.0]], dtype=float)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, axes, grid=False)
     for ax, matrix, title in zip(axes, (skew, directed), ("antisymmetric skew", "directed adjacency")):
         im = ax.imshow(matrix, cmap="coolwarm" if title.startswith("antisymmetric") else "magma", aspect="auto")
         ax.set_title(title)
         ax.set_xticks([])
         ax.set_yticks([])
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        style_dark_colorbar(cbar)
     fig.suptitle(f"{record['record_id']} noncommutative heatmaps")
-    fig.savefig(out, dpi=180)
+    fig._suptitle.set_color("white")
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -774,20 +865,20 @@ def plot_toric_shadow(record: dict[str, Any], out: Path) -> None:
     margins = np.asarray(toric.get("margins", []), dtype=float)
     bends = np.asarray(toric.get("bend_magnitudes", []), dtype=float)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(3, 1, figsize=(10, 8), constrained_layout=True)
+    fig, axes = plt.subplots(3, 1, figsize=(10, 8), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, axes)
     if active.size:
-        axes[0].plot(active, color="#2563eb", linewidth=1.2)
+        axes[0].plot(active, color="#39b8ff", linewidth=1.2)
     axes[0].set_title("active toric fan cell")
     if margins.size:
-        axes[1].plot(margins, color="#16a34a", linewidth=1.2)
+        axes[1].plot(margins, color="#8cff6a", linewidth=1.2)
     axes[1].set_title("active-face margin")
     if bends.size:
-        axes[2].plot(bends, color="#dc2626", linewidth=1.2)
+        axes[2].plot(bends, color="#ff4fd8", linewidth=1.2)
     axes[2].set_title("shadow bend magnitude")
-    for ax in axes:
-        ax.grid(alpha=0.25)
     fig.suptitle(f"{record['record_id']} toric shadow audit")
-    fig.savefig(out, dpi=180)
+    fig._suptitle.set_color("white")
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -798,23 +889,31 @@ def plot_slepian(record: dict[str, Any], out: Path) -> None:
     recon = np.asarray(slepian.get("slepian_reconstruction", []), dtype=float)
     envelope = np.asarray(slepian.get("slepian_envelope", []), dtype=float)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(2, 1, figsize=(10, 7), constrained_layout=True)
+    fig, axes = plt.subplots(2, 1, figsize=(10, 7), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, axes)
     if eig.size:
         x = np.arange(eig.size)
-        axes[0].bar(x - 0.18, eig, width=0.36, color="#2563eb", label="eigenvalue")
-        axes[0].bar(x + 0.18, np.abs(coeff[: eig.size]), width=0.36, color="#dc2626", label="|coefficient|")
-        axes[0].legend(loc="best")
+        axes[0].bar(x - 0.18, eig, width=0.36, color="#39b8ff", label="eigenvalue")
+        axes[0].bar(x + 0.18, np.abs(coeff[: eig.size]), width=0.36, color="#ff4fd8", label="|coefficient|")
+        legend0 = axes[0].legend(loc="best")
+        for text in legend0.get_texts():
+            text.set_color(DARK_TEXT)
+        legend0.get_frame().set_facecolor(DARK_PANEL)
+        legend0.get_frame().set_edgecolor("#2de2e6")
     axes[0].set_title("Slepian/Pollak mode concentration")
     if recon.size:
-        axes[1].plot(recon, color="#2563eb", label="reconstruction")
+        axes[1].plot(recon, color="#39b8ff", label="reconstruction")
     if envelope.size:
-        axes[1].plot(envelope, color="#16a34a", label="envelope")
-    axes[1].legend(loc="best")
+        axes[1].plot(envelope, color="#8cff6a", label="envelope")
+    legend1 = axes[1].legend(loc="best")
+    for text in legend1.get_texts():
+        text.set_color(DARK_TEXT)
+    legend1.get_frame().set_facecolor(DARK_PANEL)
+    legend1.get_frame().set_edgecolor("#2de2e6")
     axes[1].set_title("prolate envelope")
-    for ax in axes:
-        ax.grid(alpha=0.25)
     fig.suptitle(f"{record['record_id']} toric Slepian audit")
-    fig.savefig(out, dpi=180)
+    fig._suptitle.set_color("white")
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -830,14 +929,14 @@ def plot_commutative_algebra(record: dict[str, Any], out: Path) -> None:
     ]
     values = [float(record.get(key, 0.0) or 0.0) for key in keys]
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 5), constrained_layout=True)
-    ax.barh(np.arange(len(keys)), values, color=["#dc2626" if "residual" in key or "leakage" in key else "#16a34a" for key in keys])
+    fig, ax = plt.subplots(figsize=(10, 5), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, ax)
+    ax.barh(np.arange(len(keys)), values, color=["#ff4fd8" if "residual" in key or "leakage" in key else "#8cff6a" for key in keys])
     ax.set_yticks(np.arange(len(keys)), keys, fontsize=8)
     ax.invert_yaxis()
     ax.set_xlabel("audit value")
     ax.set_title(f"{record['record_id']} commutative algebra / Koszul / BGG audit")
-    ax.grid(axis="x", alpha=0.25)
-    fig.savefig(out, dpi=180)
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -854,13 +953,13 @@ def plot_persistence_morphisms(record: dict[str, Any], out: Path) -> None:
     topology = record["_arrays"]["topology"]
     values = [float(topology.get(key, 0.0) or 0.0) for key in keys]
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 5), constrained_layout=True)
-    ax.bar(np.arange(len(keys)), values, color="#7c3aed")
+    fig, ax = plt.subplots(figsize=(10, 5), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, ax)
+    ax.bar(np.arange(len(keys)), values, color="#ad7cff")
     ax.set_xticks(np.arange(len(keys)), keys, rotation=35, ha="right", fontsize=8)
     ax.set_ylabel("rank / validity")
     ax.set_title(f"{record['record_id']} exact persistence morphisms")
-    ax.grid(axis="y", alpha=0.25)
-    fig.savefig(out, dpi=180)
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -874,8 +973,9 @@ def plot_graphcg(record: dict[str, Any], out: Path) -> None:
     ]
     values = [float(record.get(key, 0.0) or 0.0) for key in keys]
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
-    axes[0].barh(np.arange(len(keys)), values, color="#2563eb")
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, axes, grid=True)
+    axes[0].barh(np.arange(len(keys)), values, color="#39b8ff")
     axes[0].set_yticks(np.arange(len(keys)), keys, fontsize=8)
     axes[0].invert_yaxis()
     axes[0].set_title("GraphCG basis metrics")
@@ -887,32 +987,34 @@ def plot_graphcg(record: dict[str, Any], out: Path) -> None:
         basis = vh[: min(16, vh.shape[0])]
         gram = basis @ basis.T
         im = axes[1].imshow(gram, cmap="coolwarm", vmin=-1.0, vmax=1.0)
-        fig.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
+        cbar = fig.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
+        style_dark_colorbar(cbar)
     axes[1].set_title("basis Gram matrix")
     axes[1].set_xticks([])
     axes[1].set_yticks([])
     fig.suptitle(f"{record['record_id']} GraphCG disentangling audit")
-    fig.savefig(out, dpi=180)
+    fig._suptitle.set_color("white")
+    save_dark(fig, out)
     plt.close(fig)
 
 
 def plot_analogy(record: dict[str, Any], out: Path) -> None:
     proj = record["_arrays"]["proj3"]
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8, 6), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(8, 6), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, ax)
     if proj.shape[0] >= 4:
         for i in range(min(12, proj.shape[0] - 3)):
             a, b, c, d = proj[i], proj[i + 1], proj[i + 2], proj[i + 3]
             pred = b - a + c
-            ax.arrow(a[0], a[1], (b - a)[0], (b - a)[1], color="#2563eb", alpha=0.35, head_width=0.02)
-            ax.arrow(c[0], c[1], (d - c)[0], (d - c)[1], color="#16a34a", alpha=0.35, head_width=0.02)
-            ax.plot([pred[0], d[0]], [pred[1], d[1]], color="#dc2626", alpha=0.4, linewidth=0.8)
+            ax.arrow(a[0], a[1], (b - a)[0], (b - a)[1], color="#39b8ff", alpha=0.35, head_width=0.02)
+            ax.arrow(c[0], c[1], (d - c)[0], (d - c)[1], color="#8cff6a", alpha=0.35, head_width=0.02)
+            ax.plot([pred[0], d[0]], [pred[1], d[1]], color="#ff4fd8", alpha=0.4, linewidth=0.8)
     ax.scatter(proj[:, 0], proj[:, 1], c=np.arange(proj.shape[0]), cmap="viridis", s=30)
     ax.set_title(f"{record['record_id']} analogical transport map")
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
-    ax.grid(alpha=0.25)
-    fig.savefig(out, dpi=180)
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -921,17 +1023,17 @@ def plot_tropical(record: dict[str, Any], out: Path) -> None:
     active = np.asarray(toric.get("active_faces", []), dtype=float)
     energy = record["_arrays"]["energy"]
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(2, 1, figsize=(9, 6), constrained_layout=True)
+    fig, axes = plt.subplots(2, 1, figsize=(9, 6), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, axes)
     if active.size:
-        axes[0].step(np.arange(active.size), active, where="mid", color="#2563eb")
+        axes[0].step(np.arange(active.size), active, where="mid", color="#39b8ff")
     axes[0].set_title("tropical active-face / chamber path")
     if energy.size:
-        axes[1].plot(energy, color="#dc2626")
+        axes[1].plot(energy, color="#ff4fd8")
     axes[1].set_title("tropical energy plateau pressure")
-    for ax in axes:
-        ax.grid(alpha=0.25)
     fig.suptitle(f"{record['record_id']} tropical chamber audit")
-    fig.savefig(out, dpi=180)
+    fig._suptitle.set_color("white")
+    save_dark(fig, out)
     plt.close(fig)
 
 
@@ -1021,49 +1123,75 @@ def annotate_scores(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def plot_triangle(records: list[dict[str, Any]], spec: dict[str, Any], out: Path) -> None:
     vertices = [TRIANGLE_VERTICES["left"], TRIANGLE_VERTICES["right"], TRIANGLE_VERTICES["top"]]
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(7, 6), constrained_layout=True)
-    tri = np.asarray([vertices[0], vertices[1], vertices[2], vertices[0]], dtype=float)
-    ax.plot(tri[:, 0], tri[:, 1], color="#111827", linewidth=1.2)
     labels = spec["labels"]
-    ax.text(vertices[0][0] - 0.02, vertices[0][1] - 0.04, labels[0], ha="left", va="top", fontsize=9)
-    ax.text(vertices[1][0] + 0.02, vertices[1][1] - 0.04, labels[1], ha="right", va="top", fontsize=9)
-    ax.text(vertices[2][0], vertices[2][1] + 0.04, labels[2], ha="center", va="bottom", fontsize=9)
     points = []
-    colors = []
+    intensities = []
     for record in records:
         simplex = simplex_record(record, spec["scores"], labels)
         xy = barycentric_to_cartesian(simplex["weights"], vertices)
         points.append(xy)
-        colors.append(float(record.get("score/bpb_quality", 0.5)))
+        intensity_key = spec.get("intensity", spec["scores"][0])
+        intensities.append(float(record.get(intensity_key, 0.5)))
+    grid = triangle_grid(resolution=110)
+    xs = [item[0] for item in grid]
+    ys = [item[1] for item in grid]
+    zs = [rbf_interpolate((x, y), points, intensities, bandwidth=0.16) for x, y, _ in grid]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8.2, 7.2), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, ax, grid=False)
+    if points:
+        triangulation = mtri.Triangulation(xs, ys)
+        contour = ax.tricontourf(triangulation, zs, levels=22, cmap=blue_colormap(), alpha=0.96)
+        ax.tricontour(triangulation, zs, levels=8, colors="#a8f6ff", linewidths=0.32, alpha=0.48)
+        cbar = fig.colorbar(contour, ax=ax, fraction=0.035, pad=0.02)
+        cbar.set_label("reasoning simplex intensity", color=DARK_TEXT)
+        style_dark_colorbar(cbar)
+    tri = np.asarray([vertices[0], vertices[1], vertices[2], vertices[0]], dtype=float)
+    ax.plot(tri[:, 0], tri[:, 1], color="#6df6ff", linewidth=1.8)
+    label_offsets = [(-0.08, -0.055), (0.08, -0.055), (0.0, -0.036)]
+    for label, vertex, offset in zip(labels, vertices, label_offsets):
+        ax.text(vertex[0] + offset[0], vertex[1] + offset[1], label, color=DARK_TEXT, fontsize=9, ha="center")
     if points:
         arr = np.asarray(points, dtype=float)
         if arr.shape[0] > 1:
-            ax.plot(arr[:, 0], arr[:, 1], color="#64748b", linewidth=0.8, alpha=0.7)
-        scatter = ax.scatter(arr[:, 0], arr[:, 1], c=colors, cmap="viridis", s=48, edgecolor="#111827", linewidth=0.3)
-        fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04, label="BPB quality")
+            ax.plot(arr[:, 0], arr[:, 1], color="#e8fbff", linewidth=0.8, alpha=0.48)
+        scatter = ax.scatter(
+            arr[:, 0],
+            arr[:, 1],
+            c=[float(record.get("score/bpb_quality", 0.5)) for record in records],
+            cmap="magma_r",
+            s=64,
+            edgecolor="white",
+            linewidth=0.55,
+            zorder=5,
+        )
+        scatter_bar = fig.colorbar(scatter, ax=ax, fraction=0.035, pad=0.09)
+        scatter_bar.set_label("BPB quality", color=DARK_TEXT)
+        style_dark_colorbar(scatter_bar)
         for record, (x, y) in zip(records, arr):
-            ax.text(x, y, record["record_id"].split("_", 1)[0], fontsize=7, ha="center", va="center")
-    ax.set_title(spec["title"])
+            ax.text(x, y + 0.016, record["record_id"].split("_", 1)[0], color="white", fontsize=7, ha="center", va="center")
+    ax.set_title(spec["title"], color="white")
+    ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_xlim(-0.08, 1.08)
     ax.set_ylim(-0.08, 1.02)
-    fig.savefig(out, dpi=180)
+    save_dark(fig, out)
     plt.close(fig)
 
 
 def plot_tetrahedron(records: list[dict[str, Any]], spec: dict[str, Any], out: Path) -> None:
     vertices = [TETRAHEDRON_VERTICES[key] for key in ("a", "b", "c", "d")]
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig = plt.figure(figsize=(8, 7), constrained_layout=True)
+    fig = plt.figure(figsize=(8, 7), constrained_layout=True, facecolor=DARK_BG)
     ax = fig.add_subplot(111, projection="3d")
+    style_dark_axes(fig, ax, grid=False)
     verts = np.asarray(vertices, dtype=float)
     for i, j in ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)):
-        ax.plot([verts[i, 0], verts[j, 0]], [verts[i, 1], verts[j, 1]], [verts[i, 2], verts[j, 2]], color="#94a3b8", linewidth=1.0)
+        ax.plot([verts[i, 0], verts[j, 0]], [verts[i, 1], verts[j, 1]], [verts[i, 2], verts[j, 2]], color="#6df6ff", linewidth=1.2)
     labels = spec["labels"]
     for vertex, label in zip(verts, labels):
-        ax.text(vertex[0], vertex[1], vertex[2], label, fontsize=8)
+        ax.text(vertex[0], vertex[1], vertex[2], label, color=DARK_TEXT, fontsize=8)
     points = []
     colors = []
     for record in records:
@@ -1073,11 +1201,12 @@ def plot_tetrahedron(records: list[dict[str, Any]], spec: dict[str, Any], out: P
         colors.append(float(record.get("score/bpb_quality", 0.5)))
     if points:
         arr = np.asarray(points, dtype=float)
-        scatter = ax.scatter(arr[:, 0], arr[:, 1], arr[:, 2], c=colors, cmap="viridis", s=50, edgecolor="#111827", linewidth=0.3)
-        fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.06, label="BPB quality")
-    ax.set_title(spec["title"])
+        scatter = ax.scatter(arr[:, 0], arr[:, 1], arr[:, 2], c=colors, cmap="magma_r", s=56, edgecolor="white", linewidth=0.45)
+        cbar = fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.06, label="BPB quality")
+        style_dark_colorbar(cbar)
+    ax.set_title(spec["title"], color="white")
     ax.set_axis_off()
-    fig.savefig(out, dpi=180)
+    save_dark(fig, out)
     plt.close(fig)
     save_html(out.with_suffix(".html"), spec["title"], json.dumps([record_public(record) for record in records], indent=2), out.name)
 

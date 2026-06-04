@@ -110,6 +110,14 @@ class RecoveryControls:
     bigram_bias_init_alpha: float = 0.1
     bigram_bias_init_strength: float = 0.35
     bigram_bias_scale: float = 1.0
+    advanced_loss_scale: float = 0.0
+    graphcg_loss_weight: float = 0.0
+    toric_tropical_loss_weight: float = 0.0
+    slepian_loss_weight: float = 0.0
+    koszul_bgg_loss_weight: float = 0.0
+    analogy_loss_weight: float = 0.0
+    advanced_loss_sample_tokens: int = 256
+    toric_tropical_fan_bins: int = 8
 
     def launch_dict(self) -> dict[str, Any]:
         return {
@@ -131,6 +139,14 @@ class RecoveryControls:
             "bigram_bias_init_alpha": float(self.bigram_bias_init_alpha),
             "bigram_bias_init_strength": float(self.bigram_bias_init_strength),
             "bigram_bias_scale": float(self.bigram_bias_scale),
+            "advanced_loss_scale": float(self.advanced_loss_scale),
+            "graphcg_loss_weight": float(self.graphcg_loss_weight),
+            "toric_tropical_loss_weight": float(self.toric_tropical_loss_weight),
+            "slepian_loss_weight": float(self.slepian_loss_weight),
+            "koszul_bgg_loss_weight": float(self.koszul_bgg_loss_weight),
+            "analogy_loss_weight": float(self.analogy_loss_weight),
+            "advanced_loss_sample_tokens": int(self.advanced_loss_sample_tokens),
+            "toric_tropical_fan_bins": int(self.toric_tropical_fan_bins),
         }
 
 
@@ -424,13 +440,22 @@ def plan_failed_train_wave_recovery_controls(
             bigram_bias_scale=round(max(base.bigram_bias_scale, 1.15), 6),
             bigram_bias_init_from_data=False,
             policy="repeated_damped_train_wave_diversity_probe",
-            advanced_metric_policy="repeated_damped_branch_graphcg_slepian_memory_sidecars",
+            advanced_metric_policy="guarded_graphcg_toric_slepian_koszul_analogy_losses",
+            advanced_loss_scale=max(base.advanced_loss_scale, 0.20),
+            graphcg_loss_weight=max(base.graphcg_loss_weight, 0.05),
+            toric_tropical_loss_weight=max(base.toric_tropical_loss_weight, 0.03),
+            slepian_loss_weight=max(base.slepian_loss_weight, 0.02),
+            koszul_bgg_loss_weight=max(base.koszul_bgg_loss_weight, 0.01),
+            analogy_loss_weight=max(base.analogy_loss_weight, 0.01),
+            advanced_loss_sample_tokens=max(base.advanced_loss_sample_tokens, 256),
+            toric_tropical_fan_bins=max(base.toric_tropical_fan_bins, 8),
             rationale=(
                 "failed damped train-wave branch has reached the tied/bigram LR floor without validation transfer",
                 "matched failed analogue count "
                 f"{risk.analogue_failed_count} suggests this is the same recovery basin, not a fresh BPB descent",
                 "lower tied, matrix, scalar, and bigram LR and reduce batch tokens to change the optimizer trajectory",
-                "keep advanced topology/toric/BGG/Koszul/GraphCG/Slepian/analogy losses as sidecars until the <=1.2 checkpoint is preserved",
+                "begin guarded lightweight advanced-loss training: GraphCG basis disentanglement, toric/tropical chamber pressure, "
+                "Slepian/Pollak trajectory concentration, Koszul/BGG exactness, and analogical transport consistency",
             ),
         )
     return replace(
@@ -1273,6 +1298,14 @@ def build_recovery_launch(
     bigram_bias_init_alpha: float = 0.1,
     bigram_bias_init_strength: float = 0.35,
     bigram_bias_scale: float = 1.0,
+    advanced_loss_scale: float = 0.0,
+    graphcg_loss_weight: float = 0.0,
+    toric_tropical_loss_weight: float = 0.0,
+    slepian_loss_weight: float = 0.0,
+    koszul_bgg_loss_weight: float = 0.0,
+    analogy_loss_weight: float = 0.0,
+    advanced_loss_sample_tokens: int = 256,
+    toric_tropical_fan_bins: int = 8,
 ) -> RecoveryLaunch:
     _ = repo_root
     env = {
@@ -1307,6 +1340,14 @@ def build_recovery_launch(
         "RESET_OPTIMIZER_ON_RESUME": 1,
         "RESET_RNG_ON_RESUME": 1,
         "RESET_LOADER_ON_RESUME": 1,
+        "ADVANCED_LOSS_SCALE": advanced_loss_scale,
+        "GRAPHCG_LOSS_WEIGHT": graphcg_loss_weight,
+        "TORIC_TROPICAL_LOSS_WEIGHT": toric_tropical_loss_weight,
+        "SLEPIAN_LOSS_WEIGHT": slepian_loss_weight,
+        "KOSZUL_BGG_LOSS_WEIGHT": koszul_bgg_loss_weight,
+        "ANALOGY_LOSS_WEIGHT": analogy_loss_weight,
+        "ADVANCED_LOSS_SAMPLE_TOKENS": advanced_loss_sample_tokens,
+        "TORIC_TROPICAL_FAN_BINS": toric_tropical_fan_bins,
     }
     if grad_clip_norm is not None:
         env["GRAD_CLIP_NORM"] = grad_clip_norm
@@ -1454,6 +1495,14 @@ def build_gate_shell(
     recovery_bigram_bias_init_alpha: float,
     recovery_bigram_bias_init_strength: float,
     recovery_bigram_bias_scale: float,
+    recovery_advanced_loss_scale: float,
+    recovery_graphcg_loss_weight: float,
+    recovery_toric_tropical_loss_weight: float,
+    recovery_slepian_loss_weight: float,
+    recovery_koszul_bgg_loss_weight: float,
+    recovery_analogy_loss_weight: float,
+    recovery_advanced_loss_sample_tokens: int,
+    recovery_toric_tropical_fan_bins: int,
     preempt_on_projected_miss: bool,
     preempt_min_step: int,
     preempt_patience: int,
@@ -1493,6 +1542,16 @@ def build_gate_shell(
         )
         if recovery_bigram_bias_init_from_data:
             bigram_arg += "--recovery-bigram-bias-init-from-data "
+    advanced_loss_arg = (
+        f"--recovery-advanced-loss-scale {float(recovery_advanced_loss_scale)} "
+        f"--recovery-graphcg-loss-weight {float(recovery_graphcg_loss_weight)} "
+        f"--recovery-toric-tropical-loss-weight {float(recovery_toric_tropical_loss_weight)} "
+        f"--recovery-slepian-loss-weight {float(recovery_slepian_loss_weight)} "
+        f"--recovery-koszul-bgg-loss-weight {float(recovery_koszul_bgg_loss_weight)} "
+        f"--recovery-analogy-loss-weight {float(recovery_analogy_loss_weight)} "
+        f"--recovery-advanced-loss-sample-tokens {int(recovery_advanced_loss_sample_tokens)} "
+        f"--recovery-toric-tropical-fan-bins {int(recovery_toric_tropical_fan_bins)} "
+    )
     return (
         f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src && "
         f"{shlex.quote(str(python))} scripts/watch_seq4096_4k_recovery.py "
@@ -1510,6 +1569,7 @@ def build_gate_shell(
         f"--recovery-muon-momentum-warmup-start {float(recovery_muon_momentum_warmup_start)} "
         f"{grad_clip_arg}"
         f"{bigram_arg}"
+        f"{advanced_loss_arg}"
         f"{preempt_arg}"
         f"{advanced_metric_arg}"
         f"--recovery-max-train-batch-tokens {int(recovery_max_train_batch_tokens)} "
@@ -1554,6 +1614,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recovery-bigram-bias-init-alpha", type=float, default=0.1)
     parser.add_argument("--recovery-bigram-bias-init-strength", type=float, default=0.35)
     parser.add_argument("--recovery-bigram-bias-scale", type=float, default=1.0)
+    parser.add_argument("--recovery-advanced-loss-scale", type=float, default=0.0)
+    parser.add_argument("--recovery-graphcg-loss-weight", type=float, default=0.0)
+    parser.add_argument("--recovery-toric-tropical-loss-weight", type=float, default=0.0)
+    parser.add_argument("--recovery-slepian-loss-weight", type=float, default=0.0)
+    parser.add_argument("--recovery-koszul-bgg-loss-weight", type=float, default=0.0)
+    parser.add_argument("--recovery-analogy-loss-weight", type=float, default=0.0)
+    parser.add_argument("--recovery-advanced-loss-sample-tokens", type=int, default=256)
+    parser.add_argument("--recovery-toric-tropical-fan-bins", type=int, default=8)
     parser.add_argument("--analysis-root", default="")
     parser.add_argument("--preempt-on-projected-miss", action="store_true")
     parser.add_argument("--preempt-min-step", type=int, default=2500)
@@ -1669,6 +1737,14 @@ def main() -> None:
             bigram_bias_init_alpha=args.recovery_bigram_bias_init_alpha,
             bigram_bias_init_strength=args.recovery_bigram_bias_init_strength,
             bigram_bias_scale=args.recovery_bigram_bias_scale,
+            advanced_loss_scale=args.recovery_advanced_loss_scale,
+            graphcg_loss_weight=args.recovery_graphcg_loss_weight,
+            toric_tropical_loss_weight=args.recovery_toric_tropical_loss_weight,
+            slepian_loss_weight=args.recovery_slepian_loss_weight,
+            koszul_bgg_loss_weight=args.recovery_koszul_bgg_loss_weight,
+            analogy_loss_weight=args.recovery_analogy_loss_weight,
+            advanced_loss_sample_tokens=args.recovery_advanced_loss_sample_tokens,
+            toric_tropical_fan_bins=args.recovery_toric_tropical_fan_bins,
         )
         projected_target_step = (
             float("nan")
@@ -1810,6 +1886,14 @@ def main() -> None:
             bigram_bias_init_alpha=recovery_controls.bigram_bias_init_alpha,
             bigram_bias_init_strength=recovery_controls.bigram_bias_init_strength,
             bigram_bias_scale=recovery_controls.bigram_bias_scale,
+            advanced_loss_scale=recovery_controls.advanced_loss_scale,
+            graphcg_loss_weight=recovery_controls.graphcg_loss_weight,
+            toric_tropical_loss_weight=recovery_controls.toric_tropical_loss_weight,
+            slepian_loss_weight=recovery_controls.slepian_loss_weight,
+            koszul_bgg_loss_weight=recovery_controls.koszul_bgg_loss_weight,
+            analogy_loss_weight=recovery_controls.analogy_loss_weight,
+            advanced_loss_sample_tokens=recovery_controls.advanced_loss_sample_tokens,
+            toric_tropical_fan_bins=recovery_controls.toric_tropical_fan_bins,
         )
         command_dir = repo_root / "logs" / recovery_run_id / "supervisor"
         command_dir.mkdir(parents=True, exist_ok=True)
@@ -1867,6 +1951,14 @@ def main() -> None:
             recovery_bigram_bias_init_alpha=recovery_controls.bigram_bias_init_alpha,
             recovery_bigram_bias_init_strength=recovery_controls.bigram_bias_init_strength,
             recovery_bigram_bias_scale=recovery_controls.bigram_bias_scale,
+            recovery_advanced_loss_scale=recovery_controls.advanced_loss_scale,
+            recovery_graphcg_loss_weight=recovery_controls.graphcg_loss_weight,
+            recovery_toric_tropical_loss_weight=recovery_controls.toric_tropical_loss_weight,
+            recovery_slepian_loss_weight=recovery_controls.slepian_loss_weight,
+            recovery_koszul_bgg_loss_weight=recovery_controls.koszul_bgg_loss_weight,
+            recovery_analogy_loss_weight=recovery_controls.analogy_loss_weight,
+            recovery_advanced_loss_sample_tokens=recovery_controls.advanced_loss_sample_tokens,
+            recovery_toric_tropical_fan_bins=recovery_controls.toric_tropical_fan_bins,
             preempt_on_projected_miss=args.preempt_on_projected_miss,
             preempt_min_step=args.preempt_min_step,
             preempt_patience=args.preempt_patience,

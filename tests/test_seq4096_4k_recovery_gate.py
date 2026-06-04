@@ -754,7 +754,13 @@ def test_repeated_damped_train_wave_uses_stronger_diversity_controls(tmp_path: P
     assert planned.bigram_bias_lr < base.bigram_bias_lr
     assert planned.bigram_bias_scale > base.bigram_bias_scale
     assert planned.muon_momentum_warmup_steps > base.muon_momentum_warmup_steps
-    assert planned.advanced_metric_policy == "repeated_damped_branch_graphcg_slepian_memory_sidecars"
+    assert planned.advanced_metric_policy == "guarded_graphcg_toric_slepian_koszul_analogy_losses"
+    assert planned.advanced_loss_scale > 0.0
+    assert planned.graphcg_loss_weight > 0.0
+    assert planned.toric_tropical_loss_weight > 0.0
+    assert planned.slepian_loss_weight > 0.0
+    assert planned.koszul_bgg_loss_weight > 0.0
+    assert planned.analogy_loss_weight > 0.0
 
 
 def test_seq4096_log_parses_train_bpb_for_validation_gap_controls(tmp_path: Path):
@@ -1359,6 +1365,40 @@ def test_recovery_launch_exports_bigram_bias_env_when_enabled(tmp_path: Path):
     assert "BIGRAM_BIAS_INIT_TOKENS=12345" in rendered
     assert "BIGRAM_BIAS_INIT_ALPHA=0.2" in rendered
     assert "BIGRAM_BIAS_INIT_STRENGTH=0.4" in rendered
+
+
+def test_recovery_launch_exports_advanced_loss_env_when_enabled(tmp_path: Path):
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+
+    launch = build_recovery_launch(
+        repo_root=tmp_path,
+        parameter_golf_root=tmp_path / "parameter-golf",
+        run_id="unit_advanced_recovery",
+        checkpoint_dir=tmp_path / "recovery_checkpoints",
+        log_path=tmp_path / "unit_recovery.log",
+        resume_checkpoint=checkpoint,
+        seed=7332,
+        target_bpb=1.2,
+        advanced_loss_scale=0.20,
+        graphcg_loss_weight=0.05,
+        toric_tropical_loss_weight=0.03,
+        slepian_loss_weight=0.02,
+        koszul_bgg_loss_weight=0.01,
+        analogy_loss_weight=0.01,
+        advanced_loss_sample_tokens=128,
+        toric_tropical_fan_bins=8,
+    )
+    rendered = " ".join(launch.training_command)
+
+    assert "ADVANCED_LOSS_SCALE=0.2" in rendered
+    assert "GRAPHCG_LOSS_WEIGHT=0.05" in rendered
+    assert "TORIC_TROPICAL_LOSS_WEIGHT=0.03" in rendered
+    assert "SLEPIAN_LOSS_WEIGHT=0.02" in rendered
+    assert "KOSZUL_BGG_LOSS_WEIGHT=0.01" in rendered
+    assert "ANALOGY_LOSS_WEIGHT=0.01" in rendered
+    assert "ADVANCED_LOSS_SAMPLE_TOKENS=128" in rendered
+    assert "TORIC_TROPICAL_FAN_BINS=8" in rendered
 
 
 def test_metric_controls_hold_when_projection_is_on_track(tmp_path: Path):

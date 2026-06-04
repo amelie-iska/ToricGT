@@ -1255,58 +1255,55 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
         xs.extend(focused[:, 0].tolist())
         ys.extend(focused[:, 1].tolist())
         zs.extend(energy[idx].tolist())
-    fig, ax = plt.subplots(figsize=(8.2, 7), facecolor="#030712")
+    fig = plt.figure(figsize=(8.4, 7.2), facecolor="#030712")
+    ax = fig.add_subplot(111, projection="3d")
     ax.set_facecolor("#030712")
     if len(xs) > 12:
         x_arr = np.asarray(xs, dtype=float)
         y_arr = np.asarray(ys, dtype=float)
         z_arr = np.asarray(zs, dtype=float)
-        bins = 96
-        z_sum, x_edges, y_edges = np.histogram2d(x_arr, y_arr, bins=bins, weights=z_arr)
-        counts, _, _ = np.histogram2d(x_arr, y_arr, bins=(x_edges, y_edges))
-        z_mean = np.divide(z_sum, counts, out=np.full_like(z_sum, np.nan), where=counts > 0)
-        image = ax.imshow(
-            np.ma.masked_invalid(z_mean.T),
-            origin="lower",
-            extent=[float(x_edges[0]), float(x_edges[-1]), float(y_edges[0]), float(y_edges[-1])],
-            cmap="magma",
-            interpolation="bilinear",
-            alpha=0.90,
-            aspect="auto",
-        )
-        ax.contour(
-            0.5 * (x_edges[:-1] + x_edges[1:]),
-            0.5 * (y_edges[:-1] + y_edges[1:]),
-            np.ma.masked_invalid(z_mean.T),
-            levels=8,
-            colors="#dff8ff",
-            linewidths=0.25,
-            alpha=0.38,
-        )
-        cbar = fig.colorbar(image, ax=ax, fraction=0.04, pad=0.02)
+        try:
+            surface = ax.plot_trisurf(
+                x_arr,
+                y_arr,
+                z_arr,
+                cmap="magma",
+                linewidth=0.035,
+                antialiased=True,
+                alpha=0.82,
+            )
+            cbar = fig.colorbar(surface, ax=ax, fraction=0.04, pad=0.08)
+        except Exception:
+            scatter = ax.scatter(x_arr, y_arr, z_arr, c=z_arr, cmap="magma", s=7, alpha=0.82)
+            cbar = fig.colorbar(scatter, ax=ax, fraction=0.04, pad=0.08)
     else:
-        scatter = ax.scatter(xs, ys, c=zs, cmap="magma", s=8)
-        cbar = fig.colorbar(scatter, ax=ax, fraction=0.04, pad=0.02)
+        scatter = ax.scatter(xs, ys, zs, c=zs, cmap="magma", s=14)
+        cbar = fig.colorbar(scatter, ax=ax, fraction=0.04, pad=0.08)
     cbar.set_label("local NLL energy", color="white")
     cbar.ax.yaxis.set_tick_params(color="white")
     plt.setp(cbar.ax.get_yticklabels(), color="white")
     for branch in branches:
         path = branch["projected_path"]
+        energy = np.asarray(branch["per_token_nll"], dtype=float)
         step = max(1, path.shape[0] // 160)
         focused_path = _focus_project(path[::step, :2], focus_center, focus_scale)
-        ax.plot(focused_path[:, 0], focused_path[:, 1], color="#6df6ff", alpha=0.18, linewidth=0.65)
+        energy_path = energy[::step][: focused_path.shape[0]]
+        ax.plot(focused_path[:, 0], focused_path[:, 1], energy_path, color="#6df6ff", alpha=0.35, linewidth=0.7)
     ax.set_xlabel("focused PC1", color="white")
     ax.set_ylabel("focused PC2", color="white")
-    ax.set_title(f"Embedding energy landscape R{record_meta['record_index']}", color="white")
+    ax.set_zlabel("local NLL energy", color="white")
+    ax.set_title(f"3D embedding energy landscape R{record_meta['record_index']}", color="white")
     ax.text(
-        0.015,
         0.02,
-        "asinh-focused projection; binned local-NLL heatmap",
+        0.02,
+        0.98,
+        "asinh-focused PCA; local-NLL surface with branch overlays",
         transform=ax.transAxes,
         color="#e8fbff",
         fontsize=8,
     )
     ax.tick_params(colors="white")
+    ax.view_init(elev=30, azim=-48)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
@@ -1319,12 +1316,11 @@ def write_interactive_energy_landscape(
 ) -> None:
     """Write a rotatable 3D embedding-energy landscape.
 
-    The static landscape is a top-down tricontour plot over the first two
-    hidden-state PCA coordinates.  This companion HTML lifts the same
-    model-computed local NLL values into the z-axis.  The mesh is built from the
-    sampled reasoning states, while each branch path is drawn on top of the
-    surface so low-energy basins and high-energy ridges can be inspected by
-    rotating the plot.
+    The static landscape and this companion HTML both lift model-computed local
+    NLL values into the z-axis over the first two hidden-state PCA coordinates.
+    The mesh is built from sampled reasoning states, while each branch path is
+    drawn on top of the surface so low-energy basins and high-energy ridges can
+    be inspected by rotating the plot.
     """
 
     xs: list[float] = []

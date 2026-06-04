@@ -1,4 +1,5 @@
 import numpy as np
+from matplotlib.figure import Figure
 
 from toricgt.visualization import (
     plot_energy_landscape,
@@ -30,3 +31,21 @@ def test_reasoning_trajectory_visualizations(tmp_path):
     for output in outputs:
         assert output.exists()
         assert output.stat().st_size > 0
+
+
+def test_energy_landscape_uses_static_3d_axis(tmp_path, monkeypatch):
+    projections: list[str | None] = []
+    original_add_subplot = Figure.add_subplot
+
+    def capture_add_subplot(self, *args, **kwargs):
+        projections.append(kwargs.get("projection"))
+        return original_add_subplot(self, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "add_subplot", capture_add_subplot)
+    path, energy = reasoning_trajectory(seed=29, steps=18)
+
+    output = tmp_path / "landscape_3d.png"
+    plot_energy_landscape(path, energy, output)
+
+    assert output.exists()
+    assert "3d" in projections

@@ -6,6 +6,8 @@ import sys
 from argparse import Namespace
 from pathlib import Path
 
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 import torch
 
 
@@ -99,3 +101,68 @@ def test_seq4096_reasoning_geometry_suite_writes_old_suite_shape(tmp_path: Path)
     assert any("toric_slepian_audit" in path for path in inventory["image_files"])
     assert any("graphcg_basis_disentanglement" in path for path in inventory["image_files"])
     assert any("analogical_transport_map" in path for path in inventory["image_files"])
+
+
+def test_seq4096_energy_landscape_uses_static_3d_axis(tmp_path: Path, monkeypatch) -> None:
+    module = load_module()
+    projections: list[str | None] = []
+    original_add_subplot = Figure.add_subplot
+
+    def capture_add_subplot(self, *args, **kwargs):
+        projections.append(kwargs.get("projection"))
+        return original_add_subplot(self, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "add_subplot", capture_add_subplot)
+    proj3 = torch.randn(18, 3).numpy()
+    record = {
+        "record_id": "synthetic",
+        "_arrays": {
+            "proj3": proj3,
+            "energy": torch.linspace(0.5, 1.5, 18).numpy(),
+        },
+    }
+
+    output = tmp_path / "energy_3d.png"
+    module.plot_energy_landscape(record, output)
+
+    assert output.exists()
+    assert "3d" in projections
+
+
+def test_seq4096_triangle_uses_dark_filled_reasoning_heatmap(tmp_path: Path, monkeypatch) -> None:
+    module = load_module()
+    contour_calls = 0
+    saved_facecolors: list[tuple[float, float, float, float]] = []
+    original_tricontourf = Axes.tricontourf
+    original_savefig = Figure.savefig
+
+    def capture_tricontourf(self, *args, **kwargs):
+        nonlocal contour_calls
+        contour_calls += 1
+        return original_tricontourf(self, *args, **kwargs)
+
+    def capture_savefig(self, *args, **kwargs):
+        saved_facecolors.append(tuple(self.get_facecolor()))
+        return original_savefig(self, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "tricontourf", capture_tricontourf)
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+    records = [
+        {
+            "record_id": f"R{idx}",
+            "score/trajectory_depth": 0.2 + idx * 0.1,
+            "score/relative_k": 0.8 - idx * 0.08,
+            "score/bpb_quality": 0.3 + idx * 0.09,
+        }
+        for idx in range(6)
+    ]
+
+    output = tmp_path / "triangle.png"
+    module.plot_triangle(records, module.TRIANGLE_SPECS["reasoning_k_bpb"], output)
+
+    assert output.exists()
+    assert contour_calls >= 1
+    assert saved_facecolors
+    assert saved_facecolors[-1][0] < 0.05
+    assert saved_facecolors[-1][1] < 0.08
+    assert saved_facecolors[-1][2] < 0.12

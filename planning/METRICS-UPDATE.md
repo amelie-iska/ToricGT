@@ -909,22 +909,32 @@ Use best checkpoint at or before 3250/3500/3750, then launch the controller-reco
   stored-weight compression path, because PolarQuant K/V cache compression does
   not shrink model weights.
 
-Current action: R52 missed the projected gate velocity at step 3750, R54 and
-R55 did not improve the authoritative validation gate, R56 missed step 4000 at
-`val_bpb=1.2163`, R57 missed at `1.2299`, R59 missed at `1.2288`, and R62
-missed at `1.2266`. R60 and R61 repeated the same damped recovery basin, R61
-was preempted at step 3850 into R62, and R62 confirmed a different but still
-insufficient diversity trajectory. R63 is now active from the best step-3750
-checkpoint (`val_bpb=1.2131`) with reset optimizer/RNG/loader and BPB-clean
-diversity controls. The live analysis supervisor is attached with
-`--analyze-start-step`, runs the historical W&B metrics and OAI BPB entrypoints
-plus compact Seq4096 advanced geometry/simplex visualization, refreshes the
-final artifact inventory, and dispatches the Codex review hook for sub-agent
-inspection of every current-run output family. If R63 does not materially
-improve validation transfer, next recovery should consider guarded, explicitly
-byte-accounted structural-theory controls centered on toric/Slepian, topology,
-BGG/Koszul, and GraphCG sidecar evidence rather than another pure replay of
-R62 controls.
+Current action update (2026-06-04): R52 missed the projected gate velocity at
+step 3750, R54 and R55 did not improve the authoritative validation gate, R56
+missed step 4000 at `val_bpb=1.2163`, R57 missed at `1.2299`, R59 missed at
+`1.2288`, and R62 missed at `1.2266`. R60/R61/R63/R64/R65 repeatedly replayed
+the same step-3750 recovery origin (`val_bpb=1.2131`) and matched failed
+train-wave analogues by step 3850. This is now enough evidence to begin guarded
+advanced-methodology experimentation before the final <=1.2 checkpoint: the
+Seq4096 trainer has compact auxiliary losses, disabled by default, for GraphCG
+embedding-basis disentanglement, toric/tropical chamber pressure, Slepian/Pollak
+trajectory concentration, Koszul/BGG exactness, and analogical transport
+consistency. The recovery controller promotes these only after repeated damped
+replay, using `ADVANCED_LOSS_SCALE=0.20` with low per-family weights
+(`GRAPHCG=0.05`, `TORIC_TROPICAL=0.03`, `SLEPIAN=0.02`, `KOSZUL_BGG=0.01`,
+`ANALOGY=0.01`) so BPB cross-entropy remains dominant. W&B reports
+`train/advanced_aux_loss` plus each `advanced/*` component; `train/bpb` remains
+computed from the base cross-entropy, not the auxiliary objective.
+
+Live analysis update: recovery-launched live watchers must include
+`--analyze-start-step` so the step-3750 resume checkpoint is analyzed before a
+short recovery is preempted. The compact geometry suite now renders static
+energy-landscape PNGs as real 3D PCA/local-energy plots, keeps the existing HTML
+companions, uses dark-mode styling where possible, and restores filled
+reasoning-simplex triangle heatmaps via barycentric RBF interpolation instead of
+sparse point-only triangles. These outputs should be reviewed at every live
+periodic interval and correlated with W&B advanced-loss metrics before
+increasing any auxiliary scale.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
@@ -941,9 +951,14 @@ Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, ver
 
 Use existing reasoning and memory special tokens where tokenizer/model shape permits.
 
-- [ ] **Step 2: Enable GraphCG, analogy, topology, BGG, Koszul, toric, tropical, Slepian/Pollak losses by controller scale**
+- [x] **Step 2: Enable GraphCG, analogy, topology, BGG, Koszul, toric, tropical, Slepian/Pollak losses by controller scale**
 
 Start from low weights and promote families with positive held-out BPB transfer.
+Initial compact Seq4096 implementation is training-module-free and
+byte-accounted: it adds no stored parameters, so the competition artifact weight
+size is unchanged. Next updates should compare the first advanced-loss branch
+against R62-R66 replay baselines and only raise `ADVANCED_LOSS_SCALE` if
+validation BPB improves before or at the 4K gate.
 
 - [ ] **Step 3: Add long-context tropical ring phase**
 
