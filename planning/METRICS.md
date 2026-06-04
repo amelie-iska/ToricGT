@@ -12282,3 +12282,22 @@ analysis start: 3650
 analysis interval: 1
 low-train-BPB checkpoint trigger: enabled
 ```
+
+Because R82 had already written no-trigger rows up to the 3700 region before
+the in-place correction, it was superseded by a fresh clean R83 run rather than
+continuing with a mixed log:
+
+```text
+active run: toricgt_seq4096_4k_recovery_r83_low_bpb_trigger_20260604T193357Z
+resume checkpoint: toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z_step_003650.pt
+reset_optimizer: 0
+reset_rng: 0
+reset_loader: 0
+low-train-BPB checkpoint trigger: enabled
+analysis start: 3650
+analysis interval: 1
+W&B: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r83_low_bpb_trigger_20260604T193357Z
+```
+
+R82 training and R82 sidecars were stopped after the R83 handoff. R81/R82
+checkpoints and analysis artifacts were left intact.
