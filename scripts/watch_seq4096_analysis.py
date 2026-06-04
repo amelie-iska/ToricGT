@@ -571,6 +571,39 @@ def bounded_pressure(value: float, scale: float, *, invert: bool = False, floor:
     return max(0.0, min(1.0, measured / float(scale)))
 
 
+def structural_family_pressures(components: dict[str, float] | None) -> dict[str, float]:
+    components = components or {}
+
+    def value(key: str) -> float:
+        try:
+            numeric = float(components.get(key, 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+        return numeric if math.isfinite(numeric) else 0.0
+
+    return {
+        "bpb_gap": value("bpb_gap_pressure"),
+        "topology_directed": value("topology_loss") + value("directed_topology_loss"),
+        "toric_slepian": value("slepian_leakage")
+        + value("toric_negative_margin")
+        + value("toric_shadow_bend"),
+        "bgg_koszul": value("bgg_standard_leakage") + value("bgg_d2_residual"),
+        "tropical_complexity": value("complexity_ncd") + value("tropical_plateau"),
+    }
+
+
+def dominant_structural_family(families: dict[str, float] | None) -> tuple[str, float]:
+    valid = {
+        str(key): float(value)
+        for key, value in (families or {}).items()
+        if isinstance(value, (int, float)) and math.isfinite(float(value)) and float(value) > 0.0
+    }
+    if not valid:
+        return "none", 0.0
+    key, value = max(valid.items(), key=lambda item: (item[1], item[0]))
+    return key, float(value)
+
+
 def structural_recapture_report(diagnostic_payload: dict[str, Any]) -> dict[str, Any]:
     """Score whether advanced diagnostics should shape the next BPB restart."""
 
@@ -648,6 +681,8 @@ def structural_recapture_report(diagnostic_payload: dict[str, Any]) -> dict[str,
         "complexity_ncd": 0.03 * bounded_pressure(complexity_ncd, 1.0),
         "tropical_plateau": 0.02 * bounded_pressure(tropical_plateau, 0.04),
     }
+    family_pressures = structural_family_pressures(components)
+    dominant_family, dominant_pressure = dominant_structural_family(family_pressures)
     score = max(0.0, min(1.0, sum(components.values())))
     families_available = any(
         finite_payload_value(diagnostic_payload, key, default=0.0) >= 0.5
@@ -665,10 +700,15 @@ def structural_recapture_report(diagnostic_payload: dict[str, Any]) -> dict[str,
         control_prior = "hold_primary_bpb_clean_until_structural_payload_available"
     elif score >= 0.75:
         band = "high"
-        control_prior = "restart_guarded_damp_lr_use_structural_sidecar_transfer"
+        control_prior = f"restart_guarded_damp_lr_use_{dominant_family}_sidecar_transfer"
     elif score >= 0.50:
         band = "guarded"
-        control_prior = "restart_guarded_warmup_bigram_lr_damping"
+        if dominant_family == "topology_directed":
+            control_prior = "guard_directed_topology_with_warmup_and_bigram_lr_damping"
+        elif dominant_family == "toric_slepian":
+            control_prior = "guard_toric_slepian_concentration_before_velocity_push"
+        else:
+            control_prior = "restart_guarded_warmup_bigram_lr_damping"
     elif score >= 0.30:
         band = "watch"
         control_prior = "monitor_do_not_add_heavy_structural_losses"
@@ -680,6 +720,9 @@ def structural_recapture_report(diagnostic_payload: dict[str, Any]) -> dict[str,
         "structural_recapture_band": band,
         "structural_control_prior": control_prior,
         "structural_recapture_components": components,
+        "structural_family_pressures": family_pressures,
+        "dominant_structural_pressure_family": dominant_family,
+        "dominant_structural_pressure_value": dominant_pressure,
         "structural_raw_signals": {
             "bpb_intervention_pressure": bpb_pressure,
             "topology_loss": topology_loss,
@@ -1137,6 +1180,67 @@ def plot_structural_recapture_map(report: dict[str, Any], out: Path) -> None:
     plt.close(fig)
 
 
+def plot_advanced_metric_control_map(report: dict[str, Any], out: Path) -> None:
+    """Plot family-level pressures that drive the next optimizer-control choice."""
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    families = report.get("structural_family_pressures") or {}
+    families = {
+        str(key): float(value)
+        for key, value in families.items()
+        if isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+    dominant = str(report.get("dominant_structural_pressure_family") or "none")
+    transfer_regime = str(report.get("transfer_regime") or "unknown")
+    recent_efficiency = report.get("recent_transfer_efficiency")
+    validation_gap = report.get("latest_generalization_gap_bpb")
+    control_prior = str(report.get("structural_control_prior") or "unknown")
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6), constrained_layout=True)
+    ax = axes[0]
+    if families:
+        ordered = sorted(families.items(), key=lambda item: item[1], reverse=True)
+        labels = [item[0] for item in ordered]
+        xs = [item[1] for item in ordered]
+        colors = ["#dc2626" if label == dominant else "#2563eb" for label in labels]
+        y = np.arange(len(ordered))
+        ax.barh(y, xs, color=colors)
+        ax.set_yticks(y, labels, fontsize=9)
+        ax.invert_yaxis()
+        ax.axvline(0.20, color="#f59e0b", linestyle="--", linewidth=0.9, label="watch")
+        ax.axvline(0.28, color="#dc2626", linestyle="--", linewidth=0.9, label="guard")
+        ax.legend(loc="lower right", fontsize=8)
+    else:
+        ax.text(0.5, 0.5, "family pressures unavailable", ha="center", va="center")
+        ax.set_xticks([])
+        ax.set_yticks([])
+    ax.set_title("Advanced-Metric Family Pressure")
+    ax.set_xlabel("weighted pressure")
+    ax.grid(axis="x", alpha=0.25)
+
+    ax = axes[1]
+    ax.axis("off")
+    lines = [
+        f"dominant family: {dominant}",
+        f"transfer regime: {transfer_regime}",
+        f"recent transfer efficiency: {recent_efficiency}",
+        f"latest generalization gap: {validation_gap}",
+        f"structural control prior: {control_prior}",
+        "",
+        "control reading:",
+        "- healthy transfer + guarded pressure: BPB velocity nudge",
+        "- topology/toric/Slepian pressure: warmup and LR damping",
+        "- validation lag: batch/regularity before more LR",
+        "- threshold reached: preserve checkpoint before advanced losses",
+    ]
+    ax.text(0.02, 0.96, "\n".join(lines), va="top", ha="left", fontsize=10, wrap=True)
+    ax.set_title("Controller Readout")
+
+    fig.suptitle("Advanced Metric Control Map", fontsize=15)
+    fig.savefig(out, dpi=180)
+    plt.close(fig)
+
+
 def phase_bpb_breakdown_plan(target_bpb: float) -> dict[str, Any]:
     return {
         "target_bpb": float(target_bpb),
@@ -1260,6 +1364,8 @@ def write_synopsis(
         f"- latest generalization gap BPB: `{report.get('latest_generalization_gap_bpb')}`",
         f"- structural recapture score: `{report.get('structural_recapture_score')}`",
         f"- structural recapture band: `{report.get('structural_recapture_band')}`",
+        f"- dominant structural pressure family: `{report.get('dominant_structural_pressure_family')}`",
+        f"- dominant structural pressure value: `{report.get('dominant_structural_pressure_value')}`",
         f"- structural control prior: `{report.get('structural_control_prior')}`",
         "",
         "## Plots",
@@ -1275,6 +1381,7 @@ def write_synopsis(
         "- `bpb/bpb_transfer_efficiency.png`: Train-To-Validation BPB Transfer Efficiency, showing whether train BPB gains are becoming validation BPB gains.",
         "- `bpb/diagnostic_proxy_geometry.png`: topology, toric, Slepian, BGG, tropical, and complexity proxy readout.",
         "- `bpb/bpb_structural_recapture_map.png`: BPB Structural Recapture Map showing which advanced metrics should shape the next restart.",
+        "- `bpb/advanced_metric_control_map.png`: Advanced Metric Control Map showing family-level pressure used to decide velocity, damping, or transfer stabilization.",
         "- `training_adjustment_proposal.json` and `.md`: conservative intervention recommendation combining BPB trajectory, W&B metric statistics, and structural diagnostics.",
         "",
         "## Recommendations",
@@ -1370,6 +1477,7 @@ def write_bpb_analysis_artifacts(
     plot_bpb_transfer_efficiency(frame, bpb_dir / "bpb_transfer_efficiency.png", report)
     plot_diagnostic_proxy_geometry(diagnostic_payload, bpb_dir / "diagnostic_proxy_geometry.png")
     plot_structural_recapture_map(report, bpb_dir / "bpb_structural_recapture_map.png")
+    plot_advanced_metric_control_map(report, bpb_dir / "advanced_metric_control_map.png")
     write_synopsis(output_dir, report, run_path, checkpoint_path, diagnostic_payload)
     return report
 

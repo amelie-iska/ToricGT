@@ -374,6 +374,13 @@ def test_advanced_diagnostics_loader_summarizes_structural_pressure(tmp_path: Pa
     assert summary["structural_pressure_high"] is True
     assert summary["structural_recapture_score"] >= 0.50
     assert summary["structural_recapture_band"] in {"guarded", "high"}
+    assert summary["structural_family_pressures"]["toric_slepian"] > 0.0
+    assert summary["dominant_structural_family"] in {
+        "topology_directed",
+        "toric_slepian",
+        "bpb_gap",
+    }
+    assert summary["dominant_structural_family_pressure"] > 0.0
     assert summary["bpb_intervention_pressure"] == 0.12
     assert summary["topology_loss"] == 1.10
     assert summary["slepian_leakage"] == 1.0
@@ -432,6 +439,7 @@ def test_metric_controls_use_structural_pressure_after_bigram_is_already_enabled
     assert planned.muon_momentum_warmup_steps > base.muon_momentum_warmup_steps
     assert planned.advanced_metric_policy == "toric_topology_slepian_guarded_bpb_recapture"
     assert any("structural recapture score" in item for item in planned.rationale)
+    assert any("dominant advanced-metric family" in item for item in planned.rationale)
 
 
 def test_structural_pressure_recapture_keeps_muon_warmup_active_after_resume_step(tmp_path: Path):
@@ -543,6 +551,62 @@ def test_metric_controls_use_velocity_when_structural_pressure_eases_and_validat
     assert planned.scalar_lr == base.scalar_lr
     assert planned.muon_momentum_warmup_steps == base.muon_momentum_warmup_steps
     assert any("no longer lagging train" in item for item in planned.rationale)
+    assert any("dominant advanced-metric family" in item for item in planned.rationale)
+
+
+def test_metric_controls_do_not_velocity_push_when_directed_topology_dominates(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3250/20000 train_loss:2.1083 train_time:1ms step_avg:1ms train_bpb:1.2377",
+                "step:3250/20000 val_loss:2.0836 val_bpb:1.2340 train_time:1ms step_avg:1ms",
+                "step:3500/20000 train_loss:2.0939 train_time:1ms step_avg:1ms train_bpb:1.2550",
+                "step:3500/20000 val_loss:2.0751 val_bpb:1.2290 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_seq4096_log(log)
+    base = RecoveryControls(
+        train_batch_tokens=983_040,
+        tied_embed_lr=0.034,
+        matrix_lr=0.018,
+        scalar_lr=0.018,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=4250,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+        bigram_bias=True,
+        bigram_bias_lr=0.02,
+    )
+
+    planned = plan_metric_driven_recovery_controls(
+        base,
+        parsed=parsed,
+        target_bpb=1.2,
+        gate_step=4000,
+        projected_target_step=4384.1,
+        max_train_batch_tokens=983_040,
+        advanced_diagnostics={
+            "diagnostics/families/topology_available": 1,
+            "diagnostics/families/toric_available": 1,
+            "diagnostics/families/slepian_pollak_prolate_available": 1,
+            "diagnostics/latest/bpb_intervention_pressure": 0.12,
+            "diagnostics/latest/topology_loss": 1.35,
+            "diagnostics/latest/directed_topology_loss": 0.44,
+            "diagnostics/latest/slepian_leakage": 0.50,
+            "diagnostics/latest/toric_active_face_margin": 0.50,
+            "diagnostics/latest/transfer_efficiency_recent": 0.70,
+            "diagnostics/latest/validation_lag_pressure": 0.0,
+        },
+    )
+
+    assert planned.policy == "structural_pressure_recapture"
+    assert planned.bigram_bias_lr <= base.bigram_bias_lr
+    assert planned.tied_embed_lr <= base.tied_embed_lr
+    assert any("dominant advanced-metric family is topology_directed" in item for item in planned.rationale)
 
 
 def test_recovery_launch_exports_bigram_bias_env_when_enabled(tmp_path: Path):

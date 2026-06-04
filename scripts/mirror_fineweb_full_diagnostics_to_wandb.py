@@ -203,6 +203,49 @@ def finite_metric(payload: dict[str, float], *keys: str, default: float = float(
     return default
 
 
+STRUCTURAL_FAMILY_IDS = {
+    "none": 0.0,
+    "bpb_gap": 1.0,
+    "topology_directed": 2.0,
+    "toric_slepian": 3.0,
+    "bgg_koszul": 4.0,
+    "tropical_complexity": 5.0,
+}
+
+
+def structural_family_pressures(components: dict[str, float] | None) -> dict[str, float]:
+    components = components or {}
+
+    def value(key: str) -> float:
+        try:
+            numeric = float(components.get(key, 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+        return numeric if math.isfinite(numeric) else 0.0
+
+    return {
+        "bpb_gap": value("bpb_gap_pressure"),
+        "topology_directed": value("topology_loss") + value("directed_topology_loss"),
+        "toric_slepian": value("slepian_leakage")
+        + value("toric_negative_margin")
+        + value("toric_shadow_bend"),
+        "bgg_koszul": value("bgg_standard_leakage") + value("bgg_d2_residual"),
+        "tropical_complexity": value("complexity_ncd") + value("tropical_plateau"),
+    }
+
+
+def dominant_structural_family(families: dict[str, float] | None) -> tuple[str, float]:
+    valid = {
+        str(key): float(value)
+        for key, value in (families or {}).items()
+        if isinstance(value, (int, float)) and math.isfinite(float(value)) and float(value) > 0.0
+    }
+    if not valid:
+        return "none", 0.0
+    key, value = max(valid.items(), key=lambda item: (item[1], item[0]))
+    return key, float(value)
+
+
 def add_prefixed_torch_metrics(
     target: dict[str, float],
     metrics: dict[str, torch.Tensor],
@@ -509,6 +552,8 @@ def structural_recapture_payload(payload: dict[str, float]) -> dict[str, float]:
         "complexity_ncd": 0.03 * bounded_pressure(complexity_ncd, 1.0),
         "tropical_plateau": 0.02 * bounded_pressure(tropical_plateau, 0.04),
     }
+    family_pressures = structural_family_pressures(components)
+    dominant_family, dominant_pressure = dominant_structural_family(family_pressures)
     score = max(0.0, min(1.0, sum(components.values())))
     families_available = any(
         finite_metric(payload, key, default=0.0) >= 0.5
@@ -541,6 +586,15 @@ def structural_recapture_payload(payload: dict[str, float]) -> dict[str, float]:
     }
     for key, value in components.items():
         out[f"diagnostics/structural_recapture_components/{key}"] = float(value)
+    for key, value in family_pressures.items():
+        out[f"diagnostics/structural_family_pressure/{key}"] = float(value)
+        out[f"diagnostics/latest/structural_family_pressure_{key}"] = float(value)
+    out["diagnostics/latest/dominant_structural_pressure_id"] = float(
+        STRUCTURAL_FAMILY_IDS.get(dominant_family, 0.0)
+    )
+    out["diagnostics/latest/dominant_structural_pressure_value"] = float(dominant_pressure)
+    out["diagnostics/dominant_structural_pressure_id"] = float(STRUCTURAL_FAMILY_IDS.get(dominant_family, 0.0))
+    out["diagnostics/dominant_structural_pressure_value"] = float(dominant_pressure)
     return out
 
 

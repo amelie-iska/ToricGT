@@ -353,6 +353,37 @@ def bounded_pressure(value: float, scale: float, *, invert: bool = False, floor:
     return max(0.0, min(1.0, measured / float(scale)))
 
 
+def structural_family_pressures(components: dict[str, float] | None) -> dict[str, float]:
+    """Group fine-grained recapture components into controller-level families."""
+
+    components = components or {}
+
+    def value(key: str) -> float:
+        return finite_float(components.get(key), default=0.0)
+
+    return {
+        "bpb_gap": value("bpb_gap_pressure"),
+        "topology_directed": value("topology_loss") + value("directed_topology_loss"),
+        "toric_slepian": value("slepian_leakage")
+        + value("toric_negative_margin")
+        + value("toric_shadow_bend"),
+        "bgg_koszul": value("bgg_standard_leakage") + value("bgg_d2_residual"),
+        "tropical_complexity": value("complexity_ncd") + value("tropical_plateau"),
+    }
+
+
+def dominant_structural_family(families: dict[str, float] | None) -> tuple[str, float]:
+    families = {
+        str(key): finite_float(value, default=0.0)
+        for key, value in (families or {}).items()
+        if finite_float(value, default=0.0) > 0.0
+    }
+    if not families:
+        return "none", 0.0
+    key, value = max(families.items(), key=lambda item: (item[1], item[0]))
+    return key, float(value)
+
+
 def summarize_advanced_diagnostics(payload: dict[str, Any] | None) -> dict[str, Any]:
     """Compact structural-pressure summary used by the recovery controller."""
 
@@ -428,6 +459,8 @@ def summarize_advanced_diagnostics(payload: dict[str, Any] | None) -> dict[str, 
         "complexity_ncd": 0.03 * bounded_pressure(complexity_ncd, 1.0),
         "tropical_plateau": 0.02 * bounded_pressure(tropical_plateau, 0.04),
     }
+    family_pressures = structural_family_pressures(recapture_components)
+    dominant_family, dominant_family_pressure = dominant_structural_family(family_pressures)
     structural_recapture_score = max(0.0, min(1.0, sum(recapture_components.values())))
     structural_pressure_high = bool(
         family_available
@@ -453,6 +486,9 @@ def summarize_advanced_diagnostics(payload: dict[str, Any] | None) -> dict[str, 
         "structural_recapture_score": structural_recapture_score,
         "structural_recapture_band": structural_band,
         "structural_recapture_components": recapture_components,
+        "structural_family_pressures": family_pressures,
+        "dominant_structural_family": dominant_family,
+        "dominant_structural_family_pressure": dominant_family_pressure,
         "bpb_intervention_pressure": bpb_pressure,
         "topology_loss": topology_loss,
         "directed_topology_loss": directed_topology_loss,
@@ -565,6 +601,27 @@ def plan_metric_driven_recovery_controls(
         if base.bigram_bias and diagnostics_summary.get("structural_pressure_high"):
             structural_score = finite_float(diagnostics_summary.get("structural_recapture_score"), default=0.0)
             structural_band = str(diagnostics_summary.get("structural_recapture_band", "unknown"))
+            dominant_family = str(diagnostics_summary.get("dominant_structural_family", "none"))
+            dominant_pressure = finite_float(
+                diagnostics_summary.get("dominant_structural_family_pressure"),
+                default=0.0,
+            )
+            family_pressures = diagnostics_summary.get("structural_family_pressures") or {}
+            topology_pressure = finite_float(
+                family_pressures.get("topology_directed") if isinstance(family_pressures, dict) else None,
+                default=0.0,
+            )
+            transfer_efficiency = diagnostic_float(
+                advanced_diagnostics,
+                "diagnostics/latest/transfer_efficiency_recent",
+                "fineweb_curve/transfer_efficiency_recent",
+            )
+            validation_lag_pressure = diagnostic_float(
+                advanced_diagnostics,
+                "diagnostics/latest/validation_lag_pressure",
+                "fineweb_curve/validation_lag_pressure",
+                default=0.0,
+            )
             resume_step_aware_warmup_steps = max(
                 base.muon_momentum_warmup_steps,
                 int(gate_step) + 250,
@@ -574,6 +631,13 @@ def plan_metric_driven_recovery_controls(
                 0.50 <= structural_score < 0.75
                 and math.isfinite(validation_gap)
                 and validation_gap <= 0.005
+                and (
+                    not math.isfinite(transfer_efficiency)
+                    or transfer_efficiency >= 0.45
+                    or validation_gap <= 0.0
+                )
+                and validation_lag_pressure <= 0.35
+                and topology_pressure < 0.28
             )
             if validation_transfer_relieved:
                 return replace(
@@ -595,6 +659,8 @@ def plan_metric_driven_recovery_controls(
                         f"validation projects target at step {projected_target_step:.1f}, beyond gate {gate_step}",
                         "structural recapture pressure has eased into the guarded band: "
                         f"score={structural_score:.3f} band={structural_band}",
+                        "dominant advanced-metric family is "
+                        f"{dominant_family} pressure={dominant_pressure:.3f}",
                         f"validation BPB {latest_val.val_bpb:.4f} is no longer lagging train BPB {train_bpb:.4f} "
                         f"(gap={validation_gap:.4f})",
                         "use a small tied-embedding and bigram-LR velocity push while keeping matrix/scalar LR fixed",
@@ -622,6 +688,8 @@ def plan_metric_driven_recovery_controls(
                     f"slepian_leakage={diagnostics_summary.get('slepian_leakage')}, "
                     f"toric_margin={diagnostics_summary.get('toric_active_face_margin')}",
                     f"structural recapture score={structural_score:.3f} band={structural_band}",
+                    "dominant advanced-metric family is "
+                    f"{dominant_family} pressure={dominant_pressure:.3f}",
                     "use resume-step-aware Muon warmup so structural recapture still changes the optimizer flow after a 3K checkpoint resume",
                     "damp the lexical-head LR to improve validation transfer without injecting heavy structural losses",
                 ),

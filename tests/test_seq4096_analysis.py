@@ -169,6 +169,14 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert report["state"] == "near_target"
     assert report["structural_recapture_score"] > 0.55
     assert report["structural_recapture_band"] in {"guarded", "high"}
+    assert report["dominant_structural_pressure_family"] in {
+        "topology_directed",
+        "toric_slepian",
+        "bgg_koszul",
+        "tropical_complexity",
+        "bpb_gap",
+    }
+    assert report["structural_family_pressures"]["toric_slepian"] > 0.0
     assert (tmp_path / "analysis" / "bpb" / "bpb_descent_timeseries.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_descent_simplex.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_velocity.png").exists()
@@ -177,6 +185,7 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert (tmp_path / "analysis" / "bpb" / "bpb_eta_to_target.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_rockfall_dashboard.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_structural_recapture_map.png").exists()
+    assert (tmp_path / "analysis" / "bpb" / "advanced_metric_control_map.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "structural_recapture_report.json").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_efficiency.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_efficiency_report.json").exists()
@@ -200,6 +209,7 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert "structural recapture score" in synopsis
     assert "BPB Structural Recapture Map" in synopsis
     assert "Train-To-Validation BPB Transfer Efficiency" in synopsis
+    assert "Advanced Metric Control Map" in synopsis
 
 
 def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
@@ -232,6 +242,10 @@ def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
     )
     assert "diagnostics/structural_recapture_components/topology_loss" in payload
     assert "diagnostics/structural_recapture_components/slepian_leakage" in payload
+    assert "diagnostics/structural_family_pressure/topology_directed" in payload
+    assert "diagnostics/latest/structural_family_pressure_toric_slepian" in payload
+    assert payload["diagnostics/latest/dominant_structural_pressure_id"] > 0.0
+    assert payload["diagnostics/latest/dominant_structural_pressure_value"] > 0.0
     assert payload["diagnostics/families/structural_recapture_available"] == 1.0
     assert payload["diagnostics/families/topology_available"] == 1.0
     assert payload["diagnostics/families/category_o_bgg_available"] == 1.0
