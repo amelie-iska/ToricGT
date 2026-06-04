@@ -222,6 +222,8 @@ def test_dense_wandb_mirror_loads_train_bpb_and_diagnostic_aliases(tmp_path: Pat
                 "diagnostics/latest/topology_loss": 0.8,
                 "diagnostics/latest/bpb_intervention_pressure": 0.12,
                 "diagnostics/families/slepian_pollak_prolate_available": 1.0,
+                "diagnostics/structural_recapture_score": 0.71,
+                "diagnostics/structural_recapture_components/topology_loss": 0.19,
                 "fineweb_curve/latest_train_bpb": 1.2821,
                 "toric/shadow_fan_cell_entropy": 0.75,
             }
@@ -234,6 +236,8 @@ def test_dense_wandb_mirror_loads_train_bpb_and_diagnostic_aliases(tmp_path: Pat
     assert aliases["diagnostics/latest/topology_loss"] == pytest.approx(0.8)
     assert aliases["diagnostics/latest/bpb_intervention_pressure"] == pytest.approx(0.12)
     assert aliases["diagnostics/families/slepian_pollak_prolate_available"] == 1.0
+    assert aliases["diagnostics/structural_recapture_score"] == pytest.approx(0.71)
+    assert aliases["diagnostics/structural_recapture_components/topology_loss"] == pytest.approx(0.19)
     assert aliases["fineweb_curve/latest_train_bpb"] == pytest.approx(1.2821)
     assert aliases["diagnostics/latest_full_metrics_step"] == pytest.approx(2100)
     assert aliases["diagnostics/latest/staleness_steps"] == pytest.approx(100)

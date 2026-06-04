@@ -62,6 +62,7 @@ def latest_diagnostics_aliases(path: Path, step: int) -> dict[str, float]:
         if not (
             key.startswith("diagnostics/latest/")
             or key.startswith("diagnostics/families/")
+            or key.startswith("diagnostics/structural_recapture")
             or key.startswith("fineweb_curve/")
         ):
             continue
@@ -80,6 +81,25 @@ def latest_diagnostics_aliases(path: Path, step: int) -> dict[str, float]:
         aliases["diagnostics/latest_full_metrics_step"] = diag_step_value
         aliases["diagnostics/latest/staleness_steps"] = max(0.0, float(step) - diag_step_value)
     return aliases
+
+
+def sync_public_summary(
+    wandb_module,
+    *,
+    entity: str,
+    project: str,
+    run_id: str,
+    summary_payload: dict[str, float],
+) -> bool:
+    try:
+        api_run = wandb_module.Api().run(f"{entity}/{project}/{run_id}")
+        for key, value in summary_payload.items():
+            api_run.summary[key] = value
+        api_run.summary.update()
+    except Exception as exc:  # pragma: no cover - W&B availability should not stop the mirror.
+        print(f"wandb_summary_sync_failed:{type(exc).__name__}:{exc}", flush=True)
+        return False
+    return True
 
 
 def main() -> None:
@@ -188,6 +208,13 @@ def main() -> None:
                     }
                     summary_payload.update(diagnostic_payload)
                     run.summary.update(summary_payload)
+                    sync_public_summary(
+                        wandb,
+                        entity=args.entity,
+                        project=args.project,
+                        run_id=args.run_id,
+                        summary_payload=summary_payload,
+                    )
                     print(f"wandb_val step={step} val_bpb={bpb:.4f} best={best_bpb:.4f}", flush=True)
                     continue
                 train = TRAIN_RE.search(line)
@@ -250,6 +277,13 @@ def main() -> None:
                         )
                     summary_payload.update(diagnostic_payload)
                     run.summary.update(summary_payload)
+                    sync_public_summary(
+                        wandb,
+                        entity=args.entity,
+                        project=args.project,
+                        run_id=args.run_id,
+                        summary_payload=summary_payload,
+                    )
             stop_requested = any(
                 marker in text_tail
                 for marker in ("final_int8_zlib_roundtrip", "Traceback", "RuntimeError")
