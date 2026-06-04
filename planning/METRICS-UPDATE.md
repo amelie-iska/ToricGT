@@ -965,6 +965,18 @@ training-adjustment proposal logic now treats sampled OAI and train BPB as
 non-gating evidence; only authoritative validation/OAI can mark the competition
 target reached.
 
+R68 follow-up: the lighter active-loss probe still failed to transfer:
+`train_bpb=1.1867`, `val_bpb=1.2232` at step 3800 and `train_bpb=1.2045`,
+`val_bpb=1.2256` at step 3850. This is now direct evidence that active
+pre-threshold auxiliary structural losses should be paused for the BPB gate.
+R69 (`toricgt_seq4096_4k_recovery_r69_20260604T170016Z`) was launched from the
+earlier step-3500 checkpoint (`val_bpb=1.2198`) with more runway, a BPB-clean
+objective (`ADVANCED_LOSS_SCALE=0.0`), high batch (`TRAIN_BATCH_TOKENS=1048576`),
+lower tied/matrix/scalar LR (`0.0305/0.0155/0.0155`), low bigram LR (`0.004`),
+and 50-step validation/checkpointing. The advanced topology, toric, tropical,
+Slepian/Pollak, GraphCG, analogical, and BGG/Koszul analyses remain attached as
+sidecar diagnostics and controller evidence.
+
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
 Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, verify code+weights <=16,000,000 bytes, then start post-threshold advanced reasoning/memory phases.
