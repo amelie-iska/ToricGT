@@ -39,7 +39,12 @@ changes.
   encoder.
 - Export: bit-packed 6-bit row quantization with LZMA by default; auxiliary
   heads are excluded from the artifact.
-- PolarQuant: optional 8-bit KV perturbation in evaluation/export checks.
+- PolarQuant: optional sampled K/V perturbation during training/evaluation and
+  export checks.  The compact competition artifact still uses weight
+  quantization plus compression for the <=16,000,000 byte cap; PolarQuant is
+  a cache method, not a current stored-weight compression method. It is used to
+  harden long-context/ring-attention behavior and to prepare later
+  cache-efficient reasoning phases without adding deploy-time probe baggage.
 
 ## Why Random-Order AR
 
@@ -403,6 +408,28 @@ optimization. The requested "there be dragons" responding-onlooker ablation is
 an absence check in executable paths; no matching observer/prompt path exists
 outside ignored output/checkpoint/data directories.
 
+Current `oai-advanced` BPB guardrail: before a <=1.2 OpenAI FineWeb threshold
+checkpoint is preserved, the BPB-transfer controller keeps cross-entropy/BPB as
+the only full-strength training objective.  BGG Category O, Koszul,
+topological, toric, tropical, Slepian/Pollak, GraphCG, memory, and analogical
+signals can still be logged, plotted, and used for restart/damping decisions,
+but their loss scales stay zero or tiny unless the controller shows positive
+held-out BPB transfer.  This is why the current Seq4096 R52 run is kept
+BPB-clean while the sidecars produce structural recapture, transfer-efficiency,
+advanced-metric-evidence, and controller maps.  At step 3500, R52 reached
+validation/OpenAI BPB `1.2198`; the controller projects target step
+`3886.71875`, keeps `bpb_gap` at loss scale `1.0`, and leaves all advanced
+families at `0.0` sidecar/damping scale.
+
+Artifact policy is equally strict.  The latest R52 step-3250 export probe fits
+the cap at `15,976,425` total bytes, leaving only `23,575` bytes of margin.
+The latest manual R52 step-3500 export probe is even tighter:
+`15,996,978` total bytes, leaving only `3,022` bytes of margin.  That margin is
+too small for extra exported probes or a larger parameter count in the active
+run.  Larger-parameter experiments are allowed only as sidecar branches after a
+true stored-weight/export compression path proves code+weights stay under
+`16,000,000` bytes and improves held-out BPB.
+
 The paper update also ties the same toric coordinates to future affine
 Coxeter and braid tasks. A toric lattice becomes a Weyl-chamber coordinate
 system once a root datum is attached; translated root hyperplanes define
@@ -625,4 +652,10 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
 - Auxiliary multi-token heads are training-only and stripped from exports.
 - The artifact audit runs before training and fails if the compressed export is
   above the challenge cap.
+- Sampled PolarQuant K/V perturbation is safe to enable only when memory
+  headroom has been measured; full-batch PolarQuant perturbations are avoided in
+  the BPB-first run because they previously produced an OOM failure mode.
+- PolarQuant K/V compression alone does not reduce the saved model-weight
+  payload.  Do not use it as evidence that a larger model fits the competition
+  artifact cap unless the export byte counter proves it.
 - `keys.txt`, checkpoints, and logs are not intended for git commits.

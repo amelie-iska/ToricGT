@@ -18,7 +18,11 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 
 Current validated status:
 
-- Branch: active work is on `oai`.
+- Branch: active work is on `oai-advanced` in both this repo and the nested
+  `amelie-iska/parameter-golf` repo. The branch was created from the `oai`
+  recovery work and pushed so the BPB-transfer controller, sampled PolarQuant
+  code path, and current documentation are versioned without committing local
+  credentials or checkpoints.
 - CPU tests: focused Parameter-Golf structural-token/model/recovery tests pass:
   `PYTHONPATH=src python -m pytest tests/test_seq4096_4k_recovery_gate.py tests/test_seq4096_analysis.py tests/test_seq4096_bigram_bias.py tests/test_parameter_golf_advanced_tokens.py tests/test_parameter_golf_export.py -q`
   (`36 passed`, with only existing SWIG deprecation warnings).
@@ -26,35 +30,35 @@ Current validated status:
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
-  `toricgt_seq4096_4k_recovery_r20_20260604T032941Z`. The <1.2 BPB competition
-  checkpoint has not yet been preserved, but R20 is currently on the intended
-  4K trajectory: step 3250 reached validation/OpenAI BPB `1.2338`, target gap
-  `0.0338`, recent validation velocity `0.00464` BPB per 100 steps, required
-  gate velocity `0.004506666666666674`, gate-velocity shortfall `0.0`, and
-  validation-projected target step `3978.4482758620666`. R20 was launched from
-  the R19 step-3000 checkpoint after a preemptive gate overreacted to R19's
-  step-3250 projection of `4004.4247787610566`; the current gate logic now uses
-  projected-overrun materiality plus velocity-shortfall pressure so a tiny
-  near-gate overrun with sufficient validation velocity does not cause another
-  restart. R20 resumes with optimizer, RNG, and loader reset; it uses `983040`
-  train tokens per step, `TIED_EMBED_LR=0.034`, matrix/scalar LR `0.018`, Muon
-  momentum `0.985`, a resume-aware warmup through step `4250`, gradient
-  clipping `1.0`, and the zero-initialized learned `BIGRAM_BIAS=1` head with
-  `BIGRAM_BIAS_LR=0.02`. R20's W&B run is
-  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r20_20260604T032941Z>.
-- R20 step 3250 is the current active on-track recovery analysis. Its checkpoint
-  was saved at
-  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r20_20260604T032941Z/toricgt_seq4096_4k_recovery_r20_20260604T032941Z_step_003250.pt`
-  with validation/OpenAI BPB `1.2338`, structural recapture score
-  `0.8346038648781849`, train-to-validation transfer regime
-  `single_validation_pair`, and latest validation-minus-train BPB gap
-  `-0.0039`. The dominant structural-pressure family is `toric_slepian`
-  (`0.372139201760292`), followed by `topology_directed`. The current structural
-  prior is `restart_guarded_damp_lr_use_toric_slepian_sidecar_transfer`, while
-  the gate-velocity chart shows no BPB velocity shortfall. The active decision is
-  to continue R20, keep checkpoint/analysis cadence dense through 3500 and 4000,
-  and preserve a threshold artifact only once validation/OpenAI BPB reaches
-  `<=1.2`.
+  `toricgt_seq4096_warmdown_r52_20260604T125517Z`. The <1.2 BPB competition
+  checkpoint has not yet been preserved. R52 resumes from the R20 step-3000
+  checkpoint with optimizer/RNG/loader reset and a BPB-clean schedule:
+  `TRAIN_BATCH_TOKENS=1048576`, `TIED_EMBED_LR=0.034`, matrix/scalar LR
+  `0.018`, Muon momentum `0.985`, `BIGRAM_BIAS=1`, `BIGRAM_BIAS_LR=0.012`,
+  `HASH_NGRAM_BIAS=0`, `POLARQUANT_KV_BITS=0`, `EXPORT_PRUNE_FRACTION=0`, and
+  `ARTIFACT_SIZE_LIMIT_BYTES=16000000`. R52 reached validation/OpenAI BPB
+  `1.2290` at step 3250 after starting from `1.2454` at step 3000, then
+  reached validation/OpenAI BPB `1.2198` at step 3500 with train BPB `1.2157`.
+  The 3500 controller projection places the <=1.2 target near step
+  `3886.71875`, so the run remains on track but pre-threshold. R52's W&B run is
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_warmdown_r52_20260604T125517Z>.
+- R52 step 3500 is the current completed recovery analysis. Its checkpoint was
+  saved at
+  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_warmdown_r52_20260604T125517Z/toricgt_seq4096_warmdown_r52_20260604T125517Z_step_003500.pt`.
+  The step-3500 training-adjustment proposal classifies the run as on track,
+  with projected target step `3886.71875`, recent validation drop `0.00512`
+  BPB per 100 steps, and required gate drop `0.00396` BPB per 100 steps.
+  The BPB-transfer controller chooses `pre_threshold_primary_bpb_clean`: keep
+  the BPB gap objective at scale `1.0`, keep BGG/Koszul, topology, toric,
+  tropical, Slepian/Pollak, GraphCG, memory, and analogy losses at sidecar or
+  damping-only scale before the threshold checkpoint, and do not disturb a
+  clean BPB descent. The latest export probe fits the 16,000,000 byte cap at
+  `15,996,978` total bytes with only `3,022` bytes of margin, so compact
+  artifact bloat is treated as a first-class risk.
+  PolarQuant currently quantizes K/V cache tensors, not stored model weights;
+  increasing parameter count is allowed only for a separate sidecar experiment
+  after a true weight/export compression path proves code+weights stay under
+  the cap and improves held-out BPB.
 - Seq4096 recovery automation now uses metric-driven launch controls. Repeated
   validation ETA misses trigger pre-gate recovery; projected-miss cases use
   batch/LR controls, while train-low / validation-lag cases lower LR and keep
@@ -101,6 +105,11 @@ Current validated status:
   `diagnostics/latest/val_bpb_velocity_recent_per_100_steps`,
   `diagnostics/latest/val_velocity_shortfall_to_gate_per_100_steps`, and
   `diagnostics/latest/bpb_velocity_shortfall_pressure`.
+  The `oai-advanced` branch adds `src/toricgt/bpb_transfer_controller.py` and
+  `bpb/bpb_transfer_controller_report.json` /
+  `bpb/bpb_transfer_controller_map.png` outputs, which convert family-level
+  metric evidence into explicit early-BPB loss-scale policy, artifact-size
+  policy, and post-threshold phase recommendations.
   Periodic analyses also write `bpb/structural_recapture_report.json`,
   `bpb/bpb_structural_recapture_map.png`,
   `bpb/bpb_transfer_efficiency_report.json`, and
@@ -658,30 +667,30 @@ runs W&B/OAI BPB/simplex/geometry analyses as non-interrupting sidecars. Codex
 review handoffs are allowed to time out without stopping training; the BPB loop
 uses `BPB_TARGET=1.2` and a 100-analysis cap.
 
-Current `oai` OpenAI Parameter-Golf recovery status:
+Current `oai-advanced` OpenAI Parameter-Golf recovery status:
 
 - Primary BPB run:
-  `toricgt_seq4096_4k_recovery_r17_20260604T015107Z`.
+  `toricgt_seq4096_warmdown_r52_20260604T125517Z`.
 - W&B:
-  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r17_20260604T015107Z>.
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_warmdown_r52_20260604T125517Z>.
 - Training tmux:
-  `toricgt_seq4096_4k_recovery_r17_20260604T015107Z`.
+  `toricgt_seq4096_warmdown_r52_20260604T125517Z`.
 - Analysis tmux sidecars:
-  `toricgt_seq4096_4k_analysis_r17_20260604T015107Z`,
-  `toricgt_seq4096_4k_mirror_r17_20260604T015107Z`,
-  `toricgt_seq4096_4k_full_diag_r17_20260604T015107Z`, and
-  `toricgt_seq4096_4k_gate_r17_20260604T015107Z`.
+  `toricgt_seq4096_warmdown_r52_20260604T125517Z_analysis`,
+  `toricgt_seq4096_warmdown_r52_20260604T125517Z_mirror`,
+  `toricgt_seq4096_warmdown_r52_20260604T125517Z_full_diag`, and
+  `toricgt_seq4096_warmdown_r52_20260604T125517Z_4k_gate`.
 - Checkpoint directory:
-  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r17_20260604T015107Z`.
+  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_warmdown_r52_20260604T125517Z`.
 - Latest completed analysis:
-  `outputs/post_resume_analysis/toricgt_seq4096_4k_recovery_r17_20260604T015107Z/step-00003250`.
+  `outputs/post_resume_analysis/toricgt_seq4096_warmdown_r52_20260604T125517Z/step-00003250`.
 
-Periodic analyses are part of the live training loop. The R17 sidecars produce
+Periodic analyses are part of the live training loop. The R52 sidecars produce
 W&B metric-history summaries, BPB descent plots, rockfall dashboards,
 target-zone plots, BPB phase planes, descent simplices, diagnostic proxy
 geometry, full ToricGT geometry payloads, bounded structural recapture maps,
 train-to-validation transfer-efficiency reports, and structural BPB
-intervention proposals. The latest R17 step-3250 analysis wrote:
+intervention proposals. The latest R52 step-3500 analysis wrote:
 
 ```text
 bpb/bpb_descent_timeseries.png
@@ -696,6 +705,8 @@ bpb/bpb_structural_recapture_map.png
 bpb/structural_recapture_report.json
 bpb/bpb_transfer_efficiency.png
 bpb/bpb_transfer_efficiency_report.json
+bpb/bpb_transfer_controller_map.png
+bpb/bpb_transfer_controller_report.json
 metrics/core_metric_timeseries.png
 metrics/recent_metric_slopes.png
 metrics/selected_metric_correlations.png
@@ -704,38 +715,37 @@ training_adjustment_proposal.json
 training_adjustment_proposal.md
 ```
 
-The current readout is not yet a solved <1.2 BPB checkpoint. R17 improved the
-best validation BPB to `1.2340` at step 3250 and moved the validation-slope ETA
-to step `3995.614035087715`, just inside the step-4000 gate. The step-3250
-structural recapture score is `0.8349147724484675`, with high BPB-gap,
-topology, Slepian/Pollak leakage, BGG leakage, toric negative-margin, and
-toric-bend pressure. The train-to-validation transfer report has only one
-paired validation point so far, but that point is favorable: validation BPB is
-slightly below train BPB (`1.2340` versus `1.2377`). The gate watcher therefore
-keeps R17 running instead of launching another recovery. Heavy
-GraphCG/Slepian/topology/toric/BGG/Koszul losses remain out of the compact
-competition scorer; they continue to guide sidecars and the separate advanced
-transfer branch until a <=1.2 competition checkpoint is preserved.
+The current readout is not yet a solved <1.2 BPB checkpoint. R52 improved the
+best validation BPB to `1.2198` at step 3500 and the BPB-transfer proposal
+projects the target near step `3886.71875`, before the step-4000 gate. The
+step-3500 controller classifies the run as `pre_threshold_primary_bpb_clean`: primary
+BPB scale `1.0`, all structural training families at scale `0.0` or
+sidecar/damping mode, and no restart while validation velocity remains
+sufficient. The compact export probe is under the challenge cap but with very
+tight margin: `15,996,978` total bytes against `16,000,000`. The gate watcher keeps
+R52 running and will restart from the best checkpoint at or before 3500 only if
+validation evidence or projected velocity falls materially short.
 
-R17 resumes from:
+R52 resumes from:
 
 ```text
-amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r16_20260604T013007Z/toricgt_seq4096_4k_recovery_r16_20260604T013007Z_step_003000.pt
+amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r20_20260604T032941Z/toricgt_seq4096_4k_recovery_r20_20260604T032941Z_step_003000.pt
 ```
 
-Launch controls for R17:
+Launch controls for R52:
 
 ```text
-TRAIN_BATCH_TOKENS=983040
+TRAIN_BATCH_TOKENS=1048576
 TIED_EMBED_LR=0.034
 MATRIX_LR=0.018
 SCALAR_LR=0.018
 MUON_MOMENTUM=0.985
-MUON_MOMENTUM_WARMUP_STEPS=4250
-MUON_MOMENTUM_WARMUP_START=0.900
-GRAD_CLIP_NORM=1.0
 BIGRAM_BIAS=1
-BIGRAM_BIAS_LR=0.02
+BIGRAM_BIAS_LR=0.012
+HASH_NGRAM_BIAS=0
+POLARQUANT_KV_BITS=0
+ARTIFACT_SIZE_LIMIT_BYTES=16000000
+EXPORT_PRUNE_FRACTION=0
 RESET_OPTIMIZER=1
 RESET_RNG=1
 RESET_DATALOADER=1
@@ -755,12 +765,18 @@ Observed validation trajectory:
 | R16 guarded structural recovery | 3250 | `1.2391` |
 | R17 resume-aware Muon recovery | 3000 | `1.245367828628834` |
 | R17 resume-aware Muon recovery | 3250 | `1.2340` |
+| R20 4K recovery | 3000 | `1.245367828628834` |
+| R20 4K recovery | 3250 | `1.2338` |
+| R52 warmdown from R20 step 3000 | 3000 | `1.2454` |
+| R52 warmdown from R20 step 3000 | 3250 | `1.2290` |
+| R52 warmdown from R20 step 3000 | 3500 | `1.2198` |
 
-R17 has W&B `trainer/step`, train BPB, validation BPB, OpenAI
+R52 has W&B `trainer/step`, train BPB, validation BPB, OpenAI
 Parameter-Golf BPB, best BPB, target-gap aliases, optimizer hyperparameters,
-structural-recapture diagnostics, and train-to-validation transfer diagnostics
-reporting from the active run id. The dense and full-diagnostic W&B mirrors
-report the bounded structural score, transfer readout, and component metrics
+structural-recapture diagnostics, train-to-validation transfer diagnostics, and
+BPB-transfer-controller policy reporting from the active run id. The dense and
+full-diagnostic W&B mirrors report the bounded structural score, transfer
+readout, controller readout, artifact-size status, and component metrics
 under:
 
 ```text
@@ -770,6 +786,8 @@ diagnostics/latest/structural_recapture_band_id
 diagnostics/latest/transfer_efficiency_recent
 diagnostics/latest/validation_transfer_pressure
 diagnostics/latest/val_bpb_for_transfer
+diagnostics/latest/bpb_transfer_competition_phase_policy
+diagnostics/latest/bpb_transfer_artifact_size_policy
 diagnostics/structural_recapture_components/*
 ```
 
@@ -784,13 +802,13 @@ The current launch path for this family is:
 
 ```bash
 python scripts/watch_seq4096_4k_recovery.py \
-  --run-id toricgt_seq4096_4k_recovery_r17_20260604T015107Z \
+  --run-id toricgt_seq4096_warmdown_r52_20260604T125517Z \
   --gate-step 4000 \
   --target-bpb 1.2 \
   --min-recovery-runway-steps 1000 \
   --preempt-on-projected-miss \
-  --preempt-min-step 3250 \
-  --preempt-patience 1
+  --preempt-min-step 3500 \
+  --preempt-patience 2
 ```
 
 The live advanced reasoning/memory transfer run is separate from the Seq4096
@@ -1369,29 +1387,38 @@ Implemented:
 - curation manifest and clustered splitting logic;
 - visualization script.
 
-Recent `oai` implementation commits:
+Recent `oai-advanced` implementation commits:
 
-- `09f2378 Track train validation BPB transfer diagnostics`
-- `8ab3417 Keep latest diagnostics pinned in W&B summary`
-- `b8f4e3c Use resume-aware Muon warmup for structural recapture`
-- `1d5175e Keep structural diagnostics in dense W&B mirror`
-- `adec5d4 Add structural recapture W&B diagnostics`
+- `1354631 Add BPB transfer metric controller`
+- `81d1286 Use toric Slepian diagnostics to damp hot BPB probes`
+- `6b9a09c Log recovery diagnostics as W&B history`
+- `d50df55 Drive all-phases gates with advanced metrics`
+- `afe378a Use single recurrent pass for all-phases warmup`
+
+Recent nested `amelie-iska/parameter-golf` implementation commits:
+
+- `194df53 Add sampled PolarQuant KV training`
+- `4ff99c3 Add bounded validation proxy knob`
+- `8afc4fa Add optional PolarQuant KV perturbation`
+- `94fb5d0 Guard final export under 16MB`
+- `efe7930 Center data initialized memory biases`
 
 Active live training:
 
-- Primary BPB recovery: `toricgt_seq4096_4k_recovery_r17_20260604T015107Z`.
-  It was launched from the R16 step-3000 checkpoint after R16 step 3250
-  reached validation/OpenAI BPB `1.2391` but projected the <1.2 target near
-  step `4801.6`, beyond the 4K gate. R17 step 3250 reached
-  validation/OpenAI BPB `1.2340`, target gap `0.0340`, and a validation-slope
-  target projection of step `3995.614035087715`, so it is currently on track
-  but still not solved. W&B reports
+- Primary BPB recovery: `toricgt_seq4096_warmdown_r52_20260604T125517Z`.
+  It was launched from the R20 step-3000 checkpoint after the controller
+  indicated a BPB-clean warmdown should be preferred over adding structural
+  losses before the threshold artifact. R52 step 3250 reached validation/OpenAI
+  BPB `1.2290`, and R52 step 3500 reached validation/OpenAI BPB `1.2198`,
+  target gap `0.0198`, and a controller-projected target around step
+  `3886.71875`, so it is currently on track but still not solved. W&B reports
   `trainer/step`, `train/bpb`, `val/bpb`, `openai_parameter_golf/bpb`,
   `bpb/best`, `bpb/gap_to_target`, optimizer hyperparameters, structural
-  recapture diagnostics, and train-to-validation transfer diagnostics.
-- Current best completed BPB checkpoint: R17 step 3250,
-  `toricgt_seq4096_4k_recovery_r17_20260604T015107Z_step_003250.pt`,
-  validation/OpenAI BPB `1.2340`. The <1.2 threshold artifact is not yet
+  recapture diagnostics, train-to-validation transfer diagnostics, and
+  BPB-transfer controller diagnostics.
+- Current best completed BPB checkpoint: R52 step 3500,
+  `toricgt_seq4096_warmdown_r52_20260604T125517Z_step_003500.pt`,
+  validation/OpenAI BPB `1.2198`. The <1.2 threshold artifact is not yet
   preserved.
 - Advanced reasoning/memory transfer:
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.

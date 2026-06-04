@@ -1515,6 +1515,29 @@ PolarQuant is directly relevant when ToricGT performs long-context autoregressiv
 
 Han, Kacham, Karbasi, Mirrokni, and Zandieh introduce PolarQuant as a KV-cache quantization method using random preconditioning, recursive polar transformation, and angle quantization \cite{han2025polarquant}.  The method is motivated by the fact that KV cache memory scales with context length, layers, and heads; their paper reports over $\times 4.2$ compression while maintaining strong long-context performance.
 
+\paragraph{Current training implementation.}
+The compact Parameter-Golf branch now uses PolarQuant conservatively.  During BPB-first recovery, full-batch key/value perturbation is disabled because it can spend activation memory without improving the immediate FineWeb log score.  Instead, the attention implementation exposes a sampled perturbation knob: if a training run enables PolarQuant and specifies a token budget $m\ll n$, only $m$ evenly spaced key/value rows are cloned, polar-quantized, dequantized, and inserted back into the exact cache tensor before attention.  This gives a differentiable robustness signal and a shape/gradient audit without materializing an additional full quantized cache.  In pseudocode,
+\begin{verbatim}
+if training and polarquant_enabled and sample_tokens > 0:
+    idx = evenly_spaced_indices(seq_len, sample_tokens)
+    Kq, Vq = K.clone(), V.clone()
+    Kq[:, idx], Vq[:, idx] = polarquant(K[:, idx]), polarquant(V[:, idx])
+else:
+    Kq, Vq = polarquant(K), polarquant(V)
+Y = attention(Q, Kq, Vq)
+\end{verbatim}
+For the OpenAI FineWeb threshold run this knob is kept at zero unless measured headroom and held-out BPB transfer justify it.  After the $\le1.2$ BPB artifact is saved, the same implementation becomes a long-context cache-compression and ring-attention evaluation path for graph-of-thought, memory-retrieval, and verifier-decoding phases.
+
+It is important not to confuse this with stored-weight compression.  PolarQuant
+compresses key/value cache vectors; the competition artifact budget is governed
+by code bytes plus saved model-weight bytes.  Therefore a larger-parameter
+Parameter-Golf model is justified only after a separate weight/export
+compression experiment proves that the saved artifact remains under
+16,000,000 bytes and improves held-out BPB.  A previous full-batch
+PolarQuant-training probe ran out of memory when no token-sampling cap was
+used, which is why the current implementation treats sampled PolarQuant as a
+bounded stress test rather than a default BPB-first objective.
+
 \subsection{Recursive polar transform}
 
 Assume the head dimension $d_h$ is a power of two.  For $x\in\R^{d_h}$, define level-one angles and radii by pairing coordinates:
@@ -2462,6 +2485,21 @@ The conservative recovery mode is
 with tighter gradient clipping and no new deployable parameters.  Toric BGG losses are activated in the following order: $\partial^2$ residual, standard-filtration leakage, signature distillation, Gale-dual consistency, and Euler-Koszul exactness.  This order reflects numerical conditioning.  The first two losses are local and sparse; the last two require the representation to have already stabilized.
 
 The gate writes an audit record containing validation BPB, answer-span BPB, branch-search lift, graph-answer accuracy, resolution-consistency score, standard-filtration leakage, Koszul-linearity residual, Gale-dual consistency, BGG trajectory retrieval at $K$, GraphCG covariance, tropical active-face margins, and artifact bytes after round-trip export.  A run may continue with a larger Toric BGG weight only if the record shows no score-first violation and no statistically meaningful BPB regression relative to a matched seed or matched checkpoint window.
+
+In the current implementation this audit is made explicit by a BPB-transfer controller.  For each family $f$ in
+\[
+  \{\mathrm{BGG/Koszul},\mathrm{topology},\mathrm{toric},\mathrm{tropical},
+  \mathrm{Slepian/Pollak},\mathrm{GraphCG},\mathrm{memory},\mathrm{analogy}\},
+\]
+the controller records pressure $p_f$, recent held-out BPB transfer $\Delta_f$, artifact-size risk $a$, and the current phase $s$.  Before the threshold checkpoint,
+\[
+  \lambda_f =
+  \begin{cases}
+    \epsilon_f & \text{if } \Delta_f>0 \text{ with sufficient evidence and } a<1,\\
+    0 & \text{otherwise,}
+  \end{cases}
+\]
+while the BPB objective keeps weight one.  Thus attractive algebraic or topological plots are not allowed to redirect the competition optimizer unless they first show predictive transfer to validation BPB.  After a protected $\le1.2$ artifact exists, the same controller can promote these families into the graph-of-thought, GFlowNet, memory, analogical, and long-context phases.
 \section{Datasets, synthetic families, and leakage control}
 
 \subsection{Training mixture}

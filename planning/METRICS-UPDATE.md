@@ -8,6 +8,35 @@
 
 **Tech Stack:** PyTorch, W&B, matplotlib, pandas/numpy, existing ToricGT modules under `src/toricgt`, Seq4096 watcher scripts under `scripts`, and compact Parameter-Golf training script under `amelie-iska/parameter-golf/records/.../train_gpt.py`.
 
+## Current Live Update - 2026-06-04 R52
+
+- Active branch: `oai-advanced` in both ToricGT and the nested
+  Parameter-Golf repo.
+- Active BPB run: `toricgt_seq4096_warmdown_r52_20260604T125517Z`.
+- Latest completed validation: step 3500, validation/OpenAI BPB `1.2198`,
+  down from `1.2454` at step 3000 and `1.2290` at step 3250.
+- Latest gate projection: target step `3886.71875`, recent drop `0.00512` BPB
+  per 100 steps, required drop `0.00396` BPB per 100 steps.
+- Controller policy at step 3500: `pre_threshold_primary_bpb_clean`.
+  Keep `bpb_gap` at scale `1.0`; keep BGG/Koszul, topology, toric, tropical,
+  Slepian/Pollak, GraphCG, memory, and analogy families as sidecar/damping
+  evidence until either the <=1.2 threshold checkpoint is preserved or the
+  controller sees positive held-out BPB transfer.
+- Artifact policy: under the 16,000,000 byte cap but extremely tight.  The
+  manual step-3500 export probe reported `15,996,978` total bytes, leaving only
+  `3,022` bytes of margin after 8% export pruning, so do not add exported probes,
+  code bloat, or larger stored weights before preserving the threshold
+  checkpoint.
+- PolarQuant/larger-parameter policy: PolarQuant currently quantizes K/V cache
+  tensors, not stored model weights.  Larger-parameter retraining is permitted
+  only as a separate sidecar branch if a true stored-weight/export compression
+  path proves code+weights remain under `16,000,000` bytes and improves held-out
+  BPB.  It should not interrupt R52 while R52 remains on-track.
+- Training action: do not restart R52 before step-3750 validation unless the
+  gate watcher reports a material projected miss.  If step-3750 validation
+  misses velocity, restart from the best 3000/3250/3500/3750 checkpoint with
+  BPB-clean controls before adding structural loss weight.
+
 ---
 
 ## Current Implementation With Pseudocode
@@ -470,15 +499,15 @@ Expected BPB impact:
 - Create: `src/toricgt/bpb_transfer_controller.py`
 - Test: `tests/test_bpb_transfer_controller.py`
 
-- [ ] **Step 1: Write failing controller tests**
+- [x] **Step 1: Write failing controller tests**
 
 Test supportive topology pressure before threshold, adverse toric pressure before threshold, artifact-over-limit export guard, and post-threshold advanced phase promotion.
 
-- [ ] **Step 2: Implement controller**
+- [x] **Step 2: Implement controller**
 
 Implement `bpb_transfer_control_report(current_report, evidence_report, target_bpb, gate_step, artifact_size_limit_bytes)`.
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run:
 
@@ -495,7 +524,7 @@ Expected: all tests pass.
 - Modify: `scripts/watch_seq4096_analysis.py`
 - Test: `tests/test_seq4096_analysis.py`
 
-- [ ] **Step 1: Add watcher assertions**
+- [x] **Step 1: Add watcher assertions**
 
 Assert that periodic analysis writes:
 
@@ -503,11 +532,11 @@ Assert that periodic analysis writes:
 - `bpb/bpb_transfer_controller_map.png`;
 - controller fields in `analysis_status.json`.
 
-- [ ] **Step 2: Add watcher integration**
+- [x] **Step 2: Add watcher integration**
 
 Call the controller after structural and historical evidence reports are computed. Write JSON, plot family recommended loss scales, and add synopsis lines.
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run:
 
@@ -526,11 +555,11 @@ Expected: all tests pass.
 - Modify: `amelie-iska/parameter-golf/records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py`
 - Test: `tests/test_tropical_attention.py`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Assert sampled PolarQuant changes only sampled K/V token positions in training mode and preserves output shape/finite gradients.
 
-- [ ] **Step 2: Implement sampled perturbation**
+- [x] **Step 2: Implement sampled perturbation**
 
 Add `polarquant_train_sample_tokens`.
 
@@ -547,7 +576,7 @@ else:
 
 Evaluation behavior: full K/V PolarQuant perturbation when bits > 0.
 
-- [ ] **Step 3: Run tests and smoke compact script**
+- [x] **Step 3: Run tests and smoke compact script**
 
 Run:
 
@@ -565,19 +594,22 @@ Expected: tests pass, compile passes.
 - No code file required unless controller recommends a relaunch.
 - Inspect: current R52 logs, W&B, checkpoint exports, periodic analysis outputs.
 
-- [ ] **Step 1: Monitor R52**
+- [x] **Step 1: Monitor R52**
 
 Check train/val BPB, W&B sync, checkpoint saving, GPU memory, and 16MB export report.
 
 - [ ] **Step 2: If R52 misses the required gate velocity**
 
-Use best checkpoint at or before 3250/3500, then launch the controller-recommended branch. Prefer BPB-clean controls before structural losses:
+Use best checkpoint at or before 3250/3500/3750, then launch the controller-recommended branch. Prefer BPB-clean controls before structural losses:
 
 - tied embedding LR 0.034 to 0.037 range;
 - matrix/scalar LR 0.018 range;
 - full validation every 250 steps;
 - bigram bias enabled, low LR;
 - PolarQuant sampled only if memory headroom is proven.
+- larger-parameter variants only after export byte accounting proves a
+  stored-weight compression path, because PolarQuant K/V cache compression does
+  not shrink model weights.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
