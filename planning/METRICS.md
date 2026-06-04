@@ -12339,3 +12339,26 @@ projects target around step 4049.5, so R85 is closer but still not safely inside
 the 4K gate. Continue dense low-BPB checkpoint capture and scheduled validation;
 only branch after scheduled checkpoints or current analyses show the target is
 unreachable again.
+
+R85 continued to the next scheduled checkpoint and improved again:
+
+```text
+R85 step 3750 scheduled: train BPB 1.2481, validation BPB 1.2131
+```
+
+The 3750 analysis projected the target around step 4244 and showed guarded/high
+structural pressure dominated by the toric/Slepian family:
+
+```text
+dominant structural family: toric_slepian
+toric_slepian pressure: 0.312
+structural recapture score: 0.720
+latest validation slope: -0.00265 BPB per 100 steps
+velocity shortfall to 4K gate: 0.00304 BPB per 100 steps
+```
+
+The gate therefore launched R86 from the R85 step-3750 checkpoint with
+`policy=structural_pressure_recapture`, preserving optimizer/RNG/loader state,
+the low-BPB checkpoint trigger, and the lightweight advanced losses. R86 is the
+current branch for testing whether toric/Slepian/topology-guided recapture can
+turn the improving but too-slow R85 validation slope into a <1.2 BPB 4K finish.
