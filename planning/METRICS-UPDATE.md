@@ -835,6 +835,19 @@ Muon warmup. This remains BPB-clean: it changes optimizer and transition-bias
 controls rather than adding heavy topology/toric/BGG/Koszul/GraphCG losses
 before the <=1.2 checkpoint is preserved.
 
+R61/R62 update: the old R60 gate watcher launched R61 with the previous damped
+floor controls before the second-stage controller patch was active. After
+restarting the R61 gate watcher with the patched code, R61 matched failed R59
+exactly at step 3850 (`3800 -> 1.2412`, `3850 -> 1.2087`, train-wave RMSE
+`0.0`) and was preempted. R62 is now active:
+`toricgt_seq4096_4k_recovery_r62_20260604T155056Z`. It resumes from the R61
+step-3750 checkpoint with `train_batch_tokens=917504`,
+`tied_embed_lr=0.03008`, `matrix_lr=scalar_lr=0.01656`,
+`bigram_bias_lr=0.0042`, `bigram_bias_scale=1.15`, seed `7393`, and Muon
+warmup steps `5000`. W&B and the live full periodic analysis watcher are
+enabled for R62. Stale R61 sidecars were stopped so the active reviewer queue
+follows R62.
+
 Recommended follow-up for the advanced-analysis track: implement compact
 Seq4096 analogues of the old simplex/geometry entrypoints so graph-of-thought
 trajectory, directed simplicial, toric, Slepian/Pollak, BGG/Koszul, and memory
@@ -875,15 +888,15 @@ Use best checkpoint at or before 3250/3500/3750, then launch the controller-reco
 Current action: R52 missed the projected gate velocity at step 3750, R54 and
 R55 did not improve the authoritative validation gate, R56 missed step 4000 at
 `val_bpb=1.2163`, R57 missed at `1.2299`, and R59 missed at `1.2288` after R58
-was preempted for matching a failed train wave. R60 is now active from the best
-step-3750 checkpoint (`val_bpb=1.2131`) with reset optimizer/RNG/loader and
-conservative BPB-clean controls. The live analysis supervisor is attached, runs
-the historical W&B metrics and OAI BPB entrypoints plus compact Seq4096
-advanced geometry/simplex visualization, refreshes the final artifact
-inventory, and dispatches the Codex review hook for sub-agent inspection of
-every current-run output family. If R60 repeats the R59 branch, the patched
-gate should launch the `repeated_damped_train_wave_diversity_probe` from the
-best step-3750 checkpoint before adding heavy structural losses.
+was preempted for matching a failed train wave. R60 and R61 then repeated the
+same damped recovery basin, and R61 was preempted at step 3850 into R62 using
+the stronger `repeated_damped_train_wave_diversity_probe`. R62 is now active
+from the best step-3750 checkpoint (`val_bpb=1.2131`) with reset
+optimizer/RNG/loader and BPB-clean diversity controls. The live analysis
+supervisor is attached, runs the historical W&B metrics and OAI BPB entrypoints
+plus compact Seq4096 advanced geometry/simplex visualization, refreshes the
+final artifact inventory, and dispatches the Codex review hook for sub-agent
+inspection of every current-run output family.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
