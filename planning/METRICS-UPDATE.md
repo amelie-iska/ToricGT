@@ -8,7 +8,43 @@
 
 **Tech Stack:** PyTorch, W&B, matplotlib, pandas/numpy, existing ToricGT modules under `src/toricgt`, Seq4096 watcher scripts under `scripts`, and compact Parameter-Golf training script under `amelie-iska/parameter-golf/records/.../train_gpt.py`.
 
-## Current Live Update - 2026-06-04 R77
+## Current Live Update - 2026-06-04 R78
+
+- Active branch: `oai-advanced` in both ToricGT and the nested
+  Parameter-Golf repo.
+- Active BPB run: `toricgt_seq4096_4k_recovery_r78_20260604T184450Z`.
+- Current recovery origin: clean R75 step 3600 checkpoint
+  `toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt`,
+  with authoritative validation BPB `1.2169`.
+- R77 negative result: the broader advanced pulse was useful as an
+  intervention test but harmed BPB transfer at the first paired readout.
+  Step 3650 train BPB rose to `1.2478`, and validation worsened from
+  `1.2169` to `1.2171`. Treat this as evidence that the combination of
+  stronger late warmdown/LR, higher advanced scale, larger sample/fan, and
+  nontrivial Koszul/analogy pressure was too aggressive before the threshold
+  checkpoint.
+- R78 policy: preserve optimizer/RNG/loader and keep advanced gradients active,
+  but return to a calmer BPB-transfer setting:
+  `TIED_EMBED_LR=0.0342`, `BIGRAM_BIAS_LR=0.0125`,
+  `WARMDOWN_ITERS=1000`, `ADVANCED_LOSS_SCALE=0.012`,
+  `GRAPHCG_LOSS_WEIGHT=0.026`, `TORIC_TROPICAL_LOSS_WEIGHT=0.004`,
+  `SLEPIAN_LOSS_WEIGHT=0.014`, `KOSZUL_BGG_LOSS_WEIGHT=0.00015`,
+  `ANALOGY_LOSS_WEIGHT=0.00010`, `ADVANCED_LOSS_SAMPLE_TOKENS=256`,
+  `TORIC_TROPICAL_FAN_BINS=8`, `ADVANCED_LOSS_EVERY=6`, and
+  `ADVANCED_LOSS_MAX_CE_RATIO=0.00035`.
+- R78 rationale: GraphCG/Slepian/toric remain active because R75 showed that
+  family can coexist with validation descent. Koszul/BGG and analogy remain
+  nonzero but tiny so they are represented in the gradient stream without
+  consuming the BPB-critical budget. If R78 step 3650 does not beat `1.2169`,
+  disable Koszul/analogy again and use them as analysis-only sidecars until the
+  <=1.2 checkpoint is preserved.
+- R78 periodic analyses: W&B mirroring, full diagnostics, gate status, and
+  Seq4096 checkpoint analysis are attached. The gate is configured with
+  preemptive projection checks after step 3700 and explicit
+  `--no-recovery-reset-optimizer`, `--no-recovery-reset-rng`, and
+  `--no-recovery-reset-loader` recovery flags.
+
+## Previous Live Update - 2026-06-04 R77
 
 - Active branch: `oai-advanced` in both ToricGT and the nested
   Parameter-Golf repo.
