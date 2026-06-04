@@ -34,6 +34,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+try:
+    from toricgt.bpb_transfer_controller import bpb_transfer_control_report
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from toricgt.bpb_transfer_controller import bpb_transfer_control_report
+
 
 TRAIN_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+train_loss:(?P<loss>[0-9.eE+-]+)"
@@ -1693,6 +1699,73 @@ def plot_advanced_metric_evidence_map(report: dict[str, Any], out: Path) -> None
     plt.close(fig)
 
 
+def plot_bpb_transfer_controller_map(report: dict[str, Any], out: Path) -> None:
+    """Plot recommended family loss scales from the BPB-transfer controller."""
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    controls = report.get("family_controls") or {}
+    controls = {str(key): value for key, value in controls.items() if isinstance(value, dict)}
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6), constrained_layout=True)
+
+    ax = axes[0]
+    if controls:
+        ordered = sorted(
+            controls.items(),
+            key=lambda item: finite_payload_value(item[1], "recommended_loss_scale", default=0.0),
+        )
+        labels = [item[0] for item in ordered]
+        scales = [
+            finite_payload_value(item[1], "recommended_loss_scale", default=0.0)
+            for item in ordered
+        ]
+        colors = []
+        for _family, item in ordered:
+            mode = str(item.get("mode") or "")
+            if "guarded" in mode or "advanced_phase" in mode:
+                colors.append("#16a34a")
+            elif "damp" in mode or "guard" in mode:
+                colors.append("#dc2626")
+            else:
+                colors.append("#64748b")
+        y = np.arange(len(ordered))
+        ax.barh(y, scales, color=colors)
+        ax.set_yticks(y, labels, fontsize=9)
+        ax.set_xlabel("recommended loss scale")
+        ax.set_xlim(0.0, max(1.0, max(scales) + 0.05))
+        ax.grid(axis="x", alpha=0.25)
+    else:
+        ax.text(0.5, 0.5, "controller unavailable", ha="center", va="center")
+        ax.set_xticks([])
+        ax.set_yticks([])
+    ax.set_title("Family Loss-Scale Recommendations")
+
+    ax = axes[1]
+    ax.axis("off")
+    lines = [
+        f"controller: {report.get('controller_version')}",
+        f"target state: {report.get('target_checkpoint_state')}",
+        f"competition policy: {report.get('competition_phase_policy')}",
+        f"best val BPB: {report.get('best_val_bpb_for_controller')}",
+        f"target BPB: {report.get('target_bpb')}",
+        f"gate step: {report.get('gate_step')}",
+        f"artifact policy: {report.get('artifact_size_policy')}",
+        f"artifact bytes: {report.get('artifact_total_bytes')}",
+        f"artifact margin bytes: {report.get('artifact_size_margin_bytes')}",
+        f"velocity shortfall pressure: {report.get('velocity_shortfall_pressure')}",
+        "",
+        "reading:",
+        "- scale 0 before threshold: sidecar or damping only",
+        "- small scale before threshold: guarded BPB-transfer probe",
+        "- larger scale after threshold: advanced reasoning phase",
+        "- over-limit artifact: fix export before auxiliary promotion",
+    ]
+    ax.text(0.02, 0.96, "\n".join(lines), va="top", ha="left", fontsize=10, wrap=True)
+    ax.set_title("BPB And Artifact Policy")
+    fig.suptitle("BPB Transfer Controller Map", fontsize=15)
+    fig.savefig(out, dpi=180)
+    plt.close(fig)
+
+
 def phase_bpb_breakdown_plan(target_bpb: float) -> dict[str, Any]:
     return {
         "target_bpb": float(target_bpb),
@@ -1821,6 +1894,9 @@ def write_synopsis(
         f"- structural control prior: `{report.get('structural_control_prior')}`",
         f"- advanced metric evidence policy: `{report.get('current_evidence_policy')}`",
         f"- current family evidence action: `{report.get('current_family_evidence_action')}`",
+        f"- BPB-transfer competition policy: `{report.get('bpb_transfer_competition_phase_policy')}`",
+        f"- BPB-transfer artifact policy: `{report.get('bpb_transfer_artifact_size_policy')}`",
+        f"- BPB-transfer recommended loss scales: `{report.get('bpb_transfer_recommended_loss_scales')}`",
         "",
         "## Plots",
         "",
@@ -1838,6 +1914,7 @@ def write_synopsis(
         "- `bpb/bpb_structural_recapture_map.png`: BPB Structural Recapture Map showing which advanced metrics should shape the next restart.",
         "- `bpb/advanced_metric_control_map.png`: Advanced Metric Control Map showing family-level pressure used to decide velocity, damping, or transfer stabilization.",
         "- `bpb/advanced_metric_evidence_map.png`: Advanced Metric Evidence Map showing whether each advanced metric family historically predicted the next validation BPB drop.",
+        "- `bpb/bpb_transfer_controller_map.png`: BPB Transfer Controller Map showing artifact-size policy and recommended family loss scales.",
         "- `training_adjustment_proposal.json` and `.md`: conservative intervention recommendation combining BPB trajectory, W&B metric statistics, and structural diagnostics.",
         "",
         "## Recommendations",
@@ -1913,6 +1990,14 @@ def write_bpb_analysis_artifacts(
     report.update(transfer_report)
     report.update(velocity_report)
     evidence_report = advanced_metric_evidence_report(history_root, current_report=report)
+    controller_report = bpb_transfer_control_report(
+        report,
+        evidence_report,
+        diagnostic_payload,
+        target_bpb=target_bpb,
+        gate_step=gate_step,
+        artifact_size_limit_bytes=int(finite_payload_value(diagnostic_payload, "artifact/size_limit_bytes", default=16_000_000)),
+    )
     report.update(
         {
             "advanced_metric_evidence_policy": evidence_report.get("current_evidence_policy"),
@@ -1922,6 +2007,11 @@ def write_bpb_analysis_artifacts(
             "advanced_metric_evidence_baseline_next_val_drop_bpb": evidence_report.get(
                 "baseline_next_val_drop_bpb"
             ),
+            "bpb_transfer_controller": controller_report,
+            "bpb_transfer_competition_phase_policy": controller_report.get("competition_phase_policy"),
+            "bpb_transfer_artifact_size_policy": controller_report.get("artifact_size_policy"),
+            "bpb_transfer_recommended_loss_scales": controller_report.get("recommended_loss_scales"),
+            "bpb_transfer_recommended_modes": controller_report.get("recommended_modes"),
         }
     )
     report["recommendations"] = list(report.get("recommendations", [])) + list(
@@ -1933,6 +2023,7 @@ def write_bpb_analysis_artifacts(
     write_json(bpb_dir / "bpb_transfer_efficiency_report.json", transfer_report)
     write_json(bpb_dir / "bpb_gate_velocity_requirement_report.json", velocity_report)
     write_json(bpb_dir / "advanced_metric_evidence_report.json", evidence_report)
+    write_json(bpb_dir / "bpb_transfer_controller_report.json", controller_report)
     write_json(
         bpb_dir / "checkpoint_manifest.json",
         {
@@ -1959,6 +2050,7 @@ def write_bpb_analysis_artifacts(
     plot_structural_recapture_map(report, bpb_dir / "bpb_structural_recapture_map.png")
     plot_advanced_metric_control_map(report, bpb_dir / "advanced_metric_control_map.png")
     plot_advanced_metric_evidence_map(evidence_report, bpb_dir / "advanced_metric_evidence_map.png")
+    plot_bpb_transfer_controller_map(controller_report, bpb_dir / "bpb_transfer_controller_map.png")
     write_synopsis(output_dir, report, run_path, checkpoint_path, diagnostic_payload)
     return report
 

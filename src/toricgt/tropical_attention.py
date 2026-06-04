@@ -149,6 +149,7 @@ class MultiHeadTropicalAttention(nn.Module):
         ring_block_size: int = 256,
         polarquant_kv_bits: int = 0,
         polarquant_train: bool = False,
+        polarquant_train_sample_tokens: int = 0,
     ) -> None:
         super().__init__()
         if d_model % num_heads != 0:
@@ -160,6 +161,7 @@ class MultiHeadTropicalAttention(nn.Module):
         self.ring_block_size = ring_block_size
         self.polarquant_kv_bits = polarquant_kv_bits
         self.polarquant_train = polarquant_train
+        self.polarquant_train_sample_tokens = int(polarquant_train_sample_tokens)
         self.qkv = nn.Linear(d_model, 3 * d_model)
         self.out = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(dropout)
@@ -173,6 +175,19 @@ class MultiHeadTropicalAttention(nn.Module):
         bsz, heads, seq_len, dim = x.shape
         return x.transpose(1, 2).contiguous().view(bsz, seq_len, heads * dim)
 
+    @staticmethod
+    def _sample_token_indices(length: int, max_tokens: int, device: torch.device) -> torch.Tensor:
+        if max_tokens <= 0 or length <= max_tokens:
+            return torch.arange(length, device=device)
+        stride = max(1, math.ceil(float(length) / float(max_tokens)))
+        return torch.arange(0, length, stride, device=device)[:max_tokens]
+
+    def _polarquant_full(self, x: torch.Tensor) -> torch.Tensor:
+        original_dtype = x.dtype
+        encoded = recursive_polar_encode(x.float())
+        quantized = uniform_quantize_angles(encoded, bits=self.polarquant_kv_bits)
+        return recursive_polar_decode(quantized).to(dtype=original_dtype)
+
     def _maybe_polarquant(self, x: torch.Tensor) -> torch.Tensor:
         if self.polarquant_kv_bits <= 0:
             return x
@@ -180,10 +195,17 @@ class MultiHeadTropicalAttention(nn.Module):
             return x
         if self.head_dim < 2 or self.head_dim & (self.head_dim - 1):
             return x
-        original_dtype = x.dtype
-        encoded = recursive_polar_encode(x.float())
-        quantized = uniform_quantize_angles(encoded, bits=self.polarquant_kv_bits)
-        return recursive_polar_decode(quantized).to(dtype=original_dtype)
+        if self.training and self.polarquant_train_sample_tokens > 0 and x.shape[-2] > self.polarquant_train_sample_tokens:
+            index = self._sample_token_indices(
+                int(x.shape[-2]),
+                int(self.polarquant_train_sample_tokens),
+                x.device,
+            )
+            sampled = x.index_select(-2, index)
+            perturbed_sample = self._polarquant_full(sampled)
+            out = x.clone()
+            return out.index_copy(-2, index, perturbed_sample)
+        return self._polarquant_full(x)
 
     def forward(
         self,
@@ -245,6 +267,7 @@ class TransformerBlock(nn.Module):
         soft_moe_residual_scale: float = 0.1,
         polarquant_kv_bits: int = 0,
         polarquant_train: bool = False,
+        polarquant_train_sample_tokens: int = 0,
     ) -> None:
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
@@ -256,6 +279,7 @@ class TransformerBlock(nn.Module):
             ring_block_size=ring_block_size,
             polarquant_kv_bits=polarquant_kv_bits,
             polarquant_train=polarquant_train,
+            polarquant_train_sample_tokens=polarquant_train_sample_tokens,
         )
         self.ln2 = nn.LayerNorm(d_model)
         hidden = ffn_multiplier * d_model

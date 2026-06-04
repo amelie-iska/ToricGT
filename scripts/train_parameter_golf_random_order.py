@@ -2011,6 +2011,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ring-block-size", type=int)
     parser.add_argument("--polarquant-kv-bits", type=int)
     parser.add_argument("--polarquant-train", action="store_true")
+    parser.add_argument("--polarquant-train-sample-tokens", type=int)
     parser.add_argument("--special-token-mode", choices=["none", "reasoning_memory"])
     parser.add_argument("--advanced-reasoning-tokens", action="store_true")
     parser.add_argument("--no-advanced-reasoning-tokens", action="store_true")
@@ -2153,6 +2154,11 @@ def main() -> None:
         if args.polarquant_kv_bits is not None
         else config_get(file_config, "model", "polarquant_kv_bits", 8),
         polarquant_train=bool(args.polarquant_train or config_get(file_config, "model", "polarquant_train", False)),
+        polarquant_train_sample_tokens=(
+            args.polarquant_train_sample_tokens
+            if args.polarquant_train_sample_tokens is not None
+            else config_get(file_config, "model", "polarquant_train_sample_tokens", 0)
+        ),
         use_gflownet_policy=(
             False
             if args.no_gflownet_policy

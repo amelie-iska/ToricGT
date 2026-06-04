@@ -224,6 +224,16 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert (tmp_path / "analysis" / "bpb" / "bpb_gate_velocity_requirement.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "advanced_metric_evidence_map.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "advanced_metric_evidence_report.json").exists()
+    assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_controller_map.png").exists()
+    assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_controller_report.json").exists()
+    assert report["bpb_transfer_competition_phase_policy"] in {
+        "pre_threshold_primary_bpb_clean",
+        "pre_threshold_guarded_bpb_transfer",
+        "export_guard_before_auxiliary_promotion",
+        "preserve_threshold_checkpoint_then_advanced_phases",
+    }
+    assert "topology_directed" in report["bpb_transfer_recommended_loss_scales"]
+    assert "toric_slepian" in report["bpb_transfer_recommended_modes"]
     assert "required_val_velocity_to_gate_per_100_steps" in report
     assert "bpb_velocity_shortfall_pressure" in report
     phase_plan_path = tmp_path / "analysis" / "bpb" / "phase_bpb_breakdown_plan.json"
@@ -249,6 +259,7 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert "Advanced Metric Control Map" in synopsis
     assert "Gate Velocity Requirement" in synopsis
     assert "Advanced Metric Evidence Map" in synopsis
+    assert "BPB Transfer Controller Map" in synopsis
 
 
 def test_advanced_metric_evidence_report_scores_next_validation_transfer(tmp_path: Path) -> None:
