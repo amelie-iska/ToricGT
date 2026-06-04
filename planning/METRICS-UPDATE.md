@@ -1045,6 +1045,35 @@ R73 through at least 3350/3400 before changing the active-loss cap. The
 `advanced_metric_control_map.png` plot path has also been corrected to
 dark-mode styling for future periodic reviews.
 
+R73 step-3350 update: the second active-loss interval improved again to
+`val_bpb=1.2246`, a `0.0044` BPB drop over the first 100 resumed steps. The
+recent validation slope is about `-0.0044` BPB per 100 steps, the 3350 analysis
+projects target reach near step `3909`, and the proposal remains `on_track`
+with `restart_policy=no_restart_until_next_gate`. Sampled OAI/FineWeb
+competition evaluation at step 3350 reported `oai_competition/bpb=1.2143`
+(`seq_len=256`, sampled), so it is close but not yet threshold evidence.
+Artifact size is now the main non-BPB constraint: the int8+zlib+pruned export
+probe is under 16MB by only `1324` bytes at `export_prune_fraction=0.08`.
+Continue R73 unchanged through 3400, but review artifact margin at every
+checkpoint and avoid parameter growth or code-size increases until the threshold
+checkpoint has a safer compression/pruning margin.
+
+R73 step-3400 update: validation continued down to `val_bpb=1.2230`. The
+150-step drop from step 3250 is `0.0060` BPB, so the branch remains slightly
+ahead of the required 4K velocity, though the last 50-step drop slowed. The
+analysis status remains `near_target`/`on_track`, projected target step is about
+`3975`, and sampled OAI/FineWeb competition BPB improved to `1.2073`
+(`seq_len=256`, sampled). Artifact margin recovered because the export probe
+automatically selected `export_prune_fraction=0.10`, giving
+`int8_zlib_total_bytes=15,876,187` and about `123,813` bytes under the 16MB
+limit. Dominant structural pressure moved to `toric_slepian`, and the proposal
+recommends holding analogy/trajectory-style losses while keeping GraphCG,
+Slepian/Pollak, and GFlowNet-style tiny supports. Current action: do not restart
+or increase auxiliary scale; continue R73 unchanged through 3450. If 3450 stalls
+or reverses, the next fallback should keep the 4K warmdown, disable the tiny
+analogy term, and preserve GraphCG/Slepian/toric at the same or lower CE-ratio
+cap.
+
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
 Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, verify code+weights <=16,000,000 bytes, then start post-threshold advanced reasoning/memory phases.
