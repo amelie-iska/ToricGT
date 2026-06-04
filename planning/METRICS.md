@@ -208,6 +208,35 @@ geometry suites as optional so a RandomOrderLM-only diagnostic can fail cleanly
 on compact Seq4096 GPT checkpoints while BPB/W&B analysis and the proposal
 still complete.
 
+Latest live-state update:
+
+The r77 step-3650 generic watcher completed the BPB/W&B sidecar path without
+pausing training.  It recorded `val_bpb=1.2171306166080218`, a small positive
+validation bump from the r77 step-3600 best of `1.2169196232244919`, and
+launched the next Codex review as a non-blocking sidecar.  The active supervisor
+then escalated to the damped r78 path, which resumes the r75 step-3600
+checkpoint with optimizer/RNG/loader state preserved and lower auxiliary
+pressure.
+
+```text
+current active training tmux: toricgt_seq4096_4k_recovery_r78_20260604T184450Z
+current active W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r78_20260604T184450Z
+current active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r78_20260604T184450Z.txt
+current active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r78_20260604T184450Z
+current active supervisor tmux: toricgt_seq4096_4k_gate_r78_20260604T184450Z
+current active supervisor log: logs/toricgt_seq4096_4k_recovery_r78_20260604T184450Z.4k_gate.txt
+current active resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r75_20260604T182013Z/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
+current active latest checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r78_20260604T184450Z/toricgt_seq4096_4k_recovery_r78_20260604T184450Z_step_003600.pt
+current active latest BPB/loss: 1.2169 / 2.0547 at step 3600
+current generic non-pausing watcher: toricgt_watch_training_analysis_r78_3650
+current generic watcher log: logs/toricgt_seq4096_4k_recovery_r78_20260604T184450Z.watch_training_analysis_3650.txt
+current generic watcher target: fresh checkpoint >= 3650 on CPU, no pause-training flag
+current generic watcher loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
+                                  BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_state.json,
+                                  BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_stop,
+                                  BPB_LOOP_NAME=parameter_golf_bpb_target
+```
+
 ## 2026-06-04 Seq4096 R75 Step-3600 BPB Gate Review
 
 Run:
@@ -304,43 +333,43 @@ Mathematical/statistical interpretation:
 
 Decision: `EDIT_AND_RESTART`.
 
-The final active handoff is the concurrent r77 scalar recovery launched from
-the analyzed step-3600 checkpoint.  I accepted it because it keeps training
-active, preserves the Parameter-Golf/ToricGT architecture, and applies only
-scalar sidecar/BPB controls.  No code file or static config file was edited for
-the restart, and no better-strategy stop sentinel was written.
+The final active handoff is scalar recovery from the analyzed step-3600
+checkpoint.  The first recovery was r77; after r77 emitted
+`step:3650/4000 val_loss:2.0551 val_bpb:1.2171`, the gate supervisor advanced
+to r78 with more damping.  I accepted this as the live `EDIT_AND_RESTART`
+handoff because it keeps training active, preserves the Parameter-Golf/ToricGT
+architecture, and changes only runtime scalar controls.  No checkpoint was
+deleted and no better-strategy stop sentinel was written.
 
-The r77 restart is active and advancing.  It loaded the r75 step-3600 checkpoint
-with `reset_optimizer=0`, `reset_rng=0`, and `reset_loader=0`, saved its own
-step-3600 checkpoint, and emitted `step:3650/4000 train_loss:2.0850
-train_bpb:1.2478`, then `step:3650/4000 val_loss:2.0551 val_bpb:1.2171`
-and saved the fresh step-3650 checkpoint.  This verifies that the handoff did
-not leave training inactive; the small positive r77 3600-to-3650 validation
-bounce remains under the active gate supervisor's projected-miss policy.
+The current r78 restart is active.  It loaded the r75 step-3600 checkpoint with
+`reset_optimizer=0`, `reset_rng=0`, and `reset_loader=0`; the tmux process is
+running and the generic CPU sidecar is waiting for the fresh step-3650
+checkpoint without pausing training.
 
 Operational handoff:
 
 ```text
-active training tmux: toricgt_seq4096_4k_recovery_r77_20260604T183710Z
+active training tmux: toricgt_seq4096_4k_recovery_r78_20260604T184450Z
 active supervisor: scripts/watch_seq4096_4k_recovery.py
-active supervisor tmux: toricgt_seq4096_4k_gate_r77_20260604T183710Z
-active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r77_20260604T183710Z.txt
-active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r77_20260604T183710Z
-fresh active checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r77_20260604T183710Z/toricgt_seq4096_4k_recovery_r77_20260604T183710Z_step_003600.pt
-W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r77_20260604T183710Z
+active supervisor tmux: toricgt_seq4096_4k_gate_r78_20260604T184450Z
+active supervisor log: logs/toricgt_seq4096_4k_recovery_r78_20260604T184450Z.4k_gate.txt
+active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r78_20260604T184450Z.txt
+active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r78_20260604T184450Z
+W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r78_20260604T184450Z
 resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r75_20260604T182013Z/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
 resume controls: reset_optimizer=0, reset_rng=0, reset_loader=0
-runtime scalar delta: tied_embed_lr=0.0345, matrix_lr=0.018, scalar_lr=0.018,
-                      bigram_bias_lr=0.014, advanced_loss_scale=0.018,
-                      graphcg=0.032, toric_tropical=0.006, slepian=0.02,
-                      koszul_bgg=0.0006, analogy=0.0006,
-                      advanced_loss_sample_tokens=320, fan_bins=12,
-                      advanced_loss_max_ce_ratio=0.00075
-nonblocking watcher tmux: toricgt_watch_training_analysis_r77_3650
+runtime scalar delta: tied_embed_lr=0.0342, matrix_lr=0.018, scalar_lr=0.018,
+                      bigram_bias_lr=0.0125, advanced_loss_scale=0.012,
+                      graphcg=0.026, toric_tropical=0.004, slepian=0.014,
+                      koszul_bgg=0.00015, analogy=0.0001,
+                      advanced_loss_sample_tokens=256, fan_bins=8,
+                      advanced_loss_every=6, warmup_steps=120,
+                      advanced_loss_max_ce_ratio=0.00035
+nonblocking watcher tmux: toricgt_watch_training_analysis_r78_3650
 nonblocking watcher script: scripts/watch_training_analysis.py
 nonblocking watcher target: fresh checkpoint >= step 3650
-nonblocking watcher log: logs/toricgt_seq4096_4k_recovery_r77_20260604T183710Z.watch_training_analysis_3650.txt
-nonblocking watcher output root: outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r77_20260604T183710Z_watch_training_analysis
+nonblocking watcher log: logs/toricgt_seq4096_4k_recovery_r78_20260604T184450Z.watch_training_analysis_3650.txt
+nonblocking watcher output root: outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r78_20260604T184450Z_watch_training_analysis
 nonblocking watcher device/precision: cpu / fp32
 nonblocking watcher pause behavior: no --pause-training-before-analysis
 required loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
