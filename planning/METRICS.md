@@ -120,7 +120,7 @@ No better-strategy sentinel was written.  The BPB-first loop remains active
 until `BPB <= 1.2`, 100 review iterations complete, or a better documented
 strategy replaces ordinary recovery replays.
 
-Operational handoff:
+Operational handoff at the decision boundary:
 
 ```text
 action: CONTINUE
@@ -157,6 +157,49 @@ The next analysis is non-interrupting.  The existing compact watcher
 step 3650 without `--pause-training-before-analysis`.  The generic watcher was
 patched to match both `random_order_step_*.pt` and Seq4096 `<run>_step_*.pt`
 checkpoint names.
+
+Post-decision live-state update:
+
+After the `CONTINUE` decision, the r75 supervisor analyzed the live step-3600
+checkpoint and observed another improvement (`val_bpb=1.2169`, `val_loss=2.0547`)
+but still projected a miss of the step-4000 BPB gate.  A concurrent supervisor
+review escalated the active path to r77.  This is not a reversal of the
+step-3550 decision: the finite difference stayed negative, but the off-track
+velocity triggered the supervisor's projected-miss recovery policy after the
+next checkpoint.  The stale r76 recovery attempt was stopped; r77 is the active
+training and supervisor path.
+
+```text
+active action after supervisor escalation: r77 recovery continuation from r75 step 3600
+active training tmux: toricgt_seq4096_4k_recovery_r77_20260604T183710Z
+active supervisor: scripts/watch_seq4096_4k_recovery.py
+active supervisor tmux: toricgt_seq4096_4k_gate_r77_20260604T183710Z
+active supervisor log: logs/toricgt_seq4096_4k_recovery_r77_20260604T183710Z.4k_gate.txt
+active W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r77_20260604T183710Z
+active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r77_20260604T183710Z.txt
+active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r77_20260604T183710Z
+resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r75_20260604T182013Z/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
+resume controls: reset_optimizer=0, reset_rng=0, reset_loader=0
+r77 scalar controls: tied_embed_lr=0.0345, matrix_lr=0.018, scalar_lr=0.018,
+                     bigram_bias_lr=0.014, advanced_loss_scale=0.018,
+                     graphcg=0.032, toric_tropical=0.006, slepian=0.02,
+                     koszul_bgg=0.0006, analogy=0.0006
+generic non-pausing watcher tmux: toricgt_watch_training_analysis_r77_3650
+generic non-pausing watcher log: logs/toricgt_seq4096_4k_recovery_r77_20260604T183710Z.watch_training_analysis_3650.txt
+generic non-pausing watcher output root: outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r77_20260604T183710Z_watch_training_analysis
+generic non-pausing watcher target: checkpoint >= 3650 on CPU, no pause-training flag
+generic watcher loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
+                          BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_state.json,
+                          BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_stop,
+                          BPB_LOOP_NAME=parameter_golf_bpb_target
+```
+
+The active r77 gate supervisor and its compact `watch_seq4096_analysis.py`
+sidecar were launched by the supervisor/concurrent review using r77-local loop
+state files.  The required generic `scripts/watch_training_analysis.py` sidecar
+for the next review preserves the supplied r75 loop environment and is
+non-blocking; training remains active while it waits for the step-3650
+checkpoint.
 
 ## 2026-06-04 Seq4096 R74 Step-3400 BPB Gate Review
 
