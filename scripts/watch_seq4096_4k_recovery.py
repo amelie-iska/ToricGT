@@ -1595,6 +1595,15 @@ def build_gate_shell(
 ) -> str:
     gate_log = repo_root / "logs" / f"{run_id}.4k_gate.txt"
     state_path = repo_root / "outputs" / f"{run_id}.4k_recovery_state.json"
+    default_loop_state = repo_root / "outputs" / f"{run_id}_bpb_codex_loop_state.json"
+    default_loop_stop_file = repo_root / "outputs" / f"{run_id}_bpb_codex_loop_stop"
+    loop_env = {
+        "BPB_TARGET": os.environ.get("BPB_TARGET", str(target_bpb)),
+        "BPB_MAX_REVIEW_ITERATIONS": os.environ.get("BPB_MAX_REVIEW_ITERATIONS", "100"),
+        "BPB_LOOP_STATE": os.environ.get("BPB_LOOP_STATE", str(default_loop_state)),
+        "BPB_LOOP_STOP_FILE": os.environ.get("BPB_LOOP_STOP_FILE", str(default_loop_stop_file)),
+        "BPB_LOOP_NAME": os.environ.get("BPB_LOOP_NAME", "parameter_golf_bpb_target"),
+    }
     grad_clip_arg = (
         ""
         if recovery_grad_clip_norm is None
@@ -1642,7 +1651,7 @@ def build_gate_shell(
     if recovery_advanced_loss_log_only:
         advanced_loss_arg += "--recovery-advanced-loss-log-only "
     return (
-        f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src && "
+        f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src {shell_env(loop_env)} && "
         f"{shlex.quote(str(python))} scripts/watch_seq4096_4k_recovery.py "
         f"--log {shlex.quote(str(log_path))} --checkpoint-dir {shlex.quote(str(checkpoint_dir))} "
         f"--run-id {shlex.quote(run_id)} --train-tmux {shlex.quote(train_tmux)} "

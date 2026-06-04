@@ -1031,6 +1031,20 @@ is passed. Koszul/BGG and analogy should graduate from tiny exploratory terms
 to full reasoning-memory losses only after they show positive authoritative
 validation transfer or after the <=1.2 BPB checkpoint has been preserved.
 
+R73 step-3300 update: the first active-loss interval improved from
+`val_bpb=1.2290` at step 3250 to `val_bpb=1.2270` at step 3300. This is not yet
+a sufficient BPB drop, but it is the first post-3250 branch that did not
+immediately spike like R71/R72. W&B now contains the expected advanced metrics,
+including `advanced/backprop_enabled=1`, nonzero
+`advanced/runtime_scale_applied`, `train/advanced_aux_loss`,
+`advanced/graphcg_loss`, `advanced/toric_tropical_loss`,
+`advanced/slepian_pollak_loss`, `advanced/koszul_bgg_loss`, and
+`advanced/analogy_loss`. The step-3300 proposal marked the branch `on_track`
+with projected target step about `3975`, so the current action is to continue
+R73 through at least 3350/3400 before changing the active-loss cap. The
+`advanced_metric_control_map.png` plot path has also been corrected to
+dark-mode styling for future periodic reviews.
+
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
 Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, verify code+weights <=16,000,000 bytes, then start post-threshold advanced reasoning/memory phases.
