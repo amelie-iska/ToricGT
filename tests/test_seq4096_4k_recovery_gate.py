@@ -454,6 +454,52 @@ def test_train_wave_analogue_risk_preempts_before_next_validation(tmp_path: Path
     assert should_preempt_for_gate_risk(risk)
 
 
+def test_train_wave_analogue_risk_preempts_single_exact_prior_failed_replay(tmp_path: Path):
+    current_log = tmp_path / "current.log"
+    current_log.write_text(
+        "\n".join(
+            [
+                "step:3750/20000 val_loss:2.0483 val_bpb:1.2131 train_time:1ms step_avg:1ms",
+                "step:3800/20000 train_loss:2.0744 train_time:1ms step_avg:1ms train_bpb:1.2424",
+                "step:3850/20000 train_loss:2.0378 train_time:1ms step_avg:1ms train_bpb:1.2101",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    failed = tmp_path / "r57_failed.log"
+    failed.write_text(
+        "\n".join(
+            [
+                "step:3750/20000 val_loss:2.0483 val_bpb:1.2131 train_time:1ms step_avg:1ms",
+                "step:3800/20000 train_loss:2.0743 train_time:1ms step_avg:1ms train_bpb:1.2424",
+                "step:3850/20000 train_loss:2.0377 train_time:1ms step_avg:1ms train_bpb:1.2101",
+                "step:3900/20000 train_loss:1.9985 train_time:1ms step_avg:1ms train_bpb:1.1742",
+                "step:3950/20000 train_loss:2.0699 train_time:1ms step_avg:1ms train_bpb:1.2329",
+                "step:4000/20000 train_loss:2.0990 train_time:1ms step_avg:1ms train_bpb:1.2322",
+                "step:4000/20000 val_loss:2.0766 val_bpb:1.2299 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    risk = load_train_wave_analogue_risk(
+        current_log,
+        history_logs=[failed],
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3850,
+        train_rmse_threshold=0.001,
+        min_failed_analogues=1,
+    )
+
+    assert risk is not None
+    assert risk.analogue_failed_count == 1
+    assert risk.risk_source == "failed_train_wave_analogue"
+    assert should_preempt_for_gate_risk(risk)
+
+
 def test_train_wave_analogue_risk_can_be_held_for_hot_velocity_validation_probe(tmp_path: Path):
     current_log = tmp_path / "current.log"
     current_log.write_text(

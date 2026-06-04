@@ -1600,7 +1600,7 @@ def main() -> None:
                 target_bpb=args.target_bpb,
                 min_step=max(args.analogue_risk_min_step, 3350),
                 train_rmse_threshold=args.analogue_risk_train_rmse_threshold,
-                min_failed_analogues=args.analogue_risk_min_failed,
+                min_failed_analogues=1,
             )
             if args.preempt_on_projected_miss and not args.no_analogue_risk
             else None

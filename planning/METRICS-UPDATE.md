@@ -797,9 +797,10 @@ exactly (`3800 -> 1.2424`, `3850 -> 1.2101`), so the gate controller now lets
 damped low-LR train-wave analogues preempt instead of holding them for another
 known-miss validation probe. The controller still gives hot-velocity probes one
 validation readout, but a damped branch that matches prior failed train waves
-switches to `failed_train_wave_damped_transfer_probe`. The bigram-bias LR
-damping was also corrected so an already-low LR such as `0.01` damps to `0.006`
-rather than being raised to the old floor. This is still BPB-clean: it changes
+now needs only one completed failed replay to switch to
+`failed_train_wave_damped_transfer_probe`. The bigram-bias LR damping was also
+corrected so an already-low LR such as `0.01` damps to `0.006` rather than
+being raised to the old floor. This is still BPB-clean: it changes
 optimizer/transition-bias controls, not auxiliary topology/toric/BGG losses.
 
 Recommended follow-up for the advanced-analysis track: implement compact
