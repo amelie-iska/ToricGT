@@ -628,6 +628,48 @@ absolute `restart_index`. For example, `restart_index=53` and `max_restarts=8`
 becomes an effective ceiling of `61`, so the gate can keep launching recovery
 runs instead of silently stopping at the exact moment a recovery is needed.
 
+### Live Update: 2026-06-04 Live Checkpoint Analysis Sidecar
+
+The live analysis scope is now attached to the up-to-date training run, not
+only to historical post-resume bundles.  A Seq4096 live supervisor watches tmux
+for the newest active `toricgt_seq4096_*` training session and launches one
+`scripts/watch_seq4096_analysis.py` watcher per fresh recovery run.  Outputs go
+under:
+
+```text
+outputs/live_periodic_reviews/<run_id>/step-XXXXXXXX
+```
+
+For R55 (`toricgt_seq4096_4k_recovery_r55_20260604T140841Z`), the live sidecar
+has produced a step-3500 review and is waiting on the step-3750 checkpoint.
+That review reports:
+
+- state: `off_track_unreachable`;
+- best validation BPB: `1.2198`;
+- target gap: `0.0198`;
+- competition-phase policy: `pre_threshold_primary_bpb_clean`;
+- sidecar/tiny loss policy for GraphCG, Slepian/Pollak, contrastive, and
+  GFlowNet signals; toric/BGG/Koszul/memory/trajectory losses remain held from
+  the primary pre-threshold objective.
+
+Compatibility finding: the older native
+`scripts/watch_training_analysis.py -> evaluate_oai_competition_bpb.py ->
+evaluate_reasoning_simplex.py -> evaluate_reasoning_geometry_suite.py` chain is
+not directly safe for live Seq4096 checkpoints. Those scripts load
+`RandomOrderLMConfig` / `DenseRandomOrderToricLM`; compact Seq4096 checkpoints
+contain GPT-style keys such as `tok_emb.weight` and no compatible config
+payload. Until a compact-checkpoint adapter exists, the correct live suite is
+`scripts/watch_seq4096_analysis.py` plus FineWeb diagnostics, W&B metric
+analysis, BPB descent plots, artifact-size probes, structural proxy maps, and
+training-adjustment proposals.
+
+Recommended follow-up for the advanced-analysis track: implement compact
+Seq4096 analogues of the old OAI/simplex/geometry entrypoints so
+graph-of-thought trajectory, directed simplicial, toric, Slepian/Pollak,
+BGG/Koszul, and
+memory diagnostics can run directly on compact checkpoints without converting
+them into RandomOrderLM payloads.
+
 PolarQuant and larger-parameter policy: R52's int8+zlib export margin is tight.
 PolarQuant currently quantizes runtime K/V cache tensors and can reduce memory
 pressure for longer contexts, but it does not by itself shrink stored model
@@ -661,7 +703,10 @@ Use best checkpoint at or before 3250/3500/3750, then launch the controller-reco
 
 Current action: R52 missed the projected gate velocity at step 3750, so R54 was
 launched from the R52 step-3500 checkpoint with the controller's guarded
-velocity-recapture controls.
+velocity-recapture controls. R54 then worsened at step 3750, so R55 was
+launched from the R54/R52 step-3500 checkpoint with a lower bigram-bias LR and
+guarded structural-recapture policy. A live analysis supervisor is attached and
+will follow subsequent R56/R57-style restarts.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
