@@ -949,6 +949,7 @@ def plan_metric_driven_recovery_controls(
         and latest_val.step < int(gate_step)
         and latest_val.val_bpb > float(target_bpb)
     )
+    gate_miss = latest_val.step >= int(gate_step) and latest_val.val_bpb > float(target_bpb)
     train_already_low = (
         math.isfinite(train_bpb)
         and train_bpb <= float(target_bpb) + float(low_train_bpb_margin)
@@ -984,7 +985,7 @@ def plan_metric_driven_recovery_controls(
             ),
         )
 
-    if projected_miss:
+    if projected_miss or gate_miss:
         batch_cap = (
             int(max_train_batch_tokens)
             if max_train_batch_tokens is not None and int(max_train_batch_tokens) > 0
