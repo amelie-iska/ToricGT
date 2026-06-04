@@ -784,6 +784,17 @@ prevents the sub-agent review queue from silently missing plots such as
 `bpb/bpb_descent_timeseries.png`, `bpb/bpb_transfer_efficiency.png`,
 `metrics/core_metric_timeseries.png`, and `metrics/recent_metric_slopes.png`.
 
+Resume-checkpoint live-analysis correction: resumed recovery branches begin
+with a saved checkpoint at step 3750, but the old watcher computed the first
+target as `start_step + interval_steps`, so preempted branches such as R60 and
+R61 could leave empty live-review directories until they survived to step 4000.
+`scripts/watch_seq4096_analysis.py` now supports `--analyze-start-step`, and
+both the live supervisor and 4K recovery launcher pass it. R62 was restarted
+with this flag and now has complete live outputs for both `step-00003750` and
+`step-00004000`, each with 177 reviewable files and 112 images. One-shot
+backfills were also launched for R60 and R61 step 3750 so the formerly empty
+directories become viewable.
+
 R56/R57/R58 gate update: R56 reached the step-4000 gate with authoritative
 validation BPB `1.2163`, so the <=1.2 BPB threshold was **not** reached. The
 gate correctly relaunched R57 from the R56 step-3750 checkpoint, which remained
@@ -848,6 +859,19 @@ warmup steps `5000`. W&B and the live full periodic analysis watcher are
 enabled for R62. Stale R61 sidecars were stopped so the active reviewer queue
 follows R62.
 
+R62/R63 update: R62 changed the train trajectory materially (`3800 -> 1.1871`,
+`3850 -> 1.2055`, `3900 -> 1.2186`, `3950 -> 1.2153`, `4000 -> 1.2001`) but
+still missed the authoritative gate with validation BPB `1.2266` at step 4000.
+The advanced full-diagnostics sidecar at the miss reported high structural
+pressure: dominant family `toric_slepian`, structural recapture score about
+`0.774`, topology loss about `1.22`, directed topology loss about `0.150`,
+Slepian leakage `1.0`, toric active-face margin about `-1.965`, BGG standard
+leakage about `0.521`, and BGG `d^2` residual about `0.0191`. This is now
+stronger evidence that the next branches may need guarded use of the advanced
+structural theory rather than only optimizer replay-diversity controls. The
+gate launched R63 from the best R62 step-3750 checkpoint with the same
+BPB-clean diversity controls while preserving the `1.2131` recovery origin.
+
 Recommended follow-up for the advanced-analysis track: implement compact
 Seq4096 analogues of the old simplex/geometry entrypoints so graph-of-thought
 trajectory, directed simplicial, toric, Slepian/Pollak, BGG/Koszul, and memory
@@ -887,16 +911,20 @@ Use best checkpoint at or before 3250/3500/3750, then launch the controller-reco
 
 Current action: R52 missed the projected gate velocity at step 3750, R54 and
 R55 did not improve the authoritative validation gate, R56 missed step 4000 at
-`val_bpb=1.2163`, R57 missed at `1.2299`, and R59 missed at `1.2288` after R58
-was preempted for matching a failed train wave. R60 and R61 then repeated the
-same damped recovery basin, and R61 was preempted at step 3850 into R62 using
-the stronger `repeated_damped_train_wave_diversity_probe`. R62 is now active
-from the best step-3750 checkpoint (`val_bpb=1.2131`) with reset
-optimizer/RNG/loader and BPB-clean diversity controls. The live analysis
-supervisor is attached, runs the historical W&B metrics and OAI BPB entrypoints
+`val_bpb=1.2163`, R57 missed at `1.2299`, R59 missed at `1.2288`, and R62
+missed at `1.2266`. R60 and R61 repeated the same damped recovery basin, R61
+was preempted at step 3850 into R62, and R62 confirmed a different but still
+insufficient diversity trajectory. R63 is now active from the best step-3750
+checkpoint (`val_bpb=1.2131`) with reset optimizer/RNG/loader and BPB-clean
+diversity controls. The live analysis supervisor is attached with
+`--analyze-start-step`, runs the historical W&B metrics and OAI BPB entrypoints
 plus compact Seq4096 advanced geometry/simplex visualization, refreshes the
 final artifact inventory, and dispatches the Codex review hook for sub-agent
-inspection of every current-run output family.
+inspection of every current-run output family. If R63 does not materially
+improve validation transfer, next recovery should consider guarded, explicitly
+byte-accounted structural-theory controls centered on toric/Slepian, topology,
+BGG/Koszul, and GraphCG sidecar evidence rather than another pure replay of
+R62 controls.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
