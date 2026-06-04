@@ -242,3 +242,34 @@ def test_dense_wandb_mirror_loads_train_bpb_and_diagnostic_aliases(tmp_path: Pat
     assert aliases["diagnostics/latest_full_metrics_step"] == pytest.approx(2100)
     assert aliases["diagnostics/latest/staleness_steps"] == pytest.approx(100)
     assert "toric/shadow_fan_cell_entropy" not in aliases
+
+
+def test_dense_wandb_mirror_builds_diagnostics_summary_pin_payload(tmp_path: Path) -> None:
+    module = load_log_mirror_module()
+    diagnostics_json = tmp_path / "latest.json"
+    diagnostics_json.write_text(
+        json.dumps(
+            {
+                "trainer/step": 3200,
+                "diagnostics/latest/structural_recapture_score": 0.7814,
+                "diagnostics/latest/structural_pressure_high": 1.0,
+                "diagnostics/latest/topology_loss": 1.2687,
+                "diagnostics/families/structural_recapture_available": 1.0,
+                "diagnostics/structural_recapture_score": 0.7814,
+                "diagnostics/structural_recapture_components/topology_loss": 0.154,
+                "fineweb_curve/latest_train_bpb": 1.1327,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = module.latest_diagnostics_summary_pin_payload(diagnostics_json, step=3229)
+    fingerprint = module.summary_payload_fingerprint(payload)
+
+    assert payload["diagnostics/latest/structural_recapture_score"] == pytest.approx(0.7814)
+    assert payload["diagnostics/latest/structural_pressure_high"] == 1.0
+    assert payload["diagnostics/families/structural_recapture_available"] == 1.0
+    assert payload["diagnostics/structural_recapture_score"] == pytest.approx(0.7814)
+    assert payload["diagnostics/latest/staleness_steps"] == pytest.approx(29)
+    assert payload["diagnostics/summary_pin_active"] == 1.0
+    assert fingerprint == module.summary_payload_fingerprint(dict(reversed(list(payload.items()))))

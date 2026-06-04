@@ -83,6 +83,25 @@ def latest_diagnostics_aliases(path: Path, step: int) -> dict[str, float]:
     return aliases
 
 
+def latest_diagnostics_summary_pin_payload(path: Path, step: int) -> dict[str, float]:
+    """Return latest diagnostics aliases for summary-only re-pinning.
+
+    Multiple W&B writers resume the same run during BPB recovery.  The primary
+    trainer logs every step and can leave the public summary without sidecar
+    diagnostics even though the metrics are present in history.  The dense mirror
+    periodically re-pins this compact payload so the run summary stays useful.
+    """
+
+    payload = latest_diagnostics_aliases(path, step)
+    if payload:
+        payload["diagnostics/summary_pin_active"] = 1.0
+    return payload
+
+
+def summary_payload_fingerprint(payload: dict[str, float]) -> tuple[tuple[str, float], ...]:
+    return tuple(sorted((str(key), round(float(value), 12)) for key, value in payload.items()))
+
+
 def sync_public_summary(
     wandb_module,
     *,
@@ -124,6 +143,8 @@ def main() -> None:
     seen: set[tuple[str, int]] = set()
     best_bpb: float | None = None
     initial_bpb: float | None = None
+    latest_seen_step = 0
+    last_diagnostics_summary_pin: tuple[tuple[str, float], ...] = ()
     while True:
         stop_requested = False
         if path.exists():
@@ -133,6 +154,7 @@ def main() -> None:
                 val = VAL_RE.search(line)
                 if val:
                     step = int(val.group("step"))
+                    latest_seen_step = max(latest_seen_step, step)
                     key = ("val", step)
                     if key in seen:
                         continue
@@ -220,6 +242,7 @@ def main() -> None:
                 train = TRAIN_RE.search(line)
                 if train:
                     step = int(train.group("step"))
+                    latest_seen_step = max(latest_seen_step, step)
                     key = ("train", step)
                     if key in seen:
                         continue
@@ -288,6 +311,24 @@ def main() -> None:
                 marker in text_tail
                 for marker in ("final_int8_zlib_roundtrip", "Traceback", "RuntimeError")
             )
+        if latest_seen_step > 0:
+            diagnostics_summary_pin = latest_diagnostics_summary_pin_payload(diagnostics_json, latest_seen_step)
+            if diagnostics_summary_pin:
+                fingerprint = summary_payload_fingerprint(diagnostics_summary_pin)
+                run.summary.update(diagnostics_summary_pin)
+                if sync_public_summary(
+                    wandb,
+                    entity=args.entity,
+                    project=args.project,
+                    run_id=args.run_id,
+                    summary_payload=diagnostics_summary_pin,
+                ) and fingerprint != last_diagnostics_summary_pin:
+                    print(
+                        "wandb_diagnostics_summary_pin "
+                        f"step={latest_seen_step} keys={len(diagnostics_summary_pin)}",
+                        flush=True,
+                    )
+                last_diagnostics_summary_pin = fingerprint
         if stop_requested:
             break
         time.sleep(max(1.0, args.poll_seconds))
