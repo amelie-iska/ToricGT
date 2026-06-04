@@ -6,9 +6,9 @@ model:
   use_advanced_reasoning_tokens: true
   vocab_size: 272
   byte_offset: 16
-  # 4096 OOMs on the current 24 GB card at this model width; warm up in a
-  # 3072-token long-context basin, then expand to 4096+ after BPB stabilizes.
-  max_seq_len: 3072
+  # 3072-4096 OOMs on the current 24 GB card at this model width; warm up in
+  # a 2048-token long-context basin, then expand to 4096+ after BPB stabilizes.
+  max_seq_len: 2048
   d_model: 384
   num_heads: 6
   num_layers: 7
