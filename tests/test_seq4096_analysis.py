@@ -239,6 +239,35 @@ def test_4k_recovery_selection_keeps_roomy_checkpoint_for_tiny_late_gain() -> No
     assert selected.val_bpb == pytest.approx(1.2131)
 
 
+def test_4k_gate_continuation_threshold_is_strict() -> None:
+    module = load_gate_module()
+
+    assert not module.should_continue_from_improved_validation(
+        module.ValRow(step=4000, total=4000, val_loss=2.0405, val_bpb=1.2085),
+        1.2085,
+    )
+    assert module.should_continue_from_improved_validation(
+        module.ValRow(step=4000, total=4000, val_loss=2.0404, val_bpb=1.2084),
+        1.2085,
+    )
+    assert not module.should_continue_from_improved_validation(None, 1.2085)
+    assert not module.should_continue_from_improved_validation(
+        module.ValRow(step=4000, total=4000, val_loss=2.0404, val_bpb=1.2084),
+        0.0,
+    )
+
+
+def test_4k_gate_continuation_run_id_is_compact() -> None:
+    module = load_gate_module()
+    run_id = module.build_continuation_run_id(
+        "toricgt_seq4096_4k_recovery_r101_20260604T214349Z",
+        "20260604T220000Z",
+    )
+
+    assert run_id == "toricgt_seq4096_full_continue_r101_20260604T220000Z"
+    assert len(run_id) <= 95
+
+
 def test_4k_gate_replay_detection_selects_roomier_historical_checkpoint(tmp_path: Path) -> None:
     module = load_gate_module()
     log_root = tmp_path / "logs"

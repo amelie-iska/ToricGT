@@ -216,6 +216,15 @@ def build_recovery_run_id(parent_run_id: str, restart_index: int, stamp: str, ma
     return f"{stem[:budget].rstrip('_')}{suffix}"
 
 
+def build_continuation_run_id(parent_run_id: str, stamp: str, max_len: int = 95) -> str:
+    parent = str(parent_run_id or "")
+    stem = "toricgt_seq4096_full"
+    match = re.search(r"_4k_recovery_r(\d+)", parent)
+    suffix = f"_continue_r{match.group(1)}_{stamp}" if match else f"_continue_{stamp}"
+    budget = max(8, int(max_len) - len(suffix))
+    return f"{stem[:budget].rstrip('_')}{suffix}"
+
+
 def parse_seq4096_log(path: Path | str) -> ParsedLog:
     train: dict[int, TrainRow] = {}
     vals: dict[int, ValRow] = {}
@@ -304,6 +313,15 @@ def select_recovery_validation(
     if best_before_gate is not None:
         return best_before_gate
     return select_best_validation(rows, gate_step)
+
+
+def should_continue_from_improved_validation(best_val: ValRow | None, threshold_bpb: float) -> bool:
+    return bool(
+        best_val is not None
+        and float(threshold_bpb) > 0.0
+        and math.isfinite(best_val.val_bpb)
+        and best_val.val_bpb < float(threshold_bpb)
+    )
 
 
 def validation_at_step(rows: list[ValRow], step: int) -> ValRow | None:
@@ -1729,6 +1747,7 @@ def build_analysis_shell(
     python: str,
     wandb_entity: str,
     wandb_project: str,
+    interval_steps: int = 1,
 ) -> str:
     analysis_log = repo_root / "logs" / f"{run_id}.analysis_watcher.txt"
     output_root = repo_root / "outputs" / "post_resume_analysis" / run_id
@@ -1758,7 +1777,7 @@ def build_analysis_shell(
         f"--log {shlex.quote(str(log_path))} "
         f"--run-path {shlex.quote(f'{wandb_entity}/{wandb_project}/{run_id}')} "
         f"--output-root {shlex.quote(str(output_root))} "
-        f"--start-step {int(start_step)} --interval-steps 1 --poll-seconds 30 "
+        f"--start-step {int(start_step)} --interval-steps {int(interval_steps)} --poll-seconds 30 "
         f"--analyze-start-step "
         f"--target-bpb {float(target_bpb)} --training-tmux {shlex.quote(train_tmux)} "
         f"{codex_review_args}"
@@ -1855,6 +1874,12 @@ def build_gate_shell(
     replay_detection_bpb_epsilon: float,
     replay_detection_late_window_steps: int,
     replay_recovery_runway_steps: int,
+    continue_on_val_bpb_below: float,
+    continuation_iterations: int,
+    continuation_val_loss_every: int,
+    continuation_checkpoint_every: int,
+    continuation_analysis_interval_steps: int,
+    continuation_warmdown_iters: int,
     python: str,
 ) -> str:
     gate_log = repo_root / "logs" / f"{run_id}.4k_gate.txt"
@@ -1957,6 +1982,12 @@ def build_gate_shell(
         f"--replay-detection-bpb-epsilon {float(replay_detection_bpb_epsilon)} "
         f"--replay-detection-late-window-steps {int(replay_detection_late_window_steps)} "
         f"--replay-recovery-runway-steps {int(replay_recovery_runway_steps)} "
+        f"--continue-on-val-bpb-below {float(continue_on_val_bpb_below)} "
+        f"--continuation-iterations {int(continuation_iterations)} "
+        f"--continuation-val-loss-every {int(continuation_val_loss_every)} "
+        f"--continuation-checkpoint-every {int(continuation_checkpoint_every)} "
+        f"--continuation-analysis-interval-steps {int(continuation_analysis_interval_steps)} "
+        f"--continuation-warmdown-iters {int(continuation_warmdown_iters)} "
         f"--state {shlex.quote(str(state_path))} "
         f"2>&1 | tee -a {shlex.quote(str(gate_log))}"
     )
@@ -2039,6 +2070,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replay-detection-bpb-epsilon", type=float, default=2.0e-4)
     parser.add_argument("--replay-detection-late-window-steps", type=int, default=75)
     parser.add_argument("--replay-recovery-runway-steps", type=int, default=350)
+    parser.add_argument("--continue-on-val-bpb-below", type=float, default=1.2085)
+    parser.add_argument("--continuation-iterations", type=int, default=20_000)
+    parser.add_argument("--continuation-val-loss-every", type=int, default=250)
+    parser.add_argument("--continuation-checkpoint-every", type=int, default=250)
+    parser.add_argument("--continuation-analysis-interval-steps", type=int, default=250)
+    parser.add_argument("--continuation-warmdown-iters", type=int, default=3_000)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -2224,6 +2261,14 @@ def main() -> None:
                 "late_window_steps": args.replay_detection_late_window_steps,
                 "recovery_runway_steps": args.replay_recovery_runway_steps,
             },
+            "continuation": {
+                "continue_on_val_bpb_below": args.continue_on_val_bpb_below,
+                "iterations": args.continuation_iterations,
+                "val_loss_every": args.continuation_val_loss_every,
+                "checkpoint_every": args.continuation_checkpoint_every,
+                "analysis_interval_steps": args.continuation_analysis_interval_steps,
+                "warmdown_iters": args.continuation_warmdown_iters,
+            },
             "updated_unix": time.time(),
         }
         rendered = json.dumps(status, sort_keys=True)
@@ -2237,6 +2282,167 @@ def main() -> None:
                     flush=True,
                 )
             last_status = rendered
+
+        if should_continue_from_improved_validation(best_val, args.continue_on_val_bpb_below):
+            assert best_val is not None
+            continuation_checkpoint = checkpoint_for_step(checkpoint_dir, args.run_id, best_val.step)
+            if continuation_checkpoint is None:
+                status["event"] = "waiting_for_continuation_checkpoint"
+                status["continuation_threshold_bpb"] = args.continue_on_val_bpb_below
+                status["selected_continuation_validation"] = best_val.__dict__
+                write_state(state_path, status)
+                time.sleep(max(1.0, args.poll_seconds))
+                continue
+
+            stamp = utc_stamp()
+            continuation_run_id = build_continuation_run_id(args.run_id, stamp)
+            continuation_train_tmux = sanitize_tmux_name(f"toricgt_seq4096_full_continue_{stamp}")
+            continuation_checkpoint_dir = parameter_golf_root / "checkpoints" / continuation_run_id
+            continuation_log = parameter_golf_root / "logs" / f"{continuation_run_id}.txt"
+            continuation_controls = replace(
+                base_controls,
+                reset_optimizer_on_resume=False,
+                reset_rng_on_resume=False,
+                reset_loader_on_resume=False,
+                policy="continue_improved_val_bpb",
+                advanced_metric_policy="full_training_continuation_from_best_bpb",
+                rationale=(
+                    f"validation BPB {best_val.val_bpb:.4f} beat continuation threshold "
+                    f"{args.continue_on_val_bpb_below:.4f}",
+                    "continue past the 4K gate instead of launching another short recovery replay",
+                    "preserve optimizer/RNG/loader state from the improved checkpoint",
+                    "keep W&B, dense metric mirroring, full diagnostics, and periodic analyses active",
+                ),
+            )
+            continuation_launch = build_recovery_launch(
+                repo_root=repo_root,
+                parameter_golf_root=parameter_golf_root,
+                run_id=continuation_run_id,
+                checkpoint_dir=continuation_checkpoint_dir,
+                log_path=continuation_log,
+                resume_checkpoint=continuation_checkpoint,
+                seed=args.seed + args.restart_index + 1,
+                target_bpb=args.target_bpb,
+                python=args.python,
+                iterations=args.continuation_iterations,
+                warmdown_iters=args.continuation_warmdown_iters,
+                val_loss_every=args.continuation_val_loss_every,
+                checkpoint_every=args.continuation_checkpoint_every,
+                train_batch_tokens=continuation_controls.train_batch_tokens,
+                tied_embed_lr=continuation_controls.tied_embed_lr,
+                matrix_lr=continuation_controls.matrix_lr,
+                scalar_lr=continuation_controls.scalar_lr,
+                muon_momentum=continuation_controls.muon_momentum,
+                muon_momentum_warmup_steps=continuation_controls.muon_momentum_warmup_steps,
+                muon_momentum_warmup_start=continuation_controls.muon_momentum_warmup_start,
+                grad_clip_norm=continuation_controls.grad_clip_norm,
+                wandb_project=args.wandb_project,
+                wandb_entity=args.wandb_entity,
+                bigram_bias=continuation_controls.bigram_bias,
+                bigram_bias_lr=continuation_controls.bigram_bias_lr,
+                bigram_bias_init_from_data=continuation_controls.bigram_bias_init_from_data,
+                bigram_bias_init_tokens=continuation_controls.bigram_bias_init_tokens,
+                bigram_bias_init_alpha=continuation_controls.bigram_bias_init_alpha,
+                bigram_bias_init_strength=continuation_controls.bigram_bias_init_strength,
+                bigram_bias_scale=continuation_controls.bigram_bias_scale,
+                advanced_loss_scale=continuation_controls.advanced_loss_scale,
+                graphcg_loss_weight=continuation_controls.graphcg_loss_weight,
+                toric_tropical_loss_weight=continuation_controls.toric_tropical_loss_weight,
+                slepian_loss_weight=continuation_controls.slepian_loss_weight,
+                koszul_bgg_loss_weight=continuation_controls.koszul_bgg_loss_weight,
+                analogy_loss_weight=continuation_controls.analogy_loss_weight,
+                advanced_loss_sample_tokens=continuation_controls.advanced_loss_sample_tokens,
+                toric_tropical_fan_bins=continuation_controls.toric_tropical_fan_bins,
+                advanced_loss_log_only=continuation_controls.advanced_loss_log_only,
+                advanced_loss_start_step=continuation_controls.advanced_loss_start_step,
+                advanced_loss_end_step=continuation_controls.advanced_loss_end_step,
+                advanced_loss_every=continuation_controls.advanced_loss_every,
+                advanced_loss_warmup_steps=continuation_controls.advanced_loss_warmup_steps,
+                advanced_loss_min_best_val_bpb=continuation_controls.advanced_loss_min_best_val_bpb,
+                advanced_loss_max_ce_ratio=continuation_controls.advanced_loss_max_ce_ratio,
+                reset_optimizer_on_resume=continuation_controls.reset_optimizer_on_resume,
+                reset_rng_on_resume=continuation_controls.reset_rng_on_resume,
+                reset_loader_on_resume=continuation_controls.reset_loader_on_resume,
+                checkpoint_on_train_bpb_below=args.recovery_checkpoint_on_train_bpb_below,
+                checkpoint_on_train_bpb_cooldown_steps=args.recovery_checkpoint_on_train_bpb_cooldown_steps,
+                checkpoint_on_train_bpb_max=args.recovery_checkpoint_on_train_bpb_max,
+                val_on_train_bpb_checkpoint=args.recovery_val_on_train_bpb_checkpoint,
+            )
+            command_dir = repo_root / "logs" / continuation_run_id / "supervisor"
+            command_dir.mkdir(parents=True, exist_ok=True)
+            (command_dir / "train_command.sh").write_text(
+                continuation_launch.training_shell + "\n",
+                encoding="utf-8",
+            )
+            continuation_analysis_shell = build_analysis_shell(
+                repo_root=repo_root,
+                run_id=continuation_run_id,
+                train_tmux=continuation_train_tmux,
+                checkpoint_dir=continuation_checkpoint_dir,
+                log_path=continuation_log,
+                target_bpb=args.target_bpb,
+                start_step=best_val.step,
+                python=args.python,
+                wandb_entity=args.wandb_entity,
+                wandb_project=args.wandb_project,
+                interval_steps=args.continuation_analysis_interval_steps,
+            )
+            continuation_dense_shell = build_dense_mirror_shell(
+                repo_root=repo_root,
+                run_id=continuation_run_id,
+                log_path=continuation_log,
+                target_bpb=args.target_bpb,
+                python=args.python,
+            )
+            continuation_diag_shell = build_full_diag_shell(
+                repo_root=repo_root,
+                run_id=continuation_run_id,
+                log_path=continuation_log,
+                target_bpb=args.target_bpb,
+                python=args.python,
+            )
+            (command_dir / "analysis_command.sh").write_text(continuation_analysis_shell + "\n", encoding="utf-8")
+            (command_dir / "dense_mirror_command.sh").write_text(continuation_dense_shell + "\n", encoding="utf-8")
+            (command_dir / "full_diag_command.sh").write_text(continuation_diag_shell + "\n", encoding="utf-8")
+            status.update(
+                {
+                    "event": "launching_full_continuation_from_improved_bpb",
+                    "continuation_threshold_bpb": args.continue_on_val_bpb_below,
+                    "selected_continuation_validation": best_val.__dict__,
+                    "resume_checkpoint": str(continuation_checkpoint),
+                    "continuation_run_id": continuation_run_id,
+                    "continuation_train_tmux": continuation_train_tmux,
+                    "continuation_log": str(continuation_log),
+                    "continuation_checkpoint_dir": str(continuation_checkpoint_dir),
+                    "continuation_iterations": args.continuation_iterations,
+                    "continuation_validation_interval_steps": args.continuation_val_loss_every,
+                    "continuation_checkpoint_interval_steps": args.continuation_checkpoint_every,
+                    "continuation_analysis_interval_steps": args.continuation_analysis_interval_steps,
+                    "command_dir": str(command_dir),
+                    "applied_continuation_launch_controls": continuation_controls.launch_dict(),
+                }
+            )
+            write_state(state_path, status)
+            print(json.dumps(status, sort_keys=True), flush=True)
+            if not args.dry_run:
+                tmux_kill(args.train_tmux)
+                tmux_start(continuation_train_tmux, continuation_launch.training_shell, dry_run=False)
+                tmux_start(
+                    sanitize_tmux_name(f"toricgt_seq4096_full_analysis_{stamp}"),
+                    continuation_analysis_shell,
+                    dry_run=False,
+                )
+                tmux_start(
+                    sanitize_tmux_name(f"toricgt_seq4096_full_mirror_{stamp}"),
+                    continuation_dense_shell,
+                    dry_run=False,
+                )
+                tmux_start(
+                    sanitize_tmux_name(f"toricgt_seq4096_full_diag_{stamp}"),
+                    continuation_diag_shell,
+                    dry_run=False,
+                )
+            return
 
         if target_reached:
             status["event"] = "target_reached_before_or_at_gate"
@@ -2461,6 +2667,12 @@ def main() -> None:
             replay_detection_bpb_epsilon=args.replay_detection_bpb_epsilon,
             replay_detection_late_window_steps=args.replay_detection_late_window_steps,
             replay_recovery_runway_steps=args.replay_recovery_runway_steps,
+            continue_on_val_bpb_below=args.continue_on_val_bpb_below,
+            continuation_iterations=args.continuation_iterations,
+            continuation_val_loss_every=args.continuation_val_loss_every,
+            continuation_checkpoint_every=args.continuation_checkpoint_every,
+            continuation_analysis_interval_steps=args.continuation_analysis_interval_steps,
+            continuation_warmdown_iters=args.continuation_warmdown_iters,
             python=args.python,
         )
         (command_dir / "analysis_command.sh").write_text(analysis_shell + "\n", encoding="utf-8")
@@ -2489,6 +2701,7 @@ def main() -> None:
                 "recovery_log": str(recovery_log),
                 "recovery_checkpoint_dir": str(recovery_checkpoint_dir),
                 "command_dir": str(command_dir),
+                "recovery_launch_controls": recovery_controls.launch_dict(),
                 "applied_recovery_launch_controls": recovery_controls.launch_dict(),
                 "recovery_validation_interval_steps": recovery_eval_interval,
                 "recovery_checkpoint_interval_steps": recovery_checkpoint_interval,

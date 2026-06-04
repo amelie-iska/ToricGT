@@ -1199,6 +1199,17 @@ optimizer/RNG/loader, and launches a bounded advanced replay-escape branch:
 near-threshold experiment that promotes the advanced families during the BPB
 phase while keeping the CE-ratio cap small enough for BPB to remain primary.
 
+Continuation rule update: `1.2085` is now treated as the incumbent validation
+BPB continuation threshold. A run that merely ties `1.2085` continues through
+the 4K recovery/experiment loop, but any checkpoint with validation BPB strictly
+below `1.2085` launches a longer continuation run instead of another 4K replay.
+The continuation run uses `ITERATIONS=20000`, preserves optimizer/RNG/loader
+state from the improved checkpoint, keeps W&B plus dense metric mirroring plus
+full diagnostics active, and schedules periodic analysis/check-in bundles every
+250 steps. This also covers the future `<1.2` threshold case: the target
+checkpoint will be carried forward into full training rather than causing the
+gate watcher to stop.
+
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
 Save immutable threshold checkpoint, export with int8+zlib+adaptive pruning, verify code+weights <=16,000,000 bytes, then start post-threshold advanced reasoning/memory phases.

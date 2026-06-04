@@ -12818,3 +12818,19 @@ near-threshold advanced-method experiment. The CE-ratio cap remains tiny, so
 the branch should still be judged by validation BPB first; the advanced family
 metrics should be used as branch-selection and transfer diagnostics unless they
 produce clear held-out BPB improvement.
+
+R100 tied the incumbent best at step 4000:
+
+```text
+R100 step 4000 scheduled: train BPB 1.1959, validation BPB 1.2085
+R100 export: 15,893,080 bytes total, under the 16MB competition limit
+```
+
+User steering update: any validation BPB strictly below `1.2085` should continue
+past the 4K mark rather than cycling through another 4K recovery branch. The
+gate now treats `1.2085` as a strict continuation threshold. If a checkpoint
+beats it, the watcher launches a `toricgt_seq4096_full_continue_*` run with
+`ITERATIONS=20000`, preserves optimizer/RNG/loader state, keeps the current
+advanced-loss controls, and starts W&B mirroring, full diagnostics, and
+periodic analyses every 250 steps. Exact ties at `1.2085` do not trigger this;
+they remain in the near-threshold experiment loop.
