@@ -136,6 +136,29 @@ loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
           BPB_LOOP_NAME=parameter_golf_bpb_target
 ```
 
+Follow-up before handoff completion:
+
+```text
+r90 step-3950 validation BPB/loss: 1.2088 / 2.0409
+r90 projection after step 3950: target step 4438.9, still beyond gate 4000
+supervisor action: launched r91 from r90 step-3950 checkpoint
+active training tmux: toricgt_seq4096_4k_recovery_r91_20260604T203732Z
+active W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r91_20260604T203732Z
+active training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_4k_recovery_r91_20260604T203732Z.txt
+active checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r91_20260604T203732Z
+resume checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r90_20260604T203009Z/toricgt_seq4096_4k_recovery_r90_20260604T203009Z_step_003950.pt
+r91 scalar delta: tied_embed_lr 0.03621 -> 0.03802
+r91 held controls: matrix_lr=0.018, scalar_lr=0.018, train_batch_tokens=1048576,
+                   graphcg=0.02, toric_tropical=0.003, slepian=0.01,
+                   koszul_bgg=0.0001, analogy=0.00008
+requested r90 non-pausing CPU watcher wrote:
+  outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r90_20260604T203009Z_watch_training_analysis/step-00003950/SYNOPSIS.md
+requested r91 non-pausing CPU watcher: toricgt_watch_training_analysis_r91_4000
+r91 generic watcher log:
+  logs/toricgt_seq4096_4k_recovery_r91_20260604T203732Z.watch_training_analysis_4000.txt
+r91 generic watcher target: checkpoint >= 4000 on CPU, no --pause-training-before-analysis flag
+```
+
 ## 2026-06-04 Seq4096 R75 Step-3550 BPB Gate Review
 
 Run:
