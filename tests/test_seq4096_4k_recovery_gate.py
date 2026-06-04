@@ -590,6 +590,52 @@ def test_metric_controls_accelerate_projected_miss_without_heavy_structural_loss
     assert planned.advanced_metric_policy == "proposal_guided_bpb_recapture_structural_sidecars"
 
 
+def test_metric_controls_damp_after_hot_velocity_probe_miss(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3250/20000 train_loss:2.1083 train_time:1ms step_avg:1ms train_bpb:1.2377",
+                "step:3250/20000 val_loss:2.0833 val_bpb:1.2338 train_time:1ms step_avg:1ms",
+                "step:3500/20000 train_loss:2.1093 train_time:1ms step_avg:1ms train_bpb:1.2383",
+                "step:3500/20000 val_loss:2.0834 val_bpb:1.2339 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_seq4096_log(log)
+    base = RecoveryControls(
+        train_batch_tokens=983_040,
+        tied_embed_lr=0.037485,
+        matrix_lr=0.018,
+        scalar_lr=0.018,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=4250,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+        bigram_bias=True,
+        bigram_bias_lr=0.02,
+    )
+
+    planned = plan_metric_driven_recovery_controls(
+        base,
+        parsed=parsed,
+        target_bpb=1.2,
+        gate_step=4000,
+        projected_target_step=12000.0,
+        max_train_batch_tokens=983_040,
+    )
+
+    assert planned.policy == "post_hot_probe_damped_transfer"
+    assert planned.tied_embed_lr < base.tied_embed_lr
+    assert planned.tied_embed_lr >= 0.034
+    assert planned.bigram_bias_lr < base.bigram_bias_lr
+    assert planned.matrix_lr == base.matrix_lr
+    assert planned.scalar_lr == base.scalar_lr
+    assert planned.advanced_metric_policy == "hot_probe_failed_validation_damping_structural_sidecars"
+
+
 def test_metric_controls_turn_on_bigram_bias_when_tied_lr_is_capped(tmp_path: Path):
     log = tmp_path / "train.log"
     log.write_text(

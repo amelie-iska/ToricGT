@@ -1081,6 +1081,31 @@ def plan_metric_driven_recovery_controls(
                     "damp the lexical-head LR to improve validation transfer without injecting heavy structural losses",
                 ),
             )
+        if base.bigram_bias and base.tied_embed_lr >= 0.037:
+            return replace(
+                base,
+                train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
+                tied_embed_lr=round(max(0.034, base.tied_embed_lr * 0.92), 6),
+                matrix_lr=base.matrix_lr,
+                scalar_lr=base.scalar_lr,
+                muon_momentum_warmup_steps=max(
+                    base.muon_momentum_warmup_steps,
+                    int(gate_step) + 500,
+                    int(latest_val.step) + 1000,
+                ),
+                bigram_bias=True,
+                bigram_bias_lr=round(max(0.012, base.bigram_bias_lr * 0.65), 6),
+                bigram_bias_init_from_data=False,
+                policy="post_hot_probe_damped_transfer",
+                advanced_metric_policy="hot_probe_failed_validation_damping_structural_sidecars",
+                rationale=(
+                    f"validation projects target at step {projected_target_step:.1f}, beyond gate {gate_step}",
+                    f"hot tied-embedding probe lr={base.tied_embed_lr:.6f} did not produce enough validation velocity",
+                    "do not escalate toward the known too-hot LR band",
+                    "damp tied-embedding and bigram LR while holding matrix/scalar LR fixed",
+                    "use the next run as a transfer-stability probe before switching to the native GraphCG/Slepian reasoning-memory trainer",
+                ),
+            )
         return replace(
             base,
             train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
