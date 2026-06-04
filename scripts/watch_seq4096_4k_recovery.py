@@ -377,26 +377,21 @@ def should_hold_train_wave_for_validation_probe(
     *,
     tied_embed_lr: float,
     hot_probe_lr: float = 0.037,
-    damped_probe_lr: float = 0.034,
 ) -> bool:
-    """Let explicit probe settings reach validation instead of relaunching again.
+    """Let explicit hot-velocity probes reach validation instead of relaunching.
 
     Failed train-wave analogues are useful early branch-rejection signals, but
     repeated replays can otherwise ladder through near-identical 3250 restarts
-    without ever producing a validation point for altered controls.  Once the
-    tied embedding LR is in an explicit hot-velocity or damped-transfer probe
-    band, hold the train-wave risk for the next validation checkpoint and let
-    validation velocity decide.
+    without ever producing a validation point for altered controls.  Hot
+    velocity probes get one validation readout; damped probes are allowed to
+    preempt when they are already replaying a failed damped branch.
     """
 
     return bool(
         risk
         and risk.risk_source == "failed_train_wave_analogue"
         and should_preempt_for_gate_risk(risk)
-        and (
-            float(tied_embed_lr) >= float(hot_probe_lr)
-            or float(tied_embed_lr) <= float(damped_probe_lr)
-        )
+        and float(tied_embed_lr) >= float(hot_probe_lr)
     )
 
 
@@ -422,7 +417,7 @@ def plan_failed_train_wave_recovery_controls(
             int(latest_step) + 1000,
         ),
         bigram_bias=True,
-        bigram_bias_lr=round(max(0.012, min(base.bigram_bias_lr, base.bigram_bias_lr * 0.55)), 6),
+        bigram_bias_lr=round(max(0.006, min(base.bigram_bias_lr, base.bigram_bias_lr * 0.55, 0.012)), 6),
         bigram_bias_init_from_data=False,
         policy="failed_train_wave_damped_transfer_probe",
         advanced_metric_policy="failed_train_wave_analogue_damp_graphcg_slepian_sidecars",

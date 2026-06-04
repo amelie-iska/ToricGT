@@ -792,6 +792,16 @@ and low-rate bigram bias. The policy remains BPB-clean before threshold: use
 advanced metrics as sidecar evidence and controller priors, not heavy auxiliary
 losses, until an authoritative <=1.2 competition checkpoint is preserved.
 
+R58 replay-diversity correction: early R58 train BPB reproduced R57 almost
+exactly (`3800 -> 1.2424`, `3850 -> 1.2101`), so the gate controller now lets
+damped low-LR train-wave analogues preempt instead of holding them for another
+known-miss validation probe. The controller still gives hot-velocity probes one
+validation readout, but a damped branch that matches prior failed train waves
+switches to `failed_train_wave_damped_transfer_probe`. The bigram-bias LR
+damping was also corrected so an already-low LR such as `0.01` damps to `0.006`
+rather than being raised to the old floor. This is still BPB-clean: it changes
+optimizer/transition-bias controls, not auxiliary topology/toric/BGG losses.
+
 Recommended follow-up for the advanced-analysis track: implement compact
 Seq4096 analogues of the old simplex/geometry entrypoints so graph-of-thought
 trajectory, directed simplicial, toric, Slepian/Pollak, BGG/Koszul, and memory
@@ -837,7 +847,9 @@ optimizer/RNG/loader and conservative BPB-clean controls. The live analysis
 supervisor is attached, runs the historical W&B metrics and OAI BPB entrypoints
 plus compact Seq4096 advanced geometry/simplex visualization, refreshes the
 final artifact inventory, and dispatches the Codex review hook for sub-agent
-inspection of every current-run output family.
+inspection of every current-run output family. If R58 continues the R57 train
+wave, the patched gate should now launch the damped-transfer replay-diversity
+branch before spending another full gate cycle on an already-observed miss.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 

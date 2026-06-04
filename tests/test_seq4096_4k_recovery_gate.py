@@ -495,7 +495,7 @@ def test_train_wave_analogue_risk_can_be_held_for_hot_velocity_validation_probe(
     assert risk is not None
     assert risk.risk_source == "failed_train_wave_analogue"
     assert should_preempt_for_gate_risk(risk)
-    assert should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.0335)
+    assert not should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.0335)
     assert not should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.0357)
     assert should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.037485)
 
@@ -561,11 +561,80 @@ def test_failed_train_wave_analogue_uses_damped_transfer_controls(tmp_path: Path
     assert planned.policy == "failed_train_wave_damped_transfer_probe"
     assert planned.tied_embed_lr < base.tied_embed_lr
     assert planned.bigram_bias_lr < base.bigram_bias_lr
-    assert planned.bigram_bias_lr == 0.012
+    assert planned.bigram_bias_lr == 0.011
     assert planned.matrix_lr == base.matrix_lr
     assert planned.scalar_lr == base.scalar_lr
     assert planned.muon_momentum_warmup_steps > parsed.val_rows[-1].step
     assert planned.advanced_metric_policy == "failed_train_wave_analogue_damp_graphcg_slepian_sidecars"
+
+
+def test_failed_train_wave_damping_does_not_increase_low_bigram_lr(tmp_path: Path):
+    current_log = tmp_path / "current.log"
+    current_log.write_text(
+        "\n".join(
+            [
+                "step:3750/20000 val_loss:2.0483 val_bpb:1.2131 train_time:1ms step_avg:1ms",
+                "step:3800/20000 train_loss:2.0743 train_time:1ms step_avg:1ms train_bpb:1.2424",
+                "step:3850/20000 train_loss:2.0377 train_time:1ms step_avg:1ms train_bpb:1.2101",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    failed = tmp_path / "r57_failed.log"
+    failed.write_text(
+        "\n".join(
+            [
+                "step:3750/20000 val_loss:2.0483 val_bpb:1.2131 train_time:1ms step_avg:1ms",
+                "step:3800/20000 train_loss:2.0743 train_time:1ms step_avg:1ms train_bpb:1.2424",
+                "step:3850/20000 train_loss:2.0377 train_time:1ms step_avg:1ms train_bpb:1.2101",
+                "step:3900/20000 train_loss:1.9985 train_time:1ms step_avg:1ms train_bpb:1.1742",
+                "step:3950/20000 train_loss:2.0699 train_time:1ms step_avg:1ms train_bpb:1.2329",
+                "step:4000/20000 train_loss:2.0990 train_time:1ms step_avg:1ms train_bpb:1.2322",
+                "step:4000/20000 val_loss:2.0766 val_bpb:1.2299 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    risk = load_train_wave_analogue_risk(
+        current_log,
+        history_logs=[failed, failed],
+        gate_step=4000,
+        target_bpb=1.2,
+        min_step=3850,
+        train_rmse_threshold=0.001,
+        min_failed_analogues=1,
+    )
+    assert risk is not None
+    assert should_preempt_for_gate_risk(risk)
+    assert not should_hold_train_wave_for_validation_probe(risk, tied_embed_lr=0.034)
+
+    parsed = parse_seq4096_log(current_log)
+    base = RecoveryControls(
+        train_batch_tokens=983_040,
+        tied_embed_lr=0.034,
+        matrix_lr=0.018,
+        scalar_lr=0.018,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=4500,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+        bigram_bias=True,
+        bigram_bias_lr=0.01,
+    )
+
+    planned = plan_failed_train_wave_recovery_controls(
+        base,
+        parsed=parsed,
+        risk=risk,
+        gate_step=4000,
+    )
+
+    assert planned.policy == "failed_train_wave_damped_transfer_probe"
+    assert planned.tied_embed_lr == 0.032
+    assert planned.bigram_bias_lr == 0.006
+    assert planned.bigram_bias_lr < base.bigram_bias_lr
 
 
 def test_seq4096_log_parses_train_bpb_for_validation_gap_controls(tmp_path: Path):
