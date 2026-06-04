@@ -157,6 +157,52 @@ def test_4k_gate_parser_uses_low_train_bpb_trigger_validation(tmp_path: Path) ->
     assert parsed.train_rows[-1].train_bpb == pytest.approx(1.1290)
     assert parsed.val_rows[-1].step == 3625
     assert parsed.val_rows[-1].val_bpb == pytest.approx(1.2164)
+    assert parsed.val_rows[-1].source == "low_train_bpb"
+
+
+def test_4k_gate_preemption_waits_for_scheduled_current_analysis() -> None:
+    module = load_gate_module()
+    risk = module.PreemptiveGateRisk(
+        analysis_root="/analysis",
+        latest_analysis_step=3658,
+        latest_projected_target_step=5000.0,
+        latest_best_val_bpb=1.2155,
+        latest_recent_val_slope=0.001,
+        latest_projected_gate_overrun_steps=1000.0,
+        latest_velocity_shortfall_pressure=0.9,
+        latest_val_velocity_shortfall=0.004,
+        missed_projection_count=1,
+        required_patience=1,
+        gate_step=4000,
+        target_bpb=1.2,
+    )
+
+    assert not module.should_preempt_at_latest_validation(
+        module.ValRow(
+            step=3658,
+            total=4000,
+            val_loss=2.0526,
+            val_bpb=1.2156,
+            source="low_train_bpb",
+        ),
+        risk,
+        gate_step=4000,
+        min_step=3650,
+    )
+    assert not module.should_preempt_at_latest_validation(
+        module.ValRow(step=3700, total=4000, val_loss=2.0500, val_bpb=1.2140),
+        risk,
+        gate_step=4000,
+        min_step=3650,
+    )
+
+    current_risk = module.replace(risk, latest_analysis_step=3700)
+    assert module.should_preempt_at_latest_validation(
+        module.ValRow(step=3700, total=4000, val_loss=2.0500, val_bpb=1.2140),
+        current_risk,
+        gate_step=4000,
+        min_step=3650,
+    )
 
 
 def test_write_checkpoint_scoped_log_drops_future_checkpoint_rows(tmp_path: Path) -> None:

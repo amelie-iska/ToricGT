@@ -12301,3 +12301,41 @@ W&B: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r83_low
 
 R82 training and R82 sidecars were stopped after the R83 handoff. R81/R82
 checkpoints and analysis artifacts were left intact.
+
+## 2026-06-04 Low-BPB Probe Gate Hold
+
+R83 and R84 confirmed that the low-train-BPB trigger is operational: forced
+checkpoints are saved, immediate validation runs, the analysis watcher consumes
+the sparse checkpoint, and W&B mirrors `trigger/*` and checkpoint-reason fields.
+The first probes showed strong train-side dips but weak transfer:
+
+```text
+R83 step 3658: train BPB 1.1260, validation BPB 1.2157, sampled OAI BPB 1.2093
+R84 step 3658: train BPB 1.1260, validation BPB 1.2156
+```
+
+The original preemptive gate treated a single forced probe as sufficient
+evidence to branch. That caused R84 to hand off to R85 before the scheduled
+3700 validation interval could measure transfer. The 4K recovery watcher now
+marks validation rows by source (`scheduled` or `low_train_bpb`) and refuses to
+launch a preemptive recovery from a low-BPB probe or from stale analysis that
+predates the latest validation row. Low-BPB probes still save checkpoints,
+run validation, launch full analyses, and report to W&B; they just no longer
+cause immediate restart churn.
+
+The patched gate was hot-restarted on R85 without interrupting training. R85
+then held through multiple probes and reached a scheduled 3700 validation:
+
+```text
+R85 step 3658 forced probe: train BPB 1.1259, validation BPB 1.2156
+R85 step 3674 forced probe: train BPB 1.0940, validation BPB 1.2153
+R85 step 3691 forced probe: train BPB 1.1027, validation BPB 1.2148
+R85 step 3700 scheduled: train BPB 1.2343, validation BPB 1.2142
+```
+
+This gives a real validation slope from the lower-LR validation-gap recapture
+branch rather than a noisy single-probe decision. The analysis at step 3700
+projects target around step 4049.5, so R85 is closer but still not safely inside
+the 4K gate. Continue dense low-BPB checkpoint capture and scheduled validation;
+only branch after scheduled checkpoints or current analyses show the target is
+unreachable again.

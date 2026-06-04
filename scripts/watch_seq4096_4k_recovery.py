@@ -49,6 +49,7 @@ class ValRow:
     total: int
     val_loss: float
     val_bpb: float
+    source: str = "scheduled"
 
 
 @dataclass(frozen=True)
@@ -229,6 +230,7 @@ def parse_seq4096_log(path: Path | str) -> ParsedLog:
                 total=total,
                 val_loss=float(low_trigger.group("val_loss")),
                 val_bpb=float(low_trigger.group("val_bpb")),
+                source="low_train_bpb",
             )
             continue
         val = VAL_RE.search(line)
@@ -421,6 +423,33 @@ def load_preemptive_gate_risk(
 
 def should_preempt_for_gate_risk(risk: PreemptiveGateRisk | None) -> bool:
     return bool(risk and risk.missed_projection_count >= risk.required_patience)
+
+
+def should_preempt_at_latest_validation(
+    latest_val: ValRow | None,
+    risk: PreemptiveGateRisk | None,
+    *,
+    gate_step: int,
+    min_step: int,
+) -> bool:
+    """Return whether a preemptive restart should fire at the latest validation.
+
+    Low-train-BPB probes are intentionally dense validation check-ins. They are
+    useful for saving/analyzing promising train-BPB dips, but a single probe can
+    be a noisy transfer readout. Only scheduled validation intervals should be
+    allowed to trigger another restart, and only when the risk analysis is at
+    least as current as the latest validation row.
+    """
+
+    if latest_val is None:
+        return False
+    if getattr(latest_val, "source", "scheduled") == "low_train_bpb":
+        return False
+    if latest_val.step < int(min_step) or latest_val.step >= int(gate_step):
+        return False
+    if risk is None or int(risk.latest_analysis_step) < int(latest_val.step):
+        return False
+    return should_preempt_for_gate_risk(risk)
 
 
 def effective_restart_ceiling(restart_index: int, max_restarts: int) -> int:
@@ -1895,11 +1924,11 @@ def main() -> None:
             and should_preempt_for_gate_risk(train_wave_gate_risk)
         ):
             preemptive_risk = train_wave_gate_risk
-        preempt_for_gate_risk = (
-            bool(latest_val)
-            and latest_val.step >= int(args.preempt_min_step)
-            and latest_val.step < int(args.gate_step)
-            and should_preempt_for_gate_risk(preemptive_risk)
+        preempt_for_gate_risk = should_preempt_at_latest_validation(
+            latest_val,
+            preemptive_risk,
+            gate_step=args.gate_step,
+            min_step=args.preempt_min_step,
         )
         base_controls = RecoveryControls(
             train_batch_tokens=args.recovery_train_batch_tokens,
