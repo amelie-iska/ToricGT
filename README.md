@@ -25,16 +25,16 @@ Current validated status:
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
-  `toricgt_seq4096_4k_recovery_r9_20260603T233614Z`.
-  It is a compact-id, W&B-reporting BPB-velocity recapture from the R8
-  step-3000 checkpoint after the step-3000 analysis projected the validation
-  target crossing at about step `4923.7`, beyond the step-4000 gate. R9 resumes
+  `toricgt_seq4096_4k_recovery_r10_20260603T235714Z`.
+  It is a compact-id, W&B-reporting BPB-velocity recapture from the R9
+  step-3000 checkpoint after the R9 step-3250 analysis projected the validation
+  target crossing at about step `6439.4`, beyond the step-4000 gate. R10 resumes
   from validation BPB `1.2453678313891468`, resets optimizer/RNG/loader, uses
-  `983040` train tokens per step, `TIED_EMBED_LR=0.03696`, matrix/scalar LR
+  `983040` train tokens per step, `TIED_EMBED_LR=0.038808`, matrix/scalar LR
   held at `0.02`, Muon momentum `0.985`, and gradient clipping `1.0`. Its W&B
-  run is <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r9_20260603T233614Z>.
+  run is <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r10_20260603T235714Z>.
   Latest confirmed W&B summary while this README was refreshed: trainer step
-  `3056`, train BPB `1.2257571882718448`, validation/OpenAI BPB
+  `3022`, train BPB `1.217222628158844`, validation/OpenAI BPB
   `1.2453678313891468`, target gap `0.04536783138914679`, target not yet
   reached.
 - Seq4096 recovery automation now uses metric-driven launch controls. Repeated
