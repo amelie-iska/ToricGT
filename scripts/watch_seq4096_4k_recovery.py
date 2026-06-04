@@ -565,13 +565,18 @@ def plan_metric_driven_recovery_controls(
         if base.bigram_bias and diagnostics_summary.get("structural_pressure_high"):
             structural_score = finite_float(diagnostics_summary.get("structural_recapture_score"), default=0.0)
             structural_band = str(diagnostics_summary.get("structural_recapture_band", "unknown"))
+            resume_step_aware_warmup_steps = max(
+                base.muon_momentum_warmup_steps,
+                int(gate_step) + 250,
+                int(latest_val.step) + 750,
+            )
             return replace(
                 base,
                 train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
                 tied_embed_lr=round(max(0.034, base.tied_embed_lr * 0.925), 6),
                 matrix_lr=round(max(0.018, base.matrix_lr * 0.95), 6),
                 scalar_lr=round(max(0.018, base.scalar_lr * 0.95), 6),
-                muon_momentum_warmup_steps=max(base.muon_momentum_warmup_steps, 650),
+                muon_momentum_warmup_steps=resume_step_aware_warmup_steps,
                 bigram_bias=True,
                 bigram_bias_lr=round(max(0.02, base.bigram_bias_lr * 0.50), 6),
                 bigram_bias_init_from_data=False,
@@ -586,7 +591,8 @@ def plan_metric_driven_recovery_controls(
                     f"slepian_leakage={diagnostics_summary.get('slepian_leakage')}, "
                     f"toric_margin={diagnostics_summary.get('toric_active_face_margin')}",
                     f"structural recapture score={structural_score:.3f} band={structural_band}",
-                    "damp the lexical-head LR and lengthen warmup to improve validation transfer without injecting heavy structural losses",
+                    "use resume-step-aware Muon warmup so structural recapture still changes the optimizer flow after a 3K checkpoint resume",
+                    "damp the lexical-head LR to improve validation transfer without injecting heavy structural losses",
                 ),
             )
         return replace(

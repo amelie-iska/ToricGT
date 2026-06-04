@@ -434,6 +434,55 @@ def test_metric_controls_use_structural_pressure_after_bigram_is_already_enabled
     assert any("structural recapture score" in item for item in planned.rationale)
 
 
+def test_structural_pressure_recapture_keeps_muon_warmup_active_after_resume_step(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 train_loss:2.0296 train_time:1ms step_avg:1ms train_bpb:1.2206",
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_seq4096_log(log)
+    base = RecoveryControls(
+        train_batch_tokens=983_040,
+        tied_embed_lr=0.034,
+        matrix_lr=0.018,
+        scalar_lr=0.018,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=650,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+        bigram_bias=True,
+        bigram_bias_lr=0.02,
+    )
+
+    planned = plan_metric_driven_recovery_controls(
+        base,
+        parsed=parsed,
+        target_bpb=1.2,
+        gate_step=4000,
+        projected_target_step=4830.6,
+        max_train_batch_tokens=983_040,
+        advanced_diagnostics={
+            "diagnostics/families/topology_available": 1,
+            "diagnostics/families/toric_available": 1,
+            "diagnostics/families/slepian_pollak_prolate_available": 1,
+            "diagnostics/latest/bpb_intervention_pressure": 0.12,
+            "diagnostics/latest/topology_loss": 1.10,
+            "diagnostics/latest/slepian_leakage": 1.0,
+            "diagnostics/latest/toric_active_face_margin": -1.7,
+        },
+    )
+
+    assert planned.policy == "structural_pressure_recapture"
+    assert planned.muon_momentum_warmup_steps > parsed.val_rows[-1].step
+    assert any("resume-step-aware Muon warmup" in item for item in planned.rationale)
+
+
 def test_recovery_launch_exports_bigram_bias_env_when_enabled(tmp_path: Path):
     checkpoint = tmp_path / "checkpoint.pt"
     checkpoint.write_bytes(b"checkpoint")
