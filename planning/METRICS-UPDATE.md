@@ -779,11 +779,14 @@ prevents the sub-agent review queue from silently missing plots such as
 `bpb/bpb_descent_timeseries.png`, `bpb/bpb_transfer_efficiency.png`,
 `metrics/core_metric_timeseries.png`, and `metrics/recent_metric_slopes.png`.
 
-R56/R57 gate update: R56 reached the step-4000 gate with authoritative
+R56/R57/R58 gate update: R56 reached the step-4000 gate with authoritative
 validation BPB `1.2163`, so the <=1.2 BPB threshold was **not** reached. The
-gate correctly relaunched R57 from the R56 step-3750 checkpoint, which remains
-the best validation checkpoint at `1.2131` so far. R57 uses optimizer/RNG/loader
-reset, `TRAIN_BATCH_TOKENS=983040`, tied embedding LR `0.034`, matrix/scalar LR
+gate correctly relaunched R57 from the R56 step-3750 checkpoint, which remained
+the best validation checkpoint at `1.2131`. R57 then reached the step-4000 gate
+with authoritative validation BPB `1.2299`, so it also missed. The gate launched
+R58 from the R57 step-3750 checkpoint, again preserving the best validation BPB
+`1.2131` as the recovery origin. R58 uses optimizer/RNG/loader reset,
+`TRAIN_BATCH_TOKENS=983040`, tied embedding LR `0.034`, matrix/scalar LR
 `0.018`, Muon momentum warmup to `0.985`, validation/checkpoint interval 250,
 and low-rate bigram bias. The policy remains BPB-clean before threshold: use
 advanced metrics as sidecar evidence and controller priors, not heavy auxiliary
@@ -827,13 +830,14 @@ Use best checkpoint at or before 3250/3500/3750, then launch the controller-reco
   not shrink model weights.
 
 Current action: R52 missed the projected gate velocity at step 3750, R54 and
-R55 did not improve the authoritative validation gate, and R56 missed step 4000
-at `val_bpb=1.2163`. R57 is now active from the best step-3750 checkpoint
-(`val_bpb=1.2131`) with reset optimizer/RNG/loader and conservative BPB-clean
-controls. The live analysis supervisor is attached, runs the historical W&B
-metrics and OAI BPB entrypoints plus compact Seq4096 advanced geometry/simplex
-visualization, refreshes the final artifact inventory, and dispatches the Codex
-review hook for sub-agent inspection of every current-run output family.
+R55 did not improve the authoritative validation gate, R56 missed step 4000 at
+`val_bpb=1.2163`, and R57 missed step 4000 at `val_bpb=1.2299`. R58 is now
+active from the best step-3750 checkpoint (`val_bpb=1.2131`) with reset
+optimizer/RNG/loader and conservative BPB-clean controls. The live analysis
+supervisor is attached, runs the historical W&B metrics and OAI BPB entrypoints
+plus compact Seq4096 advanced geometry/simplex visualization, refreshes the
+final artifact inventory, and dispatches the Codex review hook for sub-agent
+inspection of every current-run output family.
 
 - [ ] **Step 3: If <=1.2 BPB is reached**
 
