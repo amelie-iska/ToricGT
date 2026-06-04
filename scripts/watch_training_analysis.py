@@ -38,6 +38,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -368,7 +369,7 @@ def main() -> None:
     if args.run_path:
         run_command(
             [
-                "python",
+                sys.executable,
                 "scripts/analyze_wandb_metrics.py",
                 "--run-path",
                 args.run_path,
@@ -384,7 +385,7 @@ def main() -> None:
     oai_config = config.get("oai_competition", {}) if isinstance(config.get("oai_competition", {}), dict) else {}
     if bool(oai_config.get("enabled", False)) and not args.skip_oai_competition_eval:
         command = [
-            "python",
+            sys.executable,
             "scripts/evaluate_oai_competition_bpb.py",
             "--checkpoint",
             str(checkpoint),
@@ -408,7 +409,7 @@ def main() -> None:
         )
     run_command(
         [
-            "python",
+            sys.executable,
             "scripts/evaluate_reasoning_simplex.py",
             "--checkpoint",
             str(checkpoint),
@@ -441,7 +442,7 @@ def main() -> None:
     )
     run_command(
         [
-            "python",
+            sys.executable,
             "scripts/evaluate_reasoning_geometry_suite.py",
             "--checkpoint",
             str(checkpoint),
@@ -468,7 +469,7 @@ def main() -> None:
         log_path=base / "logs" / "geometry.log",
     )
     proposal_command = [
-        "python",
+        sys.executable,
         "scripts/propose_training_adjustments.py",
         "--analysis-dir",
         str(base),

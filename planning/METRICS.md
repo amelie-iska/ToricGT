@@ -189,82 +189,112 @@ generic non-pausing watcher log: logs/toricgt_seq4096_4k_recovery_r77_20260604T1
 generic non-pausing watcher output root: outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r77_20260604T183710Z_watch_training_analysis
 generic non-pausing watcher target: checkpoint >= 3650 on CPU, no pause-training flag
 generic watcher loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
-                          BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_state.json,
-                          BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_stop,
+                          BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_state.json,
+                          BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_stop,
                           BPB_LOOP_NAME=parameter_golf_bpb_target
 ```
 
 The active r77 gate supervisor and its compact `watch_seq4096_analysis.py`
 sidecar were launched by the supervisor/concurrent review using r77-local loop
 state files.  The required generic `scripts/watch_training_analysis.py` sidecar
-for the next review preserves the supplied r74 loop environment and is
+for the next review preserves the supplied r75 loop environment and is
 non-blocking; training remains active while it waits for the step-3650
 checkpoint.
 
-## 2026-06-04 Seq4096 R75 Step-3600 Nonblocking BPB Gate Review
+Implementation note: the generic watcher uses its invoking Python interpreter
+for child analysis subprocesses, avoiding tmux environments where a plain
+`python` executable is not present on `PATH`.
+
+## 2026-06-04 Seq4096 R75 Step-3600 BPB Gate Review
 
 Run:
 
 ```text
 W&B run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_4k_recovery_r75_20260604T182013Z
-analysis dir: outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_nonblocking/step-00003600
+analysis dir: outputs/live_periodic_reviews/toricgt_seq4096_4k_recovery_r75_20260604T182013Z/step-00003600
 checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r75_20260604T182013Z/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_step_003600.pt
 checkpoint step: 3600
 target BPB: 1.2
-loop iteration: 5 / 100
+loop iteration: 3 / 100
 ```
 
-Metrics and plot review:
+Status:
 
-- Desired: official-style FineWeb validation BPB still improved from `1.2198`
-  at step 3500 to `1.2185` at step 3550 and `1.2169196232244919` at step
-  3600.  Validation loss moved with it (`2.0596 -> 2.0573 -> 2.0547178091`).
-  GraphCG coherence stayed low/stable (`advanced/graphcg_offdiag_coherence`
-  about `0.08`), GraphCG spectral entropy was high (`0.99698`), toric fan
-  entropy was high (`0.99870`), BGG/Gale consistency was coherent in the
-  checkpoint geometry records, and artifact size remained under the 16 MB
-  controller limit.
-- Desired but too weak or slow: the BPB gate is still above target by
-  `0.016900000000000137`; recent validation velocity was about `0.0032` BPB
-  per 100 steps against a required `0.004225` per 100 steps, projecting target
-  crossing near step `4182.76`.  Core metric counts were `46` desired, `25`
-  desired-but-weak, and `3` undesirable.  Train BPB was volatile: W&B train BPB
-  reached a strong local value near step 3550 but bounced to `1.2255` at the
-  validation-aligned step 3600 while the latest train row logged
-  `1.1445233787637143`.
-- Undesirable: the train-side floor bounce after step 3550, weak train-to-val
-  transfer evidence with only two paired validation intervals, and sidecar
-  geometry showing jagged trajectories, many tropical chamber crossings, a
-  tropical plateau spike, weak analogical transport, low layer/attention
-  GraphCG disentanglement, and large memory-graph condition numbers.  The
-  sampled `oai_competition/bpb=1.325594941932744` is not authoritative because
-  the eval scope was sampled (`val_max_sequences=16`, `seq_len=256`).
+```text
+primary BPB signal: openai_parameter_golf/bpb = 1.2169196232244919
+FineWeb validation BPB/loss: 1.2169196232244919 / 2.0547178091232596
+FineWeb train BPB/loss: 1.2255411781645588 / 2.0819263458251953
+sampled official-style OAI BPB/loss: 1.2183651952387373 / 2.1244614124298096
+sampled OAI eval scope: 1 local FineWeb sp1024 validation sequence, seq_len=256
+target gap: 0.0169196232244919
+recent validation velocity: about 0.0029-0.0032 BPB drop per 100 steps
+required velocity to hit 1.2 by step 4000: about 0.004225 BPB per 100 steps
+projected target step: 4182.76
+metric categories: desired=47, weak_or_slow=22, undesirable=5
+artifact probe: 15,886,755 bytes, 113,245 bytes under the 16 MB controller limit
+```
+
+Metric and plot review:
+
+- Desired: official-style FineWeb validation BPB improved from `1.219800000`
+  at step 3500 to `1.2184563243984596` at step 3550 and
+  `1.2169196232244919` at step 3600.  Validation loss moved with it
+  (`2.0596 -> 2.057312464685708 -> 2.0547178091232596`).  The sampled local
+  FineWeb SP1024 OAI probe was consistent with the primary signal at
+  `1.2183651952387373`, but its one-sequence scope keeps it high variance.
+  GraphCG off-diagonal coherence stayed near zero in the geometry records,
+  Koszul `d2` residual was zero, BGG resolution and Gale-dual consistency were
+  essentially one, and the simplex, 3D trajectory, phase-energy,
+  energy-landscape, GraphCG, tropical, topology, and BGG/Koszul plots were
+  generated and inspected.
+- Desired but too weak or slow: BPB remains above target by
+  `0.0169196232244919`.  The recent validation velocity is below the required
+  gate velocity by roughly `0.0010-0.0015` BPB per 100 steps, so the line still
+  crosses after the 4K gate.  Transfer evidence is weak with only two paired
+  validation intervals.  The reasoning gate is alive but rough: GraphCG basis
+  condition numbers are very large on some records, MST efficiency and path
+  smoothness are weak, analogical transport is poor, Slepian leakage is uneven,
+  and GFlowNet/branch replay and test-time-scaling diagnostics remain
+  proxy-level rather than promotion evidence.
+- Undesirable: train BPB is noisy and bounced at the validation-aligned step
+  (`train_bpb=1.2255411781645588` at step 3600 after lower train samples
+  around step 3550).  Train loss and total loss were categorized undesirable in
+  the metric summary.  Tropical chamber crossings and plateau pressure remain
+  high, trajectory paths are long and kinked, relative-K/NCD proxies are still
+  high enough to withhold compression claims, and no Hessian trace/sharpness
+  probe was available.
 
 Mathematical/statistical interpretation:
 
-- The validation first derivative is still negative, but the velocity is below
-  the gate requirement.  The finite differences are roughly `-0.0013` BPB from
-  3500 to 3550 and `-0.0016` BPB from 3550 to 3600, so validation is not
-  reversing.  The issue is rate, not sign.
+- FineWeb BPB is the competition gate.  The validation first differences are
+  still negative: approximately `-0.001343676` from step 3500 to 3550 and
+  `-0.001536701` from step 3550 to 3600.  The second difference is slightly
+  favorable rather than a validation floor bounce, so a rollback is not
+  justified by sign or curvature.  The failure mode is insufficient descent
+  speed.
 - The train/validation phase plane shows poor transfer: train BPB crossed below
-  the target band at 3550 and then moved back above validation by 3600, while
-  validation descended only slowly.  This is consistent with a floor-bounce or
-  optimizer-transfer mismatch rather than a clean loss basin.
+  the target band around step 3550 and then moved back above validation by step
+  3600, while validation descended slowly.  This is consistent with an
+  optimizer-transfer mismatch or noisy train floor bounce, not with a clean
+  deployable basin.
 - The proposal script was re-run on the analysis directory.  It reported
-  `status=off_track`, `primary_action=restart_from_best_checkpoint_with_damped_structural_sidecars`,
-  `recent_drop_per_100_steps=0.0028999999999999027`, and
-  `velocity_shortfall_per_100_steps=0.0013250000000001316`.  I treated this as
-  evidence for scalar intervention, not as authority to add new architecture.
+  `primary_action=restart_from_best_checkpoint_with_damped_structural_sidecars`,
+  current/best gate BPB `1.2169196232244919`, recent drop about `0.0029` BPB
+  per 100 steps, and projected target step `4182.76`.  I treated this as
+  evidence for scalar intervention, not as authority to add architecture.  Its
+  OAI competition field missed the sampled OAI probe, so that blind spot was
+  not used against the primary FineWeb signal.
 - The reasoning gate stays as sidecar evidence.  The simplex/geometry plots
-  were non-collapsed but not promotion-grade: R0/R1 had better BPB and
-  trajectory structure, R2/R3 leaned toward low-K but weak MST/basis behavior,
-  and R4 memory had high toric entropy with long path length and many chamber
-  crossings.  GraphCG/topology/toric/BGG diagnostics should shape branch
-  control, not replace the FineWeb BPB objective before the target checkpoint.
+  were non-collapsed but not promotion-grade.  GraphCG/topology/toric/BGG
+  diagnostics should shape branch and auxiliary control, not replace the
+  FineWeb BPB objective before the target checkpoint.  The two-gate rule
+  therefore calls for scalar mixture/auxiliary control rather than discarding
+  either objective.
 - No OOD-transfer claim is justified here.  The run is already using the local
   FineWeb SP1024 stream, and the sampled OAI eval is too small.  Tokenizer,
-  n-gram/context, dataset-easiness, FineWeb-only, hard-data-only, and equal
-  exposure controls are still required before claiming hard-reasoning transfer.
+  n-gram/context, dataset-easiness, FineWeb-only, hard-data-only, mixed-budget,
+  and auxiliary-ablation controls are still required before claiming
+  hard-reasoning transfer.
 - Hessian/sharpness probes were not available in this analysis directory; the
   decision used finite differences, BPB velocity, transfer diagnostics, and
   geometry/topology sidecars.
@@ -276,6 +306,14 @@ the analyzed step-3600 checkpoint.  I accepted it because it keeps training
 active, preserves the Parameter-Golf/ToricGT architecture, and applies only
 scalar sidecar/BPB controls.  No code file or static config file was edited for
 the restart, and no better-strategy stop sentinel was written.
+
+The r77 restart is active and advancing.  It loaded the r75 step-3600 checkpoint
+with `reset_optimizer=0`, `reset_rng=0`, and `reset_loader=0`, saved its own
+step-3600 checkpoint, and emitted `step:3650/4000 train_loss:2.0850
+train_bpb:1.2478`, then `step:3650/4000 val_loss:2.0551 val_bpb:1.2171`
+and saved the fresh step-3650 checkpoint.  This verifies that the handoff did
+not leave training inactive; the small positive r77 3600-to-3650 validation
+bounce remains under the active gate supervisor's projected-miss policy.
 
 Operational handoff:
 
@@ -303,8 +341,8 @@ nonblocking watcher output root: outputs/live_periodic_reviews/toricgt_seq4096_4
 nonblocking watcher device/precision: cpu / fp32
 nonblocking watcher pause behavior: no --pause-training-before-analysis
 required loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100,
-                   BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_state.json,
-                   BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r74_20260604T180722Z_live_bpb_codex_loop_stop,
+                   BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_state.json,
+                   BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_4k_recovery_r75_20260604T182013Z_live_bpb_codex_loop_stop,
                    BPB_LOOP_NAME=parameter_golf_bpb_target
 ```
 
