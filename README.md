@@ -20,36 +20,39 @@ Current validated status:
 
 - Branch: active work is on `oai`.
 - CPU tests: focused Parameter-Golf structural-token/model/recovery tests pass:
-  `PYTHONPATH=src python -m pytest tests/test_seq4096_analysis.py tests/test_parameter_golf_advanced_tokens.py tests/test_random_order_lm.py tests/test_seq4096_4k_recovery_gate.py -q`.
+  `PYTHONPATH=src python -m pytest tests/test_seq4096_4k_recovery_gate.py tests/test_seq4096_analysis.py tests/test_seq4096_bigram_bias.py tests/test_parameter_golf_advanced_tokens.py tests/test_parameter_golf_export.py -q`
+  (`36 passed`, with only existing SWIG deprecation warnings).
 - CPU implementation validation: default Soft-MoE, tropical-ring attention, embedding-space GFlowNet trajectory balance, and finite rotation-algebra checks run without meaningful VRAM use.
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
 - OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
-  `toricgt_seq4096_4k_recovery_r18_20260604T023007Z`. The <1.2 BPB competition
-  checkpoint has not yet been preserved, but R18 is currently on the intended
+  `toricgt_seq4096_4k_recovery_r20_20260604T032941Z`. The <1.2 BPB competition
+  checkpoint has not yet been preserved, but R20 is currently on the intended
   4K trajectory: step 3250 reached validation/OpenAI BPB `1.2338`, target gap
-  `0.0338`, recent validation slope `-0.00464` BPB per 100 steps, and
-  validation-projected target step `3978.4482758620666`. R18 was launched by the
-  gate after R17 step 3500 improved to BPB `1.2290` but projected the target
-  near step `4384.15`; the R18 gate now leaves the run alive because the step
-  3250 projection is inside the 4K gate. R18 resumes from the R17 step-3000
-  checkpoint with optimizer, RNG, and loader reset; it uses `983040` train
-  tokens per step, `TIED_EMBED_LR=0.034`, matrix/scalar LR `0.018`, Muon
+  `0.0338`, recent validation velocity `0.00464` BPB per 100 steps, required
+  gate velocity `0.004506666666666674`, gate-velocity shortfall `0.0`, and
+  validation-projected target step `3978.4482758620666`. R20 was launched from
+  the R19 step-3000 checkpoint after a preemptive gate overreacted to R19's
+  step-3250 projection of `4004.4247787610566`; the current gate logic now uses
+  projected-overrun materiality plus velocity-shortfall pressure so a tiny
+  near-gate overrun with sufficient validation velocity does not cause another
+  restart. R20 resumes with optimizer, RNG, and loader reset; it uses `983040`
+  train tokens per step, `TIED_EMBED_LR=0.034`, matrix/scalar LR `0.018`, Muon
   momentum `0.985`, a resume-aware warmup through step `4250`, gradient
   clipping `1.0`, and the zero-initialized learned `BIGRAM_BIAS=1` head with
-  `BIGRAM_BIAS_LR=0.02`. R18's W&B run is
-  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r18_20260604T023007Z>.
-- R18 step 3250 is the current best completed recovery analysis. Its checkpoint
+  `BIGRAM_BIAS_LR=0.02`. R20's W&B run is
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_4k_recovery_r20_20260604T032941Z>.
+- R20 step 3250 is the current active on-track recovery analysis. Its checkpoint
   was saved at
-  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r18_20260604T023007Z/toricgt_seq4096_4k_recovery_r18_20260604T023007Z_step_003250.pt`
+  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_4k_recovery_r20_20260604T032941Z/toricgt_seq4096_4k_recovery_r20_20260604T032941Z_step_003250.pt`
   with validation/OpenAI BPB `1.2338`, structural recapture score
-  `0.8346494101301106`, train-to-validation transfer regime
+  `0.8346038648781849`, train-to-validation transfer regime
   `single_validation_pair`, and latest validation-minus-train BPB gap
-  `-0.0038`. The dominant structural-pressure family is `toric_slepian`
-  (`0.3721298724412918`), followed by `topology_directed`
-  (`0.23143164685794287`). The current structural prior is
-  `restart_guarded_damp_lr_use_toric_slepian_sidecar_transfer`, but because the
-  validation projection remains inside 4K the active decision is to continue R18
+  `-0.0039`. The dominant structural-pressure family is `toric_slepian`
+  (`0.372139201760292`), followed by `topology_directed`. The current structural
+  prior is `restart_guarded_damp_lr_use_toric_slepian_sidecar_transfer`, while
+  the gate-velocity chart shows no BPB velocity shortfall. The active decision is
+  to continue R20, keep checkpoint/analysis cadence dense through 3500 and 4000,
   and preserve a threshold artifact only once validation/OpenAI BPB reaches
   `<=1.2`.
 - Seq4096 recovery automation now uses metric-driven launch controls. Repeated
@@ -65,13 +68,18 @@ Current validated status:
   score and a guarded structural-pressure recovery: it stops escalating tied
   embedding LR, damps lexical/bigram controls to their floor, lengthens warmup,
   and keeps heavy structural losses out of the compact competition scorer.
-  The latest controller revision (`c845eda`) breaks the structural score into
+  The controller revision `c845eda` breaks the structural score into
   family-level pressure groups (`bpb_gap`, `topology_directed`,
   `toric_slepian`, `bgg_koszul`, and `tropical_complexity`) so high structural
   pressure no longer implies a single action: guarded pressure with healthy
   transfer can allow a small BPB velocity nudge, while dominant toric/Slepian or
   directed-topology pressure favors warmup and LR damping if another restart is
   needed.
+  Revision `8ece259` adds the gate-velocity requirement/shortfall metrics and a
+  curvature-aware structural-relief velocity policy; revision `07f899d` makes
+  preemptive gate restarts require a material projected overrun or real
+  velocity-shortfall pressure instead of a bare projected step greater than
+  `4000`.
   Recovery run ids are compacted to avoid W&B `CommError` failures from
   recursively long names.
 - W&B mirrors now report `diagnostics/latest/structural_recapture_score`,
@@ -88,12 +96,18 @@ Current validated status:
   `diagnostics/latest/structural_family_pressure_tropical_complexity`,
   `diagnostics/latest/dominant_structural_pressure_id`, and
   `diagnostics/latest/dominant_structural_pressure_value`.
+  Gate-aware aliases now include
+  `diagnostics/latest/required_val_velocity_to_gate_per_100_steps`,
+  `diagnostics/latest/val_bpb_velocity_recent_per_100_steps`,
+  `diagnostics/latest/val_velocity_shortfall_to_gate_per_100_steps`, and
+  `diagnostics/latest/bpb_velocity_shortfall_pressure`.
   Periodic analyses also write `bpb/structural_recapture_report.json`,
   `bpb/bpb_structural_recapture_map.png`,
   `bpb/bpb_transfer_efficiency_report.json`, and
   `bpb/bpb_transfer_efficiency.png` beside the BPB rockfall dashboard, plus
   `bpb/advanced_metric_control_map.png` for the family-level velocity/damping/
-  transfer-stabilization decision.
+  transfer-stabilization decision and `bpb/bpb_gate_velocity_requirement.png`
+  for the 4K-gate BPB velocity shortfall readout.
 - Advanced reasoning/memory branch: the live auxiliary run is
   `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
   It trains the random-order ToricGT adapter with explicit graph-of-thought,
