@@ -622,6 +622,28 @@ def plan_metric_driven_recovery_controls(
                 "fineweb_curve/validation_lag_pressure",
                 default=0.0,
             )
+            required_val_velocity = diagnostic_float(
+                advanced_diagnostics,
+                "diagnostics/latest/required_val_velocity_to_gate_per_100_steps",
+                "fineweb_curve/required_val_velocity_to_gate_per_100_steps",
+            )
+            recent_val_velocity = diagnostic_float(
+                advanced_diagnostics,
+                "diagnostics/latest/val_bpb_velocity_recent_per_100_steps",
+                "fineweb_curve/val_bpb_velocity_recent_per_100_steps",
+            )
+            val_velocity_shortfall = diagnostic_float(
+                advanced_diagnostics,
+                "diagnostics/latest/val_velocity_shortfall_to_gate_per_100_steps",
+                "fineweb_curve/val_velocity_shortfall_to_gate_per_100_steps",
+                default=0.0,
+            )
+            velocity_shortfall_pressure = diagnostic_float(
+                advanced_diagnostics,
+                "diagnostics/latest/bpb_velocity_shortfall_pressure",
+                "fineweb_curve/bpb_velocity_shortfall_pressure",
+                default=0.0,
+            )
             resume_step_aware_warmup_steps = max(
                 base.muon_momentum_warmup_steps,
                 int(gate_step) + 250,
@@ -640,6 +662,41 @@ def plan_metric_driven_recovery_controls(
                 and topology_pressure < 0.28
             )
             if validation_transfer_relieved:
+                velocity_shortfall_active = (
+                    velocity_shortfall_pressure >= 0.45
+                    or val_velocity_shortfall >= 0.0025
+                )
+                if velocity_shortfall_active:
+                    return replace(
+                        base,
+                        train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),
+                        tied_embed_lr=round(max(base.tied_embed_lr, min(0.0392, base.tied_embed_lr * 1.12)), 6),
+                        matrix_lr=base.matrix_lr,
+                        scalar_lr=base.scalar_lr,
+                        muon_momentum_warmup_steps=resume_step_aware_warmup_steps,
+                        bigram_bias=True,
+                        bigram_bias_lr=round(
+                            max(base.bigram_bias_lr, min(0.035, base.bigram_bias_lr * 1.35)),
+                            6,
+                        ),
+                        bigram_bias_init_from_data=False,
+                        policy="curvature_aware_structural_relief_velocity_recapture",
+                        advanced_metric_policy="gate_velocity_shortfall_structural_relief_bpb_velocity",
+                        rationale=(
+                            f"validation projects target at step {projected_target_step:.1f}, beyond gate {gate_step}",
+                            "structural recapture pressure has eased enough for guarded velocity: "
+                            f"score={structural_score:.3f} band={structural_band}",
+                            "dominant advanced-metric family is "
+                            f"{dominant_family} pressure={dominant_pressure:.3f}",
+                            "validation velocity shortfall is active: "
+                            f"recent={recent_val_velocity:.4f}/100 required={required_val_velocity:.4f}/100 "
+                            f"shortfall={val_velocity_shortfall:.4f}/100 pressure={velocity_shortfall_pressure:.3f}",
+                            f"validation BPB {latest_val.val_bpb:.4f} is no longer lagging train BPB {train_bpb:.4f} "
+                            f"(gap={validation_gap:.4f})",
+                            "use a stronger tied-embedding and bigram-LR nudge while keeping matrix/scalar LR fixed",
+                            "keep GraphCG/Slepian/topology/toric/BGG/Koszul losses in sidecar transfer until the competition checkpoint is preserved",
+                        ),
+                    )
                 return replace(
                     base,
                     train_batch_tokens=max(base.train_batch_tokens, min(batch_cap, raised_batch)),

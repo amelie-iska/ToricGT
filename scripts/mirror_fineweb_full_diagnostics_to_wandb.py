@@ -59,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-name", default="")
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--target-bpb", type=float, default=1.2)
+    parser.add_argument("--gate-step", type=int, default=4000)
     parser.add_argument("--max-points", type=int, default=160)
     parser.add_argument("--output-json", default="")
     parser.add_argument("--once", action="store_true", help="Log one diagnostics payload and exit.")
@@ -373,6 +374,47 @@ def fineweb_transfer_metrics(parsed: dict[str, Any], target_bpb: float) -> dict[
     return metrics
 
 
+def fineweb_gate_velocity_metrics(parsed: dict[str, Any], target_bpb: float, gate_step: int) -> dict[str, float]:
+    vals: dict[int, dict[str, float]] = parsed["vals"]
+    rows: list[tuple[float, float]] = []
+    for step in sorted(vals):
+        val_bpb = _latest_at_or_before(vals, step, "val_bpb")
+        if val_bpb is not None:
+            rows.append((float(step), float(val_bpb)))
+    if not rows:
+        return {"fineweb_curve/val_velocity_pairs": 0.0}
+
+    latest_step, latest_val = rows[-1]
+    remaining_steps = max(1.0, float(gate_step) - latest_step)
+    target_gap = max(0.0, latest_val - float(target_bpb))
+    required_velocity = target_gap / remaining_steps * 100.0
+    recent_velocity = float("nan")
+    previous_velocity = float("nan")
+    velocity_delta = float("nan")
+    if len(rows) >= 2:
+        prev_step, prev_val = rows[-2]
+        recent_velocity = max(0.0, (prev_val - latest_val) / max(1.0, latest_step - prev_step) * 100.0)
+    if len(rows) >= 3:
+        prev2_step, prev2_val = rows[-3]
+        prev_step, prev_val = rows[-2]
+        previous_velocity = max(0.0, (prev2_val - prev_val) / max(1.0, prev_step - prev2_step) * 100.0)
+    if math.isfinite(recent_velocity) and math.isfinite(previous_velocity):
+        velocity_delta = recent_velocity - previous_velocity
+    effective_recent = recent_velocity if math.isfinite(recent_velocity) else 0.0
+    shortfall = max(0.0, required_velocity - effective_recent)
+    decay = max(0.0, previous_velocity - effective_recent) if math.isfinite(previous_velocity) else 0.0
+    return {
+        "fineweb_curve/val_velocity_pairs": float(len(rows)),
+        "fineweb_curve/val_bpb_velocity_recent_per_100_steps": recent_velocity,
+        "fineweb_curve/val_bpb_velocity_previous_per_100_steps": previous_velocity,
+        "fineweb_curve/val_bpb_velocity_delta_per_100_steps": velocity_delta,
+        "fineweb_curve/val_bpb_velocity_decay_per_100_steps": decay,
+        "fineweb_curve/required_val_velocity_to_gate_per_100_steps": required_velocity,
+        "fineweb_curve/val_velocity_shortfall_to_gate_per_100_steps": shortfall,
+        "fineweb_curve/bpb_velocity_shortfall_pressure": max(0.0, min(1.0, shortfall / 0.005)),
+    }
+
+
 def _latest_step_and_value(rows: dict[int, dict[str, float]], field: str) -> tuple[int, float]:
     if not rows:
         return 0, float("nan")
@@ -447,6 +489,13 @@ DIAGNOSTIC_ALIAS_KEYS = {
     "fineweb_curve/recent_val_drop_bpb": "diagnostics/latest/recent_val_drop_bpb",
     "fineweb_curve/validation_transfer_pressure": "diagnostics/latest/validation_transfer_pressure",
     "fineweb_curve/validation_lag_pressure": "diagnostics/latest/validation_lag_pressure",
+    "fineweb_curve/val_bpb_velocity_recent_per_100_steps": "diagnostics/latest/val_bpb_velocity_recent_per_100_steps",
+    "fineweb_curve/val_bpb_velocity_previous_per_100_steps": "diagnostics/latest/val_bpb_velocity_previous_per_100_steps",
+    "fineweb_curve/val_bpb_velocity_delta_per_100_steps": "diagnostics/latest/val_bpb_velocity_delta_per_100_steps",
+    "fineweb_curve/val_bpb_velocity_decay_per_100_steps": "diagnostics/latest/val_bpb_velocity_decay_per_100_steps",
+    "fineweb_curve/required_val_velocity_to_gate_per_100_steps": "diagnostics/latest/required_val_velocity_to_gate_per_100_steps",
+    "fineweb_curve/val_velocity_shortfall_to_gate_per_100_steps": "diagnostics/latest/val_velocity_shortfall_to_gate_per_100_steps",
+    "fineweb_curve/bpb_velocity_shortfall_pressure": "diagnostics/latest/bpb_velocity_shortfall_pressure",
 }
 
 
@@ -650,7 +699,13 @@ def complexity_metrics(log_path: Path) -> dict[str, float]:
     return metrics
 
 
-def compute_payload(parsed: dict[str, Any], log_path: Path, target_bpb: float, max_points: int) -> dict[str, float]:
+def compute_payload(
+    parsed: dict[str, Any],
+    log_path: Path,
+    target_bpb: float,
+    max_points: int,
+    gate_step: int = 4000,
+) -> dict[str, float]:
     hidden, positions, val_bpbs = build_curve_tensor(parsed, max_points, target_bpb)
     payload: dict[str, float] = {
         "metrics_status/model_hidden_state_available": 0.0,
@@ -719,6 +774,7 @@ def compute_payload(parsed: dict[str, Any], log_path: Path, target_bpb: float, m
     payload.update(complexity_metrics(log_path))
     add_fineweb_curve_status(payload, parsed, target_bpb)
     payload.update(fineweb_transfer_metrics(parsed, target_bpb))
+    payload.update(fineweb_gate_velocity_metrics(parsed, target_bpb, gate_step))
     payload.update(diagnostic_alias_payload(payload))
     payload.update(structural_recapture_payload(payload))
     return payload
@@ -757,11 +813,12 @@ def run_once_without_wandb(
     output_json: Path | str,
     target_bpb: float,
     max_points: int,
+    gate_step: int = 4000,
 ) -> dict[str, float]:
     parsed = parse_log(log_path)
     latest_step = int(parsed.get("latest_step") or 0)
     total = int(parsed.get("total") or 0)
-    payload = compute_payload(parsed, log_path, target_bpb, max_points)
+    payload = compute_payload(parsed, log_path, target_bpb, max_points, gate_step)
     payload.update(
         {
             "trainer/step": latest_step,
@@ -783,6 +840,7 @@ def main() -> None:
             output_json=args.output_json,
             target_bpb=args.target_bpb,
             max_points=args.max_points,
+            gate_step=args.gate_step,
         )
         print(
             "fineweb_full_diag_json "
@@ -818,7 +876,7 @@ def main() -> None:
         signature = diagnostic_log_signature(parsed)
         should_log = latest_step > 0 and signature not in seen_signatures
         if should_log:
-            payload = compute_payload(parsed, log_path, args.target_bpb, args.max_points)
+            payload = compute_payload(parsed, log_path, args.target_bpb, args.max_points, args.gate_step)
             payload.update(
                 {
                     "trainer/step": latest_step,

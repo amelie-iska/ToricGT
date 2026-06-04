@@ -189,6 +189,9 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert (tmp_path / "analysis" / "bpb" / "structural_recapture_report.json").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_efficiency.png").exists()
     assert (tmp_path / "analysis" / "bpb" / "bpb_transfer_efficiency_report.json").exists()
+    assert (tmp_path / "analysis" / "bpb" / "bpb_gate_velocity_requirement.png").exists()
+    assert "required_val_velocity_to_gate_per_100_steps" in report
+    assert "bpb_velocity_shortfall_pressure" in report
     phase_plan_path = tmp_path / "analysis" / "bpb" / "phase_bpb_breakdown_plan.json"
     assert phase_plan_path.exists()
     phase_plan = json.loads(phase_plan_path.read_text(encoding="utf-8"))
@@ -210,6 +213,7 @@ def test_write_bpb_artifacts_creates_actionable_plots_and_synopsis(tmp_path: Pat
     assert "BPB Structural Recapture Map" in synopsis
     assert "Train-To-Validation BPB Transfer Efficiency" in synopsis
     assert "Advanced Metric Control Map" in synopsis
+    assert "Gate Velocity Requirement" in synopsis
 
 
 def test_full_diagnostics_can_write_json_without_wandb(tmp_path: Path) -> None:
@@ -274,6 +278,39 @@ def test_full_diagnostics_reports_transfer_efficiency_aliases(tmp_path: Path) ->
     assert payload["diagnostics/latest/transfer_efficiency_recent"] == pytest.approx(expected_efficiency)
     assert payload["diagnostics/latest/generalization_gap_slope_per_100_steps"] > 0.0
     assert payload["diagnostics/latest/validation_transfer_pressure"] > 0.0
+
+
+def test_full_diagnostics_reports_gate_velocity_shortfall_aliases(tmp_path: Path) -> None:
+    module = load_full_diag_module()
+    log_path = tmp_path / "gate_velocity.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "step:3000/20000 train_loss:2.1200 train_time:7600000ms step_avg:2533.33ms train_bpb:1.2450",
+                "step:3000/20000 val_loss:2.1028 val_bpb:1.2454 train_time:7600001ms step_avg:2533.33ms",
+                "step:3250/20000 train_loss:2.1083 train_time:8250000ms step_avg:2538.46ms train_bpb:1.2377",
+                "step:3250/20000 val_loss:2.0836 val_bpb:1.2340 train_time:8250001ms step_avg:2538.46ms",
+                "step:3500/20000 train_loss:2.0939 train_time:8900000ms step_avg:2542.85ms train_bpb:1.2550",
+                "step:3500/20000 val_loss:2.0751 val_bpb:1.2290 train_time:8900001ms step_avg:2542.85ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = module.run_once_without_wandb(
+        log_path=log_path,
+        output_json=tmp_path / "diagnostics.json",
+        target_bpb=1.2,
+        max_points=16,
+        gate_step=4000,
+    )
+
+    assert payload["fineweb_curve/val_bpb_velocity_recent_per_100_steps"] == pytest.approx(0.002)
+    assert payload["fineweb_curve/required_val_velocity_to_gate_per_100_steps"] == pytest.approx(0.0058)
+    assert payload["fineweb_curve/val_velocity_shortfall_to_gate_per_100_steps"] == pytest.approx(0.0038)
+    assert payload["diagnostics/latest/val_velocity_shortfall_to_gate_per_100_steps"] == pytest.approx(0.0038)
+    assert payload["diagnostics/latest/bpb_velocity_shortfall_pressure"] > 0.5
 
 
 def test_full_diagnostics_signature_changes_when_validation_arrives_after_train(tmp_path: Path) -> None:

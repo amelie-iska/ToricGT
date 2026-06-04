@@ -554,6 +554,71 @@ def test_metric_controls_use_velocity_when_structural_pressure_eases_and_validat
     assert any("dominant advanced-metric family" in item for item in planned.rationale)
 
 
+def test_metric_controls_use_gate_velocity_shortfall_when_structural_relief_is_available(tmp_path: Path):
+    log = tmp_path / "train.log"
+    log.write_text(
+        "\n".join(
+            [
+                "step:3250/20000 train_loss:2.1083 train_time:1ms step_avg:1ms train_bpb:1.2377",
+                "step:3250/20000 val_loss:2.0836 val_bpb:1.2340 train_time:1ms step_avg:1ms",
+                "step:3500/20000 train_loss:2.0939 train_time:1ms step_avg:1ms train_bpb:1.2550",
+                "step:3500/20000 val_loss:2.0751 val_bpb:1.2290 train_time:1ms step_avg:1ms",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_seq4096_log(log)
+    base = RecoveryControls(
+        train_batch_tokens=983_040,
+        tied_embed_lr=0.034,
+        matrix_lr=0.018,
+        scalar_lr=0.018,
+        muon_momentum=0.985,
+        muon_momentum_warmup_steps=4250,
+        muon_momentum_warmup_start=0.90,
+        grad_clip_norm=1.0,
+        bigram_bias=True,
+        bigram_bias_lr=0.02,
+    )
+
+    planned = plan_metric_driven_recovery_controls(
+        base,
+        parsed=parsed,
+        target_bpb=1.2,
+        gate_step=4000,
+        projected_target_step=4384.1,
+        max_train_batch_tokens=983_040,
+        advanced_diagnostics={
+            "diagnostics/families/topology_available": 1,
+            "diagnostics/families/toric_available": 1,
+            "diagnostics/families/slepian_pollak_prolate_available": 1,
+            "diagnostics/families/category_o_bgg_available": 1,
+            "diagnostics/latest/bpb_intervention_pressure": 0.104,
+            "diagnostics/latest/topology_loss": 1.156,
+            "diagnostics/latest/directed_topology_loss": 0.1205,
+            "diagnostics/latest/slepian_leakage": 0.862,
+            "diagnostics/latest/toric_active_face_margin": -2.03,
+            "diagnostics/latest/toric_shadow_mean_bend": 0.861,
+            "diagnostics/latest/bgg_standard_leakage": 0.544,
+            "diagnostics/latest/bgg_d2_residual": 0.020,
+            "diagnostics/latest/complexity_recent_full_log_ncd_lzma": 0.874,
+            "diagnostics/latest/required_val_velocity_to_gate_per_100_steps": 0.0058,
+            "diagnostics/latest/val_bpb_velocity_recent_per_100_steps": 0.0020,
+            "diagnostics/latest/val_velocity_shortfall_to_gate_per_100_steps": 0.0038,
+            "diagnostics/latest/bpb_velocity_shortfall_pressure": 0.76,
+        },
+    )
+
+    assert planned.policy == "curvature_aware_structural_relief_velocity_recapture"
+    assert planned.advanced_metric_policy == "gate_velocity_shortfall_structural_relief_bpb_velocity"
+    assert planned.tied_embed_lr > 0.037
+    assert planned.bigram_bias_lr >= 0.027
+    assert planned.matrix_lr == base.matrix_lr
+    assert planned.scalar_lr == base.scalar_lr
+    assert any("validation velocity shortfall" in item for item in planned.rationale)
+
+
 def test_metric_controls_do_not_velocity_push_when_directed_topology_dominates(tmp_path: Path):
     log = tmp_path / "train.log"
     log.write_text(

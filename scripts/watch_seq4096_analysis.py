@@ -91,6 +91,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interval-steps", type=int, default=500)
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--target-bpb", type=float, default=1.2)
+    parser.add_argument("--gate-step", type=int, default=4000)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--project", default=os.environ.get("WANDB_PROJECT", "toricgt-parameter-golf"))
     parser.add_argument("--entity", default=os.environ.get("WANDB_ENTITY", "amelie-iska-math"))
@@ -543,6 +544,59 @@ def transfer_efficiency_report(frame: pd.DataFrame, target_bpb: float = 1.2) -> 
         "recent_transfer_efficiency": recent_efficiency,
         "validation_transfer_pressure": recent_pressure,
         "transfer_recommendations": recommendations,
+    }
+
+
+def gate_velocity_report(frame: pd.DataFrame, target_bpb: float = 1.2, gate_step: int = 4000) -> dict[str, Any]:
+    val_steps, val_values = finite_xy(frame, "val_bpb")
+    if len(val_values) == 0:
+        return {
+            "gate_step": int(gate_step),
+            "val_velocity_pairs": 0,
+            "val_bpb_velocity_recent_per_100_steps": float("nan"),
+            "val_bpb_velocity_previous_per_100_steps": float("nan"),
+            "val_bpb_velocity_delta_per_100_steps": float("nan"),
+            "val_bpb_velocity_decay_per_100_steps": float("nan"),
+            "required_val_velocity_to_gate_per_100_steps": float("nan"),
+            "val_velocity_shortfall_to_gate_per_100_steps": float("nan"),
+            "bpb_velocity_shortfall_pressure": float("nan"),
+        }
+    latest_step = float(val_steps[-1])
+    latest_val = float(val_values[-1])
+    remaining_steps = max(1.0, float(gate_step) - latest_step)
+    target_gap = max(0.0, latest_val - float(target_bpb))
+    required_velocity = target_gap / remaining_steps * 100.0
+    recent_velocity = float("nan")
+    previous_velocity = float("nan")
+    velocity_delta = float("nan")
+    if len(val_values) >= 2:
+        recent_velocity = max(
+            0.0,
+            (float(val_values[-2]) - latest_val) / max(1.0, latest_step - float(val_steps[-2])) * 100.0,
+        )
+    if len(val_values) >= 3:
+        previous_velocity = max(
+            0.0,
+            (float(val_values[-3]) - float(val_values[-2]))
+            / max(1.0, float(val_steps[-2]) - float(val_steps[-3]))
+            * 100.0,
+        )
+    if math.isfinite(recent_velocity) and math.isfinite(previous_velocity):
+        velocity_delta = recent_velocity - previous_velocity
+    effective_recent = recent_velocity if math.isfinite(recent_velocity) else 0.0
+    shortfall = max(0.0, required_velocity - effective_recent)
+    decay = max(0.0, previous_velocity - effective_recent) if math.isfinite(previous_velocity) else 0.0
+    pressure = max(0.0, min(1.0, shortfall / 0.005))
+    return {
+        "gate_step": int(gate_step),
+        "val_velocity_pairs": int(len(val_values)),
+        "val_bpb_velocity_recent_per_100_steps": recent_velocity,
+        "val_bpb_velocity_previous_per_100_steps": previous_velocity,
+        "val_bpb_velocity_delta_per_100_steps": velocity_delta,
+        "val_bpb_velocity_decay_per_100_steps": decay,
+        "required_val_velocity_to_gate_per_100_steps": required_velocity,
+        "val_velocity_shortfall_to_gate_per_100_steps": shortfall,
+        "bpb_velocity_shortfall_pressure": pressure,
     }
 
 
@@ -1090,6 +1144,46 @@ def plot_bpb_transfer_efficiency(frame: pd.DataFrame, out: Path, report: dict[st
     plt.close(fig)
 
 
+def plot_bpb_gate_velocity_requirement(report: dict[str, Any], out: Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    recent = report.get("val_bpb_velocity_recent_per_100_steps")
+    required = report.get("required_val_velocity_to_gate_per_100_steps")
+    shortfall = report.get("val_velocity_shortfall_to_gate_per_100_steps")
+    pressure = report.get("bpb_velocity_shortfall_pressure")
+    values = [
+        float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else 0.0
+        for value in (recent, required, shortfall)
+    ]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
+    ax = axes[0]
+    labels = ["recent val velocity", "required to gate", "shortfall"]
+    colors = ["#16a34a", "#2563eb", "#dc2626"]
+    ax.bar(labels, values, color=colors)
+    ax.set_ylabel("BPB drop per 100 steps")
+    ax.set_title("Gate Velocity Requirement")
+    ax.tick_params(axis="x", rotation=20)
+    ax.grid(axis="y", alpha=0.25)
+
+    ax = axes[1]
+    ax.axis("off")
+    lines = [
+        f"gate step: {report.get('gate_step')}",
+        f"validation velocity pairs: {report.get('val_velocity_pairs')}",
+        f"recent velocity/100: {recent}",
+        f"required velocity/100: {required}",
+        f"shortfall/100: {shortfall}",
+        f"shortfall pressure: {pressure}",
+        "",
+        "control reading:",
+        "- shortfall near zero: hold or damp",
+        "- shortfall with low topology pressure: velocity recapture",
+        "- shortfall with high directed topology: warmup before more LR",
+    ]
+    ax.text(0.02, 0.95, "\n".join(lines), va="top", ha="left", fontsize=10, wrap=True)
+    fig.savefig(out, dpi=180)
+    plt.close(fig)
+
+
 def plot_diagnostic_proxy_geometry(payload: dict[str, Any], out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     preferred = [
@@ -1225,6 +1319,8 @@ def plot_advanced_metric_control_map(report: dict[str, Any], out: Path) -> None:
         f"transfer regime: {transfer_regime}",
         f"recent transfer efficiency: {recent_efficiency}",
         f"latest generalization gap: {validation_gap}",
+        f"gate velocity shortfall: {report.get('val_velocity_shortfall_to_gate_per_100_steps')}",
+        f"velocity shortfall pressure: {report.get('bpb_velocity_shortfall_pressure')}",
         f"structural control prior: {control_prior}",
         "",
         "control reading:",
@@ -1379,6 +1475,7 @@ def write_synopsis(
         "- `bpb/bpb_rockfall_dashboard.png`: combined intervention readout for deciding whether to leave the run alone or adjust scalar controls.",
         "- `bpb/bpb_phase_plane.png`: train BPB versus validation BPB trajectory.",
         "- `bpb/bpb_transfer_efficiency.png`: Train-To-Validation BPB Transfer Efficiency, showing whether train BPB gains are becoming validation BPB gains.",
+        "- `bpb/bpb_gate_velocity_requirement.png`: Gate Velocity Requirement, comparing recent validation BPB velocity to the velocity needed to cross the 1.2 target by the 4K gate.",
         "- `bpb/diagnostic_proxy_geometry.png`: topology, toric, Slepian, BGG, tropical, and complexity proxy readout.",
         "- `bpb/bpb_structural_recapture_map.png`: BPB Structural Recapture Map showing which advanced metrics should shape the next restart.",
         "- `bpb/advanced_metric_control_map.png`: Advanced Metric Control Map showing family-level pressure used to decide velocity, damping, or transfer stabilization.",
@@ -1432,6 +1529,7 @@ def write_bpb_analysis_artifacts(
     parsed: Seq4096TrainingLog,
     output_dir: Path,
     target_bpb: float = 1.2,
+    gate_step: int = 4000,
     checkpoint_path: Path | None = None,
     run_path: str = "",
     diagnostic_payload: dict[str, Any] | None = None,
@@ -1445,8 +1543,10 @@ def write_bpb_analysis_artifacts(
     report = bpb_acceleration_report(frame, target_bpb=target_bpb, checkpoint_step=checkpoint_step)
     structural_report = structural_recapture_report(diagnostic_payload)
     transfer_report = transfer_efficiency_report(frame, target_bpb=target_bpb)
+    velocity_report = gate_velocity_report(frame, target_bpb=target_bpb, gate_step=gate_step)
     report.update(structural_report)
     report.update(transfer_report)
+    report.update(velocity_report)
     report["recommendations"] = list(report.get("recommendations", [])) + list(
         transfer_report.get("transfer_recommendations", [])
     )
@@ -1454,6 +1554,7 @@ def write_bpb_analysis_artifacts(
     write_json(bpb_dir / "bpb_acceleration_report.json", report)
     write_json(bpb_dir / "structural_recapture_report.json", structural_report)
     write_json(bpb_dir / "bpb_transfer_efficiency_report.json", transfer_report)
+    write_json(bpb_dir / "bpb_gate_velocity_requirement_report.json", velocity_report)
     write_json(
         bpb_dir / "checkpoint_manifest.json",
         {
@@ -1475,6 +1576,7 @@ def write_bpb_analysis_artifacts(
     plot_bpb_rockfall_dashboard(frame, bpb_dir / "bpb_rockfall_dashboard.png", target_bpb, report)
     plot_bpb_phase_plane(frame, bpb_dir / "bpb_phase_plane.png", target_bpb)
     plot_bpb_transfer_efficiency(frame, bpb_dir / "bpb_transfer_efficiency.png", report)
+    plot_bpb_gate_velocity_requirement(report, bpb_dir / "bpb_gate_velocity_requirement.png")
     plot_diagnostic_proxy_geometry(diagnostic_payload, bpb_dir / "diagnostic_proxy_geometry.png")
     plot_structural_recapture_map(report, bpb_dir / "bpb_structural_recapture_map.png")
     plot_advanced_metric_control_map(report, bpb_dir / "advanced_metric_control_map.png")
@@ -1536,6 +1638,8 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
             run_id,
             "--target-bpb",
             str(args.target_bpb),
+            "--gate-step",
+            str(args.gate_step),
             "--output-json",
             str(diagnostic_json),
             "--once",
@@ -1566,6 +1670,7 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
         parsed,
         output_dir,
         target_bpb=args.target_bpb,
+        gate_step=args.gate_step,
         checkpoint_path=checkpoint,
         run_path=args.run_path,
         diagnostic_payload=diagnostic_payload,
@@ -1578,7 +1683,7 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
         "--target-bpb",
         str(args.target_bpb),
         "--gate-step",
-        "4000",
+        str(args.gate_step),
     ]
     command_status["training_adjustment_proposal"] = run_command(
         proposal_cmd,
