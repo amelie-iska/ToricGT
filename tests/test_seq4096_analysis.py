@@ -12,6 +12,7 @@ import pytest
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "watch_seq4096_analysis.py"
 FULL_DIAG_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "mirror_fineweb_full_diagnostics_to_wandb.py"
 LOG_MIRROR_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "mirror_fineweb_log_to_wandb.py"
+GATE_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "watch_seq4096_4k_recovery.py"
 
 
 def load_module():
@@ -40,6 +41,16 @@ def load_log_mirror_module():
     spec = importlib.util.spec_from_file_location("mirror_fineweb_log_to_wandb", LOG_MIRROR_SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_gate_module():
+    assert GATE_SCRIPT_PATH.exists(), "Seq4096 4K recovery gate script should exist"
+    spec = importlib.util.spec_from_file_location("watch_seq4096_4k_recovery", GATE_SCRIPT_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -122,6 +133,32 @@ def test_parse_seq4096_log_captures_low_train_bpb_trigger_validation(tmp_path: P
     assert trigger_row["generalization_gap"] == pytest.approx(1.2180 - 1.1149)
 
 
+def test_4k_gate_parser_uses_low_train_bpb_trigger_validation(tmp_path: Path) -> None:
+    module = load_gate_module()
+    log_path = tmp_path / "low_bpb_trigger.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "step:3600/4000 val_loss:2.0547 val_bpb:1.2169 train_time:9781627ms step_avg:2717.12ms",
+                (
+                    "low_train_bpb_trigger_val step:3625/4000 train_bpb:1.1290 "
+                    "threshold:1.1300 val_loss:2.0539 val_bpb:1.2164 train_time:9872444ms"
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    parsed = module.parse_seq4096_log(log_path)
+
+    assert parsed.latest_step == 3625
+    assert parsed.train_rows[-1].step == 3625
+    assert parsed.train_rows[-1].train_bpb == pytest.approx(1.1290)
+    assert parsed.val_rows[-1].step == 3625
+    assert parsed.val_rows[-1].val_bpb == pytest.approx(1.2164)
+
+
 def test_write_checkpoint_scoped_log_drops_future_checkpoint_rows(tmp_path: Path) -> None:
     module = load_module()
     log_path = tmp_path / "train.log"
@@ -177,6 +214,49 @@ def test_find_next_checkpoint_at_or_after_skips_missing_sparse_steps(tmp_path: P
         "003650.pt"
     )
     assert module.find_next_checkpoint_at_or_after(tmp_path, 3651, processed=set()) is None
+
+
+def test_4k_recovery_launch_preserves_low_bpb_checkpoint_trigger(tmp_path: Path) -> None:
+    module = load_gate_module()
+
+    launch = module.build_recovery_launch(
+        repo_root=tmp_path,
+        parameter_golf_root=tmp_path / "parameter-golf",
+        run_id="triggered_run",
+        checkpoint_dir=tmp_path / "checkpoints",
+        log_path=tmp_path / "logs" / "train.log",
+        resume_checkpoint=tmp_path / "resume.pt",
+        seed=123,
+        target_bpb=1.2,
+        checkpoint_on_train_bpb_below=1.13,
+        checkpoint_on_train_bpb_cooldown_steps=10,
+        checkpoint_on_train_bpb_max=6,
+        val_on_train_bpb_checkpoint=True,
+    )
+
+    assert "CHECKPOINT_ON_TRAIN_BPB_BELOW=1.13" in launch.training_shell
+    assert "CHECKPOINT_ON_TRAIN_BPB_COOLDOWN_STEPS=10" in launch.training_shell
+    assert "CHECKPOINT_ON_TRAIN_BPB_MAX=6" in launch.training_shell
+    assert "VAL_ON_TRAIN_BPB_CHECKPOINT=1" in launch.training_shell
+
+
+def test_4k_recovery_analysis_watcher_uses_sparse_checkpoint_interval(tmp_path: Path) -> None:
+    module = load_gate_module()
+
+    shell = module.build_analysis_shell(
+        repo_root=tmp_path,
+        run_id="analysis_run",
+        train_tmux="train_session",
+        checkpoint_dir=tmp_path / "checkpoints",
+        log_path=tmp_path / "logs" / "train.log",
+        target_bpb=1.2,
+        start_step=3650,
+        python="/env/python",
+        wandb_entity="entity",
+        wandb_project="project",
+    )
+
+    assert "--start-step 3650 --interval-steps 1" in shell
 
 
 def test_initial_target_step_can_analyze_resume_checkpoint_first() -> None:

@@ -29,6 +29,13 @@ VAL_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+val_loss:(?P<loss>[0-9.eE+-]+)"
     r"\s+val_bpb:(?P<bpb>[0-9.eE+-]+)"
 )
+LOW_TRAIN_BPB_TRIGGER_VAL_RE = re.compile(
+    r"low_train_bpb_trigger_val\s+step:(?P<step>\d+)/(?P<total>\d+)"
+    r"\s+train_bpb:(?P<train_bpb>[0-9.eE+-]+)"
+    r"\s+threshold:(?P<threshold>[0-9.eE+-]+)"
+    r"\s+val_loss:(?P<val_loss>[0-9.eE+-]+)"
+    r"\s+val_bpb:(?P<val_bpb>[0-9.eE+-]+)"
+)
 TRAIN_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+train_loss:(?P<loss>[0-9.eE+-]+)"
     r"(?:.*?\btrain_bpb:(?P<bpb>[0-9.eE+-]+))?"
@@ -207,6 +214,23 @@ def parse_seq4096_log(path: Path | str) -> ParsedLog:
     if not path.exists():
         return ParsedLog([], [])
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        low_trigger = LOW_TRAIN_BPB_TRIGGER_VAL_RE.search(line)
+        if low_trigger:
+            step = int(low_trigger.group("step"))
+            total = int(low_trigger.group("total"))
+            train[step] = TrainRow(
+                step=step,
+                total=total,
+                train_loss=float("nan"),
+                train_bpb=float(low_trigger.group("train_bpb")),
+            )
+            vals[step] = ValRow(
+                step=step,
+                total=total,
+                val_loss=float(low_trigger.group("val_loss")),
+                val_bpb=float(low_trigger.group("val_bpb")),
+            )
+            continue
         val = VAL_RE.search(line)
         if val:
             step = int(val.group("step"))
@@ -1377,6 +1401,10 @@ def build_recovery_launch(
     reset_optimizer_on_resume: bool = True,
     reset_rng_on_resume: bool = True,
     reset_loader_on_resume: bool = True,
+    checkpoint_on_train_bpb_below: float = 1.13,
+    checkpoint_on_train_bpb_cooldown_steps: int = 10,
+    checkpoint_on_train_bpb_max: int = 6,
+    val_on_train_bpb_checkpoint: bool = True,
 ) -> RecoveryLaunch:
     _ = repo_root
     env = {
@@ -1411,6 +1439,10 @@ def build_recovery_launch(
         "RESET_OPTIMIZER_ON_RESUME": 1 if reset_optimizer_on_resume else 0,
         "RESET_RNG_ON_RESUME": 1 if reset_rng_on_resume else 0,
         "RESET_LOADER_ON_RESUME": 1 if reset_loader_on_resume else 0,
+        "CHECKPOINT_ON_TRAIN_BPB_BELOW": checkpoint_on_train_bpb_below,
+        "CHECKPOINT_ON_TRAIN_BPB_COOLDOWN_STEPS": checkpoint_on_train_bpb_cooldown_steps,
+        "CHECKPOINT_ON_TRAIN_BPB_MAX": checkpoint_on_train_bpb_max,
+        "VAL_ON_TRAIN_BPB_CHECKPOINT": 1 if val_on_train_bpb_checkpoint else 0,
         "ADVANCED_LOSS_SCALE": advanced_loss_scale,
         "GRAPHCG_LOSS_WEIGHT": graphcg_loss_weight,
         "TORIC_TROPICAL_LOSS_WEIGHT": toric_tropical_loss_weight,
@@ -1515,7 +1547,7 @@ def build_analysis_shell(
         f"--log {shlex.quote(str(log_path))} "
         f"--run-path {shlex.quote(f'{wandb_entity}/{wandb_project}/{run_id}')} "
         f"--output-root {shlex.quote(str(output_root))} "
-        f"--start-step {int(start_step)} --interval-steps 50 --poll-seconds 30 "
+        f"--start-step {int(start_step)} --interval-steps 1 --poll-seconds 30 "
         f"--analyze-start-step "
         f"--target-bpb {float(target_bpb)} --training-tmux {shlex.quote(train_tmux)} "
         f"2>&1 | tee -a {shlex.quote(str(analysis_log))}"
@@ -1596,6 +1628,10 @@ def build_gate_shell(
     recovery_reset_optimizer: bool,
     recovery_reset_rng: bool,
     recovery_reset_loader: bool,
+    recovery_checkpoint_on_train_bpb_below: float,
+    recovery_checkpoint_on_train_bpb_cooldown_steps: int,
+    recovery_checkpoint_on_train_bpb_max: int,
+    recovery_val_on_train_bpb_checkpoint: bool,
     preempt_on_projected_miss: bool,
     preempt_min_step: int,
     preempt_patience: int,
@@ -1669,6 +1705,13 @@ def build_gate_shell(
         reset_arg += "--no-recovery-reset-rng "
     if not recovery_reset_loader:
         reset_arg += "--no-recovery-reset-loader "
+    low_bpb_trigger_arg = (
+        f"--recovery-checkpoint-on-train-bpb-below {float(recovery_checkpoint_on_train_bpb_below)} "
+        f"--recovery-checkpoint-on-train-bpb-cooldown-steps {int(recovery_checkpoint_on_train_bpb_cooldown_steps)} "
+        f"--recovery-checkpoint-on-train-bpb-max {int(recovery_checkpoint_on_train_bpb_max)} "
+    )
+    if not recovery_val_on_train_bpb_checkpoint:
+        low_bpb_trigger_arg += "--no-recovery-val-on-train-bpb-checkpoint "
     return (
         f"cd {shlex.quote(str(repo_root))} && export PYTHONPATH=src {shell_env(loop_env)} && "
         f"{shlex.quote(str(python))} scripts/watch_seq4096_4k_recovery.py "
@@ -1688,6 +1731,7 @@ def build_gate_shell(
         f"{bigram_arg}"
         f"{advanced_loss_arg}"
         f"{reset_arg}"
+        f"{low_bpb_trigger_arg}"
         f"{preempt_arg}"
         f"{advanced_metric_arg}"
         f"--recovery-max-train-batch-tokens {int(recovery_max_train_batch_tokens)} "
@@ -1750,6 +1794,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recovery-reset-optimizer", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--recovery-reset-rng", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--recovery-reset-loader", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--recovery-checkpoint-on-train-bpb-below", type=float, default=1.13)
+    parser.add_argument("--recovery-checkpoint-on-train-bpb-cooldown-steps", type=int, default=10)
+    parser.add_argument("--recovery-checkpoint-on-train-bpb-max", type=int, default=6)
+    parser.add_argument(
+        "--recovery-val-on-train-bpb-checkpoint",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--analysis-root", default="")
     parser.add_argument("--preempt-on-projected-miss", action="store_true")
     parser.add_argument("--preempt-min-step", type=int, default=2500)
@@ -2046,6 +2098,10 @@ def main() -> None:
             reset_optimizer_on_resume=recovery_controls.reset_optimizer_on_resume,
             reset_rng_on_resume=recovery_controls.reset_rng_on_resume,
             reset_loader_on_resume=recovery_controls.reset_loader_on_resume,
+            checkpoint_on_train_bpb_below=args.recovery_checkpoint_on_train_bpb_below,
+            checkpoint_on_train_bpb_cooldown_steps=args.recovery_checkpoint_on_train_bpb_cooldown_steps,
+            checkpoint_on_train_bpb_max=args.recovery_checkpoint_on_train_bpb_max,
+            val_on_train_bpb_checkpoint=args.recovery_val_on_train_bpb_checkpoint,
         )
         command_dir = repo_root / "logs" / recovery_run_id / "supervisor"
         command_dir.mkdir(parents=True, exist_ok=True)
@@ -2121,6 +2177,10 @@ def main() -> None:
             recovery_reset_optimizer=recovery_controls.reset_optimizer_on_resume,
             recovery_reset_rng=recovery_controls.reset_rng_on_resume,
             recovery_reset_loader=recovery_controls.reset_loader_on_resume,
+            recovery_checkpoint_on_train_bpb_below=args.recovery_checkpoint_on_train_bpb_below,
+            recovery_checkpoint_on_train_bpb_cooldown_steps=args.recovery_checkpoint_on_train_bpb_cooldown_steps,
+            recovery_checkpoint_on_train_bpb_max=args.recovery_checkpoint_on_train_bpb_max,
+            recovery_val_on_train_bpb_checkpoint=args.recovery_val_on_train_bpb_checkpoint,
             preempt_on_projected_miss=args.preempt_on_projected_miss,
             preempt_min_step=args.preempt_min_step,
             preempt_patience=args.preempt_patience,

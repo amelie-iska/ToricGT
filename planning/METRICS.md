@@ -12252,3 +12252,33 @@ Next decision rule: if the step-3700/3750 validation slope does not accelerate
 toward the `<= 1.2` gate, prefer an even cleaner BPB branch with advanced losses
 log-only or lower tied-embedding/bigram-bias velocity rather than another
 high-auxiliary replay.
+
+## 2026-06-04 R82 Supervisor Trigger Propagation Fix
+
+The 4K gate auto-launched R82 from the R81 step-3650 checkpoint after the
+step-3650 analysis classified the branch as still off-track. The initial R82
+command preserved the damped-auxiliary settings but did not inherit the
+low-train-BPB forced checkpoint settings. The recovery supervisor has been
+updated so every future recovery launch includes:
+
+```text
+CHECKPOINT_ON_TRAIN_BPB_BELOW=1.13
+CHECKPOINT_ON_TRAIN_BPB_COOLDOWN_STEPS=10
+CHECKPOINT_ON_TRAIN_BPB_MAX=6
+VAL_ON_TRAIN_BPB_CHECKPOINT=1
+```
+
+Recovery analysis watchers now use `--interval-steps 1`, which still analyzes
+only saved checkpoints but catches sparse forced checkpoints immediately instead
+of waiting for the next 50-step scheduled checkpoint.
+
+R82 was restarted in place from the same R81 step-3650 checkpoint with the
+corrected command set:
+
+```text
+run: toricgt_seq4096_4k_recovery_r82_20260604T192647Z
+resume checkpoint: toricgt_seq4096_4k_recovery_r81_damped_aux_20260604T191617Z_step_003650.pt
+analysis start: 3650
+analysis interval: 1
+low-train-BPB checkpoint trigger: enabled
+```
