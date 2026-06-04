@@ -141,8 +141,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-advanced-geometry", action="store_true")
     parser.add_argument("--compact-oai-eval-device", default="cpu")
     parser.add_argument("--compact-oai-eval-seq-len", type=int, default=256)
-    parser.add_argument("--compact-oai-eval-val-batch-size", type=int, default=256)
-    parser.add_argument("--compact-oai-eval-max-sequences", type=int, default=1)
+    parser.add_argument("--compact-oai-eval-val-batch-size", type=int, default=65536)
+    parser.add_argument("--compact-oai-eval-max-sequences", type=int, default=64)
     parser.add_argument(
         "--compact-oai-eval-token-glob",
         default="amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_val_*.bin",

@@ -322,7 +322,7 @@ def test_initial_target_step_can_analyze_resume_checkpoint_first() -> None:
     ) == 3750
 
 
-def test_compact_oai_eval_command_uses_sampled_cpu_probe(tmp_path: Path) -> None:
+def test_compact_oai_eval_command_uses_robust_sampled_cpu_probe(tmp_path: Path) -> None:
     module = load_module()
     checkpoint = tmp_path / "run_step_000500.pt"
     output_json = tmp_path / "analysis" / "oai_competition" / "seq4096_summary.json"
@@ -334,8 +334,8 @@ def test_compact_oai_eval_command_uses_sampled_cpu_probe(tmp_path: Path) -> None
         output_json=output_json,
         device="cpu",
         seq_len=256,
-        val_batch_size=256,
-        val_max_sequences=1,
+        val_batch_size=65536,
+        val_max_sequences=64,
         token_glob="data/fineweb_val_*.bin",
         tokenizer_path="data/tokenizers/fineweb_1024_bpe.model",
     )
@@ -348,9 +348,35 @@ def test_compact_oai_eval_command_uses_sampled_cpu_probe(tmp_path: Path) -> None
     assert "--device" in command
     assert "cpu" in command
     assert "--batch-size" in command
-    assert "256" in command
+    assert "65536" in command
     assert "--val-max-sequences" in command
-    assert "1" in command
+    assert "64" in command
+
+
+def test_compact_oai_eval_defaults_use_robust_sample(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    module = load_module()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "watch_seq4096_analysis.py",
+            "--checkpoint-dir",
+            str(tmp_path / "checkpoints"),
+            "--log",
+            str(tmp_path / "train.log"),
+            "--run-path",
+            "entity/project/run",
+            "--output-root",
+            str(tmp_path / "analysis"),
+        ],
+    )
+
+    args = module.parse_args()
+
+    assert args.compact_oai_eval_device == "cpu"
+    assert args.compact_oai_eval_seq_len == 256
+    assert args.compact_oai_eval_val_batch_size == 65536
+    assert args.compact_oai_eval_max_sequences == 64
 
 
 def test_refresh_artifact_inventory_includes_late_bpb_and_wandb_outputs(tmp_path: Path) -> None:

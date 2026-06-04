@@ -12362,3 +12362,30 @@ The gate therefore launched R86 from the R85 step-3750 checkpoint with
 the low-BPB checkpoint trigger, and the lightweight advanced losses. R86 is the
 current branch for testing whether toric/Slepian/topology-guided recapture can
 turn the improving but too-slow R85 validation slope into a <1.2 BPB 4K finish.
+
+## 2026-06-04 Robust OAI Probe Default
+
+The R86 step-3750 periodic analysis produced a one-sequence sampled OAI probe
+below target:
+
+```text
+R86 step 3750 compact OAI probe: seq_len 256, val_max_sequences 1, BPB 1.1968
+```
+
+That checkpoint was hardlinked into
+`amelie-iska/parameter-golf/checkpoints/oai_bpb_candidates/` for preservation,
+but a stronger CPU sidecar evaluation over 64 validation sequences did not
+confirm the threshold:
+
+```text
+R86 step 3750 robust OAI check: seq_len 256, val_max_sequences 64, BPB 1.4089
+output: outputs/oai_candidate_evals/toricgt_seq4096_4k_recovery_r86_20260604T195914Z/step-003750/oai_seq256_valmax64.json
+```
+
+Conclusion: do not promote the one-sequence `1.1968` as the OpenAI
+competition checkpoint. Treat it as a noisy candidate signal only. The periodic
+Seq4096 analysis watcher now defaults compact OAI evaluation to
+`val_max_sequences=64` and `val_batch_size=65536`, so future sub-1.2 OAI
+alerts require a more robust sampled check rather than a single sampled
+sequence. Keep regular FineWeb validation BPB and robust OAI BPB as the
+authoritative pre-threshold gates.
