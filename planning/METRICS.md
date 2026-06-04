@@ -12439,3 +12439,19 @@ hidden-state analysis family being available for that checkpoint. R88's patched
 step-3850 summary, for example, correctly reports Slepian/Pollak training
 enabled while leaving `diagnostics/families/slepian_pollak_prolate_available=0`
 until the hidden-state/geometry analysis emits that family.
+
+R89 resumed from the R88 step-3850 checkpoint and reproduced the same starting
+validation value:
+
+```text
+R89 step 3850 scheduled: validation BPB 1.2108
+R89 step 3850 analysis: off_track_unreachable, gap 0.0108
+```
+
+The recovery watcher now adds `scripts/codex_training_review_resume.sh` to the
+analysis watcher command whenever the hook exists. The active R89 analysis
+watcher was hot-restarted from target step 3851 with the hook attached, and a
+manual review hook was launched for the already-completed step-3850 analysis.
+This keeps future periodic plots, geometry diagnostics, simplex/tetrahedron
+artifacts, and training-adjustment proposals flowing into the automated Codex
+review loop without interrupting training.

@@ -1566,6 +1566,13 @@ def build_analysis_shell(
 ) -> str:
     analysis_log = repo_root / "logs" / f"{run_id}.analysis_watcher.txt"
     output_root = repo_root / "outputs" / "post_resume_analysis" / run_id
+    codex_review_hook = repo_root / "scripts" / "codex_training_review_resume.sh"
+    codex_review_args = ""
+    if codex_review_hook.exists():
+        codex_review_args = (
+            f"--codex-review-hook {shlex.quote(str(codex_review_hook))} "
+            f"--codex-review-tmux-prefix {shlex.quote(f'toricgt_codex_review_{run_id}')} "
+        )
     default_loop_state = repo_root / "outputs" / f"{run_id}_bpb_codex_loop_state.json"
     default_loop_stop_file = repo_root / "outputs" / f"{run_id}_bpb_codex_loop_stop"
     env = {
@@ -1588,6 +1595,7 @@ def build_analysis_shell(
         f"--start-step {int(start_step)} --interval-steps 1 --poll-seconds 30 "
         f"--analyze-start-step "
         f"--target-bpb {float(target_bpb)} --training-tmux {shlex.quote(train_tmux)} "
+        f"{codex_review_args}"
         f"2>&1 | tee -a {shlex.quote(str(analysis_log))}"
     )
     return command

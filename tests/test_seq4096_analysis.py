@@ -339,6 +339,29 @@ def test_4k_recovery_analysis_watcher_uses_sparse_checkpoint_interval(tmp_path: 
     assert "--start-step 3650 --interval-steps 1" in shell
 
 
+def test_4k_recovery_analysis_watcher_adds_codex_review_hook_when_available(tmp_path: Path) -> None:
+    module = load_gate_module()
+    hook = tmp_path / "scripts" / "codex_training_review_resume.sh"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    shell = module.build_analysis_shell(
+        repo_root=tmp_path,
+        run_id="analysis_run",
+        train_tmux="train_session",
+        checkpoint_dir=tmp_path / "checkpoints",
+        log_path=tmp_path / "logs" / "train.log",
+        target_bpb=1.2,
+        start_step=3650,
+        python="/env/python",
+        wandb_entity="entity",
+        wandb_project="project",
+    )
+
+    assert f"--codex-review-hook {hook}" in shell
+    assert "--codex-review-tmux-prefix toricgt_codex_review_analysis_run" in shell
+
+
 def test_initial_target_step_can_analyze_resume_checkpoint_first() -> None:
     module = load_module()
 
