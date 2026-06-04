@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wandb-entity", default=os.environ.get("WANDB_ENTITY", "amelie-iska-math"))
     parser.add_argument("--wandb-project", default=os.environ.get("WANDB_PROJECT", "toricgt-parameter-golf"))
     parser.add_argument("--conda-env", default=os.environ.get("CONDA_ENV", "tokengt"))
+    parser.add_argument("--conda-bin", default=os.environ.get("CONDA_BIN", "conda"))
     parser.add_argument("--train-session", default="toricgt_all_phases_live")
     parser.add_argument("--watch-session", default="toricgt_all_phases_analysis")
     parser.add_argument("--codex-prefix", default="toricgt_codex_review_all_phases")
@@ -217,7 +218,7 @@ def start_training(args: argparse.Namespace, state: dict[str, Any], checkpoint: 
     log_dir.mkdir(parents=True, exist_ok=True)
 
     command = [
-        "conda",
+        args.conda_bin,
         "run",
         "--no-capture-output",
         "-n",
@@ -227,6 +228,7 @@ def start_training(args: argparse.Namespace, state: dict[str, Any], checkpoint: 
         f"WANDB_ENTITY={args.wandb_entity}",
         f"WANDB_PROJECT={args.wandb_project}",
         f"WANDB_RUN_ID={args.run_id}",
+        f"CONDA_BIN={args.conda_bin}",
         "WANDB_RESUME=allow",
         "python",
         "scripts/train_parameter_golf_random_order.py",
@@ -280,7 +282,7 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
     loop_stop_file = os.environ.get("BPB_LOOP_STOP_FILE", str(Path(args.log_root) / "bpb_codex_loop_stop"))
     loop_name = os.environ.get("BPB_LOOP_NAME", "all_phases_supervised_watchdog")
     command = [
-        "conda",
+        args.conda_bin,
         "run",
         "--no-capture-output",
         "-n",
@@ -290,6 +292,7 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         f"BPB_TARGET={args.target_bpb}",
         f"BPB_MAX_REVIEW_ITERATIONS={args.max_analysis_iterations}",
         f"BPB_LOOP_STATE={loop_state}",
+        f"CONDA_BIN={args.conda_bin}",
         f"BPB_LOOP_STOP_FILE={loop_stop_file}",
         f"BPB_LOOP_NAME={loop_name}",
         "CODEX_REVIEW_FALLBACK_CONTINUE=0",
@@ -398,6 +401,7 @@ def main() -> None:
             "wandb_run": f"https://wandb.ai/{args.wandb_entity}/{args.wandb_project}/runs/{args.run_id}",
             "config": args.config,
             "checkpoint_dir": args.checkpoint_dir,
+            "conda_bin": args.conda_bin,
             "train_session": args.train_session,
             "watch_session": args.watch_session,
             "target_bpb": args.target_bpb,

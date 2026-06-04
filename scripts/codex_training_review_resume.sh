@@ -34,6 +34,16 @@ BPB_MAX_REVIEW_ITERATIONS="${BPB_MAX_REVIEW_ITERATIONS:-100}"
 BPB_LOOP_STATE="${BPB_LOOP_STATE:-outputs/bpb_codex_loop_state.json}"
 BPB_LOOP_STOP_FILE="${BPB_LOOP_STOP_FILE:-outputs/bpb_codex_loop_stop}"
 BPB_LOOP_NAME="${BPB_LOOP_NAME:-parameter_golf_bpb_target}"
+CONDA_BIN="${CONDA_BIN:-}"
+if [[ -z "$CONDA_BIN" ]]; then
+  if command -v conda >/dev/null 2>&1; then
+    CONDA_BIN="$(command -v conda)"
+  elif [[ -x /home/iska/miniconda3/bin/conda ]]; then
+    CONDA_BIN="/home/iska/miniconda3/bin/conda"
+  else
+    CONDA_BIN="conda"
+  fi
+fi
 
 usage() {
   sed -n '1,32p' "$0"
@@ -529,6 +539,7 @@ NEXT_TARGET_STEP=$NEXT_TARGET_STEP
 TIMEOUT_SECONDS=$CODEX_REVIEW_TIMEOUT_SECONDS
 POST_EXIT_GRACE_SECONDS=$CODEX_REVIEW_POST_EXIT_GRACE_SECONDS
 FALLBACK_CONTINUE=$CODEX_REVIEW_FALLBACK_CONTINUE
+CONDA_BIN=$(printf '%q' "$CONDA_BIN")
 
 cd "\$REPO_ROOT"
 CODEX_EXIT=0
@@ -586,7 +597,7 @@ if [[ -n "\$RUN_PATH" ]]; then
   fi
 fi
 
-TRAIN_CMD=(conda run --no-capture-output -n "\${CONDA_ENV:-tokengt}" env PYTHONPATH=src)
+TRAIN_CMD=("\$CONDA_BIN" run --no-capture-output -n "\${CONDA_ENV:-tokengt}" env PYTHONPATH=src CONDA_BIN="\$CONDA_BIN")
 if [[ -n "\$WANDB_RUN_ID_VALUE" ]]; then
   TRAIN_CMD+=(WANDB_RUN_ID="\$WANDB_RUN_ID_VALUE" WANDB_RESUME=allow)
 fi
@@ -595,7 +606,7 @@ if [[ -n "\$WANDB_RUN_ID_VALUE" ]]; then
   TRAIN_CMD+=(--wandb-run-name "\$WANDB_RUN_ID_VALUE")
 fi
 
-WATCH_CMD=(conda run --no-capture-output -n "\${CONDA_ENV:-tokengt}" env PYTHONPATH=src)
+WATCH_CMD=("\$CONDA_BIN" run --no-capture-output -n "\${CONDA_ENV:-tokengt}" env PYTHONPATH=src CONDA_BIN="\$CONDA_BIN")
 WATCH_CMD+=(BPB_TARGET=$(printf '%q' "$BPB_TARGET") BPB_MAX_REVIEW_ITERATIONS=$(printf '%q' "$BPB_MAX_REVIEW_ITERATIONS") BPB_LOOP_STATE=$(printf '%q' "$BPB_LOOP_STATE_ABS") BPB_LOOP_STOP_FILE=$(printf '%q' "$BPB_LOOP_STOP_FILE") BPB_LOOP_NAME=$(printf '%q' "$BPB_LOOP_NAME"))
 WATCH_CMD+=(python scripts/watch_training_analysis.py --checkpoint-dir "\$CHECKPOINT_DIR" --start-step "\$STEP" --target-step "\$NEXT_TARGET_STEP" --min-mtime-unix "\$START_EPOCH" --poll-seconds 60)
 if [[ -n "\$RUN_PATH" ]]; then

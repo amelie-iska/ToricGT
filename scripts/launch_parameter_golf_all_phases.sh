@@ -12,6 +12,16 @@ cd "$REPO_ROOT"
 
 CONFIG="${CONFIG:-config/train.parameter_golf_all_phases.yaml}"
 CONDA_ENV="${CONDA_ENV:-tokengt}"
+CONDA_BIN="${CONDA_BIN:-}"
+if [[ -z "$CONDA_BIN" ]]; then
+  if command -v conda >/dev/null 2>&1; then
+    CONDA_BIN="$(command -v conda)"
+  elif [[ -x /home/iska/miniconda3/bin/conda ]]; then
+    CONDA_BIN="/home/iska/miniconda3/bin/conda"
+  else
+    CONDA_BIN="conda"
+  fi
+fi
 PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="${STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
@@ -42,12 +52,13 @@ if tmux has-session -t "$SUPERVISOR_SESSION" 2>/dev/null; then
 fi
 
 SUPERVISOR_CMD=(
-  conda run --no-capture-output -n "$CONDA_ENV" env
+  "$CONDA_BIN" run --no-capture-output -n "$CONDA_ENV" env
   PYTHONPATH=src
   WANDB_ENTITY="$ENTITY"
   WANDB_PROJECT="$PROJECT"
   BPB_TARGET="$BPB_TARGET"
   BPB_MAX_REVIEW_ITERATIONS="$BPB_MAX_REVIEW_ITERATIONS"
+  CONDA_BIN="$CONDA_BIN"
   python scripts/supervise_parameter_golf_training.py
   --config "$CONFIG"
   --run-id "$RUN_ID"
@@ -55,6 +66,7 @@ SUPERVISOR_CMD=(
   --wandb-entity "$ENTITY"
   --wandb-project "$PROJECT"
   --conda-env "$CONDA_ENV"
+  --conda-bin "$CONDA_BIN"
   --train-session "$TRAIN_SESSION"
   --watch-session "$WATCH_SESSION"
   --checkpoint-dir "$CHECKPOINT_DIR"
