@@ -45,7 +45,7 @@ from typing import Any
 import yaml
 
 
-CHECKPOINT_PATTERN = re.compile(r"random_order_step_(\d+)\.pt$")
+CHECKPOINT_PATTERN = re.compile(r"(?:random_order_step_|_step_)(\d+)\.pt$")
 
 
 def parse_args() -> argparse.Namespace:
@@ -107,7 +107,7 @@ def parse_args() -> argparse.Namespace:
 
 def latest_checkpoint(checkpoint_dir: Path, min_step: int, min_mtime_unix: float = 0.0) -> tuple[int, Path] | None:
     best: tuple[int, Path] | None = None
-    for path in checkpoint_dir.glob("random_order_step_*.pt"):
+    for path in checkpoint_dir.glob("*.pt"):
         if min_mtime_unix > 0:
             try:
                 if path.stat().st_mtime < min_mtime_unix:
