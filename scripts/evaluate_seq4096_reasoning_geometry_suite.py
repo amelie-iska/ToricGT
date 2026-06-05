@@ -57,7 +57,7 @@ from toricgt.reasoning_geometry import (
 )
 from toricgt.slepian_torus import ToricSlepianConfig, toric_slepian_audit
 from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step_filtration_stats_np
-from toricgt.toric_geometry_tasks import empirical_toric_shadow_stats_np
+from toricgt.toric_geometry_tasks import empirical_toric_shadow_stats_np, make_binomial_relations, make_exponent_table
 
 
 TRAIN_RE = re.compile(
@@ -602,6 +602,202 @@ def bgg_koszul_metrics(topology: dict[str, Any], graphcg: dict[str, float]) -> d
     }
 
 
+def fixed_chart_directions_np(width: int, count: int) -> np.ndarray:
+    count = max(4, int(count))
+    coord = np.arange(width, dtype=np.float64) + 1.0
+    freqs = np.arange(1, count + 1, dtype=np.float64)[:, None]
+    angles = 2.0 * math.pi * freqs * coord[None, :] / float(max(width + count, 2))
+    directions = np.sin(angles) + 0.5 * np.cos((freqs + 1.0) * angles / (freqs + 0.5))
+    norms = np.linalg.norm(directions, axis=1, keepdims=True)
+    return directions / np.maximum(norms, 1e-8)
+
+
+def f2_rank_np(matrix: np.ndarray) -> int:
+    if matrix.size == 0:
+        return 0
+    mat = (np.asarray(matrix, dtype=np.uint8).copy() & 1)
+    rows, cols = mat.shape
+    rank = 0
+    for col in range(cols):
+        pivots = np.flatnonzero(mat[rank:, col])
+        if pivots.size == 0:
+            continue
+        pivot = rank + int(pivots[0])
+        if pivot != rank:
+            mat[[rank, pivot]] = mat[[pivot, rank]]
+        for row in range(rows):
+            if row != rank and mat[row, col]:
+                mat[row] ^= mat[rank]
+        rank += 1
+        if rank == rows:
+            break
+    return int(rank)
+
+
+def flag_complex_f2_audit(adjacency: np.ndarray, *, max_edges: int = 256, max_triangles: int = 512) -> dict[str, float]:
+    hard = np.asarray(adjacency, dtype=bool)
+    hard = np.logical_or(hard, hard.T)
+    np.fill_diagonal(hard, False)
+    n = int(hard.shape[0])
+    edges = [(i, j) for i in range(n) for j in range(i + 1, n) if hard[i, j]]
+    truncated = len(edges) > max_edges
+    if truncated:
+        edges = edges[:max_edges]
+    edge_index = {edge: idx for idx, edge in enumerate(edges)}
+    triangles: list[tuple[int, int, int]] = []
+    if not truncated:
+        for i in range(n):
+            for j in range(i + 1, n):
+                if not hard[i, j]:
+                    continue
+                for k in range(j + 1, n):
+                    if hard[i, k] and hard[j, k]:
+                        triangles.append((i, j, k))
+                        if len(triangles) >= max_triangles:
+                            truncated = True
+                            break
+                if truncated:
+                    break
+            if truncated:
+                break
+    d1 = np.zeros((n, len(edges)), dtype=np.uint8)
+    for col, (i, j) in enumerate(edges):
+        d1[i, col] = 1
+        d1[j, col] = 1
+    d2 = np.zeros((len(edges), len(triangles)), dtype=np.uint8)
+    for col, (i, j, k) in enumerate(triangles):
+        for edge in ((i, j), (i, k), (j, k)):
+            row = edge_index.get(tuple(sorted(edge)))
+            if row is not None:
+                d2[row, col] = 1
+    rank_d1 = f2_rank_np(d1)
+    rank_d2 = f2_rank_np(d2)
+    product = (d1 @ d2) & 1 if d1.size and d2.size else np.zeros((d1.shape[0], d2.shape[1]), dtype=np.uint8)
+    h0 = max(0, n - rank_d1)
+    h1 = max(0, len(edges) - rank_d1 - rank_d2)
+    return {
+        "vertices": float(n),
+        "edges": float(len(edges)),
+        "triangles": float(len(triangles)),
+        "rank_d1": float(rank_d1),
+        "rank_d2": float(rank_d2),
+        "h0": float(h0),
+        "h1": float(h1),
+        "boundary_square_residual": float(product.sum() / max(1, product.size)),
+        "truncated": 1.0 if truncated else 0.0,
+    }
+
+
+def exact_combinatorial_cca_audit(
+    points: np.ndarray,
+    *,
+    num_chambers: int = 8,
+    exponent_dim: int = 4,
+    temperature: float = 0.14,
+) -> dict[str, float]:
+    """Exact finite CCA sidecar audit over chamber coactivation complexes."""
+
+    x = np.asarray(points, dtype=np.float64)
+    keys = [
+        "toric_cca_exact_relation_pass_rate",
+        "toric_cca_exact_relation_residual_mean",
+        "toric_cca_exact_relation_residual_max",
+        "toric_cca_exact_sr_nonface_edge_fraction",
+        "toric_cca_exact_sr_nonface_pair_fraction",
+        "toric_cca_exact_h0",
+        "toric_cca_exact_h1",
+        "toric_cca_exact_allowed_h0",
+        "toric_cca_exact_allowed_h1",
+        "toric_cca_exact_betti_mismatch",
+        "toric_cca_exact_edges",
+        "toric_cca_exact_allowed_edges",
+        "toric_cca_exact_nonface_edges",
+        "toric_cca_exact_triangles",
+        "toric_cca_exact_rank_d1",
+        "toric_cca_exact_rank_d2",
+        "toric_cca_exact_boundary_square_residual",
+        "toric_cca_exact_threshold",
+        "toric_cca_exact_audit_backed_score",
+    ]
+    if x.ndim != 2 or x.shape[0] < 4:
+        return {key: 0.0 for key in keys}
+
+    chambers = max(4, int(num_chambers))
+    x = x / np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-8)
+    directions = fixed_chart_directions_np(x.shape[1], chambers)
+    logits = x @ directions.T
+    logits = logits / max(float(temperature), 1e-4)
+    logits = logits - logits.max(axis=1, keepdims=True)
+    probs = np.exp(logits)
+    probs = probs / np.maximum(probs.sum(axis=1, keepdims=True), 1e-8)
+    coactivation = probs.T @ probs / float(max(1, x.shape[0]))
+    sym = 0.5 * (coactivation + coactivation.T)
+    np.fill_diagonal(sym, 0.0)
+
+    labels = np.arange(chambers)
+    dist = (labels[:, None] - labels[None, :]) % chambers
+    allowed = np.logical_or(dist == 1, dist == chambers - 1)
+    np.fill_diagonal(allowed, False)
+    nonface = np.logical_not(allowed)
+    np.fill_diagonal(nonface, False)
+    positive = sym[sym > 0.0]
+    threshold = float(max(np.mean(positive) if positive.size else 0.0, 0.25 / float(chambers * chambers)))
+    hard_edges = sym > threshold
+    np.fill_diagonal(hard_edges, False)
+    nonface_edges = np.logical_and(hard_edges, nonface)
+    allowed_edges = np.logical_and(hard_edges, allowed)
+
+    observed = flag_complex_f2_audit(hard_edges)
+    allowed_complex = flag_complex_f2_audit(allowed_edges)
+
+    exponents = make_exponent_table(chambers, exponent_dim)
+    relations = make_binomial_relations(exponents, max_relations=16)
+    rounded = torch.round(exponents * 3.0).to(torch.int64)
+    residuals: list[float] = []
+    passes: list[float] = []
+    for relation in relations.tolist():
+        i, j, k, l = [int(item) for item in relation]
+        rounded_residual = rounded[i] + rounded[j] - rounded[k] - rounded[l]
+        passes.append(1.0 if torch.count_nonzero(rounded_residual).item() == 0 else 0.0)
+        exact_residual = exponents[i] + exponents[j] - exponents[k] - exponents[l]
+        residuals.append(float(torch.linalg.vector_norm(exact_residual).item()))
+    relation_pass = float(np.mean(passes)) if passes else 0.0
+    relation_mean = float(np.mean(residuals)) if residuals else 0.0
+    relation_max = float(np.max(residuals)) if residuals else 0.0
+
+    total_edges = float(np.count_nonzero(hard_edges))
+    nonface_count = float(np.count_nonzero(nonface_edges))
+    sr_edge_fraction = nonface_count / max(1.0, total_edges)
+    sr_pair_fraction = nonface_count / max(1.0, float(np.count_nonzero(nonface)))
+    betti_mismatch = abs(observed["h0"] - allowed_complex["h0"]) + abs(observed["h1"] - allowed_complex["h1"])
+    audit_score = relation_pass
+    audit_score *= max(0.0, 1.0 - sr_edge_fraction)
+    audit_score *= 1.0 / (1.0 + float(betti_mismatch))
+    audit_score *= max(0.0, 1.0 - observed["boundary_square_residual"])
+
+    return {
+        "toric_cca_exact_relation_pass_rate": relation_pass,
+        "toric_cca_exact_relation_residual_mean": relation_mean,
+        "toric_cca_exact_relation_residual_max": relation_max,
+        "toric_cca_exact_sr_nonface_edge_fraction": float(sr_edge_fraction),
+        "toric_cca_exact_sr_nonface_pair_fraction": float(sr_pair_fraction),
+        "toric_cca_exact_h0": float(observed["h0"]),
+        "toric_cca_exact_h1": float(observed["h1"]),
+        "toric_cca_exact_allowed_h0": float(allowed_complex["h0"]),
+        "toric_cca_exact_allowed_h1": float(allowed_complex["h1"]),
+        "toric_cca_exact_betti_mismatch": float(betti_mismatch),
+        "toric_cca_exact_edges": float(total_edges),
+        "toric_cca_exact_allowed_edges": float(np.count_nonzero(allowed_edges)),
+        "toric_cca_exact_nonface_edges": float(nonface_count),
+        "toric_cca_exact_triangles": float(observed["triangles"]),
+        "toric_cca_exact_rank_d1": float(observed["rank_d1"]),
+        "toric_cca_exact_rank_d2": float(observed["rank_d2"]),
+        "toric_cca_exact_boundary_square_residual": float(observed["boundary_square_residual"]),
+        "toric_cca_exact_threshold": float(threshold),
+        "toric_cca_exact_audit_backed_score": float(audit_score),
+    }
+
+
 def combinatorial_cca_metrics(points: np.ndarray, topology_config: ReasoningTopologyConfig) -> dict[str, float]:
     """Run the training-time CCA bridge on checkpoint proxy trajectories."""
 
@@ -613,6 +809,7 @@ def combinatorial_cca_metrics(points: np.ndarray, topology_config: ReasoningTopo
             "toric_cca_stanley_reisner_nonface_mass": 0.0,
             "toric_cca_chamber_coverage": 0.0,
             "toric_cca_betti1_proxy": 0.0,
+            **exact_combinatorial_cca_audit(x_np),
         }
     hidden = torch.from_numpy(x_np).unsqueeze(0)
     positions = torch.arange(hidden.shape[1], dtype=torch.long).view(1, -1)
@@ -631,6 +828,7 @@ def combinatorial_cca_metrics(points: np.ndarray, topology_config: ReasoningTopo
         if torch.is_tensor(value) and value.ndim == 0:
             safe = torch.nan_to_num(value.detach().float().cpu(), nan=0.0, posinf=0.0, neginf=0.0)
             metrics[key] = float(safe.item())
+    metrics.update(exact_combinatorial_cca_audit(x_np, num_chambers=cfg.num_chambers, temperature=cfg.temperature))
     return metrics
 
 def analyze_record(
@@ -1024,6 +1222,57 @@ def plot_combinatorial_cca(record: dict[str, Any], out: Path) -> None:
     save_dark(fig, out)
     plt.close(fig)
 
+
+def plot_combinatorial_cca_exact(record: dict[str, Any], out: Path) -> None:
+    quality_keys = [
+        "toric_cca_exact_relation_pass_rate",
+        "toric_cca_exact_audit_backed_score",
+        "toric_cca_exact_sr_nonface_edge_fraction",
+        "toric_cca_exact_sr_nonface_pair_fraction",
+        "toric_cca_exact_boundary_square_residual",
+    ]
+    topology_keys = [
+        "toric_cca_exact_h0",
+        "toric_cca_exact_h1",
+        "toric_cca_exact_allowed_h0",
+        "toric_cca_exact_allowed_h1",
+        "toric_cca_exact_betti_mismatch",
+    ]
+    size_keys = [
+        "toric_cca_exact_edges",
+        "toric_cca_exact_allowed_edges",
+        "toric_cca_exact_nonface_edges",
+        "toric_cca_exact_triangles",
+        "toric_cca_exact_rank_d1",
+        "toric_cca_exact_rank_d2",
+    ]
+    quality = np.nan_to_num(np.asarray([float(record.get(key, 0.0) or 0.0) for key in quality_keys], dtype=float))
+    topology = np.nan_to_num(np.asarray([float(record.get(key, 0.0) or 0.0) for key in topology_keys], dtype=float))
+    sizes = np.nan_to_num(np.asarray([float(record.get(key, 0.0) or 0.0) for key in size_keys], dtype=float))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 3, figsize=(17, 5.8), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, axes)
+    axes[0].barh(np.arange(len(quality_keys)), quality, color=["#8cff6a", "#39b8ff", "#ff4fd8", "#ff4fd8", "#ad7cff"])
+    axes[0].set_yticks(np.arange(len(quality_keys)), quality_keys, fontsize=7)
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("fraction / score")
+    axes[0].set_title("exact audit quality")
+    axes[1].barh(np.arange(len(topology_keys)), topology, color="#39b8ff")
+    axes[1].set_yticks(np.arange(len(topology_keys)), topology_keys, fontsize=7)
+    axes[1].invert_yaxis()
+    axes[1].set_xlabel("F2 Betti / mismatch")
+    axes[1].set_title("F2 homology on chamber complex")
+    axes[2].barh(np.arange(len(size_keys)), sizes, color="#2de2e6")
+    axes[2].set_yticks(np.arange(len(size_keys)), size_keys, fontsize=7)
+    axes[2].invert_yaxis()
+    axes[2].set_xlabel("count / rank")
+    axes[2].set_title("finite complex size")
+    fig.suptitle(f"{record['record_id']} exact combinatorial CCA F2 audit")
+    fig._suptitle.set_color("white")
+    save_dark(fig, out)
+    plt.close(fig)
+
+
 def plot_persistence_morphisms(record: dict[str, Any], out: Path) -> None:
     keys = [
         "exact_h0_dim_mean",
@@ -1166,6 +1415,7 @@ def plot_record_artifacts(record: dict[str, Any], geometry_dir: Path) -> list[st
         ("commutative_algebra_audit", plot_commutative_algebra),
         ("exact_persistence_morphisms", plot_persistence_morphisms),
         ("combinatorial_cca_audit", plot_combinatorial_cca),
+        ("combinatorial_cca_exact_audit", plot_combinatorial_cca_exact),
     ):
         path = topo_dir / f"{base}_{suffix}.png"
         fn(record, path)
@@ -1207,6 +1457,7 @@ def annotate_scores(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "score/cca_topology_consistency": ("toric_cca_topology_loss", False),
         "score/betti1_consistency": ("toric_cca_betti1_proxy", False),
         "score/cca_chart_coverage": ("toric_cca_chamber_coverage", True),
+        "score/cca_exact_audit": ("toric_cca_exact_audit_backed_score", True),
     }
     return attach_normalized_scores(records, specs)
 
@@ -1349,6 +1600,7 @@ def aggregate_summary(records: list[dict[str, Any]], *, checkpoint: Path, step: 
             "graphcg": 1.0,
             "analogical": 1.0,
             "combinatorial_commutative_algebra": 1.0,
+            "exact_f2_combinatorial_audits": 1.0,
         },
         "means": {
             "topology_directed_asymmetry": mean("topology_directed_asymmetry_mean"),
@@ -1368,6 +1620,13 @@ def aggregate_summary(records: list[dict[str, Any]], *, checkpoint: Path, step: 
             "toric_cca_stanley_reisner_nonface_mass": mean("toric_cca_stanley_reisner_nonface_mass"),
             "toric_cca_chamber_coverage": mean("toric_cca_chamber_coverage"),
             "toric_cca_betti1_proxy": mean("toric_cca_betti1_proxy"),
+            "toric_cca_exact_relation_pass_rate": mean("toric_cca_exact_relation_pass_rate"),
+            "toric_cca_exact_relation_residual_mean": mean("toric_cca_exact_relation_residual_mean"),
+            "toric_cca_exact_sr_nonface_edge_fraction": mean("toric_cca_exact_sr_nonface_edge_fraction"),
+            "toric_cca_exact_h0": mean("toric_cca_exact_h0"),
+            "toric_cca_exact_h1": mean("toric_cca_exact_h1"),
+            "toric_cca_exact_betti_mismatch": mean("toric_cca_exact_betti_mismatch"),
+            "toric_cca_exact_audit_backed_score": mean("toric_cca_exact_audit_backed_score"),
         },
         "recommendations": recommendation_lines(records, log_context),
     }
@@ -1386,6 +1645,9 @@ def recommendation_lines(records: list[dict[str, Any]], log_context: dict[str, A
             "toric_cca_binomial_residual",
             "toric_cca_stanley_reisner_nonface_mass",
             "toric_cca_betti1_proxy",
+            "toric_cca_exact_sr_nonface_edge_fraction",
+            "toric_cca_exact_betti_mismatch",
+            "toric_cca_exact_audit_backed_score",
         )
     }
     latest_val = float(log_context.get("latest_val_bpb", float("nan")))
@@ -1407,6 +1669,12 @@ def recommendation_lines(records: list[dict[str, Any]], log_context: dict[str, A
         recs.append("Combinatorial CCA residuals are high; keep the training bridge micro-weighted pre-gate, then increase toric-ideal/Stanley-Reisner pressure after BPB is safely below threshold.")
     if means["toric_cca_betti1_proxy"] > 3.0:
         recs.append("Betti1 proxy is large; prefer directed topology damping and memory-graph sparsification before stronger topology losses.")
+    if means["toric_cca_exact_sr_nonface_edge_fraction"] > 0.20:
+        recs.append("Exact CCA audit sees hard Stanley-Reisner nonface edges; keep CCA loss audit-backed but micro-weighted until BPB is safe, then use SR nonface pressure before raising broader topology weights.")
+    if means["toric_cca_exact_betti_mismatch"] > 2.0:
+        recs.append("Exact F2 chamber Betti mismatch is high; prefer GraphCG basis conditioning and chamber sparsification before increasing Koszul/topology loss weight.")
+    if means["toric_cca_exact_audit_backed_score"] > 0.65 and math.isfinite(latest_val) and latest_val <= target:
+        recs.append("Exact CCA audit is stable enough for a cautious post-gate frequency increase before increasing raw CCA loss scale.")
     if not recs:
         recs.append("Advanced geometry is stable enough to keep as monitoring while BPB validation remains the primary gate.")
     return recs

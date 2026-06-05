@@ -85,7 +85,10 @@ def test_seq4096_reasoning_geometry_suite_writes_old_suite_shape(tmp_path: Path)
 
     assert summary["analysis_source"] == "seq4096_checkpoint_embedding_proxy"
     assert summary["families_available"]["combinatorial_commutative_algebra"] == 1.0
+    assert summary["families_available"]["exact_f2_combinatorial_audits"] == 1.0
     assert "toric_cca_topology_loss" in summary["means"]
+    assert "toric_cca_exact_audit_backed_score" in summary["means"]
+    assert "toric_cca_exact_betti_mismatch" in summary["means"]
     assert summary["current_run_only"] == 1.0
     assert summary["families_available"]["topology"] == 1.0
     assert summary["families_available"]["graphcg"] == 1.0
@@ -104,6 +107,20 @@ def test_seq4096_reasoning_geometry_suite_writes_old_suite_shape(tmp_path: Path)
     assert any("graphcg_basis_disentanglement" in path for path in inventory["image_files"])
     assert any("analogical_transport_map" in path for path in inventory["image_files"])
     assert any("combinatorial_cca_audit" in path for path in inventory["image_files"])
+    assert any("combinatorial_cca_exact_audit" in path for path in inventory["image_files"])
+
+
+def test_seq4096_exact_combinatorial_cca_audit_reports_f2_metrics() -> None:
+    module = load_module()
+    points = torch.randn(18, 12).numpy()
+    audit = module.exact_combinatorial_cca_audit(points, num_chambers=8)
+
+    assert 0.0 <= audit["toric_cca_exact_relation_pass_rate"] <= 1.0
+    assert 0.0 <= audit["toric_cca_exact_sr_nonface_edge_fraction"] <= 1.0
+    assert audit["toric_cca_exact_h0"] >= 0.0
+    assert audit["toric_cca_exact_h1"] >= 0.0
+    assert audit["toric_cca_exact_betti_mismatch"] >= 0.0
+    assert 0.0 <= audit["toric_cca_exact_audit_backed_score"] <= 1.0
 
 
 def test_seq4096_energy_landscape_uses_static_3d_axis(tmp_path: Path, monkeypatch) -> None:
