@@ -29,36 +29,43 @@ Current validated status:
 - CPU implementation validation: default Soft-MoE, tropical-ring attention, embedding-space GFlowNet trajectory balance, and finite rotation-algebra checks run without meaningful VRAM use.
 - CUDA capacity validation: `d=384`, 8 layers, 8 heads, 29.8M parameters, 1,280 graph tokens, bf16, default Soft-MoE, and embedding-space GFlowNet loss completed one optimizer step at about 6.0GB peak VRAM for batch 1 and 11.9GB for batch 2.
 - Parameter-Golf dense random-order scaffold: the default 13.0M-parameter byte model exports as a 12.94MB int8 compressed artifact, below the 16,000,000 byte cap, with compact embedding-space GFlowNet action sampling enabled.
-- OpenAI Parameter-Golf BPB path: the active Seq4096 FineWeb recovery run is
-  `toricgt_seq4096_warmdown_r52_20260604T125517Z`. The <1.2 BPB competition
-  checkpoint has not yet been preserved. R52 resumes from the R20 step-3000
-  checkpoint with optimizer/RNG/loader reset and a BPB-clean schedule:
-  `TRAIN_BATCH_TOKENS=1048576`, `TIED_EMBED_LR=0.034`, matrix/scalar LR
-  `0.018`, Muon momentum `0.985`, `BIGRAM_BIAS=1`, `BIGRAM_BIAS_LR=0.012`,
-  `HASH_NGRAM_BIAS=0`, `POLARQUANT_KV_BITS=0`, `EXPORT_PRUNE_FRACTION=0`, and
-  `ARTIFACT_SIZE_LIMIT_BYTES=16000000`. R52 reached validation/OpenAI BPB
-  `1.2290` at step 3250 after starting from `1.2454` at step 3000, then
-  reached validation/OpenAI BPB `1.2198` at step 3500 with train BPB `1.2157`.
-  The 3500 controller projection places the <=1.2 target near step
-  `3886.71875`, so the run remains on track but pre-threshold. R52's W&B run is
-  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_warmdown_r52_20260604T125517Z>.
-- R52 step 3500 is the current completed recovery analysis. Its checkpoint was
-  saved at
-  `amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_warmdown_r52_20260604T125517Z/toricgt_seq4096_warmdown_r52_20260604T125517Z_step_003500.pt`.
-  The step-3500 training-adjustment proposal classifies the run as on track,
-  with projected target step `3886.71875`, recent validation drop `0.00512`
-  BPB per 100 steps, and required gate drop `0.00396` BPB per 100 steps.
-  The BPB-transfer controller chooses `pre_threshold_primary_bpb_clean`: keep
-  the BPB gap objective at scale `1.0`, keep BGG/Koszul, topology, toric,
-  tropical, Slepian/Pollak, GraphCG, memory, and analogy losses at sidecar or
-  damping-only scale before the threshold checkpoint, and do not disturb a
-  clean BPB descent. The latest export probe fits the 16,000,000 byte cap at
-  `15,996,978` total bytes with only `3,022` bytes of margin, so compact
-  artifact bloat is treated as a first-class risk.
-  PolarQuant currently quantizes K/V cache tensors, not stored model weights;
-  increasing parameter count is allowed only for a separate sidecar experiment
-  after a true weight/export compression path proves code+weights stay under
-  the cap and improves held-out BPB.
+- OpenAI Parameter-Golf BPB path: the preserved public checkpoints are now the
+  4K low-BPB checkpoint and its 20K continuation, followed by a new advanced
+  step-0 run that keeps PolarQuant and combinatorial CCA/DG/topology metrics
+  active from the beginning.  The R52/R60/R78 recovery notes below are
+  historical controller evidence, not the current live run.
+- Published Parameter-Golf checkpoint metrics, with train and validation
+  quantities paired by type:
+
+  | checkpoint | step | train loss | val loss | train BPB | val BPB | raw `.pt` bytes | compact artifact bytes | counted bytes | under 16 MB |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | `parameter_golf_oai_4k_bpb1p20848.pt` | 4,000 | 2.0280 | 2.0405 | 1.1959 | 1.2084838045 | 141,911,419 | 15,786,767 | 15,901,889 | yes |
+  | `parameter_golf_oai_20k_bpb1p16858.pt` | 20,000 | 1.9289 | 1.9731 | 1.1332 | 1.1685778760 | 141,928,171 | 15,779,613 | 15,894,735 | yes |
+  | `parameter_golf_oai_best.pt` | 20,000 | 1.9289 | 1.9731 | 1.1332 | 1.1685778760 | 141,928,171 | 15,779,613 | 15,894,735 | yes |
+
+  The raw `.pt` checkpoints are resume/analysis checkpoints and exceed the
+  competition artifact cap.  The compact `.ptz` artifacts are the
+  size-constrained exports; the counted 4K and 20K artifacts remain below the
+  16,000,000 byte Parameter-Golf limit.
+- Current active advanced run:
+  `toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z`, W&B
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z>.
+  It starts from step 0 with PolarQuant enabled by default and ramped, plus
+  medium-conservative GraphCG, toric/tropical, Slepian/Pollak, Koszul/BGG,
+  analogical, and exact combinatorial CCA/DG/Taylor topology metrics active
+  from the start.  The live 10K gate targets `<1.09` BPB and allows the run to
+  continue if it is below `1.17` by step 10K.
+- Latest checked live readout for the active advanced run: finite through step
+  930, with step 750 validation/OpenAI BPB `1.3916`, train BPB in the
+  `1.33-1.40` range around steps 840-930, no observed nonfinite update skips,
+  and scheduled analysis artifacts under
+  `outputs/post_resume_analysis/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z/step-00000750`.
+- The step-0 NaN failure mode from
+  `toricgt_advdg_step0_polar_seq4096_20260605T214439Z` is treated as an
+  optimizer/gradient guard problem, not a reason to remove CCA/DG/topology.
+  The repaired run keeps advanced losses enabled, ramps PolarQuant, logs
+  nonfinite-update guards, and skips poisoned optimizer updates before they can
+  corrupt weights or optimizer state.
 - Seq4096 recovery automation now uses metric-driven launch controls. Repeated
   validation ETA misses trigger pre-gate recovery; projected-miss cases use
   batch/LR controls, while train-low / validation-lag cases lower LR and keep
@@ -667,7 +674,41 @@ runs W&B/OAI BPB/simplex/geometry analyses as non-interrupting sidecars. Codex
 review handoffs are allowed to time out without stopping training; the BPB loop
 uses `BPB_TARGET=1.2` and a 100-analysis cap.
 
-Current `oai-advanced` OpenAI Parameter-Golf recovery status:
+Current `oai-advanced` OpenAI Parameter-Golf checkpoint and advanced-run status
+(2026-06-05):
+
+- Published low-BPB checkpoints are now preserved and mirrored to Hugging Face:
+  the 4K gate checkpoint at validation BPB `1.2084838045` and the 20K
+  continuation at validation BPB `1.1685778760`.
+- Train and validation metrics for the published checkpoints are paired in the
+  table below so same-type quantities are adjacent:
+
+  | checkpoint | step | train loss | val loss | train BPB | val BPB | compact counted bytes |
+  |---|---:|---:|---:|---:|---:|---:|
+  | `parameter_golf_oai_4k_bpb1p20848.pt` | 4,000 | 2.0280 | 2.0405 | 1.1959 | 1.2084838045 | 15,901,889 |
+  | `parameter_golf_oai_20k_bpb1p16858.pt` | 20,000 | 1.9289 | 1.9731 | 1.1332 | 1.1685778760 | 15,894,735 |
+  | `parameter_golf_oai_best.pt` | 20,000 | 1.9289 | 1.9731 | 1.1332 | 1.1685778760 | 15,894,735 |
+
+- Active step-0 advanced run:
+  `toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z`.
+- W&B:
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z>.
+- Launch policy: optimize for `<1.09` BPB by step 10K, continue the full run if
+  validation/OpenAI BPB is below `1.17` by step 10K, and keep the 16MB compact
+  artifact cap as a hard export invariant.
+- Advanced methods active from step 0: PolarQuant KV perturbation with warmup,
+  GraphCG basis disentanglement, toric/tropical chamber losses, Slepian/Pollak
+  concentration diagnostics, Koszul/BGG losses, analogical transport, and
+  combinatorial CCA/DG/Taylor topology losses backed by exact symbolic
+  resolution certificates.
+- Latest reviewable advanced analysis path:
+  `outputs/post_resume_analysis/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z/step-00000750`.
+  The CCA review files are under `geometry/topology`, `geometry/triangles`,
+  `geometry/tetrahedra`, and `simplex`, including Hochster Betti rows, Taylor
+  ranks, symbolic resolution certificates, CCA audits, and CCA simplex/
+  tetrahedron plots.
+
+Historical `oai-advanced` R52 OpenAI Parameter-Golf recovery status:
 
 - Primary BPB run:
   `toricgt_seq4096_warmdown_r52_20260604T125517Z`.
@@ -715,7 +756,7 @@ training_adjustment_proposal.json
 training_adjustment_proposal.md
 ```
 
-The current readout is not yet a solved <1.2 BPB checkpoint. R52 improved the
+The historical R52 readout was not yet a solved <1.2 BPB checkpoint. R52 improved the
 best validation BPB to `1.2198` at step 3500 and the BPB-transfer proposal
 projects the target near step `3886.71875`, before the step-4000 gate. The
 step-3500 controller classifies the run as `pre_threshold_primary_bpb_clean`: primary
@@ -1412,27 +1453,32 @@ Recent nested `amelie-iska/parameter-golf` implementation commits:
 
 Active live training:
 
-- Primary BPB recovery: `toricgt_seq4096_warmdown_r52_20260604T125517Z`.
-  It was launched from the R20 step-3000 checkpoint after the controller
-  indicated a BPB-clean warmdown should be preferred over adding structural
-  losses before the threshold artifact. R52 step 3250 reached validation/OpenAI
-  BPB `1.2290`, and R52 step 3500 reached validation/OpenAI BPB `1.2198`,
-  target gap `0.0198`, and a controller-projected target around step
-  `3886.71875`, so it is currently on track but still not solved. W&B reports
-  `trainer/step`, `train/bpb`, `val/bpb`, `openai_parameter_golf/bpb`,
-  `bpb/best`, `bpb/gap_to_target`, optimizer hyperparameters, structural
-  recapture diagnostics, train-to-validation transfer diagnostics, and
-  BPB-transfer controller diagnostics.
-- Current best completed BPB checkpoint: R52 step 3500,
-  `toricgt_seq4096_warmdown_r52_20260604T125517Z_step_003500.pt`,
-  validation/OpenAI BPB `1.2198`. The <1.2 threshold artifact is not yet
-  preserved.
-- Advanced reasoning/memory transfer:
-  `toricgt-graphcg-slepian-adaptive-step0-20260603T214528Z`.
-  W&B confirms `trainer/step`, `train/bpb`, phase index, GraphCG weight, and
-  Slepian/Pollak leakage are reporting.
+- Primary BPB/advanced step-0 run:
+  `toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z`.
+  It starts from scratch with PolarQuant enabled by default and ramped, plus
+  medium-conservative GraphCG, toric/tropical, Slepian/Pollak, Koszul/BGG,
+  analogical, and combinatorial CCA/DG/Taylor topology losses active from step
+  0.  The active gate targets `<1.09` BPB by step 10K and allows the full run to
+  continue if validation/OpenAI BPB is below `1.17` by step 10K.
+- W&B confirms the current run is reporting primary BPB, train BPB, validation
+  BPB, advanced loss families, nonfinite guards, PolarQuant telemetry, artifact
+  size telemetry, and controller diagnostics:
+  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z>.
+- Current best completed raw BPB checkpoint: the 20K continuation
+  `toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_step_020000.pt`,
+  with train loss `1.9289`, validation loss `1.9731`, train BPB `1.1332`, and
+  validation/OpenAI BPB `1.1685778760`.  Its compact artifact remains below
+  the 16MB Parameter-Golf cap.
+- Current reviewable CCA and symbolic-resolution outputs:
+  `outputs/post_resume_analysis/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z/step-00000750`.
+  Review `geometry/topology` for CCA audits, exact symbolic resolution
+  certificates, Hochster Betti rows, Taylor multidegree/rank CSVs, and
+  resolution-complex plots; review `geometry/triangles`,
+  `geometry/tetrahedra`, and `simplex` for the CCA control triangle and 3D
+  tetrahedron/simplex plots.
 
 The active full 30M-class graph-model training recipe remains documented above,
-but the current priority is the OpenAI Parameter-Golf BPB gate followed by the
-advanced graph-of-thought, graph-memory, analogy, topology, toric, BGG,
-Koszul, Slepian/Pollak, and complexity phases.
+but the immediate priority is the advanced Seq4096 Parameter-Golf run to push
+BPB below `1.09` while preserving the compact artifact cap, followed by the
+full graph-of-thought, graph-memory, analogy, topology, toric, BGG, Koszul,
+Slepian/Pollak, and complexity phases.

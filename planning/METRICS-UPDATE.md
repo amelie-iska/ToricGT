@@ -1314,3 +1314,110 @@ Memory phase contract:
   loss;
 - memory datasets and retrieval libraries must be built only from training data,
   never from held-out OpenAI validation bytes.
+
+## 2026-06-05 Full-run metric audit and current step-0 advanced policy
+
+Completed run audited:
+`toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z`.
+
+Current run launched from step 0:
+`toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z`.
+
+### What happened in the 20K continuation
+
+- The 20K continuation preserved the low-BPB basin from the 4K checkpoint and
+  improved native validation/OpenAI BPB from the 4K value `1.2084838045` to
+  `1.1685778760`.
+- W&B export state is `crashed`, but the metric-history audit found
+  `0` nonfinite/string-NaN metric families.  The crash label is therefore not
+  evidence of a NaN training run; treat it as a process/reporting termination
+  after useful metrics had already been written unless later log evidence says
+  otherwise.
+- Main metric behavior:
+
+  | family | behavior | interpretation |
+  |---|---|---|
+  | train BPB/loss | `train/bpb` median `1.21404 -> 1.1581`; `train/loss` median `2.05377 -> 1.95644` | Desired compression improvement, but late slope was shallow. |
+  | validation BPB/loss | `val/bpb` median `1.2258 -> 1.17812`; `val/loss` median `2.0203 -> 1.98544` | Desired improvement, below 1.2 and suitable as the preserved competition basin. |
+  | GraphCG/Koszul | `advanced/graphcg_loss` and `advanced/koszul_bgg_loss` increased late | Do not simply raise these weights in a near-threshold BPB run; use micro weights or controller-gated schedules. |
+  | toric/tropical | `advanced/toric_tropical_loss` decreased about 10.6% | This family transferred cleanly enough to keep active at small scale. |
+  | Slepian/Pollak and analogy | nearly flat | Keep as diagnostics or very small regularizers until BPB margin is secured. |
+  | artifact size | compact artifact below 16MB with narrow margin | Do not grow exported parameters unless PolarQuant/export compression proves the counted artifact remains below cap. |
+
+### Why the next run changed
+
+The 20K continuation showed that standard BPB training can reach `1.1686`, but
+late improvement slowed and the advanced families were not all aligned with
+compression.  The next experiment therefore starts from step 0 rather than step
+20K, keeps primary CE/BPB dominant, and introduces advanced families through a
+long warmup and a strict CE-ratio cap:
+
+```text
+POLARQUANT_KV_BITS=8
+POLARQUANT_TRAIN=1
+POLARQUANT_TRAIN_START_STEP=0
+POLARQUANT_TRAIN_WARMUP_STEPS=512
+ADVANCED_LOSS_EVERY=16
+ADVANCED_LOSS_WARMUP_STEPS=20000
+ADVANCED_LOSS_MAX_CE_RATIO=0.0000025
+ADVANCED_LOSS_SCALE=0.000075
+GRAPHCG_LOSS_WEIGHT=0.00025
+TORIC_TROPICAL_LOSS_WEIGHT=0.000125
+SLEPIAN_LOSS_WEIGHT=0.00025
+KOSZUL_BGG_LOSS_WEIGHT=0.00005
+ANALOGY_LOSS_WEIGHT=0.000001
+ADVANCED_LOSS_SAMPLE_TOKENS=48
+TORIC_TROPICAL_FAN_BINS=8
+```
+
+The run also lowered early optimization pressure relative to the failed
+step-0 NaN branch: tied embedding LR `0.014`, matrix/scalar LR `0.009`,
+bigram-bias LR `0.004`, gradient clipping `0.12`, PolarQuant perturbation
+warmup, and nonfinite-update skips before optimizer state mutation.
+
+### Current step-0 run metric behavior
+
+Audit output:
+`outputs/metric_audits/toricgt_advdg_stable_step0_polar_seq4096_current_stats`.
+
+Latest live analysis output:
+`outputs/post_resume_analysis/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z/step-00000750`.
+
+- W&B state: `running`.
+- Last W&B history step in the audit: `862`.
+- Nonfinite/string-NaN metric families: `0`.
+- Validation/OpenAI BPB: `1.6041 -> 1.45475` in the early audit window.
+- Train BPB: large initial collapse, with later train BPB around the
+  `1.33-1.40` band by steps 840-930 in the live log.
+- Step 750 validation/OpenAI BPB: `1.3916`.
+- `00_primary/toric_cca_topology_loss`: `0.850269 -> 0.796494`, desired.
+- `advanced/graphcg_loss`: `0.093823 -> 0.035743`, desired but still noisy.
+- `advanced/koszul_bgg_loss`: `153.681 -> 81.471`, desired.
+- `advanced/toric_tropical_loss`: `0.081915 -> 0.061779`, desired.
+- `advanced/slepian_pollak_loss`: `0.831869 -> 0.834602`, nearly flat/slightly
+  adverse, so do not raise Slepian weight before the 10K gate.
+- CCA submetrics are mixed: the primary CCA loss improved, while the
+  `08_toric_tropical_bgg/advanced/toric_cca_topology_loss` alias rose in the
+  sparse W&B window.  Interpretation: keep the current micro weight and inspect
+  the exact CCA analysis artifacts before increasing CCA scale.
+
+### Current decision
+
+Do not interrupt the current run while it is finite and descending.  The active
+gate already implements the requested policy: target `<1.09` BPB by step 10K,
+continue if below `1.17` by step 10K, and stop/restart only if the gate fails.
+
+If the 10K gate fails or the next validation checks show clear stagnation, the
+recommended restart path is:
+
+1. Resume from the best finite checkpoint, not the failed NaN branch.
+2. Keep PolarQuant on, but keep the 512-step perturbation warmup or lengthen it
+   if nonfinite skips appear.
+3. Keep GraphCG, toric/tropical, Koszul/BGG, and CCA active, but raise
+   frequency before raw weight.
+4. Do not raise Slepian/Pollak until its loss and leakage move in the desired
+   direction with BPB.
+5. Preserve the exact symbolic CCA/DG/Taylor sidecar artifacts and compare
+   Hochster Betti, Taylor rank, Buchsbaum-Eisenbud, Fitting-rank, and
+   Stanley-Reisner diagnostics against BPB movement before making weight
+   increases.
