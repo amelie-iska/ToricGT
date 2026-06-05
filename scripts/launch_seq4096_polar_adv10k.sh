@@ -236,6 +236,6 @@ analysis root: $OUTPUT_ROOT
 gate state:    $STATE_PATH
 target BPB:    $TARGET_BPB
 continue if:   best <= $CONTINUE_THRESHOLD_BPB by trainer step $GATE_STEP
-advanced:      start_step=0 every=8 warmup=20000 min_best_val_bpb=0 max_ce_ratio=0.00001 grad_clip=0.25
+advanced:      start_step=0 every=16 warmup=20000 min_best_val_bpb=1.17 max_ce_ratio=0.000005 grad_clip=0.22
 polarquant:    kv_bits=8 train=1 train_start_step=0 train_warmup_steps=0 train_sample_tokens=16
 EOF
