@@ -131,6 +131,11 @@ def any_bad(stats_by_name: dict[str, dict[str, Any]], *names: str) -> bool:
     return any(metric_category(stats_by_name, name) == "not_as_desired" for name in names)
 
 
+def max_pressure(*values: float) -> float:
+    finite_values = [value for value in values if math.isfinite(value)]
+    return max(finite_values) if finite_values else 0.0
+
+
 def json_value(data: dict[str, Any], *keys: str, default: float = 0.0) -> float:
     for key in keys:
         if key in data:
@@ -189,17 +194,40 @@ def compute_bpb_gate(
     target_bpb: float,
     gate_step: int,
 ) -> dict[str, Any]:
-    train_bpb_last = metric_value(stats_by_name, ("train/bpb", "bpb/train", "fineweb/train_bpb"), default=float("nan"))
-    val_bpb_last = metric_value(stats_by_name, ("val/bpb", "bpb/val", "fineweb/val_bpb"), default=float("nan"))
+    train_bpb_last = metric_value(
+        stats_by_name,
+        ("00_primary/train_bpb", "02_train/bpb", "train/bpb", "bpb/train", "fineweb/train_bpb"),
+        default=float("nan"),
+    )
+    val_bpb_last = metric_value(
+        stats_by_name,
+        (
+            "00_primary/oai_bpb",
+            "00_primary/validation_bpb",
+            "03_validation/bpb",
+            "val/bpb",
+            "bpb/val",
+            "fineweb/val_bpb",
+        ),
+        default=float("nan"),
+    )
     train_bpb_best = metric_value(
         stats_by_name,
-        ("train/bpb", "bpb/train", "fineweb/train_bpb"),
+        ("00_primary/train_bpb", "02_train/bpb", "train/bpb", "bpb/train", "fineweb/train_bpb"),
         key="best_value",
         default=float("nan"),
     )
     val_bpb_best = metric_value(
         stats_by_name,
-        ("val/bpb", "bpb/val", "fineweb/best_val_bpb"),
+        (
+            "00_primary/oai_best_bpb",
+            "00_primary/oai_bpb",
+            "00_primary/validation_bpb",
+            "03_validation/bpb",
+            "val/bpb",
+            "bpb/val",
+            "fineweb/best_val_bpb",
+        ),
         key="best_value",
         default=float("nan"),
     )
@@ -228,7 +256,14 @@ def compute_bpb_gate(
     if not math.isfinite(val_slope_per_100):
         val_slope_per_1k = metric_value(
             stats_by_name,
-            ("val/bpb", "bpb/val", "fineweb/val_bpb"),
+            (
+                "00_primary/oai_bpb",
+                "00_primary/validation_bpb",
+                "03_validation/bpb",
+                "val/bpb",
+                "bpb/val",
+                "fineweb/val_bpb",
+            ),
             key="recent_slope_per_1k",
             default=float("nan"),
         )
@@ -243,6 +278,12 @@ def compute_bpb_gate(
     projected_target_step = finite_or_nan(bpb_report.get("projected_target_step_from_val"))
     if not math.isfinite(projected_target_step) and recent_drop_per_100 > 0 and math.isfinite(gap):
         projected_target_step = float(step) + max(0.0, gap) / recent_drop_per_100 * 100.0
+    val_velocity_pairs = finite_or_nan(bpb_report.get("val_velocity_pairs"))
+    projection_reliable = (
+        math.isfinite(val_velocity_pairs)
+        and val_velocity_pairs >= 3.0
+        and int(step) >= min(750, int(gate_step))
+    ) or int(step) >= max(750, int(gate_step) // 4)
     velocity_shortfall = (
         max(0.0, required_drop_per_100 - recent_drop_per_100)
         if math.isfinite(required_drop_per_100)
@@ -250,11 +291,17 @@ def compute_bpb_gate(
     )
     target_reached = math.isfinite(best_gate_bpb) and best_gate_bpb <= float(target_bpb)
     on_track = target_reached or (
+        projection_reliable
+        and
         math.isfinite(projected_target_step)
         and projected_target_step <= float(gate_step)
         and math.isfinite(current_primary_bpb)
     )
-    warmup_unestablished = step < 500 and not math.isfinite(projected_target_step) and not positive_finite(oai_bpb)
+    warmup_unestablished = (
+        not target_reached
+        and int(step) < min(750, int(gate_step))
+        and not projection_reliable
+    )
     if target_reached:
         status = "target_reached"
     elif warmup_unestablished:
@@ -283,6 +330,8 @@ def compute_bpb_gate(
         "required_drop_per_100_steps": required_drop_per_100,
         "velocity_shortfall_per_100_steps": velocity_shortfall,
         "projected_target_step": projected_target_step,
+        "projection_reliable": projection_reliable,
+        "val_velocity_pairs": val_velocity_pairs,
         "remaining_steps_to_gate": remaining_steps,
         "target_reached": target_reached,
         "on_track": on_track,
@@ -295,39 +344,67 @@ def compute_structural_pressures(
     geometry: dict[str, Any],
     fineweb_diag: dict[str, Any],
 ) -> dict[str, Any]:
-    graphcg_loss = metric_value(stats_by_name, ("train/graphcg_loss",), default=0.0)
+    graphcg_loss = metric_value(stats_by_name, ("06_graphcg/advanced/graphcg_loss", "train/graphcg_loss"), default=0.0)
     graphcg_cov = metric_value(stats_by_name, ("train/graphcg_covariance_loss",), default=0.0)
     graphcg_basis = metric_value(stats_by_name, ("graphcg/basis_loss", "train/analogy_basis_loss"), default=0.0)
-    graphcg_coherence = metric_value(stats_by_name, ("train/graphcg_basis_coherence",), default=0.0)
-    graphcg_pressure = max(
+    graphcg_coherence = metric_value(
+        stats_by_name,
+        ("06_graphcg/advanced/graphcg_offdiag_coherence", "train/graphcg_basis_coherence"),
+        default=0.0,
+    )
+    graphcg_pressure = max_pressure(
         bounded(graphcg_loss, 1.0),
         bounded(graphcg_cov, 1.0),
         bounded(graphcg_basis, 1.0),
         bounded(graphcg_coherence, 1.0),
-        0.65 if any_bad(stats_by_name, "train/graphcg_loss", "train/graphcg_covariance_loss") else 0.0,
+        0.65
+        if any_bad(stats_by_name, "06_graphcg/advanced/graphcg_loss", "train/graphcg_loss", "train/graphcg_covariance_loss")
+        else 0.0,
     )
 
-    slepian_leakage = max(
-        metric_value(stats_by_name, ("slepian_pollak/leakage", "toric/slepian_leakage"), default=0.0),
+    slepian_leakage = max_pressure(
+        metric_value(
+            stats_by_name,
+            ("08_toric_tropical_bgg/advanced/slepian_leakage", "slepian_pollak/leakage", "toric/slepian_leakage"),
+            default=0.0,
+        ),
         json_value(fineweb_diag, "toric/slepian_leakage", "diagnostics/latest/slepian_leakage", default=0.0),
         json_value(geometry, "mean_toric_slepian_leakage", default=0.0),
     )
     slepian_concentration = first_positive(
-        metric_value(stats_by_name, ("slepian_pollak/concentration", "toric/slepian_concentration"), default=0.0),
+        metric_value(
+            stats_by_name,
+            (
+                "08_toric_tropical_bgg/advanced/slepian_concentration",
+                "slepian_pollak/concentration",
+                "toric/slepian_concentration",
+            ),
+            default=0.0,
+        ),
         json_value(fineweb_diag, "toric/slepian_concentration", "diagnostics/latest/slepian_concentration", default=0.0),
         json_value(geometry, "mean_toric_slepian_concentration", default=0.0),
     )
-    slepian_pressure = max(bounded(slepian_leakage, 1.0), low_pressure(slepian_concentration, 0.72, 0.72))
+    slepian_pressure = max_pressure(bounded(slepian_leakage, 1.0), low_pressure(slepian_concentration, 0.72, 0.72))
 
-    topology_loss = max(
-        metric_value(stats_by_name, ("topology/step_loss", "topology/lattice_loss", "train/analogy_step_topology_loss"), default=0.0),
+    topology_loss = max_pressure(
+        metric_value(
+            stats_by_name,
+            (
+                "08_toric_tropical_bgg/advanced/toric_cca_topology_loss_component",
+                "topology/step_loss",
+                "topology/lattice_loss",
+                "train/analogy_step_topology_loss",
+            ),
+            default=0.0,
+        ),
         json_value(fineweb_diag, "topology/topology_loss", "diagnostics/latest/topology_loss", default=0.0),
     )
-    directed_loss = max(
+    directed_loss = max_pressure(
         metric_value(stats_by_name, ("topology/step_directed_loss", "topology/directed_loss"), default=0.0),
+        json_value(fineweb_diag, "topology/directed_topology_loss", "diagnostics/latest/directed_topology_loss", default=0.0),
         json_value(geometry, "mean_topology_directed_map_loss", default=0.0),
     )
-    hdbscan_noise = max(
+    hdbscan_noise = max_pressure(
         metric_value(stats_by_name, ("topology/step_hdbscan_noise_fraction",), default=0.0),
         json_value(geometry, "mean_topology_hdbscan_noise_fraction", default=0.0),
     )
@@ -336,12 +413,12 @@ def compute_structural_pressures(
         json_value(geometry, "mean_topology_hdbscan_stability", default=0.0),
     )
     cycle_flux = abs(
-        max(
+        max_pressure(
             metric_value(stats_by_name, ("topology/step_directed_cycle_flux",), default=0.0),
             json_value(geometry, "mean_topology_directed_cycle_flux", default=0.0),
         )
     )
-    topology_pressure = max(
+    topology_pressure = max_pressure(
         bounded(topology_loss, 1.2),
         bounded(directed_loss, 0.30),
         bounded(hdbscan_noise, 0.50),
@@ -354,55 +431,115 @@ def compute_structural_pressures(
         json_value(geometry, "mean_toric_geometry_active_face_margin", default=0.0),
     )
     toric_shadow_margin = json_value(geometry, "mean_toric_shadow_mean_margin", default=0.0)
-    toric_bend = max(
+    toric_bend = max_pressure(
         metric_value(stats_by_name, ("toric/bend_magnitude", "train/toric_bend_magnitude"), default=0.0),
         json_value(geometry, "mean_toric_shadow_mean_bend", default=0.0),
     )
-    toric_binom = max(
-        metric_value(stats_by_name, ("toric/binomial_residual", "train/toric_binomial_residual"), default=0.0),
+    toric_binom = max_pressure(
+        metric_value(
+            stats_by_name,
+            ("08_toric_tropical_bgg/advanced/toric_cca_binomial_residual", "toric/binomial_residual", "train/toric_binomial_residual"),
+            default=0.0,
+        ),
+        json_value(fineweb_diag, "toric/binomial_residual", "diagnostics/latest/toric_binomial_residual", default=0.0),
         json_value(geometry, "mean_toric_geometry_binomial_residual", default=0.0),
     )
-    toric_pressure = max(
+    toric_pressure = max_pressure(
         low_pressure(toric_margin, 0.04, 2.0),
         low_pressure(toric_shadow_margin, 0.04, 0.04),
         bounded(toric_bend, 2.0),
         bounded(toric_binom, 1.0),
     )
 
-    bgg_d2 = max(
+    cca_topology_loss = metric_value(
+        stats_by_name,
+        ("00_primary/toric_cca_topology_loss", "08_toric_tropical_bgg/advanced/toric_cca_topology_loss"),
+        default=0.0,
+    )
+    cca_binomial = metric_value(
+        stats_by_name,
+        ("08_toric_tropical_bgg/advanced/toric_cca_binomial_residual",),
+        default=0.0,
+    )
+    cca_nonface = metric_value(
+        stats_by_name,
+        ("08_toric_tropical_bgg/advanced/toric_cca_stanley_reisner_nonface_mass",),
+        default=0.0,
+    )
+    cca_betti1 = metric_value(
+        stats_by_name,
+        ("08_toric_tropical_bgg/advanced/toric_cca_betti1_proxy",),
+        default=0.0,
+    )
+    cca_coverage = metric_value(
+        stats_by_name,
+        ("08_toric_tropical_bgg/advanced/toric_cca_chamber_coverage",),
+        default=float("nan"),
+    )
+    cca_pressure = max_pressure(
+        bounded(cca_topology_loss, 1.0),
+        bounded(cca_binomial, 4.0),
+        bounded(cca_nonface, 0.08),
+        bounded(cca_betti1, 24.0),
+        low_pressure(cca_coverage, 0.90, 0.90),
+    )
+
+    bgg_d2 = max_pressure(
         metric_value(stats_by_name, ("bgg_category_o/d2_residual", "category_o/d2_residual"), default=0.0),
         json_value(fineweb_diag, "bgg_category_o/d2_residual", "diagnostics/latest/bgg_d2_residual", default=0.0),
     )
-    bgg_leak = max(
-        metric_value(stats_by_name, ("bgg_category_o/standard_leakage", "category_o/standard_leakage"), default=0.0),
+    bgg_leak = max_pressure(
+        metric_value(
+            stats_by_name,
+            ("08_toric_tropical_bgg/advanced/bgg_standard_leakage", "bgg_category_o/standard_leakage", "category_o/standard_leakage"),
+            default=0.0,
+        ),
         json_value(fineweb_diag, "bgg_category_o/standard_leakage", "diagnostics/latest/bgg_standard_leakage", default=0.0),
     )
-    koszul_loss = metric_value(stats_by_name, ("koszul_persistence/loss", "train/koszul_persistence_loss"), default=0.0)
-    koszul_exact = metric_value(stats_by_name, ("koszul_persistence/exactness_residual", "train/koszul_exactness_residual"), default=0.0)
-    bgg_koszul_pressure = max(bounded(bgg_d2, 0.10), bounded(bgg_leak, 1.0), bounded(koszul_loss, 1.0), bounded(koszul_exact, 0.25))
+    koszul_loss = metric_value(
+        stats_by_name,
+        ("08_toric_tropical_bgg/advanced/koszul_bgg_loss", "koszul_persistence/loss", "train/koszul_persistence_loss"),
+        default=0.0,
+    )
+    koszul_exact = max_pressure(
+        metric_value(stats_by_name, ("koszul_persistence/exactness_residual", "train/koszul_exactness_residual"), default=0.0),
+        json_value(fineweb_diag, "topology/affine_toric/exactness_residual", "diagnostics/latest/koszul_exactness_residual", default=0.0),
+    )
+    bgg_koszul_pressure = max_pressure(
+        bounded(bgg_d2, 0.10),
+        bounded(bgg_leak, 1.0),
+        bounded(koszul_loss, 200.0),
+        bounded(koszul_exact, 0.25),
+    )
 
-    memory_loss = metric_value(stats_by_name, ("train/trajectory_memory_loss",), default=0.0)
-    memory_recall = metric_value(stats_by_name, ("train/trajectory_memory_recall1",), default=0.0)
-    memory_entropy = metric_value(stats_by_name, ("train/trajectory_memory_entropy",), default=0.0)
-    trajectory_flow = metric_value(stats_by_name, ("train/trajectory_flow_loss",), default=0.0)
-    memory_pressure = max(
+    memory_loss = metric_value(stats_by_name, ("train/trajectory_memory_loss",), default=float("nan"))
+    memory_recall = metric_value(stats_by_name, ("train/trajectory_memory_recall1",), default=float("nan"))
+    memory_entropy = metric_value(stats_by_name, ("train/trajectory_memory_entropy",), default=float("nan"))
+    trajectory_flow = metric_value(stats_by_name, ("train/trajectory_flow_loss",), default=float("nan"))
+    memory_pressure = max_pressure(
         bounded(memory_loss, 1.0),
         low_pressure(memory_recall, 0.25, 0.25),
         low_pressure(memory_entropy, 0.50, 0.50),
         bounded(trajectory_flow, 1.0),
     )
 
-    analogy_map = metric_value(stats_by_name, ("topology/step_analogical_map_loss", "train/analogy_step_analogical_map_loss"), default=0.0)
-    analogy_directed_map = metric_value(stats_by_name, ("topology/step_directed_map_loss", "train/analogy_step_directed_map_loss"), default=0.0)
-    contrastive = metric_value(stats_by_name, ("train/contrastive_loss",), default=0.0)
-    analogy_pressure = max(
+    analogy_map = metric_value(
+        stats_by_name,
+        ("07_topology_geometry/advanced/analogy_loss", "topology/step_analogical_map_loss", "train/analogy_step_analogical_map_loss"),
+        default=float("nan"),
+    )
+    analogy_directed_map = metric_value(stats_by_name, ("topology/step_directed_map_loss", "train/analogy_step_directed_map_loss"), default=float("nan"))
+    contrastive = metric_value(stats_by_name, ("train/contrastive_loss",), default=float("nan"))
+    analogy_pressure = max_pressure(
         bounded(analogy_map, 0.30),
         bounded(analogy_directed_map, 0.30),
         bounded(contrastive, 1.0),
-        0.65 if any_bad(stats_by_name, "train/analogy_step_analogical_map_loss", "topology/step_analogical_map_loss") else 0.0,
+        0.65
+        if any_bad(stats_by_name, "07_topology_geometry/advanced/analogy_loss", "train/analogy_step_analogical_map_loss", "topology/step_analogical_map_loss")
+        else 0.0,
     )
 
-    complexity_ncd = max(
+    complexity_ncd = max_pressure(
         json_value(fineweb_diag, "complexity/recent_full_log_ncd_lzma", "diagnostics/latest/complexity_recent_full_log_ncd_lzma", default=0.0),
         metric_value(stats_by_name, ("complexity/train/prediction_target_ncd_lzma_mean", "complexity/val/prediction_target_ncd_lzma_mean"), default=0.0),
     )
@@ -413,6 +550,7 @@ def compute_structural_pressures(
         "slepian_pollak": slepian_pressure,
         "directed_topology": topology_pressure,
         "toric_tropical": toric_pressure,
+        "combinatorial_cca_topology": cca_pressure,
         "bgg_koszul": bgg_koszul_pressure,
         "trajectory_memory": memory_pressure,
         "analogical_reasoning": analogy_pressure,
@@ -426,9 +564,10 @@ def compute_structural_pressures(
             + 0.16 * slepian_pressure
             + 0.18 * topology_pressure
             + 0.16 * toric_pressure
-            + 0.12 * bgg_koszul_pressure
-            + 0.08 * memory_pressure
-            + 0.08 * analogy_pressure
+            + 0.12 * cca_pressure
+            + 0.10 * bgg_koszul_pressure
+            + 0.04 * memory_pressure
+            + 0.04 * analogy_pressure
             + 0.06 * complexity_pressure,
         ),
     )
@@ -452,6 +591,11 @@ def compute_structural_pressures(
             "toric_shadow_margin": toric_shadow_margin,
             "toric_bend": toric_bend,
             "toric_binomial_residual": toric_binom,
+            "toric_cca_topology_loss": cca_topology_loss,
+            "toric_cca_binomial_residual": cca_binomial,
+            "toric_cca_stanley_reisner_nonface_mass": cca_nonface,
+            "toric_cca_betti1_proxy": cca_betti1,
+            "toric_cca_chamber_coverage": cca_coverage,
             "bgg_d2_residual": bgg_d2,
             "bgg_standard_leakage": bgg_leak,
             "koszul_loss": koszul_loss,
@@ -600,6 +744,8 @@ def main() -> None:
     bpb_report = load_json(root / "bpb" / "bpb_acceleration_report.json")
     fineweb_diag = load_json(root / "geometry" / "fineweb_curve_diagnostic_payload.json")
     oai = load_json(root / "oai_competition" / "summary.json")
+    if not oai:
+        oai = load_json(root / "oai_competition" / "seq4096_summary.json")
 
     bpb_gate = compute_bpb_gate(
         stats_by_name=stats_by_name,
