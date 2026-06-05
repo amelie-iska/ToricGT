@@ -12,7 +12,7 @@ PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
-RUN_ID="${RUN_ID:-toricgt_advcca_step0_polar_seq4096_${STAMP}}"
+RUN_ID="${RUN_ID:-toricgt_advdg_step0_polar_seq4096_${STAMP}}"
 TRAIN_TMUX="${TRAIN_TMUX:-${RUN_ID}_train}"
 ANALYSIS_TMUX="${ANALYSIS_TMUX:-${RUN_ID}_analysis}"
 MIRROR_TMUX="${MIRROR_TMUX:-${RUN_ID}_mirror}"
@@ -237,6 +237,6 @@ gate state:    $STATE_PATH
 target BPB:    $TARGET_BPB
 continue if:   best <= $CONTINUE_THRESHOLD_BPB by trainer step $GATE_STEP
 advanced:      start_step=0 every=16 warmup=20000 min_best_val_bpb=0 max_ce_ratio=0.000005 grad_clip=0.22
-cca/topology:  train-time CCA/topology active from step 0 with koszul_bgg=0.0001
+cca/topology:  train-time exact CCA/DG/Taylor topology active from step 0 with koszul_bgg=0.0001
 polarquant:    kv_bits=8 train=1 train_start_step=0 train_warmup_steps=0 train_sample_tokens=16
 EOF
