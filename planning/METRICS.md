@@ -1,5 +1,126 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-05 Stableadv Step-4750 BPB Loop Review
+
+Run:
+
+```text
+analyzed run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+analyzed checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_step_004750.pt
+analysis: outputs/post_resume_analysis/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/step-00004750
+loop: parameter_golf_bpb_target, iteration 2 / 100, target BPB <= 1.2
+decision: CONTINUE
+```
+
+Status:
+
+```text
+loop primary BPB: openai_parameter_golf/bpb = 1.2275301955193767 at step 4750
+loop target gap from current primary BPB: 0.027530195519376743
+best loop BPB: 1.2275301955193767 at step 4750
+best W&B FineWeb/openai_parameter_golf BPB in analyzed history: 1.2084842981821384 at step 4000
+best validation target gap: 0.008484298182138472
+step-4750 validation BPB/loss: 1.2275 / 2.0726
+step-4750 train BPB/loss: 1.2185 / 2.0834
+step-4500 validation BPB/loss: 1.2323 / 2.0807
+step-4550 mirrored validation BPB: 1.2366
+step-4550 -> 4750 validation BPB delta: -0.009069804, about -0.004534902 BPB/100 steps
+metric categories: desired=46, weak_or_slow=20, undesirable=22
+adjustment proposal: restart_from_best_checkpoint_with_damped_structural_sidecars, treated as slowness evidence only
+```
+
+Metric and plot categorization:
+
+- Desired: validation BPB recovered from the 4500--4550 shelf into a new loop
+  best at step 4750; the current FineWeb/openai_parameter_golf signal is
+  official-style and remains the competition gate; train BPB at the validation
+  point is close to the validation BPB rather than an isolated low-train
+  trigger; GraphCG basis plots are visually near diagonal for embedding
+  records; Koszul/BGG exactness proxies remain internally coherent; topology
+  and noncommutative heatmaps are active but bounded; simplex, tetrahedron,
+  phase, trajectory, and energy plots were generated and are usable.
+- Desired but too weak or slow: the current primary BPB is still `0.0275`
+  above target and the best validation BPB is still `0.0085` above target;
+  the recent validation drop is meaningful but far slower than the stale 4K
+  gate velocity; train loss/BPB remain noisy; GraphCG condition numbers are
+  very large despite diagonal-looking bases; MST efficiency and trajectory
+  smoothness are weak outside R0/R1; Slepian concentration is weak in R2/R3;
+  HDBSCAN stability is only moderate; direct curated hard-reasoning BPB,
+  GFlowNet branch-replay, test-time-scaling, and Hessian trace/sharpness
+  series are absent.
+- Undesirable: validation BPB rebounded sharply after the step-4000 low; low
+  train-BPB triggers around 4154--4526 did not transfer into target-level
+  validation BPB; recent log NCD is high; toric active-face margin is negative;
+  chamber crossings and plateau pressure are frequent; analogical transport
+  accuracy is zero; BGG standard leakage, Gale-dual consistency, and signature
+  smoothness remain guarded rather than promotable.
+
+Plot review:
+
+- `core_metric_timeseries.png` shows the same statistical story as the W&B
+  export: a sharp post-4000 validation rebound followed by a slower descent,
+  with step 4750 better than 4500 and 4550 but not target-satisfying.
+- The simplex and `toric_gfn_bpb` tetrahedron contact sheets show compact
+  middle-region records, not a clean low-BPB/high-MST/high-GraphCG basin.
+- 3D token-embedding trajectories are nonblank and noncollapsed but jagged;
+  energy landscapes show a narrow low-energy basin with many high-energy
+  states, so sharpness remains a risk even without a Hessian probe.
+- Ramachandran-style phase/energy and tropical chamber plots show broad phase
+  motion, frequent active-face jumps, and high plateau pressure.  These
+  support keeping toric/tropical diagnostics active but do not justify raising
+  their scalar weights while BPB is still the primary deficit.
+- GraphCG heatmaps are the cleanest structural plots, but the large condition
+  metrics mean they should stay as sidecar evidence rather than become a new
+  primary objective.
+
+Mathematical/statistical interpretation:
+
+- The BPB gate is improving but unsatisfied.  The validation finite
+  differences are mixed:
+  `4000 -> 4154: +0.027758269`, `4154 -> 4196: +0.000767058`,
+  `4196 -> 4224: -0.000380893`, `4224 -> 4250: -0.000313601`,
+  `4250 -> 4400: +0.000669166`, `4400 -> 4500: -0.004684864`,
+  `4500 -> 4526: +0.000429751`, `4526 -> 4550: +0.003855112`,
+  `4550 -> 4750: -0.009069804`.  The final observed derivative is negative,
+  and no Hessian/sharpness trace was available, so the data do not establish a
+  floor-bounce basin requiring rollback.
+- The proposal script correctly flags the run as off-track for a strict 4K
+  gate and too slow for the active `1.2` target, but its restart proposal leans
+  on the missed gate and low train-BPB evidence.  Because validation has just
+  improved to the loop best without a new positive derivative, the proposal is
+  evidence of slowness, not an automatic authority.
+- The two-gate rule still holds.  FineWeb/openai_parameter_golf BPB remains the
+  competition calibration/evaluation gate.  Hard-reasoning, GFlowNet, GraphCG,
+  topology, toric/tropical, memory, BGG, and Kolmogorov diagnostics are the
+  reasoning gate.  In this review the competition gate is close but not met,
+  while the reasoning gate is coherent but guarded, so no objective should be
+  discarded and no scalar should be changed without a cleaner disagreement.
+- A strong FineWeb result after limited FineWeb exposure would be plausible OOD
+  transfer from hard reasoning only with controls against tokenizer convention,
+  n-gram/bigram artifacts, dataset easiness, FineWeb-only training, hard-data
+  zero-shot validation, and matched-budget ablations.  This run has direct
+  FineWeb exposure, so the current BPB should not be overinterpreted as OOD
+  transfer.
+
+Decision and handoff:
+
+```text
+action: CONTINUE
+config/code edits: none
+rollback checkpoint: not selected
+stop sentinel written: no
+training tmux: toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+active observed step while reviewing: at least 4900 / 20000
+training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z.txt
+checkpoint directory: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+W&B URL: https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+next watcher tmux: toricgt_watch_training_analysis_stableadv_5000
+next watcher target: first checkpoint >= 5000
+next watcher mode: CPU fp32, no --pause-training-before-analysis
+next watcher log: logs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z.watch_training_analysis_5000.txt
+loop env: BPB_TARGET=1.2, BPB_MAX_REVIEW_ITERATIONS=100, BPB_LOOP_NAME=parameter_golf_bpb_target
+```
+
 ## 2026-06-05 Stableadv Step-4500 BPB Loop Review
 
 Run:
