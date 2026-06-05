@@ -2822,6 +2822,77 @@ Its homology computes
 \end{equation}
 If $a_1,\ldots,a_r$ behave like clean local parameters for the observed reasoning module, higher Koszul homology should be small or structurally predictable.  If higher homology grows, if Fitting minors jump across adjacent chart cells, or if multigraded Betti mass shifts erratically under graph relabeling, then the model's claimed toric/persistent coordinates are not yet a reliable explanation of the reasoning trajectory.
 
+\subsection{Combinatorial commutative-algebra bridge for training}
+
+The BPB-first implementation uses a smaller version of this theory that can run inside a language-model training step.  Let a sampled hidden window be
+\begin{equation}
+  H=(h_1,\ldots,h_n),\qquad h_i\in\R^d,
+\end{equation}
+and let $A=\{a_1,\ldots,a_m\}\subset \Z^r$ be a fixed small exponent configuration.  The toric monomial map
+\begin{equation}
+  \varphi_A:k[x_1,\ldots,x_m]\to k[t_1^{\pm1},\ldots,t_r^{\pm1}],
+  \qquad \varphi_A(x_i)=t^{a_i},
+\end{equation}
+has toric ideal
+\begin{equation}
+  I_A=\ker\varphi_A=\langle x^u-x^v:Au=Av\rangle.
+\end{equation}
+The training loop does not compute a Groebner basis.  Instead it finds short degree-two shadows
+\begin{equation}
+  a_i+a_j\approx a_k+a_l
+\end{equation}
+and asks chamber logits $z_i(h)$ to satisfy the corresponding binomial relation:
+\begin{equation}
+  \mathcal L_{\mathrm{binom}}
+  =
+  \frac{1}{|\mathcal R|}
+  \sum_{(i,j,k,l)\in\mathcal R}
+  \frac{(z_i+z_j-z_k-z_l)^2}
+       {\frac1m\sum_{q=1}^m z_q^2+\epsilon}.
+\end{equation}
+This is a finite commutative-algebra signal: it regularizes the hidden chart by the low-degree toric ideal relations of the Newton-polytope shadow, but it introduces no trainable parameters and no serialized artifact bytes.
+
+The second finite object is a Stanley--Reisner shadow.  Let $\Delta$ be the cyclic fan complex on the same $m$ chambers.  Its Stanley--Reisner ideal is
+\begin{equation}
+  I_\Delta=\langle x_F=\prod_{i\in F}x_i:F\notin\Delta\rangle.
+\end{equation}
+For soft chamber probabilities
+\begin{equation}
+  p_i(h)=\softmax(z(h)/\tau)_i,
+\end{equation}
+define the chamber coactivation matrix
+\begin{equation}
+  C_{ij}=\frac1n\sum_{t=1}^n p_i(h_t)p_j(h_t).
+\end{equation}
+The differentiable Stanley--Reisner residual is
+\begin{equation}
+  \mathcal L_{\mathrm{SR}}
+  =
+  \frac{1}{|\{(i,j):\{i,j\}\notin\Delta\}|}
+  \sum_{\{i,j\}\notin\Delta} C_{ij}.
+\end{equation}
+It penalizes mutually incompatible fan chambers firing together.  The same chamber graph gives an Euler-characteristic proxy
+\begin{equation}
+  \chi_{\mathrm{proxy}}=f_0-f_1+f_2,
+\end{equation}
+and small Betti proxies from the thresholded one-skeleton.  Exact finite-field homology remains a sidecar audit; the training path keeps only bounded differentiable surrogates.
+
+The implemented train-time bridge combines these terms with the Koszul-persistence and directed-topology losses:
+\begin{equation}
+\begin{split}
+  \mathcal L_{\mathrm{CCA}\text{-}\mathrm{top}}
+  ={}&
+  w_{\mathrm{binom}}\mathcal L_{\mathrm{binom}}
+  +w_{\mathrm{SR}}\mathcal L_{\mathrm{SR}}
+  +w_H(1-H(C))\\
+  &+w_{\mathrm{bal}}\mathcal L_{\mathrm{balance}}
+  +w_\chi|\chi_{\mathrm{proxy}}|/m
+  +w_K\mathcal L_{\mathrm{Koszul}}
+  +w_T\mathcal L_{\mathrm{top}}.
+\end{split}
+\end{equation}
+The corresponding code path is \texttt{src/toricgt/combinatorial\_toric\_metrics.py}.  It returns a differentiable scalar \texttt{toric\_cca\_topology\_loss} and detached diagnostics for the binomial residual, Stanley--Reisner nonface mass, chamber entropy and coverage, fan balance, Euler proxy, Betti proxies, Koszul component, and topology component.  In the Seq4096 Parameter-Golf trainer these signals are routed through the existing advanced auxiliary-loss channel, capped by a small ratio of current cross entropy, and logged under \texttt{advanced/toric\_cca\_*}.  Thus the rigorous algebraic object is present, but the optimizer is not allowed to sacrifice BPB for a beautiful complex.
+
 The corresponding audit metrics are deliberately literal:
 \begin{verbatim}
 toric_affine_chart_id

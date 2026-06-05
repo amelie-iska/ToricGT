@@ -42,9 +42,9 @@ if [[ ! -f "$TRAINER_PATH" ]]; then
   echo "missing trainer: $TRAINER_PATH" >&2
   exit 1
 fi
-if ! grep -q "finite_aux_scalar" "$TRAINER_PATH"; then
-  "$PYTHON" "$REPO_ROOT/scripts/patch_seq4096_advanced_loss_guard.py"     --trainer "$TRAINER_PATH"     --python "$PYTHON"
-fi
+"$PYTHON" "$REPO_ROOT/scripts/patch_seq4096_advanced_loss_guard.py" \
+  --trainer "$TRAINER_PATH" \
+  --python "$PYTHON"
 for session in "$TRAIN_TMUX" "$ANALYSIS_TMUX" "$MIRROR_TMUX" "$DIAG_TMUX" "$GATE_TMUX"; do
   if tmux has-session -t "$session" 2>/dev/null; then
     echo "tmux session already exists: $session" >&2
@@ -99,10 +99,12 @@ TRAIN_CMD=(
   "BIGRAM_BIAS_SCALE=1.0"
   "POLARQUANT_KV_BITS=8"
   "POLARQUANT_TRAIN=1"
-  "POLARQUANT_TRAIN_SAMPLE_TOKENS=32"
+  "POLARQUANT_TRAIN_SAMPLE_TOKENS=16"
   "POLARQUANT_EVAL_SAMPLE_TOKENS=256"
   "POLARQUANT_SEED=271828"
-  "ADVANCED_LOSS_SCALE=0.0005"
+  "POLARQUANT_TRAIN_START_STEP=750"
+  "POLARQUANT_TRAIN_WARMUP_STEPS=1250"
+  "ADVANCED_LOSS_SCALE=0.00025"
   "GRAPHCG_LOSS_WEIGHT=0.0010"
   "TORIC_TROPICAL_LOSS_WEIGHT=0.0005"
   "SLEPIAN_LOSS_WEIGHT=0.0010"
@@ -113,11 +115,11 @@ TRAIN_CMD=(
   "ADVANCED_LOSS_LOG_ONLY=0"
   "ADVANCED_LOSS_START_STEP=0"
   "ADVANCED_LOSS_END_STEP=0"
-  "ADVANCED_LOSS_EVERY=4"
-  "ADVANCED_LOSS_WARMUP_STEPS=10000"
+  "ADVANCED_LOSS_EVERY=8"
+  "ADVANCED_LOSS_WARMUP_STEPS=20000"
   "ADVANCED_LOSS_MIN_BEST_VAL_BPB=0"
-  "ADVANCED_LOSS_MAX_CE_RATIO=0.00002"
-  "GRAD_CLIP_NORM=0.5"
+  "ADVANCED_LOSS_MAX_CE_RATIO=0.00001"
+  "GRAD_CLIP_NORM=0.25"
   "CHECKPOINT_ON_TRAIN_BPB_BELOW=1.06"
   "CHECKPOINT_ON_TRAIN_BPB_COOLDOWN_STEPS=250"
   "CHECKPOINT_ON_TRAIN_BPB_MAX=2"
@@ -234,5 +236,6 @@ analysis root: $OUTPUT_ROOT
 gate state:    $STATE_PATH
 target BPB:    $TARGET_BPB
 continue if:   best <= $CONTINUE_THRESHOLD_BPB by trainer step $GATE_STEP
-advanced:      start_step=0 every=4 warmup=10000 min_best_val_bpb=0 max_ce_ratio=0.00002 grad_clip=0.5
+advanced:      start_step=0 every=8 warmup=20000 min_best_val_bpb=0 max_ce_ratio=0.00001 grad_clip=0.25
+polarquant:    kv_bits=8 train=1 train_start_step=750 train_warmup_steps=1250 train_sample_tokens=16
 EOF

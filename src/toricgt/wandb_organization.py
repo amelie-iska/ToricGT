@@ -236,6 +236,22 @@ def _category_alias(key: str) -> str | None:
             return f"12_optimization/train/{rest}"
         return f"02_train/{rest}"
 
+    if key.startswith("advanced/"):
+        rest = key.split("/", 1)[1]
+        lower = rest.lower()
+        if "graphcg" in lower:
+            return f"06_graphcg/advanced/{rest}"
+        if any(
+            token in lower
+            for token in ("toric", "tropical", "bgg", "category_o", "koszul", "slepian", "pollak", "cca")
+        ):
+            return f"08_toric_tropical_bgg/advanced/{rest}"
+        if any(token in lower for token in ("topology", "hdbscan", "simplex", "trajectory", "analogy")):
+            return f"07_topology_geometry/advanced/{rest}"
+        if any(token in lower for token in ("nonfinite", "clamp", "runtime", "aux")):
+            return f"12_optimization/advanced/{rest}"
+        return f"04_losses/advanced/{rest}"
+
     if key.startswith("complexity/"):
         return f"09_complexity/{key.split('/', 1)[1]}"
     if key.startswith("hessian/"):
@@ -326,6 +342,7 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/graphcg_loss", ("train/graphcg_loss",))
     _add_first(out, payload, "00_primary/toric_bgg_loss", ("train/toric_bgg_loss",))
     _add_first(out, payload, "00_primary/koszul_persistence_loss", ("train/koszul_persistence_loss",))
+    _add_first(out, payload, "00_primary/toric_cca_topology_loss", ("advanced/toric_cca_topology_loss",))
     _add_first(out, payload, "00_primary/slepian_pollak_loss", ("train/slepian_pollak_loss",))
     _add_first(out, payload, "00_primary/trajectory_memory_loss", ("train/trajectory_memory_loss",))
     _add_first(out, payload, "00_primary/complexity_prediction_target_ncd", ("complexity/val/prediction_target_ncd_lzma_mean",))
