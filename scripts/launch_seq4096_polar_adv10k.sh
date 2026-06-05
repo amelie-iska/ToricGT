@@ -102,8 +102,8 @@ TRAIN_CMD=(
   "POLARQUANT_TRAIN_SAMPLE_TOKENS=16"
   "POLARQUANT_EVAL_SAMPLE_TOKENS=256"
   "POLARQUANT_SEED=271828"
-  "POLARQUANT_TRAIN_START_STEP=750"
-  "POLARQUANT_TRAIN_WARMUP_STEPS=1250"
+  "POLARQUANT_TRAIN_START_STEP=0"
+  "POLARQUANT_TRAIN_WARMUP_STEPS=0"
   "ADVANCED_LOSS_SCALE=0.00025"
   "GRAPHCG_LOSS_WEIGHT=0.0010"
   "TORIC_TROPICAL_LOSS_WEIGHT=0.0005"
@@ -237,5 +237,5 @@ gate state:    $STATE_PATH
 target BPB:    $TARGET_BPB
 continue if:   best <= $CONTINUE_THRESHOLD_BPB by trainer step $GATE_STEP
 advanced:      start_step=0 every=8 warmup=20000 min_best_val_bpb=0 max_ce_ratio=0.00001 grad_clip=0.25
-polarquant:    kv_bits=8 train=1 train_start_step=750 train_warmup_steps=1250 train_sample_tokens=16
+polarquant:    kv_bits=8 train=1 train_start_step=0 train_warmup_steps=0 train_sample_tokens=16
 EOF

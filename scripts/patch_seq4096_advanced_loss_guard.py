@@ -61,31 +61,11 @@ def install_polarquant_warmup(text: str) -> tuple[str, bool]:
             """    polarquant_train_sample_tokens = int(os.environ.get(\"POLARQUANT_TRAIN_SAMPLE_TOKENS\", 0))\n    polarquant_eval_sample_tokens = int(os.environ.get(\"POLARQUANT_EVAL_SAMPLE_TOKENS\", 0))\n    polarquant_seed = int(os.environ.get(\"POLARQUANT_SEED\", 271828))\n    polarquant_train_start_step = int(os.environ.get(\"POLARQUANT_TRAIN_START_STEP\", 0))\n    polarquant_train_warmup_steps = int(os.environ.get(\"POLARQUANT_TRAIN_WARMUP_STEPS\", 0))\n""",
         )
         changed = True
-    if "polarquant_train_scale" not in text:
+    if "k_perturbed = sampled_polarquant_kv_perturb" in text:
         text = replace_once(
             text,
-            """        self.polarquant_train_sample_tokens = int(polarquant_train_sample_tokens)\n        self.polarquant_eval_sample_tokens = int(polarquant_eval_sample_tokens)\n        if self.head_dim % 2 != 0:\n""",
-            """        self.polarquant_train_sample_tokens = int(polarquant_train_sample_tokens)\n        self.polarquant_eval_sample_tokens = int(polarquant_eval_sample_tokens)\n        self.register_buffer(\"polarquant_train_scale\", torch.ones((), dtype=torch.float32), persistent=False)\n        if self.head_dim % 2 != 0:\n""",
-        )
-        text = replace_once(
-            text,
-            """            k = sampled_polarquant_kv_perturb(\n                k,\n                self.polarquant_signs.to(device=k.device),\n                self.polarquant_kv_bits,\n                sample_tokens,\n            )\n            v = sampled_polarquant_kv_perturb(\n                v,\n                self.polarquant_signs.to(device=v.device),\n                self.polarquant_kv_bits,\n                sample_tokens,\n            )\n""",
             """            k_perturbed = sampled_polarquant_kv_perturb(\n                k,\n                self.polarquant_signs.to(device=k.device),\n                self.polarquant_kv_bits,\n                sample_tokens,\n            )\n            v_perturbed = sampled_polarquant_kv_perturb(\n                v,\n                self.polarquant_signs.to(device=v.device),\n                self.polarquant_kv_bits,\n                sample_tokens,\n            )\n            if self.training:\n                train_scale = self.polarquant_train_scale.to(device=k.device, dtype=k.dtype).clamp(0.0, 1.0)\n                k = k + train_scale * (k_perturbed - k)\n                v = v + train_scale * (v_perturbed - v)\n            else:\n                k = k_perturbed\n                v = v_perturbed\n""",
-        )
-        text = replace_once(
-            text,
-            """def advanced_loss_runtime_scale(args: object, step: int, best_val_bpb: float) -> float:\n""",
-            """def polarquant_train_runtime_scale(args: object, step: int) -> float:\n    if not bool(getattr(args, \"polarquant_train\", False)):\n        return 0.0\n    start_step = int(getattr(args, \"polarquant_train_start_step\", 0))\n    if step < start_step:\n        return 0.0\n    warmup = int(getattr(args, \"polarquant_train_warmup_steps\", 0))\n    if warmup <= 0:\n        return 1.0\n    return min(max(step - start_step + 1, 0) / float(warmup), 1.0)\n\n\ndef set_polarquant_train_scale_(model: nn.Module, scale: float) -> None:\n    for module in model.modules():\n        if hasattr(module, \"polarquant_train_scale\"):\n            module.polarquant_train_scale.fill_(float(scale))\n\n\ndef advanced_loss_runtime_scale(args: object, step: int, best_val_bpb: float) -> float:\n""",
-        )
-        text = replace_once(
-            text,
-            """        elapsed_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)\n        scale = lr_mul(step, elapsed_ms)\n        zero_grad_all()\n""",
-            """        elapsed_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)\n        scale = lr_mul(step, elapsed_ms)\n        polarquant_train_scale = polarquant_train_runtime_scale(args, step)\n        set_polarquant_train_scale_(base_model, polarquant_train_scale)\n        zero_grad_all()\n""",
-        )
-        text = replace_once(
-            text,
-            """                \"advanced/backprop_enabled\": float(advanced_runtime_scale_avg.item() > 0.0),\n                \"train/perplexity\": math.exp(min(float(train_loss.item()), 20.0)),\n""",
-            """                \"advanced/backprop_enabled\": float(advanced_runtime_scale_avg.item() > 0.0),\n                \"polarquant/train_scale\": polarquant_train_scale,\n                \"polarquant/train_start_step\": args.polarquant_train_start_step,\n                \"polarquant/train_warmup_steps\": args.polarquant_train_warmup_steps,\n                \"train/perplexity\": math.exp(min(float(train_loss.item()), 20.0)),\n""",
+            """            k = sampled_polarquant_kv_perturb(\n                k,\n                self.polarquant_signs.to(device=k.device),\n                self.polarquant_kv_bits,\n                sample_tokens,\n            )\n            v = sampled_polarquant_kv_perturb(\n                v,\n                self.polarquant_signs.to(device=v.device),\n                self.polarquant_kv_bits,\n                sample_tokens,\n            )\n""",
         )
         changed = True
     return text, changed
