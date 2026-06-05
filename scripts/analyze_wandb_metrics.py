@@ -76,12 +76,47 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def numeric_metric_values(series: pd.Series) -> pd.Series:
+    """Convert W&B metric columns, including string "NaN"/"Inf", to floats."""
+
+    return pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+
 def finite_series(df: pd.DataFrame, metric: str) -> pd.DataFrame:
-    out = df[["_step", metric]].copy()
-    out = out.replace([np.inf, -np.inf], np.nan).dropna()
-    out = out.rename(columns={metric: "value"})
+    out = pd.DataFrame({"_step": df["_step"], "value": numeric_metric_values(df[metric])})
+    out = out.dropna()
     out = out.sort_values("_step")
     return out
+
+
+def nonfinite_anomaly_report(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Find W&B metrics that arrived as nonfinite values or string NaNs."""
+
+    rows: list[dict[str, Any]] = []
+    for metric in df.columns:
+        if metric == "_step":
+            continue
+        raw = df[metric]
+        present = raw.notna()
+        if not bool(present.any()):
+            continue
+        numeric = pd.to_numeric(raw, errors="coerce")
+        numeric_values = numeric.to_numpy(dtype=float, na_value=np.nan)
+        finite = np.isfinite(numeric_values)
+        bad_mask = present.to_numpy() & ~finite
+        if not bool(bad_mask.any()):
+            continue
+        bad_indices = np.flatnonzero(bad_mask)
+        rows.append(
+            {
+                "metric": metric,
+                "count": int(bad_mask.sum()),
+                "first_step": json_safe(df["_step"].iloc[int(bad_indices[0])]),
+                "last_step": json_safe(df["_step"].iloc[int(bad_indices[-1])]),
+                "examples": [repr(raw.iloc[int(idx)]) for idx in bad_indices[:5]],
+            }
+        )
+    return sorted(rows, key=lambda item: (-int(item["count"]), str(item["metric"])))
 
 
 def rankdata(values: np.ndarray) -> np.ndarray:
@@ -538,7 +573,12 @@ def plot_metric_slopes(stats: list[MetricStats], out: Path, max_metrics: int) ->
     plt.close(fig)
 
 
-def markdown_summary(stats: list[MetricStats], meta: dict[str, Any], checkpoint_meta: dict[str, Any]) -> str:
+def markdown_summary(
+    stats: list[MetricStats],
+    meta: dict[str, Any],
+    checkpoint_meta: dict[str, Any],
+    anomalies: list[dict[str, Any]],
+) -> str:
     counts = pd.Series([s.category for s in stats]).value_counts().reindex(
         [CATEGORY_DESIRED, CATEGORY_SLOW, CATEGORY_BAD], fill_value=0
     )
@@ -582,6 +622,7 @@ def markdown_summary(stats: list[MetricStats], meta: dict[str, Any], checkpoint_
         f"- W&B URL: {meta.get('url')}",
         f"- W&B state at export: `{meta.get('state')}`",
         f"- Last W&B history step: `{meta.get('last_history_step')}`",
+        f"- Nonfinite/string-NaN metric families: `{len(anomalies)}`",
     ]
     if checkpoint_meta:
         lines.extend(
@@ -614,6 +655,21 @@ def markdown_summary(stats: list[MetricStats], meta: dict[str, Any], checkpoint_
             f"| `{s.metric}` | {s.category} | {s.goal} | {s.first_median:.6g} | {s.last_median:.6g} | "
             f"{100*s.relative_change:.2f}% | {s.recent_slope_per_1k:.6g} | {s.recent_slope_t:.3g} | {s.spike_count} |"
         )
+    if anomalies:
+        lines.extend(
+            [
+                "",
+                "## Nonfinite Anomalies",
+                "",
+                "| metric | count | first step | last step | examples |",
+                "|---|---:|---:|---:|---|",
+            ]
+        )
+        for item in anomalies[:25]:
+            lines.append(
+                f"| `{item['metric']}` | {int(item['count'])} | {item['first_step']} | "
+                f"{item['last_step']} | `{', '.join(item['examples'])}` |"
+            )
     lines.extend(["", "See `metric_stats.csv` for the full per-metric table."])
     return "\n".join(lines) + "\n"
 
@@ -626,6 +682,7 @@ def main() -> None:
     df, meta = download_history(args.run_path)
     df = df.sort_values("_step")
     df.to_csv(output_dir / "wandb_history.csv", index=False)
+    anomalies = nonfinite_anomaly_report(df)
     try:
         df.to_parquet(output_dir / "wandb_history.parquet", index=False)
     except Exception:
@@ -633,6 +690,7 @@ def main() -> None:
     checkpoint_meta = load_checkpoint_meta(args.checkpoint)
     write_json(output_dir / "wandb_run_meta.json", meta)
     write_json(output_dir / "checkpoint_meta.json", checkpoint_meta)
+    write_json(output_dir / "nonfinite_anomalies.json", anomalies)
     if args.download_only:
         return
 
@@ -640,7 +698,7 @@ def main() -> None:
     for column in df.columns:
         if column.startswith("_") or column in {"epoch"}:
             continue
-        converted = pd.to_numeric(df[column], errors="coerce")
+        converted = numeric_metric_values(df[column])
         if converted.notna().sum() >= 2:
             df[column] = converted
             numeric_metrics.append(column)
@@ -669,7 +727,7 @@ def main() -> None:
     plot_correlation_heatmap(df, output_dir / "selected_metric_correlations.png")
     plot_metric_slopes(stats, output_dir / "recent_metric_slopes.png", args.max_plot_metrics)
     (output_dir / "automatic_metrics_report.md").write_text(
-        markdown_summary(stats, meta, checkpoint_meta), encoding="utf-8"
+        markdown_summary(stats, meta, checkpoint_meta, anomalies), encoding="utf-8"
     )
 
 

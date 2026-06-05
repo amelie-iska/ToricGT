@@ -162,6 +162,144 @@ def install_nonfinite_update_skip(text: str) -> tuple[str, bool]:
     return text, True
 
 
+def install_nonfinite_source_telemetry(text: str) -> tuple[str, bool]:
+    if "train/nonfinite_microbatch_skip_count" in text and "nonfinite_param_count" in text:
+        return text, False
+
+    text = replace_once(
+        text,
+        """    grad_clip_norm = float(os.environ.get("GRAD_CLIP_NORM", 0.0))
+""",
+        """    grad_clip_norm = float(os.environ.get("GRAD_CLIP_NORM", 0.0))
+    nonfinite_audit_every = int(os.environ.get("NONFINITE_AUDIT_EVERY", 25))
+""",
+    )
+    text = replace_once(
+        text,
+        """        train_token_count = torch.zeros((), device=device, dtype=torch.float64)
+        train_byte_count = torch.zeros((), device=device, dtype=torch.float64)
+        for micro_step in range(grad_accum_steps):
+""",
+        """        train_token_count = torch.zeros((), device=device, dtype=torch.float64)
+        train_byte_count = torch.zeros((), device=device, dtype=torch.float64)
+        nonfinite_microbatch_skip_count = torch.zeros((), device=device, dtype=torch.float32)
+        nonfinite_ce_loss_count = torch.zeros((), device=device, dtype=torch.float32)
+        nonfinite_aux_loss_count = torch.zeros((), device=device, dtype=torch.float32)
+        for micro_step in range(grad_accum_steps):
+""",
+    )
+    text = replace_once(
+        text,
+        """            if not torch.isfinite(aux_loss.detach()):
+                aux_metrics["advanced/aux_loss_nonfinite_suppressed"] = torch.ones((), device=device, dtype=torch.float32)
+                aux_loss = torch.zeros_like(ce_loss)
+            else:
+                aux_metrics["advanced/aux_loss_nonfinite_suppressed"] = torch.zeros((), device=device, dtype=torch.float32)
+            if runtime_scale > 0.0 and args.advanced_loss_max_ce_ratio > 0.0:
+""",
+        """            ce_loss_is_finite = torch.isfinite(ce_loss.detach())
+            if not bool(ce_loss_is_finite.item()):
+                nonfinite_ce_loss_count += 1.0
+                aux_metrics["advanced/ce_loss_nonfinite"] = torch.ones((), device=device, dtype=torch.float32)
+            else:
+                aux_metrics["advanced/ce_loss_nonfinite"] = torch.zeros((), device=device, dtype=torch.float32)
+            if not torch.isfinite(aux_loss.detach()):
+                nonfinite_aux_loss_count += 1.0
+                aux_metrics["advanced/aux_loss_nonfinite_suppressed"] = torch.ones((), device=device, dtype=torch.float32)
+                aux_loss = torch.zeros_like(ce_loss)
+            else:
+                aux_metrics["advanced/aux_loss_nonfinite_suppressed"] = torch.zeros((), device=device, dtype=torch.float32)
+            if runtime_scale > 0.0 and args.advanced_loss_max_ce_ratio > 0.0:
+""",
+    )
+    text = replace_once(
+        text,
+        """            loss = ce_loss + aux_loss
+            train_loss += ce_loss.detach()
+            train_aux_loss += aux_loss.detach()
+            advanced_runtime_scale_sum += torch.as_tensor(runtime_scale, device=device, dtype=torch.float32)
+            for key, value in aux_metrics.items():
+                advanced_metric_sums[key] = advanced_metric_sums.get(key, torch.zeros((), device=device)) + value.detach()
+            (loss * grad_scale).backward()
+""",
+        """            loss = ce_loss + aux_loss
+            loss_is_finite = torch.isfinite(loss.detach())
+            train_loss += torch.nan_to_num(ce_loss.detach(), nan=0.0, posinf=0.0, neginf=0.0)
+            train_aux_loss += torch.nan_to_num(aux_loss.detach(), nan=0.0, posinf=0.0, neginf=0.0)
+            advanced_runtime_scale_sum += torch.as_tensor(runtime_scale, device=device, dtype=torch.float32)
+            for key, value in aux_metrics.items():
+                advanced_metric_sums[key] = advanced_metric_sums.get(key, torch.zeros((), device=device)) + value.detach()
+            if not bool(loss_is_finite.item()):
+                nonfinite_microbatch_skip_count += 1.0
+                continue
+            (loss * grad_scale).backward()
+""",
+    )
+    text = replace_once(
+        text,
+        """            or not math.isfinite(train_bpb)
+        ):
+            nonfinite_update_skip = 1.0
+        else:
+""",
+        """            or not math.isfinite(train_bpb)
+            or float(nonfinite_microbatch_skip_count.item()) > 0.0
+        ):
+            nonfinite_update_skip = 1.0
+        else:
+""",
+    )
+    text = replace_once(
+        text,
+        """        zero_grad_all()
+
+        step += 1
+""",
+        """        audit_params = args.nonfinite_audit_every > 0 and (
+            step <= 10 or step % args.nonfinite_audit_every == 0 or nonfinite_update_skip > 0.5
+        )
+        nonfinite_param_count = 0.0
+        nonfinite_grad_count = 0.0
+        max_abs_param = 0.0
+        max_abs_grad = 0.0
+        if audit_params:
+            with torch.no_grad():
+                for param in base_model.parameters():
+                    data = param.detach()
+                    finite_data = torch.isfinite(data)
+                    nonfinite_param_count += float((~finite_data).sum().item())
+                    if finite_data.any():
+                        max_abs_param = max(max_abs_param, float(data[finite_data].abs().max().item()))
+                    if param.grad is not None:
+                        grad = param.grad.detach()
+                        finite_grad = torch.isfinite(grad)
+                        nonfinite_grad_count += float((~finite_grad).sum().item())
+                        if finite_grad.any():
+                            max_abs_grad = max(max_abs_grad, float(grad[finite_grad].abs().max().item()))
+        zero_grad_all()
+
+        step += 1
+""",
+    )
+    text = replace_once(
+        text,
+        """                "train/nonfinite_update_skip": nonfinite_update_skip,
+            }
+""",
+        """                "train/nonfinite_update_skip": nonfinite_update_skip,
+                "train/nonfinite_microbatch_skip_count": float(nonfinite_microbatch_skip_count.item()),
+                "train/nonfinite_ce_loss_count": float(nonfinite_ce_loss_count.item()),
+                "train/nonfinite_aux_loss_count": float(nonfinite_aux_loss_count.item()),
+                "train/nonfinite_param_count": nonfinite_param_count,
+                "train/nonfinite_grad_count": nonfinite_grad_count,
+                "optim/max_abs_param": max_abs_param,
+                "optim/max_abs_grad": max_abs_grad,
+            }
+""",
+    )
+    return text, True
+
+
 def patch_trainer(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     applied: list[str] = []
@@ -170,6 +308,7 @@ def patch_trainer(path: Path) -> list[str]:
         ("combinatorial_bridge", install_combinatorial_bridge),
         ("polarquant_warmup", install_polarquant_warmup),
         ("nonfinite_update_skip", install_nonfinite_update_skip),
+        ("nonfinite_source_telemetry", install_nonfinite_source_telemetry),
     ):
         text, changed = installer(text)
         if changed:
