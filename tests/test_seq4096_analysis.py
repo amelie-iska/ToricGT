@@ -13,6 +13,9 @@ SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "watch_seq4096_a
 FULL_DIAG_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "mirror_fineweb_full_diagnostics_to_wandb.py"
 LOG_MIRROR_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "mirror_fineweb_log_to_wandb.py"
 GATE_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "watch_seq4096_4k_recovery.py"
+SEQ4096_GEOMETRY_SCRIPT_PATH = (
+    Path(__file__).resolve().parents[1] / "scripts" / "evaluate_seq4096_reasoning_geometry_suite.py"
+)
 
 
 def load_module():
@@ -51,6 +54,21 @@ def load_gate_module():
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_seq4096_geometry_module():
+    assert SEQ4096_GEOMETRY_SCRIPT_PATH.exists(), "Seq4096 geometry analysis script should exist"
+    src_path = str(SEQ4096_GEOMETRY_SCRIPT_PATH.resolve().parents[1] / "src")
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+    spec = importlib.util.spec_from_file_location(
+        "evaluate_seq4096_reasoning_geometry_suite",
+        SEQ4096_GEOMETRY_SCRIPT_PATH,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
@@ -141,6 +159,35 @@ def test_training_adjustment_proposal_command_can_skip_wandb_for_local_dry_run(t
 
     assert "--checkpoint-step" in command
     assert "--wandb-run-path" not in command
+
+
+def test_symbolic_resolution_certificate_artifacts_are_written(tmp_path: Path) -> None:
+    module = load_seq4096_geometry_module()
+    record = {
+        "record_id": "unit-record",
+        "toric_cca_symbolic_resolution_num_vertices": 6.0,
+        "toric_cca_symbolic_resolution_loss": 0.01,
+        "toric_cca_koszul_buchsbaum_eisenbud_multiplier_residual": 0.02,
+    }
+
+    files = module.write_symbolic_resolution_certificate_artifacts(
+        record,
+        tmp_path / "unit_symbolic_resolution_certificate",
+    )
+
+    names = {path.name for path in files}
+    assert "unit_symbolic_resolution_certificate.json" in names
+    assert "unit_symbolic_resolution_certificate_faces.csv" in names
+    assert "unit_symbolic_resolution_certificate_minimal_nonfaces.csv" in names
+    assert "unit_symbolic_resolution_certificate_hochster_betti_rows.csv" in names
+    assert "unit_symbolic_resolution_certificate_taylor_multidegrees.csv" in names
+    assert "unit_symbolic_resolution_certificate_taylor_ranks.csv" in names
+    payload = json.loads((tmp_path / "unit_symbolic_resolution_certificate.json").read_text(encoding="utf-8"))
+    assert payload["record_id"] == "unit-record"
+    assert payload["dg_algebra"]["d_squared_zero"] is True
+    assert payload["minimal_nonface_generators"]
+    assert payload["hochster_betti_rows"]
+    assert payload["taylor_multidegree_counts"]
 
 
 def test_parse_seq4096_log_captures_low_train_bpb_trigger_validation(tmp_path: Path) -> None:

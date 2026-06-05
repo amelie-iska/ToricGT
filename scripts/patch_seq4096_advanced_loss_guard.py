@@ -87,6 +87,81 @@ def install_polarquant_warmup(text: str) -> tuple[str, bool]:
     return text, changed
 
 
+def install_nonfinite_update_skip(text: str) -> tuple[str, bool]:
+    if "train/nonfinite_update_skip" in text and "optim/grad_norm" in text:
+        return text, False
+
+    old = """        frac = min(step / args.muon_momentum_warmup_steps, 1.0) if args.muon_momentum_warmup_steps > 0 else 1.0
+        muon_momentum = (1 - frac) * args.muon_momentum_warmup_start + frac * args.muon_momentum
+        for group in optimizer_muon.param_groups:
+            group["momentum"] = muon_momentum
+
+        for opt in optimizers:
+            for group in opt.param_groups:
+                group["lr"] = group["base_lr"] * scale
+
+        if args.grad_clip_norm > 0:
+            torch.nn.utils.clip_grad_norm_(base_model.parameters(), args.grad_clip_norm)
+        for opt in optimizers:
+            opt.step()
+        zero_grad_all()
+
+        step += 1
+        approx_training_time_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)
+"""
+    new = """        frac = min(step / args.muon_momentum_warmup_steps, 1.0) if args.muon_momentum_warmup_steps > 0 else 1.0
+        muon_momentum = (1 - frac) * args.muon_momentum_warmup_start + frac * args.muon_momentum
+        grad_norm_value = 0.0
+        nonfinite_update_skip = 0.0
+        if (
+            not torch.isfinite(train_loss.detach())
+            or not torch.isfinite(train_aux_loss.detach())
+            or not math.isfinite(train_bpb)
+        ):
+            nonfinite_update_skip = 1.0
+        else:
+            for group in optimizer_muon.param_groups:
+                group["momentum"] = muon_momentum
+
+            for opt in optimizers:
+                for group in opt.param_groups:
+                    group["lr"] = group["base_lr"] * scale
+
+            if args.grad_clip_norm > 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(base_model.parameters(), args.grad_clip_norm)
+                grad_norm_value = float(
+                    torch.nan_to_num(
+                        grad_norm.detach().float(),
+                        nan=float("inf"),
+                        posinf=float("inf"),
+                        neginf=float("inf"),
+                    ).item()
+                )
+                if not math.isfinite(grad_norm_value):
+                    nonfinite_update_skip = 1.0
+            if nonfinite_update_skip < 0.5:
+                for opt in optimizers:
+                    opt.step()
+        zero_grad_all()
+
+        step += 1
+        approx_training_time_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)
+"""
+    text = replace_once(text, old, new)
+    text = replace_once(
+        text,
+        """                "optim/scalar_lr": args.scalar_lr * scale,
+            }
+""",
+        """                "optim/scalar_lr": args.scalar_lr * scale,
+                "optim/grad_norm": grad_norm_value,
+                "train/nonfinite_update_skip": nonfinite_update_skip,
+            }
+""",
+    )
+    return text, True
+
+
 def patch_trainer(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     applied: list[str] = []
@@ -94,6 +169,7 @@ def patch_trainer(path: Path) -> list[str]:
         ("finite_guard", install_finite_guard),
         ("combinatorial_bridge", install_combinatorial_bridge),
         ("polarquant_warmup", install_polarquant_warmup),
+        ("nonfinite_update_skip", install_nonfinite_update_skip),
     ):
         text, changed = installer(text)
         if changed:

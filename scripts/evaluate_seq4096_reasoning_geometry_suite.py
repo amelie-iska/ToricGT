@@ -59,6 +59,7 @@ from toricgt.slepian_torus import ToricSlepianConfig, toric_slepian_audit
 from toricgt.symbolic_multigraded_resolution import (
     cyclic_stanley_reisner_betti_rows,
     cyclic_stanley_reisner_generator_masks,
+    cyclic_stanley_reisner_resolution_certificate,
     cyclic_taylor_multidegree_counts,
 )
 from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step_filtration_stats_np
@@ -1353,6 +1354,111 @@ def plot_symbolic_resolution_complex(record: dict[str, Any], out: Path) -> None:
     plt.close(fig)
 
 
+def write_symbolic_resolution_certificate_artifacts(record: dict[str, Any], out_base: Path) -> list[Path]:
+    """Write exact CCA/Taylor/DG certificate files for a periodic analysis record."""
+
+    chambers = int(max(4, min(12, round(float(record.get("toric_cca_symbolic_resolution_num_vertices", 8.0) or 8.0)))))
+    certificate = cyclic_stanley_reisner_resolution_certificate(chambers)
+    certificate = {
+        **certificate,
+        "record_id": record.get("record_id", ""),
+        "source_metrics": {
+            key: record.get(key)
+            for key in sorted(record)
+            if key.startswith("toric_cca_symbolic_") or key.startswith("toric_cca_koszul_")
+        },
+    }
+
+    out_base.parent.mkdir(parents=True, exist_ok=True)
+    files: list[Path] = []
+    json_path = out_base.with_suffix(".json")
+    json_path.write_text(json.dumps(certificate, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    files.append(json_path)
+
+    def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({name: row.get(name, "") for name in fieldnames})
+
+    face_rows = [
+        {
+            "dimension": row["dimension"],
+            "mask": row["mask"],
+            "vertices": " ".join(str(item) for item in row["vertices"]),
+            "monomial": row["monomial"],
+        }
+        for row in certificate["faces"]
+    ]
+    faces_path = out_base.with_name(out_base.name + "_faces.csv")
+    write_csv(faces_path, face_rows, ["dimension", "mask", "vertices", "monomial"])
+    files.append(faces_path)
+
+    nonface_rows = [
+        {
+            "degree": row["degree"],
+            "mask": row["mask"],
+            "vertices": " ".join(str(item) for item in row["vertices"]),
+            "monomial": row["monomial"],
+        }
+        for row in certificate["minimal_nonface_generators"]
+    ]
+    nonfaces_path = out_base.with_name(out_base.name + "_minimal_nonfaces.csv")
+    write_csv(nonfaces_path, nonface_rows, ["degree", "mask", "vertices", "monomial"])
+    files.append(nonfaces_path)
+
+    betti_rows = [
+        {
+            "homological_degree": row["homological_degree"],
+            "support_mask": row["support_mask"],
+            "support_vertices": " ".join(str(item) for item in row["support_vertices"]),
+            "support_size": row["support_size"],
+            "beta": row["beta"],
+        }
+        for row in certificate["hochster_betti_rows"]
+    ]
+    betti_path = out_base.with_name(out_base.name + "_hochster_betti_rows.csv")
+    write_csv(
+        betti_path,
+        betti_rows,
+        ["homological_degree", "support_mask", "support_vertices", "support_size", "beta"],
+    )
+    files.append(betti_path)
+
+    taylor_rows = [
+        {
+            "homological_degree": row["homological_degree"],
+            "lcm_mask": row["lcm_mask"],
+            "lcm_vertices": " ".join(str(item) for item in row["lcm_vertices"]),
+            "lcm_support_size": row["lcm_support_size"],
+            "multiplicity": row["multiplicity"],
+            "monomial": row["monomial"],
+        }
+        for row in certificate["taylor_multidegree_counts"]
+    ]
+    taylor_path = out_base.with_name(out_base.name + "_taylor_multidegrees.csv")
+    write_csv(
+        taylor_path,
+        taylor_rows,
+        ["homological_degree", "lcm_mask", "lcm_vertices", "lcm_support_size", "multiplicity", "monomial"],
+    )
+    files.append(taylor_path)
+
+    rank_rows = [
+        {
+            "homological_degree": int(degree),
+            "rank": int(rank),
+            "outgoing_boundary_terms": int(certificate["taylor_boundary_terms_by_homological_degree"][degree]),
+        }
+        for degree, rank in certificate["taylor_rank_by_homological_degree"].items()
+    ]
+    ranks_path = out_base.with_name(out_base.name + "_taylor_ranks.csv")
+    write_csv(ranks_path, rank_rows, ["homological_degree", "rank", "outgoing_boundary_terms"])
+    files.append(ranks_path)
+    return files
+
+
 def plot_persistence_morphisms(record: dict[str, Any], out: Path) -> None:
     keys = [
         "exact_h0_dim_mean",
@@ -1501,6 +1607,8 @@ def plot_record_artifacts(record: dict[str, Any], geometry_dir: Path) -> list[st
         path = topo_dir / f"{base}_{suffix}.png"
         fn(record, path)
         files.append(path)
+        if suffix == "symbolic_resolution_complex":
+            files.extend(write_symbolic_resolution_certificate_artifacts(record, topo_dir / f"{base}_symbolic_resolution_certificate"))
     path = graphcg_dir / f"{base}_graphcg_basis_disentanglement.png"
     plot_graphcg(record, path)
     files.append(path)

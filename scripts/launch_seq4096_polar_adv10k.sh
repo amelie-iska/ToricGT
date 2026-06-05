@@ -12,7 +12,7 @@ PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
-RUN_ID="${RUN_ID:-toricgt_advdg_step0_polar_seq4096_${STAMP}}"
+RUN_ID="${RUN_ID:-toricgt_advdg_stable_step0_polar_seq4096_${STAMP}}"
 TRAIN_TMUX="${TRAIN_TMUX:-${RUN_ID}_train}"
 ANALYSIS_TMUX="${ANALYSIS_TMUX:-${RUN_ID}_analysis}"
 MIRROR_TMUX="${MIRROR_TMUX:-${RUN_ID}_mirror}"
@@ -88,14 +88,16 @@ TRAIN_CMD=(
   "TRAIN_BATCH_TOKENS=1048576"
   "WARMUP_STEPS=200"
   "WARMDOWN_ITERS=3000"
-  "TIED_EMBED_LR=0.018"
-  "MATRIX_LR=0.012"
-  "SCALAR_LR=0.012"
+  "QK_GAIN_INIT=1.25"
+  "LOGIT_SOFTCAP=24.0"
+  "TIED_EMBED_LR=0.014"
+  "MATRIX_LR=0.009"
+  "SCALAR_LR=0.009"
   "MUON_MOMENTUM=0.99"
-  "MUON_MOMENTUM_WARMUP_START=0.85"
-  "MUON_MOMENTUM_WARMUP_STEPS=1500"
+  "MUON_MOMENTUM_WARMUP_START=0.78"
+  "MUON_MOMENTUM_WARMUP_STEPS=2200"
   "BIGRAM_BIAS=1"
-  "BIGRAM_BIAS_LR=0.006"
+  "BIGRAM_BIAS_LR=0.004"
   "BIGRAM_BIAS_SCALE=1.0"
   "POLARQUANT_KV_BITS=8"
   "POLARQUANT_TRAIN=1"
@@ -103,14 +105,14 @@ TRAIN_CMD=(
   "POLARQUANT_EVAL_SAMPLE_TOKENS=256"
   "POLARQUANT_SEED=271828"
   "POLARQUANT_TRAIN_START_STEP=0"
-  "POLARQUANT_TRAIN_WARMUP_STEPS=0"
-  "ADVANCED_LOSS_SCALE=0.00015"
-  "GRAPHCG_LOSS_WEIGHT=0.0005"
-  "TORIC_TROPICAL_LOSS_WEIGHT=0.00025"
-  "SLEPIAN_LOSS_WEIGHT=0.0005"
-  "KOSZUL_BGG_LOSS_WEIGHT=0.0001"
-  "ANALOGY_LOSS_WEIGHT=0.000002"
-  "ADVANCED_LOSS_SAMPLE_TOKENS=64"
+  "POLARQUANT_TRAIN_WARMUP_STEPS=512"
+  "ADVANCED_LOSS_SCALE=0.000075"
+  "GRAPHCG_LOSS_WEIGHT=0.00025"
+  "TORIC_TROPICAL_LOSS_WEIGHT=0.000125"
+  "SLEPIAN_LOSS_WEIGHT=0.00025"
+  "KOSZUL_BGG_LOSS_WEIGHT=0.00005"
+  "ANALOGY_LOSS_WEIGHT=0.000001"
+  "ADVANCED_LOSS_SAMPLE_TOKENS=48"
   "TORIC_TROPICAL_FAN_BINS=8"
   "ADVANCED_LOSS_LOG_ONLY=0"
   "ADVANCED_LOSS_START_STEP=0"
@@ -118,8 +120,8 @@ TRAIN_CMD=(
   "ADVANCED_LOSS_EVERY=16"
   "ADVANCED_LOSS_WARMUP_STEPS=20000"
   "ADVANCED_LOSS_MIN_BEST_VAL_BPB=0"
-  "ADVANCED_LOSS_MAX_CE_RATIO=0.000005"
-  "GRAD_CLIP_NORM=0.22"
+  "ADVANCED_LOSS_MAX_CE_RATIO=0.0000025"
+  "GRAD_CLIP_NORM=0.12"
   "CHECKPOINT_ON_TRAIN_BPB_BELOW=1.06"
   "CHECKPOINT_ON_TRAIN_BPB_COOLDOWN_STEPS=250"
   "CHECKPOINT_ON_TRAIN_BPB_MAX=2"
@@ -234,7 +236,8 @@ analysis root: $OUTPUT_ROOT
 gate state:    $STATE_PATH
 target BPB:    $TARGET_BPB
 continue if:   best <= $CONTINUE_THRESHOLD_BPB by trainer step $GATE_STEP
-advanced:      start_step=0 every=16 warmup=20000 min_best_val_bpb=0 max_ce_ratio=0.000005 grad_clip=0.22
-cca/topology:  train-time exact CCA/DG/Taylor topology active from step 0 with koszul_bgg=0.0001
-polarquant:    kv_bits=8 train=1 train_start_step=0 train_warmup_steps=0 train_sample_tokens=16
+advanced:      start_step=0 every=16 warmup=20000 min_best_val_bpb=0 max_ce_ratio=0.0000025 grad_clip=0.12
+cca/topology:  train-time exact CCA/DG/Taylor topology active from step 0 with koszul_bgg=0.00005
+polarquant:    kv_bits=8 train=1 train_start_step=0 train_warmup_steps=512 train_sample_tokens=16
+stability:     qk_gain=1.25 logit_softcap=24 tied_lr=0.014 matrix_lr=0.009 scalar_lr=0.009 bigram_lr=0.004
 EOF

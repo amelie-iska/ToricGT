@@ -5,11 +5,14 @@ from .soft_moe import GraphTokenSoftMoE, PrefixCausalSoftMoE
 from .combinatorial_toric_metrics import CombinatorialToricConfig, combinatorial_toric_cca_topology_loss
 from .symbolic_multigraded_resolution import (
     SymbolicResolutionMetrics,
+    cyclic_flag_face_rows,
     cyclic_stanley_reisner_betti_rows,
     cyclic_stanley_reisner_generator_masks,
+    cyclic_stanley_reisner_resolution_certificate,
     cyclic_stanley_reisner_resolution_dict,
     cyclic_stanley_reisner_resolution_metrics,
     cyclic_taylor_multidegree_counts,
+    cyclic_taylor_rank_rows,
 )
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
 from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
@@ -31,11 +34,14 @@ __all__ = [
     "TrajectoryRetrievalHead",
     "ToricGeometryConfig",
     "combinatorial_toric_cca_topology_loss",
+    "cyclic_flag_face_rows",
     "cyclic_stanley_reisner_betti_rows",
     "cyclic_stanley_reisner_generator_masks",
+    "cyclic_stanley_reisner_resolution_certificate",
     "cyclic_stanley_reisner_resolution_dict",
     "cyclic_stanley_reisner_resolution_metrics",
     "cyclic_taylor_multidegree_counts",
+    "cyclic_taylor_rank_rows",
     "reasoning_step_topology_loss",
 ]
 

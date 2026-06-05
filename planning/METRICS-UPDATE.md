@@ -1266,3 +1266,48 @@ Scale from 4096 to 8192 and beyond only after BPB checkpoint preservation.
 - Compact competition export remains <=16,000,000 bytes.
 - PolarQuant can be enabled in sampled training mode without OOM.
 - Advanced losses are promoted only when they improve validation BPB transfer or after the competition threshold checkpoint is preserved.
+
+## 2026-06-05 NaN repair and memory phase contract
+
+The fresh step-0 Seq4096 DG/CCA/PolarQuant run
+`toricgt_advdg_step0_polar_seq4096_20260605T214439Z` failed early with a
+persistent nonfinite train loss beginning at step 120.  W&B showed the last
+finite advanced-loss tick at step 113 with `advanced/backprop_enabled=1`,
+`00_primary/cca_symbolic_resolution_loss ~= 0.01389`, and a tiny clamped
+advanced auxiliary scalar; then CE/train BPB became NaN on subsequent rows.  The
+failure therefore appears to be an unguarded optimizer/gradient/parameter update
+under the combined early pressure of step-0 advanced losses plus step-0
+PolarQuant train perturbation, not an absent BPB logger.
+
+Repair policy:
+
+- keep GraphCG, toric/tropical, Slepian/Pollak, Koszul/BGG, CCA/DG/Taylor, and
+  analogy enabled from step 0 with nonzero weights;
+- keep PolarQuant enabled, but ramp its train perturbation instead of applying
+  full perturbation on the first optimizer updates;
+- add trainer-level `train/nonfinite_update_skip` and `optim/grad_norm` logging
+  so poisoned CE/aux/gradient updates are skipped before optimizer state or
+  weights are corrupted;
+- retain the nonfinite gate as a hard stop for retuning if skips do not recover
+  finite training;
+- compare against the last successful 20K run, which reached step 20000 without
+  NaNs using later-gated advanced losses and no early full-strength PolarQuant
+  training perturbation.
+
+Memory phase contract:
+
+- compact FineWeb BPB collapse remains the first gate, because it controls the
+  OpenAI Parameter-Golf score and the 16MB artifact constraint;
+- graph-structured trajectory memory is not removed or optional in the full
+  training program: it is present through `TrajectoryRetrievalHead`,
+  `use_trajectory_memory_head`, phase-controlled `trajectory_memory_loss_weight`,
+  and W&B metrics `train/trajectory_memory_loss`,
+  `train/trajectory_memory_recall1`, `train/trajectory_memory_entropy`,
+  `train/trajectory_memory_score_gap`, and
+  `train/trajectory_memory_teacher_diag_prob`;
+- memory retrieval training should become active in a post-stability phase once
+  the compact BPB run is finite and either reaches the target BPB or passes the
+  continuation gate, with separate memory-conditioned BPB checks so memory gains
+  are not hidden inside aggregate loss;
+- memory datasets and retrieval libraries must be built only from training data,
+  never from held-out OpenAI validation bytes.

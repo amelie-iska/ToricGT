@@ -5,10 +5,12 @@ from toricgt.combinatorial_toric_metrics import (
     combinatorial_toric_cca_topology_loss,
 )
 from toricgt.symbolic_multigraded_resolution import (
+    cyclic_stanley_reisner_resolution_certificate,
     cyclic_stanley_reisner_generator_masks,
     cyclic_stanley_reisner_resolution_dict,
     cyclic_stanley_reisner_resolution_metrics,
     cyclic_taylor_multidegree_counts,
+    cyclic_taylor_rank_rows,
 )
 
 
@@ -31,6 +33,18 @@ def test_symbolic_multigraded_resolution_for_cyclic_fan_is_exact_and_finite():
     payload = cyclic_stanley_reisner_resolution_dict(6)
     assert payload["symbolic_resolution_minimal_total_betti"] == float(metrics.minimal_total_betti)
     assert payload["symbolic_resolution_projective_dimension"] == float(metrics.projective_dimension)
+
+    rank_rows = cyclic_taylor_rank_rows(6)
+    assert rank_rows[0] == (0, 1, 0)
+    assert sum(rank for _degree, rank, _terms in rank_rows) == 1 + (2 ** len(generators)) - 1
+
+    certificate = cyclic_stanley_reisner_resolution_certificate(6)
+    assert certificate["kind"] == "cyclic_stanley_reisner_symbolic_resolution_certificate"
+    assert len(certificate["minimal_nonface_generators"]) == len(generators)
+    assert sum(row["beta"] for row in certificate["hochster_betti_rows"]) == metrics.minimal_total_betti
+    assert len(certificate["taylor_multidegree_counts"]) == len(taylor_rows)
+    assert certificate["dg_algebra"]["d_squared_zero"] is True
+    assert certificate["dg_algebra"]["leibniz_rule"] is True
 
 
 def test_combinatorial_toric_metrics_are_finite_and_differentiable():
