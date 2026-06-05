@@ -1,5 +1,207 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-05 Stableadv Step-4500 BPB Loop Review
+
+Run:
+
+```text
+analyzed run: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+analyzed checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_step_004500.pt
+analysis: outputs/post_resume_analysis/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/step-00004500
+loop: parameter_golf_bpb_target, iteration 1 / 100, target BPB <= 1.2
+decision: CONTINUE
+```
+
+Status:
+
+```text
+loop primary BPB: openai_parameter_golf/bpb = 1.232315136329848 at step 4500
+loop target gap from current primary BPB: 0.03231513632984795
+best W&B FineWeb/openai_parameter_golf BPB in analyzed history: 1.2084842981821384
+best validation target gap: 0.008484298182138472
+synopsis best validation BPB: 1.2085
+step-4500 validation BPB/loss: 1.2323 / 2.0807
+step-4526 low-train trigger validation BPB/loss after analysis: 1.2327 / 2.0814
+step-4500 train BPB/loss: 1.3342 / 2.2546
+best train BPB in analyzed W&B export: 1.1118309382332459
+sampled compact OAI BPB/loss: 1.4307509809020849 / 2.445587396621704
+sampled compact OAI scope: 64 sampled 256-token sequences, not authoritative
+metric categories: desired=36, weak_or_slow=16, undesirable=17
+artifact probe: 15,979,507 bytes after int8+zlib; 20,493 bytes under 16 MB
+```
+
+Metric and plot categorization:
+
+- Desired: the best FineWeb/openai_parameter_golf validation BPB remains close
+  to the `1.2` target; validation BPB is descending again from the post-4000
+  rebound (`4250 -> 4500: -0.0040 BPB`, about `-0.0016 BPB/100 steps`);
+  train samples still intermittently cross the target; checkpoint export is
+  under the 16 MB limit; GraphCG, topology, toric/tropical, Slepian/Pollak,
+  Koszul/BGG, analogical, and complexity diagnostics are present; exact
+  persistence has small chain residuals and chart coverage is complete.
+- Desired but too weak or slow: current primary BPB is still `0.0323` above
+  target; the useful best validation BPB is still `0.0085` above target;
+  transfer efficiency is not stable because train drops are noisy and only
+  weakly become validation drops; GraphCG basis separation is good for token
+  and norm records but condition numbers remain high; MST efficiency is useful
+  only for the embedding records and weak for layer/attention records; path
+  smoothness is low across records; BGG/Koszul exactness is good but standard
+  leakage and fitting/rank residuals remain visible; Slepian concentration is
+  weak in the curve diagnostic payload.
+- Undesirable: validation rebounded sharply from the step-4000 low to the
+  4154--4250 shelf; the sampled compact OAI probe is worse than the W&B
+  FineWeb/openai_parameter_golf signal and is sampled, so it cannot promote a
+  checkpoint; `advanced/backprop_enabled` and `advanced/runtime_scale_applied`
+  entered the undesirable bucket because advanced sidecars turned on at step
+  4500; toric active-face margin is negative (`-2.0992`), toric geometry loss
+  is high (`8.1798`), tropical chamber crossing rate is high (mean about
+  `0.8833`), analogical transport accuracy is zero in the geometry records,
+  and no Hessian/sharpness or GFlowNet replay time series is available.
+
+Plot review:
+
+- BPB dashboards, velocity, phase-plane, target-zone, ETA, transfer, and
+  rockfall plots show a rebound after the step-4000 low followed by a slow
+  validation descent.  The old 4K gate-velocity plot marks the run off-track
+  because the gate is already past; for this review the active loop target is
+  still `BPB <= 1.2`, so that stale 4K shortfall is evidence of slowness, not
+  an automatic rollback trigger.
+- BPB control and evidence maps recommend `bpb_gap=1.0` and sidecar-only
+  structural families.  The evidence policy is
+  `monitor_metric_context_keep_bpb_primary`, with toric/Slepian the dominant
+  current structural pressure.
+- Simplex and tetrahedron plots show coherent but uneven reasoning geometry:
+  useful GraphCG and embedding structure on R0/R1, weaker low-K/MST corners,
+  and no robust low-BPB/high-MST/high-smoothness basin.
+- 3D trajectory, phase, winding, and energy-landscape plots show noncollapsed
+  but noisy paths.  R4 bigram-memory has especially long trajectory length
+  (`1539.68`) and low path smoothness (`0.0314`).
+- Directed filtration, noncommutative heatmap, persistence, and
+  commutative-algebra audit plots show useful topology with tiny directed cycle
+  flux, but standard leakage and fitting/rank residuals keep the reasoning
+  gate guarded.
+- GraphCG basis plots are visually close to diagonal; analogical maps remain
+  weak; tropical chamber plots show frequent active-face transitions and
+  plateau bursts, matching the guarded structural-recature reports.
+
+Mathematical/statistical interpretation:
+
+- The BPB gate is close but not satisfied.  Let `L_val` be the FineWeb-style
+  validation cross-entropy and `BPB = L_val / log(2) / bytes_per_token`.  The
+  best observed W&B validation BPB (`1.20848`) is only `0.7%` above target, but
+  the current primary value (`1.23232`) is `2.7%` above target.  The
+  competition gate should therefore remain the dominant objective.
+- Validation finite differences are mixed, not a clean floor-bounce signal:
+  `4000 -> 4154: +0.0278`, `4154 -> 4196: +0.0007`,
+  `4196 -> 4224: -0.0004`, `4224 -> 4250: -0.0003`,
+  `4250 -> 4500: -0.0040`, `4500 -> 4526: +0.0004`.  Late second differences
+  include a small positive value after 4500, but there is no Hessian trace,
+  sharpness probe, or sustained positive first derivative sufficient to justify
+  rollback.
+- The train/validation gap is negative at the validation points because train
+  BPB is highly sample-dependent.  Low train BPB checkpoints at 4154, 4196,
+  4224, and 4526 are useful artifact candidates, but their paired validation
+  BPB stays around `1.232--1.237`, so they are not sufficient promotion
+  evidence.
+- The sampled compact OAI result should be treated as an auxiliary probe only:
+  it uses a sampled 64-sequence, 256-token scope and a 1024-BPE Seq4096 path.
+  It is not a full official-style validation result and does not override
+  W&B FineWeb/openai_parameter_golf BPB.
+- A transfer claim is not warranted yet.  The current run is directly exposed
+  to FineWeb SP1024 training shards, so any strong FineWeb result needs
+  controls against tokenizer convention, n-gram/bigram bias, dataset easiness,
+  FineWeb-only training, hard-data-only zero-shot evaluation, and matched-budget
+  ablations before being interpreted as OOD transfer from hard reasoning data.
+- Direct curated hard-reasoning BPB and held-out GoT/ToT/CoT validation BPB are
+  not present in this analysis.  The reasoning gate is therefore represented by
+  checkpoint geometry and sidecar diagnostics, not by a direct curated BPB time
+  series.
+- GFlowNet branch replay and test-time-scaling metrics are not present as
+  time-series evidence.  The `toric_gfn_bpb` tetrahedron is a geometry proxy;
+  it is insufficient to drive a rollback or scalar edit.
+- Kolmogorov/relative-K proxies are mixed: relative-K ranges from about
+  `0.65` to `0.81`, but recent log NCD is high (`0.9001`).  This supports
+  preserving complexity diagnostics while keeping BPB primary.
+- GraphCG is useful but not clean: R0/R1 disentanglement is high
+  (`0.9487`/`0.9311`), R4 is acceptable (`0.7820`), while layer/attention
+  records are weaker (`0.4680`/`0.5177`) and all condition numbers are large.
+- Koszul/BGG is internally coherent enough to preserve: geometry records have
+  `koszul_d2_residual=0`, BGG resolution consistency is near `1.0`, and the
+  curve payload has `resolution_consistency=0.9811`; however payload
+  `gale_dual_consistency=0`, `standard_leakage=0.5664`, signature smoothness
+  `0`, Buchsbaum-Eisenbud rank residual `0.3130`, and fitting rank residual
+  `0.1029` make it a guarded sidecar.
+- Toric/tropical behavior is structurally active but too noisy for heavier
+  loss: toric active-face entropy is `0.6642`, shadow fan entropy is `0.8447`,
+  active-face margin is negative, and chamber crossing rates are high.  This
+  explains the controller's toric/Slepian pressure without implying an
+  immediate toric-weight increase.
+
+Adjustment proposal:
+
+```text
+/home/iska/miniconda3/bin/conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/propose_training_adjustments.py \
+  --analysis-dir outputs/post_resume_analysis/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/step-00004500 \
+  --output-json outputs/post_resume_analysis/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/step-00004500/training_adjustment_proposal.json \
+  --output-md outputs/post_resume_analysis/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/step-00004500/training_adjustment_proposal.md \
+  --target-bpb 1.2 --checkpoint-step 4500
+```
+
+The first rerun attempt under base Python failed because `torch` was not
+installed there; the command above succeeded under `tokengt`.  The proposal
+recommended `restart_from_best_checkpoint_with_damped_structural_sidecars`
+because it evaluates against the already-missed 4K gate and labels the current
+status `off_track`.  I used that as evidence of slowness, not authority.  For
+the active 100-iteration BPB loop, validation is still descending, the
+reasoning gate is guarded but coherent, and no derivative/Hessian evidence
+identifies a floor-bounce basin.  A restart would duplicate an active run and
+discard useful continuation evidence.
+
+Decision and active handoff:
+
+```text
+action: CONTINUE
+reason: BPB target not reached, but validation BPB is still descending and no
+        decisive rollback/edit signal is present.
+code/config edits: none
+better-strategy stop sentinel: not written
+training active after review: yes, observed through step 4550 while reviewing
+training tmux: toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+training process: /home/iska/miniconda3/envs/tokengt/bin/python -u records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
+training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z.txt
+checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+analyzed checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_step_004500.pt
+latest observed checkpoint after analysis: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_step_004526.pt
+W&B run: https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+supervisor: no active scripts/supervise_parameter_golf_training.py process was observed; preserved the active training tmux, mirror, diagnostics, and nan-guard processes instead of restarting.
+```
+
+The prior `watch_seq4096_analysis.py` review watcher was stopped after this
+decision to avoid a duplicate interrupt-style review loop.  The replacement
+sidecar is non-pausing and uses the requested generic watcher:
+
+```text
+watcher tmux: toricgt_watch_training_analysis_stableadv_4750
+watcher script: scripts/watch_training_analysis.py
+watcher target: checkpoint >= 4750
+watcher log: logs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z.watch_training_analysis_4750.txt
+watcher output root: outputs/post_resume_analysis/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+watcher device/precision: cpu / fp32
+pause behavior: non-interrupting; no --pause-training-before-analysis
+Codex review hook: enabled as a sidecar only; training remains active while reviews run
+```
+
+Loop environment preserved for the replacement watcher:
+
+```text
+BPB_TARGET=1.2
+BPB_MAX_REVIEW_ITERATIONS=100
+BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_bpb_codex_loop_state.json
+BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_bpb_codex_loop_stop
+BPB_LOOP_NAME=parameter_golf_bpb_target
+```
+
 ## 2026-06-04 Seq4096 R91 Step-3950 BPB Handoff and R92/R93 Restart Chain
 
 Run:
