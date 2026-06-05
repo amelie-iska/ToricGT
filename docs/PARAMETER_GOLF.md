@@ -268,9 +268,14 @@ cosine retrieval. `TrajectoryRetrievalHead` learns an in-batch retrieval score
 whose teacher favors trajectories with aligned GraphCG charts, coherent toric
 phase shadows, similar local topology, and lower local NLL.
 
-The active config enables the head but keeps `trajectory_memory_loss_weight` at
-zero during likelihood-first recovery. Later GFlowNet/GraphCG/topology phases
-turn on a small auxiliary weight. W&B logs
+The compact OAI BPB-collapse trainer keeps memory out of the fragile first-stage
+competition loss until the run is finite and useful enough to protect. The full
+`advanced_reasoning_memory_graphcg.yaml` curriculum enables the head, starts
+with `trajectory_memory_loss_weight: 0.00002` in the stabilized structural
+warmup, and raises it to `0.00005` in the `graphcg_memory_analogy_full`
+phase. Memory scale-ups are guarded by finite OAI BPB and no material BPB
+regression; otherwise memory remains log/analysis-only for that interval.
+W&B logs
 `train/trajectory_memory_loss`, `train/trajectory_memory_ce`,
 `train/trajectory_memory_distill_loss`, `train/trajectory_memory_quality_loss`,
 `train/trajectory_memory_recall1`, `train/trajectory_memory_entropy`, and

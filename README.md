@@ -1019,10 +1019,12 @@ density, toric phase moments, and trajectory quality. A compact JSONL index
 (`TrajectoryMemoryIndex`) supports cosine search over those keys, while the
 training head (`TrajectoryRetrievalHead`) learns in-batch retrieval targets
 using GraphCG chart similarity, toric phase similarity, topology similarity,
-and low local NLL. The active training config enables the head for checkpoint
-compatibility but keeps `trajectory_memory_loss_weight: 0.0` through
-likelihood-first recovery; later GFlowNet/GraphCG/topology phases turn on a
-small weight. W&B reports `train/trajectory_memory_loss`,
+and low local NLL. The compact OAI BPB-collapse path keeps memory out of the fragile
+competition loss until the run is finite and useful enough to protect. The
+full `advanced_reasoning_memory_graphcg.yaml` curriculum enables the head,
+uses `trajectory_memory_loss_weight: 0.00002` during stabilized structural
+warmup, and raises it to `0.00005` in the `graphcg_memory_analogy_full`
+phase under OAI BPB guardrails. W&B reports `train/trajectory_memory_loss`,
 `train/trajectory_memory_recall1`, `train/trajectory_memory_entropy`,
 `train/trajectory_memory_score_gap`, and the CE/distillation/quality
 sub-losses. The detailed staged plan is in

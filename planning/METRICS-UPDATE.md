@@ -1307,7 +1307,10 @@ Memory phase contract:
   `train/trajectory_memory_teacher_diag_prob`;
 - memory retrieval training should become active in a post-stability phase once
   the compact BPB run is finite and either reaches the target BPB or passes the
-  continuation gate, with separate memory-conditioned BPB checks so memory gains
-  are not hidden inside aggregate loss;
+  continuation gate; in the full reasoning curriculum this is represented by
+  `trajectory_memory_loss_weight=0.00002` during stabilized structural warmup
+  and `0.00005` in the `graphcg_memory_analogy_full` phase, with separate
+  memory-conditioned BPB checks so memory gains are not hidden inside aggregate
+  loss;
 - memory datasets and retrieval libraries must be built only from training data,
   never from held-out OpenAI validation bytes.
