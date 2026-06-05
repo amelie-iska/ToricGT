@@ -1,5 +1,135 @@
 # ToricGT OAI Metrics Audit
 
+## 2026-06-05 Step 6250 Seq4096 Stableadv BPB Review
+
+Context:
+
+```text
+run: toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+W&B: amelie-iska-math/toricgt-parameter-golf/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+analysis: outputs/post_resume_analysis/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/step-00006250
+checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_step_006250.pt
+loop: parameter_golf_bpb_target, iteration 5 / 100, target BPB <= 1.2
+```
+
+The W&B history export still lagged at step 5000, but the W&B summary,
+checkpoint-local log export, synopsis, and BPB reports covered step 6250.
+The active loop primary signal was `openai_parameter_golf/bpb =
+1.2136128495545466` at step 6250.  Best validation/FineWeb-style BPB in this
+loop remains `1.2085`, so the active primary gap is `0.0136128496` and the
+best-gate gap is `0.0085`.  The sampled local official-style OAI evaluator was
+available but weaker: `oai_competition/bpb = 1.4154305979` on 64 sampled
+seq-len-256 FineWeb/SP1024 sequences.  That sampled probe is a calibration
+warning and control requirement, not a target-clearing artifact.
+
+Metric and plot categories:
+
+- Desired: validation BPB is still descending after the post-4000 rebound:
+  `1.2323 -> 1.2275 -> 1.2241 -> 1.2217 -> 1.2198 -> 1.2169 -> 1.2148 ->
+  1.2136` over steps 4500--6250.  Train BPB continues to cross the target
+  intermittently (`1.1969` at 6000, `1.1216` at 6200, `1.2035` at 6250).
+  GraphCG Gram plots are close to diagonal, exact trajectory-proxy Koszul
+  `d2` residual is zero, selected BGG/Gale consistency is high, Slepian
+  concentration is strong in the full diagnostic payload, the checkpoint is
+  under the artifact limit, and the BPB/simplex/3D/phase/energy/topology/
+  tropical plots are present and noncollapsed.
+- Desired but too weak or slow: the validation slope is shallow
+  (`-0.00093` BPB per 100 steps in the synopsis, `-0.00048` recent velocity in
+  the full diagnostic payload), projected target step is about `7164`, and the
+  automatic categories remain broad: desired `57`, weak-or-slow `46`,
+  undesirable `16`.  MST efficiency is modest (`mean 0.2017`), trajectory
+  smoothness is low for the memory surface, R4 path length is large
+  (`1784.69`), analogical transport accuracy is still zero, and GFlowNet
+  branch replay/test-time-scaling metrics are not directly available.
+- Undesirable: the sampled official-style OAI/FineWeb evaluator is far above
+  target, GraphCG basis condition is extreme on the memory graph, global BGG
+  standard leakage is high (`0.52265`) despite good selected-record consistency,
+  toric active-face margin is negative (`-2.0026`), toric geometry/binomial
+  losses are high, tropical chamber crossing is frequent (`mean 0.9204`), and
+  advanced aux/Koszul/toric losses drifted upward in the W&B metric table.
+
+Plot review:
+
+- BPB dashboard and phase-plane plots show noisy train BPB with several
+  sub-target dips while validation descends smoothly but slowly.  There is no
+  positive first derivative at step 6250 and no visual floor-bounce basin.
+- The simplex/tetrahedron plots cluster nearer low-K/low-BPB than high-MST
+  efficiency.  This is acceptable for a pre-threshold compression phase, but
+  not strong enough to promote reasoning sidecars above BPB.
+- 3D memory trajectories and energy landscapes are active and branched, with a
+  low-energy cluster plus high-energy ridges and long jumps.  They support
+  sidecar monitoring, not a heavier memory/GFlowNet scalar.
+- Ramachandran-style phase/energy and tropical chamber plots show broad phase
+  winding and frequent active-face changes.  Because `tropical/bpb_plateau`
+  pressure is zero at the gate, this does not justify rollback.
+- GraphCG plots are structurally clean by Gram shape but ill-conditioned by
+  scale.  BGG/Koszul plots are locally consistent, but global standard leakage
+  keeps the reasoning gate guarded.
+
+Mathematical and statistical interpretation:
+
+- The recent validation first differences over 250-step checkpoints are
+  negative: `4750->5000: -0.0034`, `5000->5250: -0.0024`,
+  `5250->5500: -0.0019`, `5500->5750: -0.0029`, `5750->6000: -0.0021`,
+  `6000->6250: -0.0012`.  Recent second differences are small and mixed
+  (`+0.0010`, `+0.0005`, `-0.0010`, `+0.0008`, `+0.0009`), and no Hessian
+  trace/sharpness probe is available.  This is decelerating descent, not a
+  rollback-grade positive-derivative basin.
+- The two-gate rule supports continuing the BPB-clean schedule.  FineWeb/
+  openai_parameter_golf BPB is close but not at target; hard-reasoning,
+  topology, GraphCG, toric/tropical, memory, BGG, and Kolmogorov/relative-K
+  proxies are alive but guarded.  Since the gates do not show a clean
+  contradiction, no mixture-ratio or auxiliary-weight edit is warranted.
+- The sampled official-style FineWeb result prevents overclaiming OOD transfer.
+  Any strong FineWeb result still needs fixed-slice controls against tokenizer
+  convention, n-gram/bigram-bias artifacts, dataset easiness, random-init and
+  FineWeb-only baselines, hard-data zero-shot comparison, and sidecar ablations.
+- GFlowNet graph-of-thought quality, branch replay, branch BPB, and
+  test-time-scaling diagnostics are planned but absent in the current metrics.
+  They remain reasoning-gate requirements, not BPB-gate evidence at this step.
+
+`scripts/propose_training_adjustments.py` was rerun on this analysis directory
+as `training_adjustment_proposal_codex_rerun.{json,md}` with `target_bpb=1.2`,
+`checkpoint_step=6250`, and `gate_step=20000`.  Under the active loop horizon
+it classified the gate as `on_track` and proposed
+`hold_bpb_clean_schedule` with no restart.  I used that as evidence, not
+authority.  The script currently expects `oai_competition/summary.json`, while
+this analysis wrote `oai_competition/seq4096_summary.json`, so its OAI fields
+were `NaN`; the sampled OAI/FineWeb value above was reviewed manually.
+
+Decision: `CONTINUE`.
+
+Operational handoff:
+
+```text
+selected checkpoint: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_step_006250.pt
+config: config/train.parameter_golf_random_order_dense.yaml
+training/config edits: none
+training tmux: toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+training process: active original Seq4096 trainer records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
+active observed step after review: at least 6350 / 20000
+training log: amelie-iska/parameter-golf/logs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z.txt
+checkpoint dir: amelie-iska/parameter-golf/checkpoints/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+W&B URL: https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z
+supervisor: no active scripts/supervise_parameter_golf_training.py process found; active trainer, W&B mirror, full diagnostics, nan guard, and CPU sidecar were preserved
+legacy interrupting watcher: toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_analysis stopped after this decision
+non-pausing generic watcher: toricgt_watch_training_analysis_stableadv_6500_20260605T022634Z
+generic watcher script: scripts/watch_training_analysis.py, CPU/fp32, target step 6500, no --pause-training-before-analysis
+generic watcher log: outputs/post_resume_analysis/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z/sidecar_logs/toricgt_watch_training_analysis_stableadv_6500_20260605T022634Z.log
+generic watcher output root: outputs/post_resume_analysis/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_watch_training_analysis_sidecar
+stop sentinel: not written; no better replacement strategy was established
+```
+
+The preserved BPB loop environment is:
+
+```text
+BPB_TARGET=1.2
+BPB_MAX_REVIEW_ITERATIONS=100
+BPB_LOOP_STATE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_bpb_codex_loop_state.json
+BPB_LOOP_STOP_FILE=/home/iska/Documents/amelie/bio/ToricGT/outputs/toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z_bpb_codex_loop_stop
+BPB_LOOP_NAME=parameter_golf_bpb_target
+```
+
 ## 2026-06-05 Stableadv Step-4750 BPB Loop Review
 
 Run:
