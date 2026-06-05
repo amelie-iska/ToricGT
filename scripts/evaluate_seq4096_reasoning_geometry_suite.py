@@ -1456,6 +1456,91 @@ def write_symbolic_resolution_certificate_artifacts(record: dict[str, Any], out_
     ranks_path = out_base.with_name(out_base.name + "_taylor_ranks.csv")
     write_csv(ranks_path, rank_rows, ["homological_degree", "rank", "outgoing_boundary_terms"])
     files.append(ranks_path)
+
+    dg_rows = [
+        {
+            "homological_degree": row["homological_degree"],
+            "source_lcm_mask": row["source_lcm_mask"],
+            "source_lcm_vertices": " ".join(str(item) for item in row["source_lcm_vertices"]),
+            "source_monomial": row["source_monomial"],
+            "target_lcm_mask": row["target_lcm_mask"],
+            "target_lcm_vertices": " ".join(str(item) for item in row["target_lcm_vertices"]),
+            "target_monomial": row["target_monomial"],
+            "quotient_mask": row["quotient_mask"],
+            "quotient_vertices": " ".join(str(item) for item in row["quotient_vertices"]),
+            "quotient_monomial": row["quotient_monomial"],
+            "multiplicity": row["multiplicity"],
+        }
+        for row in certificate["dg_differential_entries"]
+    ]
+    dg_path = out_base.with_name(out_base.name + "_dg_differential_entries.csv")
+    write_csv(
+        dg_path,
+        dg_rows,
+        [
+            "homological_degree",
+            "source_lcm_mask",
+            "source_lcm_vertices",
+            "source_monomial",
+            "target_lcm_mask",
+            "target_lcm_vertices",
+            "target_monomial",
+            "quotient_mask",
+            "quotient_vertices",
+            "quotient_monomial",
+            "multiplicity",
+        ],
+    )
+    files.append(dg_path)
+
+    fitting_rows = [
+        {
+            "homological_degree": row["homological_degree"],
+            "quotient_mask": row["quotient_mask"],
+            "quotient_vertices": " ".join(str(item) for item in row["quotient_vertices"]),
+            "monomial": row["monomial"],
+            "multiplicity": row["multiplicity"],
+        }
+        for row in certificate["fitting_entry_ideal_generators"]
+    ]
+    fitting_path = out_base.with_name(out_base.name + "_fitting_entry_ideals.csv")
+    write_csv(
+        fitting_path,
+        fitting_rows,
+        ["homological_degree", "quotient_mask", "quotient_vertices", "monomial", "multiplicity"],
+    )
+    files.append(fitting_path)
+
+    fitting_summary_path = out_base.with_name(out_base.name + "_fitting_determinantal_summary.csv")
+    write_csv(
+        fitting_summary_path,
+        certificate["fitting_determinantal_summary"],
+        [
+            "homological_degree",
+            "source_rank",
+            "target_rank",
+            "boundary_terms",
+            "entry_ideal_generator_count",
+            "maximal_minor_size",
+            "maximal_minor_count_log10",
+        ],
+    )
+    files.append(fitting_summary_path)
+
+    dg_product_path = out_base.with_name(out_base.name + "_dg_product_summary.csv")
+    write_csv(
+        dg_product_path,
+        certificate["dg_product_summary_by_bidegree"],
+        [
+            "left_homological_degree",
+            "right_homological_degree",
+            "result_homological_degree",
+            "left_rank",
+            "right_choices_per_left",
+            "product_count",
+        ],
+    )
+    files.append(dg_product_path)
     return files
 
 

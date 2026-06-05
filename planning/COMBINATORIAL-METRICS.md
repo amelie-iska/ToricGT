@@ -1154,6 +1154,61 @@ and certificate metrics degrade together, the next retune should lower the
 advanced CE ratio or the CCA/Koszul family weights before changing the
 underlying combinatorial object.
 
+## 2026-06-05 Multigraded DG-Algebra and Fitting-Ideal Sidecars
+
+The symbolic CCA certificate now records the finite multigraded commutative
+DG-algebra data explicitly, not only as scalar residuals.  Each periodic
+Seq4096 geometry record writes:
+
+```text
+<record>_symbolic_resolution_certificate_dg_differential_entries.csv
+<record>_symbolic_resolution_certificate_fitting_entry_ideals.csv
+<record>_symbolic_resolution_certificate_fitting_determinantal_summary.csv
+<record>_symbolic_resolution_certificate_dg_product_summary.csv
+```
+
+The JSON certificate also contains:
+
+```text
+ring
+toric_fan
+stanley_reisner_ideal
+dg_differential_entries
+fitting_entry_ideal_generators
+fitting_determinantal_summary
+dg_product_summary_by_bidegree
+```
+
+Mathematically, the sidecar object is the Taylor DG-algebra of the
+Stanley-Reisner ideal `I_Delta` for the cyclic toric fan:
+
+```text
+S = F_2[x_0, ..., x_{n-1}],  deg(x_i)=e_i in Z^n,
+I_Delta = < x_sigma : sigma is a minimal nonface of Delta >.
+```
+
+For a Taylor basis element `e_A`, the differential entry is the exact
+multigraded monomial quotient
+
+```text
+d(e_A) = sum_{i in A} lcm(A) / lcm(A \\ {i}) e_{A\\{i}}.
+```
+
+The new `dg_differential_entries` rows are compressed by source lcm,
+target lcm, quotient multidegree, and multiplicity.  The
+`fitting_entry_ideals` rows are the exact 1-minor Fitting-entry ideals of each
+Taylor differential, again compressed by quotient multidegree and
+multiplicity.  Higher determinantal ideals can be enormous, so
+`fitting_determinantal_summary` records exact source/target ranks, maximal
+minor size, boundary terms, entry-generator count, and the exact log-count of
+maximal minors.  The DG product is the graded-commutative Taylor product
+`e_A e_B = e_{A union B}` for disjoint subsets and zero otherwise; it is
+recorded by exact bidegree counts in `dg_product_summary`.
+
+These are periodic analysis artifacts; the train-time differentiable loss
+still uses the finite CCA/Koszul/topology scalar bridge so BPB training remains
+cheap and the 16MB artifact is unaffected.
+
 ## 2026-06-05 Nonfinite-Update Guard for Step-0 CCA/DG Training
 
 The step-0 CCA/DG run failed by a persistent nonfinite CE/train-BPB row at step

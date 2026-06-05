@@ -5,6 +5,10 @@ from toricgt.combinatorial_toric_metrics import (
     combinatorial_toric_cca_topology_loss,
 )
 from toricgt.symbolic_multigraded_resolution import (
+    cyclic_taylor_dg_differential_rows,
+    cyclic_taylor_dg_product_summary_rows,
+    cyclic_taylor_fitting_entry_ideal_rows,
+    cyclic_taylor_fitting_summary_rows,
     cyclic_stanley_reisner_resolution_certificate,
     cyclic_stanley_reisner_generator_masks,
     cyclic_stanley_reisner_resolution_dict,
@@ -37,12 +41,29 @@ def test_symbolic_multigraded_resolution_for_cyclic_fan_is_exact_and_finite():
     rank_rows = cyclic_taylor_rank_rows(6)
     assert rank_rows[0] == (0, 1, 0)
     assert sum(rank for _degree, rank, _terms in rank_rows) == 1 + (2 ** len(generators)) - 1
+    dg_rows = cyclic_taylor_dg_differential_rows(6)
+    fitting_rows = cyclic_taylor_fitting_entry_ideal_rows(6)
+    fitting_summary = cyclic_taylor_fitting_summary_rows(6)
+    product_summary = cyclic_taylor_dg_product_summary_rows(6)
+    assert dg_rows
+    assert fitting_rows
+    assert fitting_summary
+    assert product_summary
+    assert sum(row[4] for row in dg_rows) == sum(terms for _degree, _rank, terms in rank_rows)
+    assert sum(row[2] for row in fitting_rows) == sum(terms for _degree, _rank, terms in rank_rows)
 
     certificate = cyclic_stanley_reisner_resolution_certificate(6)
     assert certificate["kind"] == "cyclic_stanley_reisner_symbolic_resolution_certificate"
+    assert certificate["ring"]["kind"] == "multigraded_polynomial_ring"
+    assert certificate["toric_fan"]["kind"] == "cyclic_one_skeleton_flag_fan"
+    assert certificate["stanley_reisner_ideal"]["kind"] == "squarefree_monomial_ideal"
     assert len(certificate["minimal_nonface_generators"]) == len(generators)
     assert sum(row["beta"] for row in certificate["hochster_betti_rows"]) == metrics.minimal_total_betti
     assert len(certificate["taylor_multidegree_counts"]) == len(taylor_rows)
+    assert certificate["dg_differential_entries"]
+    assert certificate["fitting_entry_ideal_generators"]
+    assert certificate["fitting_determinantal_summary"]
+    assert certificate["dg_product_summary_by_bidegree"]
     assert certificate["dg_algebra"]["d_squared_zero"] is True
     assert certificate["dg_algebra"]["leibniz_rule"] is True
 
