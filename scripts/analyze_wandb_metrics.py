@@ -164,6 +164,8 @@ def metric_goal(name: str) -> str:
         "trajectory_kinetic_energy",
         "vram",
     )
+    if "runtime_scale" in name:
+        return "higher"
     if name.startswith(stable_prefixes) or any(token in name for token in stable_tokens):
         return "stable"
     if any(token in name for token in higher_tokens):
@@ -198,6 +200,8 @@ def categorize(goal: str, relative_change: float, recent_slope: float, recent_t:
     if goal == "lower":
         if abs(relative_change) <= 1e-12 and abs(recent_slope) <= 1e-12:
             return CATEGORY_DESIRED, "lower-is-better metric is already at a stable floor"
+        if abs(relative_change) < 10.0 and cv <= 2.0 and abs(recent_slope) < 1.0e-6:
+            return CATEGORY_DESIRED, "lower-is-better metric is numerically near zero during a bounded ramp"
         if relative_change <= -0.03 and (recent_slope <= 0 or abs(recent_t) < 1.5) and spike_count <= 3:
             return CATEGORY_DESIRED, "lower-is-better metric improved materially without recent positive drift"
         if relative_change <= 0.01 and spike_count <= 6:
@@ -325,22 +329,62 @@ def load_checkpoint_meta(path: str) -> dict[str, Any]:
     }
 
 
+def json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        try:
+            return dict(value)
+        except Exception:
+            return str(value)
+
+
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(json.dumps(json_safe(data), indent=2, sort_keys=True), encoding="utf-8")
 
 
 def plot_core_timeseries(df: pd.DataFrame, out: Path, stats: list[MetricStats]) -> None:
     preferred = [
+        "00_primary/oai_bpb",
+        "00_primary/oai_best_bpb",
+        "00_primary/train_bpb",
+        "00_primary/train_loss",
+        "00_primary/validation_bpb",
+        "00_primary/toric_cca_topology_loss",
+        "02_train/bpb",
+        "02_train/loss",
+        "03_validation/bpb",
+        "03_validation/loss",
+        "04_losses/train/total_loss",
+        "04_losses/train/advanced_aux_loss",
+        "06_graphcg/advanced/graphcg_loss",
+        "07_topology_geometry/advanced/analogy_loss",
+        "08_toric_tropical_bgg/advanced/toric_cca_topology_loss",
+        "08_toric_tropical_bgg/advanced/toric_cca_binomial_residual",
+        "08_toric_tropical_bgg/advanced/toric_cca_stanley_reisner_nonface_mass",
+        "08_toric_tropical_bgg/advanced/koszul_bgg_loss",
+        "08_toric_tropical_bgg/advanced/slepian_pollak_loss",
+        "08_toric_tropical_bgg/advanced/toric_tropical_loss",
+        "12_optimization/advanced/runtime_scale",
+        "12_optimization/advanced/aux_loss",
+        "12_optimization/time/step_avg_ms",
         "train/bpb",
         "train/loss",
         "train/total_loss",
         "val/bpb",
         "val/loss",
-        "train/gflownet_loss",
-        "train/gflownet_entropy",
-        "train/gflownet_action_diversity",
-        "train/grad_norm",
         "audit/future_permutation_logit_error",
         "complexity/val/bpb",
         "complexity/val/argmax_byte_accuracy",
@@ -385,14 +429,26 @@ def plot_category_counts(stats: list[MetricStats], out: Path) -> None:
 
 def plot_correlation_heatmap(df: pd.DataFrame, out: Path) -> None:
     candidates = [
+        "00_primary/oai_bpb",
+        "00_primary/train_bpb",
+        "00_primary/toric_cca_topology_loss",
+        "02_train/bpb",
+        "02_train/loss",
+        "03_validation/bpb",
+        "04_losses/train/advanced_aux_loss",
+        "06_graphcg/advanced/graphcg_loss",
+        "06_graphcg/advanced/graphcg_offdiag_coherence",
+        "07_topology_geometry/advanced/analogy_loss",
+        "08_toric_tropical_bgg/advanced/toric_cca_topology_loss",
+        "08_toric_tropical_bgg/advanced/toric_cca_binomial_residual",
+        "08_toric_tropical_bgg/advanced/toric_cca_stanley_reisner_nonface_mass",
+        "08_toric_tropical_bgg/advanced/koszul_bgg_loss",
+        "08_toric_tropical_bgg/advanced/slepian_pollak_loss",
+        "08_toric_tropical_bgg/advanced/toric_tropical_loss",
+        "12_optimization/advanced/runtime_scale",
+        "12_optimization/advanced/aux_loss",
         "train/bpb",
         "train/loss",
-        "train/gflownet_loss",
-        "train/gflownet_entropy",
-        "train/gflownet_action_diversity",
-        "train/grad_norm",
-        "train/trajectory_kinetic_energy",
-        "train/trajectory_viscous_dissipation",
         "val/bpb",
         "val/loss",
         "complexity/val/argmax_byte_accuracy",
@@ -447,14 +503,33 @@ def markdown_summary(stats: list[MetricStats], meta: dict[str, Any], checkpoint_
         [CATEGORY_DESIRED, CATEGORY_SLOW, CATEGORY_BAD], fill_value=0
     )
     core_names = [
+        "00_primary/oai_bpb",
+        "00_primary/oai_best_bpb",
+        "00_primary/train_bpb",
+        "00_primary/train_loss",
+        "00_primary/validation_bpb",
+        "00_primary/toric_cca_topology_loss",
+        "02_train/bpb",
+        "02_train/loss",
+        "03_validation/bpb",
+        "03_validation/loss",
+        "04_losses/train/advanced_aux_loss",
+        "06_graphcg/advanced/graphcg_loss",
+        "07_topology_geometry/advanced/analogy_loss",
+        "08_toric_tropical_bgg/advanced/toric_cca_topology_loss",
+        "08_toric_tropical_bgg/advanced/toric_cca_binomial_residual",
+        "08_toric_tropical_bgg/advanced/toric_cca_stanley_reisner_nonface_mass",
+        "08_toric_tropical_bgg/advanced/koszul_bgg_loss",
+        "08_toric_tropical_bgg/advanced/slepian_pollak_loss",
+        "08_toric_tropical_bgg/advanced/toric_tropical_loss",
+        "12_optimization/advanced/runtime_scale",
+        "12_optimization/advanced/aux_loss",
+        "12_optimization/time/step_avg_ms",
         "train/bpb",
         "train/loss",
         "train/total_loss",
         "val/bpb",
         "val/loss",
-        "train/gflownet_loss",
-        "train/gflownet_entropy",
-        "train/gflownet_action_diversity",
         "complexity/val/argmax_byte_accuracy",
         "complexity/val/prediction_target_ncd_lzma_mean",
         "audit/future_permutation_logit_error",
