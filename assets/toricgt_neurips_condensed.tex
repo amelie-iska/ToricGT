@@ -404,6 +404,24 @@ Reasoning trajectories filtered by time, radius, density, margin, and phase are 
 \end{equation}
 Nonzero higher homology, large Fitting-minor residuals, failed varieties-of-complexes equations $d_id_{i+1}=0$, unstable multigraded Betti mass, or Buchsbaum--Eisenbud complementary-minor multiplier mismatches indicate that the model's claimed toric/persistence coordinates are not coherent local parameters for the observed reasoning module.  These quantities are audit-first: they must pass exact small-window checks and ablations before becoming training losses.
 
+\paragraph{Finite CCA certificate.}
+The current implementation sharpens this into a finite combinatorial commutative-algebra certificate for each hidden window,
+\begin{equation}
+  \mathcal C(H)=
+  (A,\Delta,\mathcal R,C_\bullet,\partial_\bullet,
+   T_1,\ldots,T_r,\mathcal F_1\subset\cdots\subset\mathcal F_L).
+\end{equation}
+Here $A$ is a small semigroup exponent table, $\Delta$ is a chamber complex, $\mathcal R$ is a verified low-degree toric-binomial relation set, $(C_\bullet,\partial_\bullet)$ is a finite chain complex, $T_i$ are local Koszul operators, and $\mathcal F_\ell$ are filtered flag complexes.  Exact sidecar checks verify $Au=Av$ for $x^u-x^v\in\mathcal R$, $\partial_{q-1}\partial_q=0$, $\mathcal F_\ell\subseteq\mathcal F_{\ell+1}$, and $T_iT_j=T_jT_i$ when Koszul exactness is claimed.  The train-time scalar is a bounded surrogate,
+\begin{equation}
+  \mathcal L_{\mathrm{CCA}\text{-}\mathrm{top}}
+  =
+  w_{\mathrm{binom}}\mathcal L_{\mathrm{binom}}
+  +w_{\mathrm{SR}}\mathcal L_{\mathrm{SR}}
+  +w_K\mathcal L_{\mathrm{Koszul}}
+  +w_T\mathcal L_{\mathrm{top}}+\cdots,
+\end{equation}
+where $\mathcal L_{\mathrm{binom}}$ is a toric-ideal residual and $\mathcal L_{\mathrm{SR}}$ is a Stanley--Reisner nonface mass.  A metric moves from diagnostic to loss only when the exact finite audit agrees with the differentiable surrogate and matched validation shows no BPB regression.  This is the operative meaning of ``toric'' in the compact training loop: finite algebraic certificates first, small gated gradients second.
+
 \paragraph{Affine Coxeter and braid structure.}
 The toric route to affine Coxeter structure is through lattices and chambers.  A torus $T$ has character and cocharacter lattices $M=\operatorname{Hom}(T,\mathbb G_m)$ and $N=\operatorname{Hom}(\mathbb G_m,T)$.  Once a root datum is attached, as for a reductive group with maximal torus $T$, roots $\alpha\in M$ cut $N_\R$ by hyperplanes $\alpha(x)=0$; the reflections in these walls generate the Weyl group, and the translated walls $\alpha(x)=k$ generate the affine Weyl/Coxeter group $W_{\mathrm{aff}}=Q^\vee\rtimes W$ \cite{humphreys1990reflection}.  Thus toric fans and Newton normal fans give the polyhedral side of the same chamber geometry that appears in affine Coxeter systems.  Artin braid actions then arise as ordered wall-crossing or monodromy actions around the complexified hyperplane complement.  In the next iteration, braid/Coxeter graph tasks should therefore be tied to toric fan tasks: actions $\sigma_i^{\pm1}$ and affine reflections $s_{\alpha,k}$ become controlled graph-of-thought edits, while tropical active-face margins determine whether a wall crossing is stable or ambiguous.
 

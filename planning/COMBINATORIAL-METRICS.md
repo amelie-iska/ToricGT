@@ -71,6 +71,100 @@ sidecar windows. This is the main rigor guardrail: a loss is not considered a
 mathematical loss unless its finite certificate and its soft surrogate are both
 defined and logged.
 
+### Finite BGG and Category O Shadow
+
+The Toric BGG part is also finite in the training loop. The intended
+representation-theoretic object is not an infinite category inside the model;
+it is a small highest-weight skeleton that can be written as matrices.
+
+Let `(Lambda, <=)` be a finite poset. A highest-weight proxy over a field `k`
+has:
+
+```text
+standard objects Delta(lambda),
+costandard objects Nabla(lambda),
+simple objects L(lambda),
+projective covers P(lambda).
+```
+
+The BGG reciprocity pattern is
+
+```text
+[P(lambda) : Delta(mu)] = [Delta(mu) : L(lambda)].
+```
+
+For train-time use this is represented by an incidence-algebra shadow. The
+incidence algebra `I(Lambda; k)` has basis elements `e_{lambda,mu}` for
+`lambda <= mu` and multiplication
+
+```text
+e_{lambda,mu} e_{nu,rho}
+  = 1[mu = nu] e_{lambda,rho}.
+```
+
+The standard-filtration metric does not ask the model to classify modules.
+Instead it asks a hidden trajectory to respect the partial order:
+
+```text
+L_standard_leak
+  = mean attention/probe mass from a lambda-state into forbidden mu
+    with mu not >= lambda under the certificate poset.
+```
+
+The BGG differential shadow comes from a multigraded polynomial ring
+
+```text
+S = k[x_1, ..., x_n],      E = exterior(e_1, ..., e_n),
+```
+
+and a graded module `M`. On `M tensor E`, the BGG/Koszul-style differential is
+
+```text
+d(m tensor eta) = sum_i x_i m tensor contraction(e_i, eta).
+```
+
+The exact identity `d^2 = 0` follows from commutativity of the `x_i` and
+anticommutativity of exterior contraction. The train-time residual is therefore
+
+```text
+L_d2 = || d_hat_{q-1} d_hat_q ||_F^2,
+```
+
+where `d_hat_q` is a low-rank hidden-state probe predicting the certificate
+differential. This is the smallest robust BGG loss because it is local,
+matrix-valued, and falsifiable on toy complexes.
+
+Hypertoric category `O` and oriented-matroid category `O` supply the toric
+choice of poset. A hyperplane arrangement gives sign vectors or chambers; the
+Gale-dual arrangement gives the Koszul-dual curriculum. The finite metric is:
+
+```text
+signature(tau)
+  = (Betti histogram, Ext-degree histogram, chamber path,
+     standard leakage, Gale-dual label, moment/toric phase summary).
+```
+
+Analogical and memory retrieval training then compare signatures by
+chain-complex structure rather than only by cosine distance:
+
+```text
+L_chain_map = || F_{q-1} d_q - d'_q F_q ||_F^2
+L_gale      = distance(signature_A(tau), signature_Gale(A)(tau'))
+L_memory    = contrastive_loss(memory_key(tau), memory_key(tau_isomorphic))
+```
+
+The useful hierarchy is:
+
+1. `d^2` residual and standard leakage: safe early probes, tiny weights.
+2. Betti/Ext signature distillation: audit-backed after exact ranks stabilize.
+3. Gale-dual consistency and Euler-Koszul exactness: late phase only.
+4. Retrieval/memory use of BGG signatures: post-BPB-gate reasoning phase.
+
+This keeps category `O` mathematically meaningful without pretending that the
+deployed micro-LM serializes a category. The final artifact stores only the
+base model and byte-accounted modules that improve BPB; BGG/category-O probes
+are training-time certificates unless an ablation proves otherwise.
+
 ### Toric Monomial Data
 
 Choose a deterministic exponent table
@@ -334,6 +428,69 @@ This prevents beautiful but unhelpful algebra from steering the BPB-first phase.
 For Parameter Golf, a metric is valuable only if it helps reduce OAI validation
 BPB, improves an explicitly tracked reasoning slice after the BPB gate, or
 diagnoses a failure that leads to a better configuration.
+
+### Exact Sidecar Algorithms
+
+The periodic analysis suite should compute exact integer or finite-field
+versions of the same objects used by the differentiable loss. The intended
+small-window algorithms are:
+
+```text
+low_degree_toric_relations(A, degree_bound):
+    fibers = group monomial exponent vectors u by A @ u
+    for each fiber with at least two elements:
+        emit binomials u - v from a stable spanning tree of the fiber
+```
+
+```text
+stanley_reisner_audit(coactivation, fan_edges, threshold):
+    hard_edges = {(i,j): coactivation[i,j] >= threshold}
+    forbidden = hard_edges - fan_edges
+    K = flag_complex(hard_edges)
+    boundary_1, boundary_2 = incidence_matrices_F2(K)
+    beta0 = n_vertices - rank(boundary_1)
+    beta1 = nullity(boundary_1) - rank(boundary_2)
+    return forbidden_fraction, beta0, beta1, euler(K)
+```
+
+```text
+koszul_audit(T_1, ..., T_r):
+    require ||T_i T_j - T_j T_i|| small for all i < j
+    build signed Koszul differentials d_q
+    exactness_residual = sum_q rank_or_norm(d_{q-1} @ d_q)
+    homology_rank_q = nullity(d_q) - rank(d_{q+1})
+```
+
+```text
+directed_persistence_audit(points, radii):
+    for rho in radii:
+        build directed graph and undirected flag complex K_rho
+        compute F2 boundary ranks, component mergers, cycle births
+        compute directed flux, transitivity, and simplex closure failures
+    verify K_rho subset K_rho_next and summarize barcode-like lifetimes
+```
+
+The exact values are not gradients. They decide whether a soft metric is
+trustworthy. A soft loss can be promoted only when:
+
+```text
+corr(soft_metric, exact_audit) >= corr_min
+and exact_nonfinite_count == 0
+and validation_bpb_delta is not worse than tolerance
+and artifact_bytes_delta == 0 for training-only probes.
+```
+
+For W&B, the exact audit names should be grouped separately from the training
+losses:
+
+```text
+advanced/toric_cca_*          # differentiable train-time metrics
+analysis_control/exact_cca/*  # sidecar finite algebra/topology audits
+```
+
+When these disagree, the exact audit wins: reduce or hold the soft loss weight
+and use the plots to diagnose whether the chart basis, threshold, relation set,
+or topology radius is wrong.
 
 ### Implementation Map
 

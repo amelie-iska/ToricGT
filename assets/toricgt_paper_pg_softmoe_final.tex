@@ -2361,6 +2361,53 @@ Its homology computes
 \end{equation}
 If $a_1,\ldots,a_r$ behave like clean local parameters for the observed reasoning module, higher Koszul homology should be small or structurally predictable.  If higher homology grows, if Fitting minors jump across adjacent chart cells, or if multigraded Betti mass shifts erratically under graph relabeling, then the model's claimed toric/persistent coordinates are not yet a reliable explanation of the reasoning trajectory.
 
+\subsection{Finite combinatorial algebra bridge}
+
+The train-time version of the previous paragraph is deliberately finite.  For a hidden window $H=(h_1,\ldots,h_n)$, ToricGT forms a small combinatorial commutative-algebra/topology certificate
+\begin{equation}
+  \mathcal C(H)=
+  \bigl(A,\Delta,\mathcal R,C_\bullet,\partial_\bullet,
+        T_1,\ldots,T_r,\mathcal F_1\subset\cdots\subset\mathcal F_L\bigr).
+\end{equation}
+Here $A=\{a_1,\ldots,a_m\}\subset\mathbb Z^s$ is a fixed exponent configuration, $\Delta$ is a chamber or fan complex, $\mathcal R$ is a low-degree toric-binomial relation set, $(C_\bullet,\partial_\bullet)$ is a finite chain complex, the $T_i$ are local operators used for Koszul differentials, and $\mathcal F_\ell$ are filtered flag complexes extracted from the reasoning trajectory.  The certificate is exact only when $Au=Av$ for every $x^u-x^v\in\mathcal R$, $\partial_{q-1}\partial_q=0$, $\mathcal F_\ell\subseteq\mathcal F_{\ell+1}$, and the $T_i$ commute whenever a Koszul exactness claim is made.
+
+The toric component comes from the monomial map
+\begin{equation}
+  \varphi_A:k[x_1,\ldots,x_m]\to k[t_1^{\pm1},\ldots,t_s^{\pm1}],
+  \qquad \varphi_A(x_i)=t^{a_i},
+\end{equation}
+with toric ideal
+\begin{equation}
+  I_A=\ker\varphi_A=\langle x^u-x^v:Au=Av\rangle.
+\end{equation}
+Training uses only a short Markov-basis shadow: degree-two or otherwise low-degree relations $a_i+a_j\approx a_k+a_l$ become a normalized binomial residual on chamber logits.  The chamber component is the Stanley--Reisner face ring
+\begin{equation}
+  k[\Delta]=k[x_1,\ldots,x_m]/I_\Delta,\qquad
+  I_\Delta=\langle x_F:F\notin\Delta\rangle.
+\end{equation}
+Soft chamber coactivation on nonfaces gives $\mathcal L_{\mathrm{SR}}$, while exact sidecar audits compute forbidden hard edges, Euler characteristic, and finite-field Betti ranks.  Hochster's formula supplies the algebraic reference:
+\begin{equation}
+  \beta_{i,\sigma}(k[\Delta])
+  =
+  \dim_k\widetilde H^{|\sigma|-i-1}(\Delta_\sigma;k).
+\end{equation}
+
+The implemented bridge is the bounded auxiliary
+\begin{equation}
+\begin{split}
+  \mathcal L_{\mathrm{CCA}\text{-}\mathrm{top}}
+  ={}&
+  w_{\mathrm{binom}}\mathcal L_{\mathrm{binom}}
+  +w_{\mathrm{SR}}\mathcal L_{\mathrm{SR}}
+  +w_H(1-H(C))\\
+  &+w_{\mathrm{bal}}\mathcal L_{\mathrm{balance}}
+  +w_\chi|\chi_{\mathrm{proxy}}|/m
+  +w_K\mathcal L_{\mathrm{Koszul}}
+  +w_T\mathcal L_{\mathrm{top}}.
+\end{split}
+\end{equation}
+The code path is \texttt{src/toricgt/combinatorial\_toric\_metrics.py}; it returns \texttt{toric\_cca\_topology\_loss} and detached diagnostics such as \texttt{toric\_cca\_binomial\_residual}, \texttt{toric\_cca\_stanley\_reisner\_nonface\_mass}, \texttt{toric\_cca\_betti0\_proxy}, and \texttt{toric\_cca\_betti1\_proxy}.  These diagnostics are useful only under an audit-to-loss rule: a metric may affect gradients only after exact finite audits agree with its differentiable surrogate and matched validation shows no BPB regression beyond tolerance.  This keeps the commutative algebra rigorous without letting it overpower the byte-level objective.
+
 The corresponding audit metrics are deliberately literal:
 \begin{verbatim}
 toric_affine_chart_id
