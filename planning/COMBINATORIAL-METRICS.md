@@ -34,6 +34,43 @@ The implementation samples at most `max_points` vectors from a training
 sequence, normalizes them, and computes all algebraic/topological quantities on
 that small finite set.
 
+### Exact Finite Certificate
+
+For each sampled window, the intended exact object is a finite certificate
+
+```text
+C(H) = (A, Delta, R, K_*, d_*, T_1, ..., T_r, F_1 subset ... subset F_L).
+```
+
+The pieces have the following meanings:
+
+1. `A` is a finite exponent configuration, hence a semigroup algebra shadow
+   `k[N A]`.
+2. `Delta` is a finite simplicial complex, usually the cyclic fan complex on
+   chamber labels.
+3. `R` is a small set of verified toric binomial relations `x^u - x^v` with
+   `A u = A v`.
+4. `(K_*, d_*)` is a finite chain complex over a field, used for exact
+   sidecar homology audits.
+5. `T_i` are local endomorphisms of the sampled module, used to build Koszul
+   differentials.
+6. `F_1 subset ... subset F_L` is a finite filtered graph or flag complex.
+
+The certificate is algebraically valid when:
+
+```text
+A u = A v for every binomial x^u - x^v in R,
+d_{q-1} d_q = 0 for every q,
+T_i T_j = T_j T_i for all i,j when a Koszul exactness claim is made,
+F_l subset F_{l+1} for every filtration level l.
+```
+
+The training code is allowed to use differentiable surrogates for these
+objects only because the exact finite objects exist and can be audited on
+sidecar windows. This is the main rigor guardrail: a loss is not considered a
+mathematical loss unless its finite certificate and its soft surrogate are both
+defined and logged.
+
 ### Toric Monomial Data
 
 Choose a deterministic exponent table
@@ -79,6 +116,19 @@ respect low-degree binomial relations of the finite toric monomial
 configuration. It is intentionally a shadow, not a symbolic Groebner-basis
 computation in the training loop.
 
+The exact sidecar version can be checked over a small integer or finite-field
+table:
+
+```text
+audit_binomial(A, u, v):
+    return (A @ u == A @ v)
+```
+
+When a larger audit budget is available, a small Markov-basis slice can be
+computed by enumerating low-degree `u,v` and reducing duplicate fibers
+`A u`. The train-time relation set is then the stable low-degree subset that
+appears across adjacent windows or matched seeds.
+
 ### Stanley-Reisner Complex
 
 Let `Delta` be the cyclic fan complex on chamber labels. Vertices are chambers,
@@ -114,6 +164,31 @@ collapsed hidden charts where mutually incompatible toric chambers fire
 together. The companion diagnostics are chamber entropy, chamber coverage,
 allowed edge mass, an Euler-characteristic proxy, and Betti proxies from the
 thresholded chamber graph.
+
+The exact commutative-algebra object is the face ring
+
+```text
+k[Delta] = k[x_1, ..., x_m] / I_Delta.
+```
+
+Its multigraded Betti numbers are governed by Hochster's formula:
+
+```text
+beta_{i,sigma}(k[Delta])
+  = dim_k H_tilde^{|sigma|-i-1}(Delta_sigma; k),
+```
+
+where `Delta_sigma` is the restriction of `Delta` to the vertex set `sigma`.
+In training, the code uses one-skeleton Betti proxies because they are cheap
+and differentiability-safe. In periodic analysis, exact `F_2` boundary ranks
+should be computed from the same thresholded complexes:
+
+```text
+beta_q = dim ker partial_q - rank image partial_{q+1}.
+```
+
+This makes the Stanley-Reisner metric falsifiable: the soft nonface mass should
+move in the same direction as exact forbidden-face counts and Betti instability.
 
 ### Koszul and Buchsbaum-Eisenbud Shadows
 
@@ -163,6 +238,32 @@ behavior. These rank terms are detached diagnostics during BPB-first training so
 SVDs cannot become the main gradient source. The differentiable path is
 primarily exactness plus commutator/syzygy residuals.
 
+The exact algebraic reference is the Koszul complex `K(T_1, ..., T_r; M)`.
+If the `T_i` commute, the Koszul differential squares to zero. Its homology
+measures failure of the operators to form a regular sequence on the sampled
+module:
+
+```text
+H_q(K(T; M)) = ker d_q / im d_{q+1}.
+```
+
+For a finite free complex
+
+```text
+F_s -> ... -> F_1 -> F_0,
+```
+
+Buchsbaum-Eisenbud exactness supplies the audit discipline: the expected ranks
+must add correctly, and the determinantal/Fitting ideals of the differentials
+must have the expected grade. The training loop should not attempt symbolic
+determinantal algebra. Instead:
+
+1. Sidecar audits compute exact ranks over `F_2` or rationals on tiny windows.
+2. Differentiable surrogates penalize `||d d||_F^2`, commutators, and soft rank
+   mismatches.
+3. A Koszul or Buchsbaum-Eisenbud loss may gain weight only when the exact
+   audit and soft surrogate agree over recent windows.
+
 ### Directed Persistent Topology
 
 The module `src/toricgt/topological_reasoning.py` treats a hidden window as a
@@ -193,6 +294,78 @@ The loss uses differentiable proxies for:
 
 This is a combinatorial-topology metric because the underlying hard object is a
 finite filtered simplicial complex and a directed graph-of-reasoning trajectory.
+
+The exact sidecar construction uses boundary matrices over `F_2` or signed
+integer incidence matrices:
+
+```text
+partial_1: C_1(K_l) -> C_0(K_l),
+partial_2: C_2(K_l) -> C_1(K_l),
+partial_1 partial_2 = 0.
+```
+
+Persistent inclusions are maps `i_l: K_l -> K_{l+1}` inducing homology maps
+`H_q(i_l)`. The training surrogate is useful only if it predicts the same
+qualitative events as the exact filtration: component mergers, short-lived
+cycle creation, directed cycle flux, and simplex closure failures. This is why
+the periodic analysis must render both soft trajectory plots and exact
+finite-complex summaries.
+
+### Loss Validity Gates
+
+Every advanced algebra/topology signal has three possible statuses:
+
+1. `metric_only`: logged for visibility; cannot affect gradients.
+2. `audit_backed`: exact sidecar audit exists and agrees with the soft metric.
+3. `loss_enabled`: allowed into the auxiliary loss after a BPB-safe ablation.
+
+The promotion rule is:
+
+```text
+if exact_audit_passes
+   and soft_metric_tracks_audit
+   and BPB_ablation_delta >= -tolerance:
+       allow small loss weight
+else:
+       keep metric_only or audit_backed
+```
+
+This prevents beautiful but unhelpful algebra from steering the BPB-first phase.
+For Parameter Golf, a metric is valuable only if it helps reduce OAI validation
+BPB, improves an explicitly tracked reasoning slice after the BPB gate, or
+diagnoses a failure that leads to a better configuration.
+
+### Implementation Map
+
+The current bridge maps theory to code as follows:
+
+```text
+toric ideal residual
+  -> src/toricgt/combinatorial_toric_metrics.py: toric_cca_binomial_residual
+
+Stanley-Reisner nonface mass
+  -> toric_cca_stanley_reisner_nonface_mass
+
+face-ring coarse topology
+  -> toric_cca_euler_characteristic_proxy
+  -> toric_cca_betti0_proxy
+  -> toric_cca_betti1_proxy
+
+Koszul-persistence module
+  -> src/toricgt/koszul_persistence.py
+  -> toric_cca_koszul_loss
+
+directed filtered flag complex
+  -> src/toricgt/topological_reasoning.py
+  -> toric_cca_topology_loss_component
+
+combined bounded bridge
+  -> toric_cca_topology_loss
+```
+
+All chart directions and exponent tables are deterministic functions of hidden
+states and configuration. No CCA/topology parameters are serialized into the
+competition artifact.
 
 ## Combined Train-Time Loss
 
@@ -251,7 +424,7 @@ For the BPB-first phase:
 5. Treat a rising nonfinite flag, sudden BPB stall, or train-BPB spike as a
    reason to reduce the advanced scale, not as a reason to trust the math more.
 
-Recommended scratch-run starting point after the step-260 NaN:
+Current scratch-run starting point after the compile-safe PolarQuant fix:
 
 ```text
 ADVANCED_LOSS_SCALE=0.00025
@@ -264,7 +437,9 @@ GRAPHCG_LOSS_WEIGHT=0.001
 SLEPIAN_LOSS_WEIGHT=0.001
 ANALOGY_LOSS_WEIGHT=0.000005
 GRAD_CLIP_NORM=0.25
-POLARQUANT_TRAIN_START_STEP=750
+POLARQUANT_TRAIN=1
+POLARQUANT_TRAIN_START_STEP=0
+POLARQUANT_WARMUP_STEPS=0
 ```
 
 This still means the advanced metrics are active from step 0 for logging and

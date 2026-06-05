@@ -2824,6 +2824,20 @@ If $a_1,\ldots,a_r$ behave like clean local parameters for the observed reasonin
 
 \subsection{Combinatorial commutative-algebra bridge for training}
 
+The train-time algebraic layer is based on a finite certificate rather than an informal geometric analogy.  For a hidden window $H$ define a combinatorial commutative-algebra/topology certificate
+\begin{equation}
+  \mathcal C(H)=
+  \bigl(A,\Delta,\mathcal R,C_\bullet,\partial_\bullet,
+        T_1,\ldots,T_r,\mathcal F_1\subset\cdots\subset\mathcal F_L\bigr).
+\end{equation}
+Here $A$ is a finite semigroup exponent configuration, $\Delta$ is a finite chamber complex, $\mathcal R$ is a set of toric binomial relations, $(C_\bullet,\partial_\bullet)$ is a finite chain complex, $T_i$ are local operators used to form Koszul differentials, and $\mathcal F_\ell$ are filtered graph or flag complexes extracted from the reasoning trajectory.  The certificate is valid only if
+\begin{equation}
+  A u=A v\quad\text{for every }x^u-x^v\in\mathcal R,\qquad
+  \partial_{q-1}\partial_q=0,\qquad
+  \mathcal F_\ell\subseteq \mathcal F_{\ell+1},
+\end{equation}
+and, whenever a Koszul exactness claim is made, the sampled operators satisfy $T_iT_j=T_jT_i$ up to the declared audit tolerance.  Thus the object used by training is a finite algebraic certificate with exact sidecar checks; the differentiable loss is only a bounded surrogate for that certificate.
+
 The BPB-first implementation uses a smaller version of this theory that can run inside a language-model training step.  Let a sampled hidden window be
 \begin{equation}
   H=(h_1,\ldots,h_n),\qquad h_i\in\R^d,
@@ -2851,6 +2865,11 @@ and asks chamber logits $z_i(h)$ to satisfy the corresponding binomial relation:
        {\frac1m\sum_{q=1}^m z_q^2+\epsilon}.
 \end{equation}
 This is a finite commutative-algebra signal: it regularizes the hidden chart by the low-degree toric ideal relations of the Newton-polytope shadow, but it introduces no trainable parameters and no serialized artifact bytes.
+In exact sidecar audits, the relation set $\mathcal R$ is obtained by enumerating small multidegrees, grouping exponent vectors by the fiber of $A$, and retaining stable low-degree binomials across adjacent windows or matched seeds.  This is a small Markov-basis slice, not a full Groebner-basis computation.  The audit condition is simply
+\begin{equation}
+  \mathrm{audit}_{\mathrm{binom}}(A,u,v)=\mathbf 1[Au=Av],
+\end{equation}
+while the training residual asks the hidden logits to make the corresponding binomial differences small.
 
 The second finite object is a Stanley--Reisner shadow.  Let $\Delta$ be the cyclic fan complex on the same $m$ chambers.  Its Stanley--Reisner ideal is
 \begin{equation}
@@ -2876,6 +2895,21 @@ It penalizes mutually incompatible fan chambers firing together.  The same chamb
   \chi_{\mathrm{proxy}}=f_0-f_1+f_2,
 \end{equation}
 and small Betti proxies from the thresholded one-skeleton.  Exact finite-field homology remains a sidecar audit; the training path keeps only bounded differentiable surrogates.
+The exact face-ring reference is
+\begin{equation}
+  k[\Delta]=k[x_1,\ldots,x_m]/I_\Delta.
+\end{equation}
+Its multigraded Betti numbers are controlled by Hochster's formula,
+\begin{equation}
+  \beta_{i,\sigma}(k[\Delta])
+  =
+  \dim_k \widetilde H^{|\sigma|-i-1}(\Delta_\sigma;k),
+\end{equation}
+where $\Delta_\sigma$ is the induced subcomplex on $\sigma$.  Periodic analyses therefore compute exact boundary ranks over a small finite field when runtime allows:
+\begin{equation}
+  \beta_q=\dim\ker \partial_q-\rank\operatorname{im}\partial_{q+1}.
+\end{equation}
+The soft nonface mass is treated as trustworthy only when it tracks exact forbidden-face counts, Euler-characteristic movement, and Betti instability on these sidecar complexes.
 
 The implemented train-time bridge combines these terms with the Koszul-persistence and directed-topology losses:
 \begin{equation}
@@ -2892,6 +2926,20 @@ The implemented train-time bridge combines these terms with the Koszul-persisten
 \end{split}
 \end{equation}
 The corresponding code path is \texttt{src/toricgt/combinatorial\_toric\_metrics.py}.  It returns a differentiable scalar \texttt{toric\_cca\_topology\_loss} and detached diagnostics for the binomial residual, Stanley--Reisner nonface mass, chamber entropy and coverage, fan balance, Euler proxy, Betti proxies, Koszul component, and topology component.  In the Seq4096 Parameter-Golf trainer these signals are routed through the existing advanced auxiliary-loss channel, capped by a small ratio of current cross entropy, and logged under \texttt{advanced/toric\_cca\_*}.  Thus the rigorous algebraic object is present, but the optimizer is not allowed to sacrifice BPB for a beautiful complex.
+
+This gives an audit-to-loss principle.  Each advanced signal has one of three statuses:
+\begin{equation}
+  \mathrm{metric\ only}\longrightarrow
+  \mathrm{audit\ backed}\longrightarrow
+  \mathrm{loss\ enabled}.
+\end{equation}
+A signal is promoted to the last status only when the exact finite audit passes, the differentiable surrogate tracks the exact audit on recent windows, and a matched ablation shows no BPB regression beyond the declared tolerance:
+\begin{equation}
+  \mathrm{pass}_{\mathrm{exact}}=1,\qquad
+  \operatorname{corr}(\widehat a_{\mathrm{soft}},a_{\mathrm{exact}})\ge c_{\min},\qquad
+  \Delta\mathrm{BPB}\le \epsilon_{\mathrm{score}}.
+\end{equation}
+This policy is deliberately conservative during the Parameter-Golf phase.  A combinatorial algebra metric is useful only if it reduces OAI validation BPB, improves a tracked reasoning slice after the BPB gate, or diagnoses a configuration change that does one of those two things.
 
 The corresponding audit metrics are deliberately literal:
 \begin{verbatim}
