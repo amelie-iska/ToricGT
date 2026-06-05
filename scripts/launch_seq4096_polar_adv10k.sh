@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Resume the stable Seq4096 FineWeb basin with cleaned W&B metrics, PolarQuant,
-# and medium-conservative advanced losses.  The +10K gate is trainer step 30000
-# when resuming from the step-20000 checkpoint.
+# Launch a fresh Seq4096 FineWeb run with cleaned W&B metrics, PolarQuant,
+# and numerically guarded step-0 advanced losses. The 10K gate is trainer
+# step 10000 because this run starts from scratch.
 
 set -euo pipefail
 
@@ -12,9 +12,7 @@ PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
-BASE_RUN_ID="${BASE_RUN_ID:-toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z}"
-BASE_CKPT="${BASE_CKPT:-$PARAMETER_GOLF_ROOT/checkpoints/$BASE_RUN_ID/${BASE_RUN_ID}_step_020000.pt}"
-RUN_ID="${RUN_ID:-toricgt_seq4096_oai_bpb1p1686_polar_adv10k_${STAMP}}"
+RUN_ID="${RUN_ID:-toricgt_adv0safe_polar_seq4096_${STAMP}}"
 TRAIN_TMUX="${TRAIN_TMUX:-${RUN_ID}_train}"
 ANALYSIS_TMUX="${ANALYSIS_TMUX:-${RUN_ID}_analysis}"
 MIRROR_TMUX="${MIRROR_TMUX:-${RUN_ID}_mirror}"
@@ -22,10 +20,10 @@ DIAG_TMUX="${DIAG_TMUX:-${RUN_ID}_diag}"
 GATE_TMUX="${GATE_TMUX:-${RUN_ID}_gate}"
 
 ITERATIONS="${ITERATIONS:-40000}"
-GATE_STEP="${GATE_STEP:-30000}"
+GATE_STEP="${GATE_STEP:-10000}"
 TARGET_BPB="${TARGET_BPB:-1.09}"
 CONTINUE_THRESHOLD_BPB="${CONTINUE_THRESHOLD_BPB:-1.17}"
-ANALYSIS_START_STEP="${ANALYSIS_START_STEP:-20250}"
+ANALYSIS_START_STEP="${ANALYSIS_START_STEP:-250}"
 ANALYSIS_INTERVAL_STEPS="${ANALYSIS_INTERVAL_STEPS:-500}"
 
 CKPT_DIR="${CKPT_DIR:-$PARAMETER_GOLF_ROOT/checkpoints/$RUN_ID}"
@@ -34,13 +32,18 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/post_resume_analysis/$RUN_ID}"
 STATE_PATH="${STATE_PATH:-$REPO_ROOT/outputs/$RUN_ID.10k_gate_state.json}"
 DIAG_JSON="${DIAG_JSON:-$REPO_ROOT/logs/$RUN_ID.full_diag.latest.json}"
 COMMAND_DIR="$REPO_ROOT/logs/$RUN_ID/supervisor"
+TRAINER_PATH="$PARAMETER_GOLF_ROOT/records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py"
 
-if [[ ! -f "$BASE_CKPT" ]]; then
-  echo "missing base checkpoint: $BASE_CKPT" >&2
-  exit 1
-fi
 if [[ ! -x "$PYTHON" ]]; then
   echo "missing python executable: $PYTHON" >&2
+  exit 1
+fi
+if [[ ! -f "$TRAINER_PATH" ]]; then
+  echo "missing trainer: $TRAINER_PATH" >&2
+  exit 1
+fi
+if ! grep -q "finite_aux_scalar" "$TRAINER_PATH"; then
+  echo "trainer is missing the finite advanced-loss guard: $TRAINER_PATH" >&2
   exit 1
 fi
 for session in "$TRAIN_TMUX" "$ANALYSIS_TMUX" "$MIRROR_TMUX" "$DIAG_TMUX" "$GATE_TMUX"; do
@@ -71,10 +74,10 @@ TRAIN_CMD=(
   "ARTIFACT_SIZE_LIMIT_BYTES=16000000"
   "EXPORT_PRUNE_FRACTION=0.12"
   "CHECKPOINT_DIR=$CKPT_DIR"
-  "RESUME_CHECKPOINT=$BASE_CKPT"
-  "RESET_OPTIMIZER_ON_RESUME=0"
-  "RESET_RNG_ON_RESUME=0"
-  "RESET_LOADER_ON_RESUME=0"
+  "RESUME_CHECKPOINT="
+  "RESET_OPTIMIZER_ON_RESUME=1"
+  "RESET_RNG_ON_RESUME=1"
+  "RESET_LOADER_ON_RESUME=1"
   "ITERATIONS=$ITERATIONS"
   "MAX_WALLCLOCK_SECONDS=0"
   "VAL_LOSS_EVERY=250"
@@ -100,21 +103,21 @@ TRAIN_CMD=(
   "POLARQUANT_TRAIN_SAMPLE_TOKENS=128"
   "POLARQUANT_EVAL_SAMPLE_TOKENS=256"
   "POLARQUANT_SEED=271828"
-  "ADVANCED_LOSS_SCALE=0.008"
-  "GRAPHCG_LOSS_WEIGHT=0.010"
-  "TORIC_TROPICAL_LOSS_WEIGHT=0.003"
-  "SLEPIAN_LOSS_WEIGHT=0.008"
-  "KOSZUL_BGG_LOSS_WEIGHT=0.00003"
-  "ANALOGY_LOSS_WEIGHT=0.00006"
-  "ADVANCED_LOSS_SAMPLE_TOKENS=384"
+  "ADVANCED_LOSS_SCALE=0.003"
+  "GRAPHCG_LOSS_WEIGHT=0.004"
+  "TORIC_TROPICAL_LOSS_WEIGHT=0.0015"
+  "SLEPIAN_LOSS_WEIGHT=0.0035"
+  "KOSZUL_BGG_LOSS_WEIGHT=0.00001"
+  "ANALOGY_LOSS_WEIGHT=0.000025"
+  "ADVANCED_LOSS_SAMPLE_TOKENS=128"
   "TORIC_TROPICAL_FAN_BINS=8"
   "ADVANCED_LOSS_LOG_ONLY=0"
-  "ADVANCED_LOSS_START_STEP=20000"
+  "ADVANCED_LOSS_START_STEP=0"
   "ADVANCED_LOSS_END_STEP=0"
-  "ADVANCED_LOSS_EVERY=4"
-  "ADVANCED_LOSS_WARMUP_STEPS=1000"
-  "ADVANCED_LOSS_MIN_BEST_VAL_BPB=1.21"
-  "ADVANCED_LOSS_MAX_CE_RATIO=0.00025"
+  "ADVANCED_LOSS_EVERY=1"
+  "ADVANCED_LOSS_WARMUP_STEPS=0"
+  "ADVANCED_LOSS_MIN_BEST_VAL_BPB=0"
+  "ADVANCED_LOSS_MAX_CE_RATIO=0.00010"
   "CHECKPOINT_ON_TRAIN_BPB_BELOW=1.06"
   "CHECKPOINT_ON_TRAIN_BPB_COOLDOWN_STEPS=250"
   "CHECKPOINT_ON_TRAIN_BPB_MAX=2"
@@ -138,6 +141,7 @@ ANALYSIS_CMD=(
   --run-path "$ENTITY/$PROJECT/$RUN_ID"
   --output-root "$OUTPUT_ROOT"
   --start-step "$ANALYSIS_START_STEP"
+  --analyze-start-step
   --interval-steps "$ANALYSIS_INTERVAL_STEPS"
   --poll-seconds 30
   --target-bpb "$TARGET_BPB"
@@ -208,13 +212,14 @@ printf "\n" >> "$COMMAND_DIR/gate_command.sh"
 chmod 700 "$COMMAND_DIR"/*.sh
 
 tmux new-session -d -s "$TRAIN_TMUX" "cd '$PARAMETER_GOLF_ROOT' && bash '$COMMAND_DIR/train_command.sh' 2>&1 | tee -a '$LOG_PATH'"
+sleep "${SIDECAR_START_DELAY_SECONDS:-25}"
 tmux new-session -d -s "$ANALYSIS_TMUX" "cd '$REPO_ROOT' && bash '$COMMAND_DIR/analysis_command.sh' 2>&1 | tee -a '$REPO_ROOT/logs/$RUN_ID.analysis_watcher.txt'"
 tmux new-session -d -s "$MIRROR_TMUX" "cd '$REPO_ROOT' && bash '$COMMAND_DIR/mirror_command.sh' 2>&1 | tee -a '$REPO_ROOT/logs/$RUN_ID.wandb_mirror.txt'"
 tmux new-session -d -s "$DIAG_TMUX" "cd '$REPO_ROOT' && bash '$COMMAND_DIR/full_diag_command.sh' 2>&1 | tee -a '$REPO_ROOT/logs/$RUN_ID.full_diag.txt'"
 tmux new-session -d -s "$GATE_TMUX" "cd '$REPO_ROOT' && bash '$COMMAND_DIR/gate_command.sh' 2>&1 | tee -a '$REPO_ROOT/logs/$RUN_ID.10k_gate.txt'"
 
 cat <<EOF
-started Seq4096 PolarQuant advanced +10K gate run
+started fresh step-0 Seq4096 PolarQuant advanced 10K gate run
 run id:        $RUN_ID
 wandb:         https://wandb.ai/$ENTITY/$PROJECT/runs/$RUN_ID
 train tmux:    $TRAIN_TMUX
@@ -222,11 +227,12 @@ analysis tmux: $ANALYSIS_TMUX
 mirror tmux:   $MIRROR_TMUX
 diag tmux:     $DIAG_TMUX
 gate tmux:     $GATE_TMUX
-checkpoint:    $BASE_CKPT
+resume:        disabled / step 0 fresh
 checkpoint dir:$CKPT_DIR
 log:           $LOG_PATH
 analysis root: $OUTPUT_ROOT
 gate state:    $STATE_PATH
 target BPB:    $TARGET_BPB
 continue if:   best <= $CONTINUE_THRESHOLD_BPB by trainer step $GATE_STEP
+advanced:      start_step=0 every=1 warmup=0 min_best_val_bpb=0 max_ce_ratio=0.00010
 EOF
