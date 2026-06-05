@@ -47,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-session", default="toricgt_all_phases_live")
     parser.add_argument("--watch-session", default="toricgt_all_phases_analysis")
     parser.add_argument("--codex-prefix", default="toricgt_codex_review_all_phases")
+    parser.add_argument("--codex-model", default=os.environ.get("CODEX_REVIEW_MODEL", "gpt-5-codex"))
     parser.add_argument("--checkpoint-dir", default="")
     parser.add_argument("--log-root", default="")
     parser.add_argument("--analysis-root", default="")
@@ -68,7 +69,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--geometry-records", type=int, default=4)
     parser.add_argument("--geometry-branches", type=int, default=6)
     parser.add_argument("--seed", type=int, default=10017)
-    parser.add_argument("--no-codex-review", action="store_true")
+    parser.add_argument(
+        "--enable-codex-review",
+        action="store_true",
+        help="Opt in to automated Codex review subagents after periodic analysis.",
+    )
+    parser.add_argument(
+        "--no-codex-review",
+        action="store_true",
+        help="Compatibility flag; Codex review subagents are disabled unless --enable-codex-review is set.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -295,6 +305,10 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
     cuda_alloc_env = []
     if cuda_alloc_conf:
         cuda_alloc_env.append(f"PYTORCH_CUDA_ALLOC_CONF={cuda_alloc_conf}")
+    codex_review_enabled = bool(args.enable_codex_review and not args.no_codex_review)
+    codex_review_env = []
+    if codex_review_enabled and args.codex_model:
+        codex_review_env.append(f"CODEX_REVIEW_MODEL={args.codex_model}")
     command = [
         args.conda_bin,
         "run",
@@ -312,6 +326,7 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         f"BPB_LOOP_NAME={loop_name}",
         "CODEX_REVIEW_FALLBACK_CONTINUE=0",
         "CODEX_REVIEW_TIMEOUT_SECONDS=1200",
+        *codex_review_env,
         "python",
         "scripts/watch_training_analysis.py",
         "--checkpoint-dir",
@@ -351,7 +366,7 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         "--training-tmux",
         args.train_session,
     ]
-    if not args.no_codex_review:
+    if codex_review_enabled:
         command.extend(
             [
                 "--codex-review-hook",
@@ -376,7 +391,8 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         session=args.watch_session,
         target_step=target_step,
         log=str(log_dir / "watcher.log"),
-        codex_review=not args.no_codex_review,
+        codex_review=codex_review_enabled,
+        codex_model=args.codex_model if codex_review_enabled else "",
     )
 
 

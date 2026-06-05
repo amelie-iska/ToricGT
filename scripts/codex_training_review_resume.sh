@@ -34,6 +34,7 @@ BPB_MAX_REVIEW_ITERATIONS="${BPB_MAX_REVIEW_ITERATIONS:-100}"
 BPB_LOOP_STATE="${BPB_LOOP_STATE:-outputs/bpb_codex_loop_state.json}"
 BPB_LOOP_STOP_FILE="${BPB_LOOP_STOP_FILE:-outputs/bpb_codex_loop_stop}"
 BPB_LOOP_NAME="${BPB_LOOP_NAME:-parameter_golf_bpb_target}"
+CODEX_REVIEW_MODEL="${CODEX_REVIEW_MODEL:-}"
 CONDA_BIN="${CONDA_BIN:-}"
 if [[ -z "$CONDA_BIN" ]]; then
   if command -v conda >/dev/null 2>&1; then
@@ -494,13 +495,18 @@ Safety:
 - Keep changes minimal and competition-focused.
 EOF
 
+CODEX_MODEL_ARGS=()
+if [[ -n "$CODEX_REVIEW_MODEL" ]]; then
+  CODEX_MODEL_ARGS=(-m "$CODEX_REVIEW_MODEL")
+fi
+
 if [[ -n "$SESSION_ID" ]]; then
-  CODEX_CMD=(codex exec -C "$REPO_ROOT" --dangerously-bypass-approvals-and-sandbox resume "$SESSION_ID" "$PROMPT")
+  CODEX_CMD=(codex exec -C "$REPO_ROOT" "${CODEX_MODEL_ARGS[@]}" --dangerously-bypass-approvals-and-sandbox resume "$SESSION_ID" "$PROMPT")
 else
   # The prompt is self-contained.  Starting a fresh non-interactive exec avoids
   # depending on whichever interactive session happens to be "last", which can
   # be locked, stale, or unrelated on long-running training hosts.
-  CODEX_CMD=(codex exec -C "$REPO_ROOT" --dangerously-bypass-approvals-and-sandbox "$PROMPT")
+  CODEX_CMD=(codex exec -C "$REPO_ROOT" "${CODEX_MODEL_ARGS[@]}" --dangerously-bypass-approvals-and-sandbox "$PROMPT")
 fi
 
 {
@@ -615,6 +621,9 @@ fi
 
 WATCH_CMD=("\$CONDA_BIN" run --no-capture-output -n "\${CONDA_ENV:-tokengt}" env PYTHONPATH=src CONDA_BIN="\$CONDA_BIN")
 WATCH_CMD+=(BPB_TARGET=$(printf '%q' "$BPB_TARGET") BPB_MAX_REVIEW_ITERATIONS=$(printf '%q' "$BPB_MAX_REVIEW_ITERATIONS") BPB_LOOP_STATE=$(printf '%q' "$BPB_LOOP_STATE_ABS") BPB_LOOP_STOP_FILE=$(printf '%q' "$BPB_LOOP_STOP_FILE") BPB_LOOP_NAME=$(printf '%q' "$BPB_LOOP_NAME"))
+if [[ -n "$CODEX_REVIEW_MODEL" ]]; then
+  WATCH_CMD+=(CODEX_REVIEW_MODEL=$(printf '%q' "$CODEX_REVIEW_MODEL"))
+fi
 WATCH_CMD+=(python scripts/watch_training_analysis.py --checkpoint-dir "\$CHECKPOINT_DIR" --start-step "\$STEP" --target-step "\$NEXT_TARGET_STEP" --min-mtime-unix "\$START_EPOCH" --poll-seconds 60)
 if [[ -n "\$RUN_PATH" ]]; then
   WATCH_CMD+=(--run-path "\$RUN_PATH")
