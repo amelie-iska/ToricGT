@@ -32,6 +32,13 @@ CATEGORY_DESIRED = "as_desired"
 CATEGORY_SLOW = "as_desired_but_not_strong_or_fast_enough"
 CATEGORY_BAD = "not_as_desired"
 
+DARK_BG = "#030712"
+DARK_PANEL = "#06111f"
+DARK_TEXT = "#e8fbff"
+DARK_MUTED = "#9fb6c5"
+DARK_GRID = "#143344"
+DARK_SPINE = "#29536a"
+
 
 @dataclass
 class MetricStats:
@@ -355,6 +362,24 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(json_safe(data), indent=2, sort_keys=True), encoding="utf-8")
 
 
+def apply_dark_plot_style(fig: plt.Figure, axes: Any, *, grid: bool = True) -> None:
+    fig.patch.set_facecolor(DARK_BG)
+    for ax in np.atleast_1d(axes).ravel():
+        ax.set_facecolor(DARK_PANEL)
+        ax.title.set_color(DARK_TEXT)
+        ax.xaxis.label.set_color(DARK_TEXT)
+        ax.yaxis.label.set_color(DARK_TEXT)
+        ax.tick_params(colors=DARK_MUTED)
+        for spine in ax.spines.values():
+            spine.set_color(DARK_SPINE)
+        if grid:
+            ax.grid(True, color=DARK_GRID, alpha=0.45, linewidth=0.6)
+
+
+def save_dark_figure(fig: plt.Figure, out: Path, *, dpi: int = 180) -> None:
+    fig.savefig(out, dpi=dpi, facecolor=fig.get_facecolor(), bbox_inches="tight")
+
+
 def plot_core_timeseries(df: pd.DataFrame, out: Path, stats: list[MetricStats]) -> None:
     preferred = [
         "00_primary/oai_bpb",
@@ -397,6 +422,7 @@ def plot_core_timeseries(df: pd.DataFrame, out: Path, stats: list[MetricStats]) 
     rows = int(math.ceil(len(present) / 2))
     fig, axes = plt.subplots(rows, 2, figsize=(14, max(4, 2.8 * rows)), constrained_layout=True)
     axes = np.atleast_1d(axes).ravel()
+    apply_dark_plot_style(fig, axes)
     category_map = {s.metric: s.category for s in stats}
     colors = {CATEGORY_DESIRED: "#2dd4bf", CATEGORY_SLOW: "#f59e0b", CATEGORY_BAD: "#ef4444"}
     for ax, metric in zip(axes, present):
@@ -404,13 +430,12 @@ def plot_core_timeseries(df: pd.DataFrame, out: Path, stats: list[MetricStats]) 
         ax.plot(series["_step"], series["value"], color=colors.get(category_map.get(metric), "#60a5fa"), linewidth=1.5)
         if len(series) >= 5:
             smooth = series["value"].ewm(span=min(25, max(5, len(series) // 8)), adjust=False).mean()
-            ax.plot(series["_step"], smooth, color="#111827", linewidth=1.0, alpha=0.75)
+            ax.plot(series["_step"], smooth, color=DARK_TEXT, linewidth=1.0, alpha=0.75)
         ax.set_title(metric, fontsize=9)
-        ax.grid(alpha=0.25)
     for ax in axes[len(present):]:
         ax.axis("off")
-    fig.suptitle("Core ToricGT Parameter-Golf Metrics", fontsize=14)
-    fig.savefig(out, dpi=180)
+    fig.suptitle("Core ToricGT Parameter-Golf Metrics", fontsize=14, color=DARK_TEXT)
+    save_dark_figure(fig, out)
     plt.close(fig)
 
 
@@ -419,11 +444,12 @@ def plot_category_counts(stats: list[MetricStats], out: Path) -> None:
         [CATEGORY_DESIRED, CATEGORY_SLOW, CATEGORY_BAD], fill_value=0
     )
     fig, ax = plt.subplots(figsize=(8, 4), constrained_layout=True)
+    apply_dark_plot_style(fig, ax, grid=False)
     ax.bar(counts.index, counts.values, color=["#2dd4bf", "#f59e0b", "#ef4444"])
     ax.set_ylabel("metric count")
     ax.set_title("Metric Behavior Categories")
     ax.tick_params(axis="x", rotation=15)
-    fig.savefig(out, dpi=180)
+    save_dark_figure(fig, out)
     plt.close(fig)
 
 
@@ -463,12 +489,15 @@ def plot_correlation_heatmap(df: pd.DataFrame, out: Path) -> None:
     filled = aligned[present].interpolate(limit_direction="both")
     corr = filled.corr(method="spearman")
     fig, ax = plt.subplots(figsize=(max(8, 0.7 * len(present)), max(7, 0.7 * len(present))), constrained_layout=True)
+    apply_dark_plot_style(fig, ax, grid=False)
     im = ax.imshow(corr.values, vmin=-1, vmax=1, cmap="coolwarm")
     ax.set_xticks(range(len(present)), present, rotation=70, ha="right", fontsize=8)
     ax.set_yticks(range(len(present)), present, fontsize=8)
     ax.set_title("Spearman Correlation of Selected Metrics")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    fig.savefig(out, dpi=180)
+    colorbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    colorbar.ax.tick_params(colors=DARK_MUTED)
+    colorbar.outline.set_edgecolor(DARK_SPINE)
+    save_dark_figure(fig, out)
     plt.close(fig)
 
 
@@ -487,14 +516,15 @@ def plot_metric_slopes(stats: list[MetricStats], out: Path, max_metrics: int) ->
         for s in ranked
     ]
     fig, ax = plt.subplots(figsize=(11, max(6, 0.35 * len(ranked))), constrained_layout=True)
+    apply_dark_plot_style(fig, ax)
     y = np.arange(len(ranked))
     ax.barh(y, values, color=colors)
-    ax.axvline(0.0, color="#111827", linewidth=0.8)
+    ax.axvline(0.0, color=DARK_TEXT, linewidth=0.8)
     ax.set_yticks(y, labels, fontsize=8)
     ax.invert_yaxis()
     ax.set_xlabel("recent OLS slope per 1k steps")
     ax.set_title("Most Statistically Active Recent Metric Slopes")
-    fig.savefig(out, dpi=180)
+    save_dark_figure(fig, out)
     plt.close(fig)
 
 
