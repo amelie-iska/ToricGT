@@ -84,6 +84,8 @@ def test_seq4096_reasoning_geometry_suite_writes_old_suite_shape(tmp_path: Path)
     )
 
     assert summary["analysis_source"] == "seq4096_checkpoint_embedding_proxy"
+    assert summary["families_available"]["combinatorial_commutative_algebra"] == 1.0
+    assert "toric_cca_topology_loss" in summary["means"]
     assert summary["current_run_only"] == 1.0
     assert summary["families_available"]["topology"] == 1.0
     assert summary["families_available"]["graphcg"] == 1.0
@@ -101,6 +103,7 @@ def test_seq4096_reasoning_geometry_suite_writes_old_suite_shape(tmp_path: Path)
     assert any("toric_slepian_audit" in path for path in inventory["image_files"])
     assert any("graphcg_basis_disentanglement" in path for path in inventory["image_files"])
     assert any("analogical_transport_map" in path for path in inventory["image_files"])
+    assert any("combinatorial_cca_audit" in path for path in inventory["image_files"])
 
 
 def test_seq4096_energy_landscape_uses_static_3d_axis(tmp_path: Path, monkeypatch) -> None:

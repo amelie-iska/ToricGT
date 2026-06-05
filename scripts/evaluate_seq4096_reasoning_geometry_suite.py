@@ -43,6 +43,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from toricgt.combinatorial_toric_metrics import CombinatorialToricConfig, combinatorial_toric_cca_topology_loss
 from toricgt.complexity import compress_len, normalized_compression_distance
 from toricgt.reasoning_geometry import (
     TETRAHEDRON_VERTICES,
@@ -166,6 +167,11 @@ TRIANGLE_SPECS = {
         "scores": ["score/energy_quality", "score/terminal_confidence", "score/mst_efficiency"],
         "title": "Seq4096 energy-control simplex",
     },
+    "combinatorial_cca_control": {
+        "labels": ["low toric ideal residual", "low Stanley-Reisner mass", "low BPB"],
+        "scores": ["score/toric_ideal_consistency", "score/stanley_reisner_consistency", "score/bpb_quality"],
+        "title": "Seq4096 combinatorial CCA/BPB simplex",
+    },
 }
 
 TETRAHEDRON_SPECS = {
@@ -194,6 +200,11 @@ TETRAHEDRON_SPECS = {
         "scores": ["score/toric_entropy", "score/graphcg_basis", "score/bpb_quality", "score/order_robustness"],
         "title": "Seq4096 toric/GraphCG/BPB tetrahedron",
     },
+    "cca_topology_bpb": {
+        "labels": ["low CCA topology", "low Betti1", "low BPB", "GraphCG basis"],
+        "scores": ["score/cca_topology_consistency", "score/betti1_consistency", "score/bpb_quality", "score/graphcg_basis"],
+        "title": "Seq4096 CCA/topology/BPB tetrahedron",
+    },
 }
 
 SIMPLEX_TRIANGLES = {
@@ -204,6 +215,7 @@ SIMPLEX_TRIANGLES = {
         "scores": ["score/bpb_quality", "score/mst_efficiency", "score/relative_k"],
         "title": "Seq4096 compression-efficiency simplex",
     },
+    "cca_topology_triangle": TRIANGLE_SPECS["combinatorial_cca_control"],
 }
 
 SIMPLEX_TETRAHEDRA = {
@@ -213,6 +225,7 @@ SIMPLEX_TETRAHEDRA = {
         "scores": ["score/trajectory_depth", "score/relative_k", "score/bpb_quality", "score/graphcg_basis"],
         "title": "Seq4096 reasoning/K(x|helpers)/BPB/GraphCG tetrahedron",
     },
+    "cca_topology_tetrahedron": TETRAHEDRON_SPECS["cca_topology_bpb"],
 }
 
 
@@ -589,6 +602,37 @@ def bgg_koszul_metrics(topology: dict[str, Any], graphcg: dict[str, float]) -> d
     }
 
 
+def combinatorial_cca_metrics(points: np.ndarray, topology_config: ReasoningTopologyConfig) -> dict[str, float]:
+    """Run the training-time CCA bridge on checkpoint proxy trajectories."""
+
+    x_np = np.asarray(points, dtype=np.float32)
+    if x_np.ndim != 2 or x_np.shape[0] < 4:
+        return {
+            "toric_cca_topology_loss": 0.0,
+            "toric_cca_binomial_residual": 0.0,
+            "toric_cca_stanley_reisner_nonface_mass": 0.0,
+            "toric_cca_chamber_coverage": 0.0,
+            "toric_cca_betti1_proxy": 0.0,
+        }
+    hidden = torch.from_numpy(x_np).unsqueeze(0)
+    positions = torch.arange(hidden.shape[1], dtype=torch.long).view(1, -1)
+    cfg = CombinatorialToricConfig(
+        max_points=min(16, max(4, int(topology_config.max_points))),
+        max_windows=min(2, max(1, int(topology_config.max_windows))),
+        window_size=min(32, max(4, int(topology_config.window_size))),
+        step_stride=max(1, int(topology_config.step_stride)),
+        num_chambers=8,
+        max_relations=16,
+    )
+    with torch.no_grad():
+        out = combinatorial_toric_cca_topology_loss(hidden, positions, config=cfg)
+    metrics: dict[str, float] = {}
+    for key, value in out.items():
+        if torch.is_tensor(value) and value.ndim == 0:
+            safe = torch.nan_to_num(value.detach().float().cpu(), nan=0.0, posinf=0.0, neginf=0.0)
+            metrics[key] = float(safe.item())
+    return metrics
+
 def analyze_record(
     item: dict[str, Any],
     *,
@@ -618,6 +662,7 @@ def analyze_record(
     complexity = compression_proxy_metrics(points)
     tropical = tropical_metrics(phase_u, phase_v, toric, energy)
     algebra = bgg_koszul_metrics(topology, graphcg)
+    cca = combinatorial_cca_metrics(points, topology_config)
     mst = prim_mst_stats(proj3.tolist())
     curvature = float(np.mean(np.linalg.norm(np.diff(proj3, n=2, axis=0), axis=1))) if proj3.shape[0] > 2 else 0.0
     path_length = float(np.sum(np.linalg.norm(np.diff(proj3, axis=0), axis=1))) if proj3.shape[0] > 1 else 0.0
@@ -665,6 +710,7 @@ def analyze_record(
         **complexity,
         **tropical,
         **algebra,
+        **cca,
     }
     record["_arrays"] = {
         "points": points,
@@ -675,6 +721,7 @@ def analyze_record(
         "topology": topology,
         "toric": toric,
         "slepian": slepian,
+        "cca": cca,
     }
     return record
 
@@ -940,6 +987,43 @@ def plot_commutative_algebra(record: dict[str, Any], out: Path) -> None:
     plt.close(fig)
 
 
+def plot_combinatorial_cca(record: dict[str, Any], out: Path) -> None:
+    residual_keys = [
+        "toric_cca_topology_loss",
+        "toric_cca_binomial_residual",
+        "toric_cca_stanley_reisner_nonface_mass",
+        "toric_cca_fan_balance_loss",
+        "toric_cca_koszul_loss",
+        "toric_cca_topology_loss_component",
+    ]
+    shape_keys = [
+        "toric_cca_chart_entropy",
+        "toric_cca_chamber_coverage",
+        "toric_cca_euler_characteristic_proxy",
+        "toric_cca_betti0_proxy",
+        "toric_cca_betti1_proxy",
+        "toric_cca_allowed_edge_mass",
+    ]
+    residuals = np.nan_to_num(np.asarray([float(record.get(key, 0.0) or 0.0) for key in residual_keys], dtype=float))
+    shape_values = np.nan_to_num(np.asarray([float(record.get(key, 0.0) or 0.0) for key in shape_keys], dtype=float))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.6), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, axes)
+    axes[0].barh(np.arange(len(residual_keys)), np.log1p(np.maximum(residuals, 0.0)), color="#ff4fd8")
+    axes[0].set_yticks(np.arange(len(residual_keys)), residual_keys, fontsize=7)
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("log1p residual")
+    axes[0].set_title("toric ideal / Stanley-Reisner / Koszul residuals")
+    axes[1].barh(np.arange(len(shape_keys)), shape_values, color="#39b8ff")
+    axes[1].set_yticks(np.arange(len(shape_keys)), shape_keys, fontsize=7)
+    axes[1].invert_yaxis()
+    axes[1].set_xlabel("proxy value")
+    axes[1].set_title("fan coverage and Betti/Euler topology proxies")
+    fig.suptitle(f"{record['record_id']} combinatorial CCA topology audit")
+    fig._suptitle.set_color("white")
+    save_dark(fig, out)
+    plt.close(fig)
+
 def plot_persistence_morphisms(record: dict[str, Any], out: Path) -> None:
     keys = [
         "exact_h0_dim_mean",
@@ -1081,6 +1165,7 @@ def plot_record_artifacts(record: dict[str, Any], geometry_dir: Path) -> list[st
         ("toric_slepian_audit", plot_slepian),
         ("commutative_algebra_audit", plot_commutative_algebra),
         ("exact_persistence_morphisms", plot_persistence_morphisms),
+        ("combinatorial_cca_audit", plot_combinatorial_cca),
     ):
         path = topo_dir / f"{base}_{suffix}.png"
         fn(record, path)
@@ -1117,6 +1202,11 @@ def annotate_scores(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "score/toric_entropy": ("toric_fan_cell_entropy", True),
         "score/slepian_concentration": ("slepian_concentration", True),
         "score/energy_quality": ("energy_mean", False),
+        "score/toric_ideal_consistency": ("toric_cca_binomial_residual", False),
+        "score/stanley_reisner_consistency": ("toric_cca_stanley_reisner_nonface_mass", False),
+        "score/cca_topology_consistency": ("toric_cca_topology_loss", False),
+        "score/betti1_consistency": ("toric_cca_betti1_proxy", False),
+        "score/cca_chart_coverage": ("toric_cca_chamber_coverage", True),
     }
     return attach_normalized_scores(records, specs)
 
@@ -1258,6 +1348,7 @@ def aggregate_summary(records: list[dict[str, Any]], *, checkpoint: Path, step: 
             "tropical": 1.0,
             "graphcg": 1.0,
             "analogical": 1.0,
+            "combinatorial_commutative_algebra": 1.0,
         },
         "means": {
             "topology_directed_asymmetry": mean("topology_directed_asymmetry_mean"),
@@ -1272,6 +1363,11 @@ def aggregate_summary(records: list[dict[str, Any]], *, checkpoint: Path, step: 
             "analogical_map_score": mean("analogical_map_score"),
             "tropical_chamber_crossing_rate": mean("tropical_chamber_crossing_rate"),
             "mst_efficiency": mean("mst_efficiency"),
+            "toric_cca_topology_loss": mean("toric_cca_topology_loss"),
+            "toric_cca_binomial_residual": mean("toric_cca_binomial_residual"),
+            "toric_cca_stanley_reisner_nonface_mass": mean("toric_cca_stanley_reisner_nonface_mass"),
+            "toric_cca_chamber_coverage": mean("toric_cca_chamber_coverage"),
+            "toric_cca_betti1_proxy": mean("toric_cca_betti1_proxy"),
         },
         "recommendations": recommendation_lines(records, log_context),
     }
@@ -1287,6 +1383,9 @@ def recommendation_lines(records: list[dict[str, Any]], log_context: dict[str, A
             "topology_directed_chain_commutator_mean",
             "bgg_standard_leakage",
             "tropical_chamber_crossing_rate",
+            "toric_cca_binomial_residual",
+            "toric_cca_stanley_reisner_nonface_mass",
+            "toric_cca_betti1_proxy",
         )
     }
     latest_val = float(log_context.get("latest_val_bpb", float("nan")))
@@ -1304,6 +1403,10 @@ def recommendation_lines(records: list[dict[str, Any]], log_context: dict[str, A
         recs.append("Analogical transport is weak; schedule analogy-pair and memory-link curricula for the post-threshold reasoner phase.")
     if means["bgg_standard_leakage"] > 0.35:
         recs.append("BGG/Koszul leakage should remain diagnostic in the competition phase, then become a small controller loss in advanced reasoning phases.")
+    if means["toric_cca_binomial_residual"] > 0.25 or means["toric_cca_stanley_reisner_nonface_mass"] > 0.18:
+        recs.append("Combinatorial CCA residuals are high; keep the training bridge micro-weighted pre-gate, then increase toric-ideal/Stanley-Reisner pressure after BPB is safely below threshold.")
+    if means["toric_cca_betti1_proxy"] > 3.0:
+        recs.append("Betti1 proxy is large; prefer directed topology damping and memory-graph sparsification before stronger topology losses.")
     if not recs:
         recs.append("Advanced geometry is stable enough to keep as monitoring while BPB validation remains the primary gate.")
     return recs
