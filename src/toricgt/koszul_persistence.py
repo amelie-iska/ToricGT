@@ -86,19 +86,22 @@ def _fixed_chart_directions(width: int, count: int, device: torch.device, dtype:
 def _soft_rank(matrix: torch.Tensor, temperature: float) -> torch.Tensor:
     if matrix.numel() == 0:
         return matrix.new_zeros(())
-    # Rank metrics are diagnostics.  Detaching avoids making tiny SVDs the
-    # dominant gradient path during the competition run.
-    with torch.no_grad():
-        safe = torch.nan_to_num(matrix.detach().float(), nan=0.0, posinf=0.0, neginf=0.0)
-        # These matrices are tiny and audit-only.  Running the SVD on CPU avoids
-        # occasional cuSOLVER non-convergence from poisoning an otherwise valid
-        # training step, while the returned scalar remains on the original device.
-        try:
-            singular = torch.linalg.svdvals(safe.cpu()).to(device=matrix.device)
-        except RuntimeError:
-            return matrix.new_zeros(())
-        singular = torch.nan_to_num(singular, nan=0.0, posinf=0.0, neginf=0.0)
-        return (singular / (singular + max(float(temperature), 1e-5))).sum()
+    safe = torch.nan_to_num(matrix.float(), nan=0.0, posinf=0.0, neginf=0.0)
+    if safe.shape[0] <= safe.shape[1]:
+        gram = safe @ safe.transpose(0, 1)
+    else:
+        gram = safe.transpose(0, 1) @ safe
+    gram = torch.nan_to_num(gram, nan=0.0, posinf=0.0, neginf=0.0)
+    dim = gram.shape[0]
+    eye = torch.eye(dim, device=gram.device, dtype=gram.dtype)
+    scale = gram.detach().diagonal().abs().mean().clamp_min(1e-6)
+    ridge = max(float(temperature), 1e-5) * scale
+    try:
+        response = torch.linalg.solve(gram + ridge * eye, gram)
+    except RuntimeError:
+        response = gram @ torch.linalg.pinv(gram + ridge * eye)
+    rank = torch.trace(torch.nan_to_num(response, nan=0.0, posinf=0.0, neginf=0.0))
+    return rank.clamp_min(0.0).clamp_max(float(dim))
 
 
 def _koszul_blocks(actions: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
@@ -249,7 +252,7 @@ def koszul_persistence_loss(
             # In the differentiable proxy, Buchsbaum-Eisenbud multiplier failure
             # is represented by exactness plus rank-condition mismatch; exact
             # complementary-minor checks are performed in the NumPy audit path.
-            be_multiplier = 0.5 * exactness.detach() + 0.5 * be_rank
+            be_multiplier = 0.5 * exactness + 0.5 * be_rank
             chart_mass = chart_probs.mean(dim=0)
             entropy = -(chart_mass * (chart_mass + 1e-8).log()).sum() / math.log(max(2, chart_mass.numel()))
             coverage = (chart_mass > (1.0 / max(2, chart_mass.numel())) * 0.25).to(points.dtype).mean()
@@ -261,10 +264,10 @@ def koszul_persistence_loss(
             previous_chart = chart_id.detach()
             terms["exactness"].append(exactness)
             terms["syzygy"].append(syzygy)
-            terms["fitting"].append(fitting.detach())
-            terms["be_rank"].append(be_rank.detach())
-            terms["be_multiplier"].append(be_multiplier.detach())
-            terms["betti"].append(betti.detach())
+            terms["fitting"].append(fitting)
+            terms["be_rank"].append(be_rank)
+            terms["be_multiplier"].append(be_multiplier)
+            terms["betti"].append(betti)
             terms["entropy"].append(entropy.detach())
             terms["coverage"].append(coverage.detach())
             terms["shift"].append(shift.detach())
@@ -281,7 +284,14 @@ def koszul_persistence_loss(
     be_rank_residual = mean("be_rank")
     be_multiplier_residual = mean("be_multiplier")
     betti_mass = mean("betti")
-    loss = exactness_residual + 0.35 * syzygy_residual + 0.10 * fitting_residual + 0.10 * be_rank_residual
+    loss = (
+        exactness_residual
+        + 0.35 * syzygy_residual
+        + 0.10 * fitting_residual
+        + 0.10 * be_rank_residual
+        + 0.04 * be_multiplier_residual
+        + 0.02 * betti_mass
+    )
     loss = torch.nan_to_num(loss, nan=0.0, posinf=1.0e4, neginf=0.0).clamp_min(0.0)
     return {
         "koszul_persistence_loss": loss,

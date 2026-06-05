@@ -807,6 +807,15 @@ def combinatorial_cca_metrics(points: np.ndarray, topology_config: ReasoningTopo
             "toric_cca_topology_loss": 0.0,
             "toric_cca_binomial_residual": 0.0,
             "toric_cca_stanley_reisner_nonface_mass": 0.0,
+            "toric_cca_symbolic_resolution_loss": 0.0,
+            "toric_cca_symbolic_sr_monomial_generator_mass": 0.0,
+            "toric_cca_symbolic_taylor_lcm_syzygy_mass": 0.0,
+            "toric_cca_symbolic_taylor_full_resolution_mass": 0.0,
+            "toric_cca_symbolic_hilbert_betti_pressure": 0.0,
+            "toric_cca_symbolic_resolution_minimal_total_betti": 0.0,
+            "toric_cca_symbolic_resolution_projective_dimension": 0.0,
+            "toric_cca_symbolic_resolution_regularity": 0.0,
+            "toric_cca_symbolic_resolution_nonminimality_log2": 0.0,
             "toric_cca_chamber_coverage": 0.0,
             "toric_cca_betti1_proxy": 0.0,
             **exact_combinatorial_cca_audit(x_np),
@@ -1192,6 +1201,14 @@ def plot_combinatorial_cca(record: dict[str, Any], out: Path) -> None:
         "toric_cca_stanley_reisner_nonface_mass",
         "toric_cca_fan_balance_loss",
         "toric_cca_koszul_loss",
+        "toric_cca_koszul_fitting_rank_residual",
+        "toric_cca_koszul_buchsbaum_eisenbud_rank_residual",
+        "toric_cca_koszul_buchsbaum_eisenbud_multiplier_residual",
+        "toric_cca_symbolic_resolution_loss",
+        "toric_cca_symbolic_sr_monomial_generator_mass",
+        "toric_cca_symbolic_taylor_lcm_syzygy_mass",
+        "toric_cca_symbolic_taylor_full_resolution_mass",
+        "toric_cca_symbolic_hilbert_betti_pressure",
         "toric_cca_topology_loss_component",
     ]
     shape_keys = [
@@ -1201,6 +1218,11 @@ def plot_combinatorial_cca(record: dict[str, Any], out: Path) -> None:
         "toric_cca_betti0_proxy",
         "toric_cca_betti1_proxy",
         "toric_cca_allowed_edge_mass",
+        "toric_cca_koszul_multigraded_betti_mass",
+        "toric_cca_symbolic_resolution_minimal_total_betti",
+        "toric_cca_symbolic_resolution_projective_dimension",
+        "toric_cca_symbolic_resolution_regularity",
+        "toric_cca_symbolic_resolution_nonminimality_log2",
     ]
     residuals = np.nan_to_num(np.asarray([float(record.get(key, 0.0) or 0.0) for key in residual_keys], dtype=float))
     shape_values = np.nan_to_num(np.asarray([float(record.get(key, 0.0) or 0.0) for key in shape_keys], dtype=float))
@@ -1618,6 +1640,37 @@ def aggregate_summary(records: list[dict[str, Any]], *, checkpoint: Path, step: 
             "toric_cca_topology_loss": mean("toric_cca_topology_loss"),
             "toric_cca_binomial_residual": mean("toric_cca_binomial_residual"),
             "toric_cca_stanley_reisner_nonface_mass": mean("toric_cca_stanley_reisner_nonface_mass"),
+            "toric_cca_symbolic_resolution_loss": mean("toric_cca_symbolic_resolution_loss"),
+            "toric_cca_symbolic_sr_monomial_generator_mass": mean(
+                "toric_cca_symbolic_sr_monomial_generator_mass"
+            ),
+            "toric_cca_symbolic_taylor_lcm_syzygy_mass": mean(
+                "toric_cca_symbolic_taylor_lcm_syzygy_mass"
+            ),
+            "toric_cca_symbolic_taylor_full_resolution_mass": mean(
+                "toric_cca_symbolic_taylor_full_resolution_mass"
+            ),
+            "toric_cca_symbolic_hilbert_betti_pressure": mean(
+                "toric_cca_symbolic_hilbert_betti_pressure"
+            ),
+            "toric_cca_symbolic_resolution_minimal_total_betti": mean(
+                "toric_cca_symbolic_resolution_minimal_total_betti"
+            ),
+            "toric_cca_symbolic_resolution_projective_dimension": mean(
+                "toric_cca_symbolic_resolution_projective_dimension"
+            ),
+            "toric_cca_symbolic_resolution_regularity": mean("toric_cca_symbolic_resolution_regularity"),
+            "toric_cca_symbolic_resolution_nonminimality_log2": mean(
+                "toric_cca_symbolic_resolution_nonminimality_log2"
+            ),
+            "toric_cca_koszul_fitting_rank_residual": mean("toric_cca_koszul_fitting_rank_residual"),
+            "toric_cca_koszul_buchsbaum_eisenbud_rank_residual": mean(
+                "toric_cca_koszul_buchsbaum_eisenbud_rank_residual"
+            ),
+            "toric_cca_koszul_buchsbaum_eisenbud_multiplier_residual": mean(
+                "toric_cca_koszul_buchsbaum_eisenbud_multiplier_residual"
+            ),
+            "toric_cca_koszul_multigraded_betti_mass": mean("toric_cca_koszul_multigraded_betti_mass"),
             "toric_cca_chamber_coverage": mean("toric_cca_chamber_coverage"),
             "toric_cca_betti1_proxy": mean("toric_cca_betti1_proxy"),
             "toric_cca_exact_relation_pass_rate": mean("toric_cca_exact_relation_pass_rate"),

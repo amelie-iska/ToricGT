@@ -18,6 +18,11 @@ import torch
 from torch.nn import functional as F
 
 from .koszul_persistence import KoszulPersistenceConfig, koszul_persistence_loss
+from .symbolic_multigraded_resolution import (
+    cyclic_stanley_reisner_generator_masks,
+    cyclic_stanley_reisner_resolution_dict,
+    cyclic_taylor_multidegree_counts,
+)
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
 from .toric_geometry_tasks import make_binomial_relations, make_exponent_table
 
@@ -41,6 +46,7 @@ class CombinatorialToricConfig:
     chart_entropy_weight: float = 0.05
     fan_balance_weight: float = 0.04
     euler_weight: float = 0.03
+    symbolic_resolution_weight: float = 0.04
     max_loss_value: float = 32.0
 
 
@@ -64,7 +70,28 @@ def _zero_like(hidden: torch.Tensor) -> dict[str, torch.Tensor]:
         "toric_cca_betti1_proxy": zero.detach(),
         "toric_cca_allowed_edge_mass": zero.detach(),
         "toric_cca_nonface_pair_count": zero.detach(),
+        "toric_cca_symbolic_resolution_loss": zero.detach(),
+        "toric_cca_symbolic_sr_monomial_generator_mass": zero.detach(),
+        "toric_cca_symbolic_taylor_lcm_syzygy_mass": zero.detach(),
+        "toric_cca_symbolic_taylor_full_resolution_mass": zero.detach(),
+        "toric_cca_symbolic_hilbert_betti_pressure": zero.detach(),
+        "toric_cca_symbolic_resolution_projective_dimension": zero.detach(),
+        "toric_cca_symbolic_resolution_regularity": zero.detach(),
+        "toric_cca_symbolic_resolution_minimal_total_betti": zero.detach(),
+        "toric_cca_symbolic_resolution_minimal_positive_betti": zero.detach(),
+        "toric_cca_symbolic_resolution_taylor_total_rank_log2": zero.detach(),
+        "toric_cca_symbolic_resolution_taylor_boundary_terms_log2": zero.detach(),
+        "toric_cca_symbolic_resolution_nonminimality_log2": zero.detach(),
+        "toric_cca_symbolic_resolution_betti_entropy": zero.detach(),
         "toric_cca_koszul_loss": zero.detach(),
+        "toric_cca_koszul_exactness_residual": zero.detach(),
+        "toric_cca_koszul_syzygy_residual": zero.detach(),
+        "toric_cca_koszul_fitting_rank_residual": zero.detach(),
+        "toric_cca_koszul_buchsbaum_eisenbud_rank_residual": zero.detach(),
+        "toric_cca_koszul_buchsbaum_eisenbud_multiplier_residual": zero.detach(),
+        "toric_cca_koszul_multigraded_betti_mass": zero.detach(),
+        "toric_cca_koszul_toric_affine_chart_entropy": zero.detach(),
+        "toric_cca_koszul_toric_affine_chart_coverage": zero.detach(),
         "toric_cca_topology_loss_component": zero.detach(),
         "toric_cca_windows": zero.detach(),
     }
@@ -130,6 +157,35 @@ def _window_toric_terms(points: torch.Tensor, cfg: CombinatorialToricConfig) -> 
     allowed_float = allowed.to(points.dtype)
     nonface_mass = (coactivation * nonface_float).sum() / nonface_float.sum().clamp_min(1.0)
     allowed_edge_mass = (coactivation * allowed_float).sum() / allowed_float.sum().clamp_min(1.0)
+    def squarefree_monomial_mass(mask: int) -> torch.Tensor:
+        factors = [chamber_mass[bit] for bit in range(chambers) if mask & (1 << bit)]
+        return torch.stack(factors).prod() if factors else chamber_mass.new_ones(())
+
+    generator_masks = cyclic_stanley_reisner_generator_masks(chambers)
+    if generator_masks:
+        sr_generator_mass = torch.stack([squarefree_monomial_mass(mask) for mask in generator_masks]).mean()
+    else:
+        sr_generator_mass = zero
+    taylor_rows = cyclic_taylor_multidegree_counts(chambers)
+    degree_two_terms: list[torch.Tensor] = []
+    full_terms: list[torch.Tensor] = []
+    full_weights: list[torch.Tensor] = []
+    for degree, mask, multiplicity in taylor_rows:
+        mass = squarefree_monomial_mass(mask)
+        weight = chamber_mass.new_tensor(float(multiplicity))
+        full_terms.append(mass * weight)
+        full_weights.append(weight)
+        if degree == 2:
+            degree_two_terms.append(mass * weight)
+    taylor_lcm_syzygy_mass = (
+        torch.stack(degree_two_terms).sum()
+        / torch.stack([chamber_mass.new_tensor(float(multiplicity)) for degree, _mask, multiplicity in taylor_rows if degree == 2]).sum().clamp_min(1.0)
+        if degree_two_terms
+        else zero
+    )
+    taylor_full_resolution_mass = (
+        torch.stack(full_terms).sum() / torch.stack(full_weights).sum().clamp_min(1.0) if full_terms else zero
+    )
 
     exponents = make_exponent_table(chambers, int(cfg.exponent_dim)).to(device=points.device, dtype=points.dtype)
     relations = make_binomial_relations(exponents.detach().cpu(), max_relations=int(cfg.max_relations)).to(points.device)
@@ -163,6 +219,9 @@ def _window_toric_terms(points: torch.Tensor, cfg: CombinatorialToricConfig) -> 
         "entropy": chart_entropy,
         "coverage": coverage,
         "balance": balance_loss,
+        "sr_generator_mass": sr_generator_mass,
+        "taylor_lcm_syzygy_mass": taylor_lcm_syzygy_mass,
+        "taylor_full_resolution_mass": taylor_full_resolution_mass,
         "euler": euler_proxy,
         "betti0": betti0.detach(),
         "betti1": betti1.detach(),
@@ -201,6 +260,9 @@ def combinatorial_toric_cca_topology_loss(
         "entropy": [],
         "coverage": [],
         "balance": [],
+        "sr_generator_mass": [],
+        "taylor_lcm_syzygy_mass": [],
+        "taylor_full_resolution_mass": [],
         "euler": [],
         "betti0": [],
         "betti1": [],
@@ -260,12 +322,39 @@ def combinatorial_toric_cca_topology_loss(
     topology_loss = _clean_scalar(topology["reasoning_step_topology_loss"], zero, float(cfg.max_loss_value))
     euler = torch.stack(terms["euler"]).mean().detach()
     euler_loss = _clean_scalar(euler.abs().to(device=x.device, dtype=x.dtype) / max(float(cfg.num_chambers), 1.0), zero, 4.0)
+    symbolic = cyclic_stanley_reisner_resolution_dict(int(cfg.num_chambers))
+    symbolic_scale = 1.0 + math.log1p(float(symbolic["symbolic_resolution_minimal_positive_betti"])) / 16.0
+    sr_generator_mass = mean_clean("sr_generator_mass")
+    taylor_lcm_syzygy_mass = mean_clean("taylor_lcm_syzygy_mass")
+    taylor_full_resolution_mass = mean_clean("taylor_full_resolution_mass")
+    hilbert_betti_scale = (
+        1.0
+        + float(symbolic["symbolic_resolution_projective_dimension"]) / max(float(cfg.num_chambers), 1.0)
+        + math.log1p(float(symbolic["symbolic_resolution_regularity"])) / 8.0
+    )
+    hilbert_betti_pressure = _clean_scalar(
+        (sr_generator_mass + 0.35 * taylor_lcm_syzygy_mass) * hilbert_betti_scale,
+        zero,
+        float(cfg.max_loss_value),
+    )
+    symbolic_resolution_loss = _clean_scalar(
+        (
+            0.30 * nonface
+            + 0.30 * sr_generator_mass
+            + 0.20 * taylor_lcm_syzygy_mass
+            + 0.20 * taylor_full_resolution_mass
+        )
+        * symbolic_scale,
+        zero,
+        float(cfg.max_loss_value),
+    )
     total = (
         float(cfg.toric_ideal_weight) * binomial
         + float(cfg.stanley_reisner_weight) * nonface
         + float(cfg.chart_entropy_weight) * entropy
         + float(cfg.fan_balance_weight) * balance
         + float(cfg.euler_weight) * euler_loss
+        + float(cfg.symbolic_resolution_weight) * (symbolic_resolution_loss + 0.25 * hilbert_betti_pressure)
         + float(cfg.koszul_weight) * koszul_loss
         + float(cfg.topology_weight) * topology_loss
     )
@@ -282,7 +371,52 @@ def combinatorial_toric_cca_topology_loss(
         "toric_cca_betti1_proxy": torch.stack(terms["betti1"]).mean().detach(),
         "toric_cca_allowed_edge_mass": torch.stack(terms["allowed_edge"]).mean().detach(),
         "toric_cca_nonface_pair_count": torch.stack(terms["nonface_pairs"]).mean().detach(),
+        "toric_cca_symbolic_resolution_loss": symbolic_resolution_loss.detach(),
+        "toric_cca_symbolic_sr_monomial_generator_mass": sr_generator_mass.detach(),
+        "toric_cca_symbolic_taylor_lcm_syzygy_mass": taylor_lcm_syzygy_mass.detach(),
+        "toric_cca_symbolic_taylor_full_resolution_mass": taylor_full_resolution_mass.detach(),
+        "toric_cca_symbolic_hilbert_betti_pressure": hilbert_betti_pressure.detach(),
+        "toric_cca_symbolic_resolution_projective_dimension": x.new_tensor(
+            symbolic["symbolic_resolution_projective_dimension"]
+        ).detach(),
+        "toric_cca_symbolic_resolution_regularity": x.new_tensor(
+            symbolic["symbolic_resolution_regularity"]
+        ).detach(),
+        "toric_cca_symbolic_resolution_minimal_total_betti": x.new_tensor(
+            symbolic["symbolic_resolution_minimal_total_betti"]
+        ).detach(),
+        "toric_cca_symbolic_resolution_minimal_positive_betti": x.new_tensor(
+            symbolic["symbolic_resolution_minimal_positive_betti"]
+        ).detach(),
+        "toric_cca_symbolic_resolution_taylor_total_rank_log2": x.new_tensor(
+            symbolic["symbolic_resolution_taylor_total_rank_log2"]
+        ).detach(),
+        "toric_cca_symbolic_resolution_taylor_boundary_terms_log2": x.new_tensor(
+            symbolic["symbolic_resolution_taylor_boundary_terms_log2"]
+        ).detach(),
+        "toric_cca_symbolic_resolution_nonminimality_log2": x.new_tensor(
+            symbolic["symbolic_resolution_nonminimality_log2"]
+        ).detach(),
+        "toric_cca_symbolic_resolution_betti_entropy": x.new_tensor(
+            symbolic["symbolic_resolution_betti_entropy"]
+        ).detach(),
         "toric_cca_koszul_loss": koszul_loss.detach(),
+        "toric_cca_koszul_exactness_residual": koszul["koszul_exactness_residual"].detach(),
+        "toric_cca_koszul_syzygy_residual": koszul["koszul_syzygy_residual"].detach(),
+        "toric_cca_koszul_fitting_rank_residual": koszul["koszul_fitting_rank_residual"].detach(),
+        "toric_cca_koszul_buchsbaum_eisenbud_rank_residual": koszul[
+            "koszul_buchsbaum_eisenbud_rank_residual"
+        ].detach(),
+        "toric_cca_koszul_buchsbaum_eisenbud_multiplier_residual": koszul[
+            "koszul_buchsbaum_eisenbud_multiplier_residual"
+        ].detach(),
+        "toric_cca_koszul_multigraded_betti_mass": koszul["koszul_multigraded_betti_mass"].detach(),
+        "toric_cca_koszul_toric_affine_chart_entropy": koszul[
+            "koszul_toric_affine_chart_entropy"
+        ].detach(),
+        "toric_cca_koszul_toric_affine_chart_coverage": koszul[
+            "koszul_toric_affine_chart_coverage"
+        ].detach(),
         "toric_cca_topology_loss_component": topology_loss.detach(),
         "toric_cca_windows": x.new_tensor(float(len(terms["binomial"]))).detach(),
     }

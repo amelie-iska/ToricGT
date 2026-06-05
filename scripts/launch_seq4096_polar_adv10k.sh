@@ -12,7 +12,7 @@ PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
 ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
-RUN_ID="${RUN_ID:-toricgt_adv0micro_safecca_polar_seq4096_${STAMP}}"
+RUN_ID="${RUN_ID:-toricgt_advcca_step0_polar_seq4096_${STAMP}}"
 TRAIN_TMUX="${TRAIN_TMUX:-${RUN_ID}_train}"
 ANALYSIS_TMUX="${ANALYSIS_TMUX:-${RUN_ID}_analysis}"
 MIRROR_TMUX="${MIRROR_TMUX:-${RUN_ID}_mirror}"
@@ -108,7 +108,7 @@ TRAIN_CMD=(
   "GRAPHCG_LOSS_WEIGHT=0.0005"
   "TORIC_TROPICAL_LOSS_WEIGHT=0.00025"
   "SLEPIAN_LOSS_WEIGHT=0.0005"
-  "KOSZUL_BGG_LOSS_WEIGHT=0"
+  "KOSZUL_BGG_LOSS_WEIGHT=0.0001"
   "ANALOGY_LOSS_WEIGHT=0.000002"
   "ADVANCED_LOSS_SAMPLE_TOKENS=64"
   "TORIC_TROPICAL_FAN_BINS=8"
@@ -117,7 +117,7 @@ TRAIN_CMD=(
   "ADVANCED_LOSS_END_STEP=0"
   "ADVANCED_LOSS_EVERY=16"
   "ADVANCED_LOSS_WARMUP_STEPS=20000"
-  "ADVANCED_LOSS_MIN_BEST_VAL_BPB=1.17"
+  "ADVANCED_LOSS_MIN_BEST_VAL_BPB=0"
   "ADVANCED_LOSS_MAX_CE_RATIO=0.000005"
   "GRAD_CLIP_NORM=0.22"
   "CHECKPOINT_ON_TRAIN_BPB_BELOW=1.06"
@@ -236,6 +236,7 @@ analysis root: $OUTPUT_ROOT
 gate state:    $STATE_PATH
 target BPB:    $TARGET_BPB
 continue if:   best <= $CONTINUE_THRESHOLD_BPB by trainer step $GATE_STEP
-advanced:      start_step=0 every=16 warmup=20000 min_best_val_bpb=1.17 max_ce_ratio=0.000005 grad_clip=0.22
+advanced:      start_step=0 every=16 warmup=20000 min_best_val_bpb=0 max_ce_ratio=0.000005 grad_clip=0.22
+cca/topology:  train-time CCA/topology active from step 0 with koszul_bgg=0.0001
 polarquant:    kv_bits=8 train=1 train_start_step=0 train_warmup_steps=0 train_sample_tokens=16
 EOF

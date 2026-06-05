@@ -3,6 +3,13 @@
 from .random_order_lm import DenseRandomOrderToricLM, RandomOrderLMConfig
 from .soft_moe import GraphTokenSoftMoE, PrefixCausalSoftMoE
 from .combinatorial_toric_metrics import CombinatorialToricConfig, combinatorial_toric_cca_topology_loss
+from .symbolic_multigraded_resolution import (
+    SymbolicResolutionMetrics,
+    cyclic_stanley_reisner_generator_masks,
+    cyclic_stanley_reisner_resolution_dict,
+    cyclic_stanley_reisner_resolution_metrics,
+    cyclic_taylor_multidegree_counts,
+)
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
 from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
 from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryMemoryIndex, TrajectoryMemoryRecord, TrajectoryRetrievalHead
@@ -16,12 +23,17 @@ __all__ = [
     "PrefixCausalSoftMoE",
     "RandomOrderLMConfig",
     "ReasoningTopologyConfig",
+    "SymbolicResolutionMetrics",
     "TrajectoryMemoryConfig",
     "TrajectoryMemoryIndex",
     "TrajectoryMemoryRecord",
     "TrajectoryRetrievalHead",
     "ToricGeometryConfig",
     "combinatorial_toric_cca_topology_loss",
+    "cyclic_stanley_reisner_generator_masks",
+    "cyclic_stanley_reisner_resolution_dict",
+    "cyclic_stanley_reisner_resolution_metrics",
+    "cyclic_taylor_multidegree_counts",
     "reasoning_step_topology_loss",
 ]
 

@@ -2406,7 +2406,33 @@ The implemented bridge is the bounded auxiliary
   +w_T\mathcal L_{\mathrm{top}}.
 \end{split}
 \end{equation}
-The code path is \texttt{src/toricgt/combinatorial\_toric\_metrics.py}; it returns \texttt{toric\_cca\_topology\_loss} and detached diagnostics such as \texttt{toric\_cca\_binomial\_residual}, \texttt{toric\_cca\_stanley\_reisner\_nonface\_mass}, \texttt{toric\_cca\_betti0\_proxy}, and \texttt{toric\_cca\_betti1\_proxy}.  These diagnostics are useful only under an audit-to-loss rule: a metric may affect gradients only after exact finite audits agree with its differentiable surrogate and matched validation shows no BPB regression beyond tolerance.  This keeps the commutative algebra rigorous without letting it overpower the byte-level objective.
+The code path is \texttt{src/toricgt/combinatorial\_toric\_metrics.py}; it returns \texttt{toric\_cca\_topology\_loss} and detached diagnostics such as \texttt{toric\_cca\_binomial\_residual}, \texttt{toric\_cca\_stanley\_reisner\_nonface\_mass}, \texttt{toric\_cca\_betti0\_proxy}, \texttt{toric\_cca\_betti1\_proxy}, \texttt{toric\_cca\_koszul\_loss}, and \texttt{toric\_cca\_topology\_loss\_component}.  The BPB-first scratch contract uses these quantities from optimizer step $0$: \texttt{ADVANCED\_LOSS\_START\_STEP=0}, no validation-BPB gate in front of metric computation, a long auxiliary warmup, and a cross-entropy-ratio cap.  The early gradient is therefore nonzero but tiny, while exact finite audits decide whether later phases may increase frequency or weight.  This keeps the commutative algebra rigorous without letting it overpower the byte-level objective.
+
+The implementation now includes a full symbolic multigraded resolution for the finite Stanley--Reisner ideal used by this bridge.  Let $S=k[x_1,\ldots,x_m]$ with $\mathbb Z^m$ grading $\deg(x_i)=e_i$, and let
+\[
+  I_\Delta=\langle x_F=\prod_{i\in F}x_i : F\notin\Delta\rangle .
+\]
+For the face ring $k[\Delta]=S/I_\Delta$, the sidecar computes the exact minimal multigraded Betti table over $\mathbb F_2$ using Hochster's formula
+\[
+  \beta_{i,\sigma}(k[\Delta])
+  =
+  \dim_{\mathbb F_2}\widetilde H_{|\sigma|-i-1}(\Delta_\sigma;\mathbb F_2).
+\]
+It also records the Taylor free resolution of $I_\Delta$: if $I_\Delta=\langle m_1,\ldots,m_g\rangle$, the degree-$p$ Taylor module has one basis vector $e_J$ for every $p$-subset $J$ of generators, multidegree $\operatorname{lcm}(m_j:j\in J)$, and differential
+\[
+  d(e_J)=
+  \sum_{r=1}^{p}(-1)^{r-1}
+  \frac{\operatorname{lcm}(m_j:j\in J)}
+       {\operatorname{lcm}(m_j:j\in J\setminus\{j_r\})}
+  e_{J\setminus\{j_r\}}.
+\]
+This Taylor complex is a full symbolic multigraded free resolution, while the Hochster table gives the minimal Betti numbers, projective dimension, regularity, and nonminimality gap.
+
+The exact symbolic data are discrete, but the train-time maps are differentiable because they are polynomial evaluations over soft chamber coordinates.  With
+\[
+  x_i(H)=\frac1n\sum_t p_i(h_t),
+\]
+the Stanley--Reisner generator loss is $\mean_{F\in\mathcal G(I_\Delta)}\prod_{i\in F}x_i(H)$, Taylor lcm-syzygy mass is the corresponding average over $\operatorname{lcm}(m_a,m_b)$, and the Hilbert/Betti pressure multiplies these polynomial maps by constants derived from the exact Betti table, projective dimension, and regularity.  Thus the symbolic multigraded ring is used exactly for audits and differentiably for optimization.
 
 The corresponding audit metrics are deliberately literal:
 \begin{verbatim}
@@ -2424,8 +2450,8 @@ Here the Buchsbaum--Eisenbud multiplier residual is a sampled complementary-mino
 \begin{equation}
   C_2\xrightarrow{d_2}C_1\xrightarrow{d_1}C_0.
 \end{equation}
-Exactness at $C_1$ requires $\rank(d_1)+\rank(d_2)=\dim C_1$, and the multiplier relations compare maximal minors of $d_1$ with complementary maximal minors of $d_2$ up to scalar factors.  The implemented audit samples complementary edge-index sets over $\mathbb F_2$ and counts multiplier mismatches, while the differentiable surrogate penalizes $d_K^2$, local action commutators, and soft rank-condition failures.
-Only after exact small-window audits over finite fields agree with differentiable float surrogates should these enter optimization.  A conservative later-stage loss is
+Exactness at $C_1$ requires $\rank(d_1)+\rank(d_2)=\dim C_1$, and the multiplier relations compare maximal minors of $d_1$ with complementary maximal minors of $d_2$ up to scalar factors.  The implemented audit samples complementary edge-index sets over $\mathbb F_2$ and counts multiplier mismatches, while the differentiable train-time expression penalizes $d_K^2$, local action commutators, and regularized rank-condition failures.
+Only after exact small-window audits over finite fields agree with these differentiable polynomial/rank evaluations should their weights be increased.  A conservative later-stage loss is
 \begin{equation}
   \mathcal L_{\mathrm{Koszul}}=
   \lambda_{\mathrm{dga}}\norm{d_K^2}_F^2+
@@ -2437,10 +2463,10 @@ where $\mathcal L_{\mathrm{BE}}$ penalizes Buchsbaum--Eisenbud-style rank and mi
 
 \subsection{Skeptic gate and ablation discipline}
 
-The practical antidote to overfitting the theory is a hard gate: no advanced geometric object changes training unless it has a logged metric, an ablation, and a plot path.  The named ``there be dragons'' onlooker is not a model component, prompt role, reward term, or hidden observer; repository search verifies it is absent from executable paths outside ignored output/checkpoint/data directories.  More importantly, the scientific guardrail is positive rather than rhetorical:
+The practical antidote to overfitting the theory is a hard gate: no advanced geometric object receives more than micro-loss status unless it has a logged metric, an ablation, and a plot path.  The named ``there be dragons'' onlooker is not a model component, prompt role, reward term, or hidden observer; repository search verifies it is absent from executable paths outside ignored output/checkpoint/data directories.  More importantly, the scientific guardrail is positive rather than rhetorical:
 \begin{enumerate}[leftmargin=2em]
   \item exact small algebraic or topological audits must pass on toy windows;
-  \item differentiable surrogates must agree with those audits within tolerance;
+  \item differentiable polynomial/rank evaluations must agree with those audits within tolerance;
   \item enabling the auxiliary loss must not damage validation BPB, score-first causality, or held-out reasoning metrics.
 \end{enumerate}
 If an object fails this gate, it remains a visualization or diagnostic.  This rule keeps the toric, Coxeter, noncommutative, and Koszul layers falsifiable instead of decorative.

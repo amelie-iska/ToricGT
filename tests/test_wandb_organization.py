@@ -59,6 +59,25 @@ def test_category_aliases_route_advanced_losses_once() -> None:
     assert organized["16_status/metrics_status/hessian_enabled"] == 1.0
 
 
+def test_symbolic_cca_resolution_metrics_are_primary_and_grouped() -> None:
+    payload = {
+        "trainer/step": 16,
+        "advanced/toric_cca_topology_loss": 0.3,
+        "advanced/toric_cca_symbolic_resolution_loss": 0.07,
+        "advanced/toric_cca_symbolic_hilbert_betti_pressure": 0.09,
+        "advanced/toric_cca_symbolic_taylor_full_resolution_mass": 0.11,
+        "advanced/toric_cca_koszul_buchsbaum_eisenbud_multiplier_residual": 0.02,
+    }
+
+    organized = organize_wandb_payload(payload)
+
+    assert organized["00_primary/toric_cca_topology_loss"] == 0.3
+    assert organized["00_primary/cca_symbolic_resolution_loss"] == 0.07
+    assert organized["00_primary/cca_buchsbaum_eisenbud_multiplier_residual"] == 0.02
+    assert organized["08_toric_tropical_bgg/advanced/toric_cca_symbolic_hilbert_betti_pressure"] == 0.09
+    assert organized["08_toric_tropical_bgg/advanced/toric_cca_symbolic_taylor_full_resolution_mass"] == 0.11
+
+
 def test_polarquant_metrics_promote_to_primary_and_artifact_size() -> None:
     payload = {
         "trainer/step": 12,

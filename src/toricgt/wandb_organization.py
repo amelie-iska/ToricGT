@@ -345,6 +345,18 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/toric_bgg_loss", ("train/toric_bgg_loss",))
     _add_first(out, payload, "00_primary/koszul_persistence_loss", ("train/koszul_persistence_loss",))
     _add_first(out, payload, "00_primary/toric_cca_topology_loss", ("advanced/toric_cca_topology_loss",))
+    _add_first(
+        out,
+        payload,
+        "00_primary/cca_symbolic_resolution_loss",
+        ("advanced/toric_cca_symbolic_resolution_loss",),
+    )
+    _add_first(
+        out,
+        payload,
+        "00_primary/cca_buchsbaum_eisenbud_multiplier_residual",
+        ("advanced/toric_cca_koszul_buchsbaum_eisenbud_multiplier_residual",),
+    )
     _add_first(out, payload, "00_primary/slepian_pollak_loss", ("train/slepian_pollak_loss",))
     _add_first(out, payload, "00_primary/trajectory_memory_loss", ("train/trajectory_memory_loss",))
     _add_first(out, payload, "00_primary/complexity_prediction_target_ncd", ("complexity/val/prediction_target_ncd_lzma_mean",))
