@@ -1384,28 +1384,34 @@ Latest live analysis output:
 `outputs/post_resume_analysis/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z/step-00000750`.
 
 - W&B state: `running`.
-- Last W&B history step in the audit: `862`.
+- Last W&B history step in the refreshed audit: `1033`.
 - Nonfinite/string-NaN metric families: `0`.
-- Validation/OpenAI BPB: `1.6041 -> 1.45475` in the early audit window.
+- Validation/OpenAI BPB: `1.6041 -> 1.3562` through the step-1000 validation
+  point.
 - Train BPB: large initial collapse, with later train BPB around the
-  `1.33-1.40` band by steps 840-930 in the live log.
+  `1.33-1.42` band by steps 840-1020 in the live log.
 - Step 750 validation/OpenAI BPB: `1.3916`.
-- `00_primary/toric_cca_topology_loss`: `0.850269 -> 0.796494`, desired.
-- `advanced/graphcg_loss`: `0.093823 -> 0.035743`, desired but still noisy.
-- `advanced/koszul_bgg_loss`: `153.681 -> 81.471`, desired.
-- `advanced/toric_tropical_loss`: `0.081915 -> 0.061779`, desired.
-- `advanced/slepian_pollak_loss`: `0.831869 -> 0.834602`, nearly flat/slightly
-  adverse, so do not raise Slepian weight before the 10K gate.
-- CCA submetrics are mixed: the primary CCA loss improved, while the
-  `08_toric_tropical_bgg/advanced/toric_cca_topology_loss` alias rose in the
-  sparse W&B window.  Interpretation: keep the current micro weight and inspect
-  the exact CCA analysis artifacts before increasing CCA scale.
+- Step 1000 validation/OpenAI BPB: `1.3562`; checkpoint saved.
+- `00_primary/toric_cca_topology_loss`: `0.821761 -> 0.836112`, now flagged
+  not-as-desired in the longer W&B window.
+- `advanced/graphcg_loss`: `0.085085 -> 0.034952`, desired but still noisy.
+- `advanced/koszul_bgg_loss`: `147.038 -> 67.970`, desired.
+- `advanced/toric_tropical_loss`: `0.080696 -> 0.059333`, desired.
+- `advanced/slepian_pollak_loss`: `0.831777 -> 0.830407`, now slightly
+  improved but still weak.
+- CCA submetrics are mixed: BPB is improving rapidly, but the CCA topology
+  aggregate and topology-loss component rose.  Interpretation: keep the current
+  CCA micro weight, do not raise CCA/Slepian pressure before the 10K gate, and
+  inspect the next exact symbolic CCA/Taylor/Hochster analysis bundle at
+  step 1250 before retuning.
 
 ### Current decision
 
 Do not interrupt the current run while it is finite and descending.  The active
 gate already implements the requested policy: target `<1.09` BPB by step 10K,
 continue if below `1.17` by step 10K, and stop/restart only if the gate fails.
+The step-1000 check strengthens that decision: validation BPB improved from
+`1.3916` at step 750 to `1.3562` at step 1000, with no nonfinite families.
 
 If the 10K gate fails or the next validation checks show clear stagnation, the
 recommended restart path is:

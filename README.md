@@ -56,8 +56,8 @@ Current validated status:
   from the start.  The live 10K gate targets `<1.09` BPB and allows the run to
   continue if it is below `1.17` by step 10K.
 - Latest checked live readout for the active advanced run: finite through step
-  930, with step 750 validation/OpenAI BPB `1.3916`, train BPB in the
-  `1.33-1.40` range around steps 840-930, no observed nonfinite update skips,
+  1020, with step 1000 validation/OpenAI BPB `1.3562`, train BPB in the
+  `1.33-1.42` range around steps 840-1020, no observed nonfinite update skips,
   and scheduled analysis artifacts under
   `outputs/post_resume_analysis/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z/step-00000750`.
 - The step-0 NaN failure mode from
@@ -1476,6 +1476,12 @@ Active live training:
   resolution-complex plots; review `geometry/triangles`,
   `geometry/tetrahedra`, and `simplex` for the CCA control triangle and 3D
   tetrahedron/simplex plots.
+- Latest live metric audit: W&B history through step 1033 shows validation/
+  OpenAI BPB improving to `1.3562` at step 1000 with no nonfinite metric
+  families.  GraphCG, Koszul/BGG, toric/tropical, and Slepian/Pollak metrics
+  are mostly moving in useful directions, while the CCA topology aggregate is
+  mixed and should stay micro-weighted until the next exact symbolic analysis
+  bundle at step 1250.
 
 The active full 30M-class graph-model training recipe remains documented above,
 but the immediate priority is the advanced Seq4096 Parameter-Golf run to push
