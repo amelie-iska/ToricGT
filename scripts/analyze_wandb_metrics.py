@@ -209,14 +209,24 @@ def categorize(goal: str, relative_change: float, recent_slope: float, recent_t:
             return CATEGORY_DESIRED, "lower-is-better metric is already at a stable floor"
         if abs(relative_change) < 10.0 and cv <= 2.0 and abs(recent_slope) < 1.0e-6:
             return CATEGORY_DESIRED, "lower-is-better metric is numerically near zero during a bounded ramp"
-        if relative_change <= -0.03 and (recent_slope <= 0 or abs(recent_t) < 1.5) and spike_count <= 3:
-            return CATEGORY_DESIRED, "lower-is-better metric improved materially without recent positive drift"
+        if relative_change <= -0.03 and (recent_slope <= 0 or abs(recent_t) < 1.5):
+            if spike_count <= 3:
+                return CATEGORY_DESIRED, "lower-is-better metric improved materially without recent positive drift"
+            return (
+                CATEGORY_SLOW,
+                "lower-is-better metric improved materially but has high per-step volatility; inspect smoothing and batch variance",
+            )
         if relative_change <= 0.01 and spike_count <= 6:
             return CATEGORY_SLOW, "lower-is-better metric is improving, flat, or noisy but not deteriorating strongly"
         return CATEGORY_BAD, "lower-is-better metric deteriorated, drifted upward, or showed repeated spikes"
     if goal == "higher":
-        if relative_change >= 0.03 and (recent_slope >= 0 or abs(recent_t) < 1.5) and spike_count <= 3:
-            return CATEGORY_DESIRED, "higher-is-better metric improved materially without recent negative drift"
+        if relative_change >= 0.03 and (recent_slope >= 0 or abs(recent_t) < 1.5):
+            if spike_count <= 3:
+                return CATEGORY_DESIRED, "higher-is-better metric improved materially without recent negative drift"
+            return (
+                CATEGORY_SLOW,
+                "higher-is-better metric improved materially but has high per-step volatility; inspect smoothing and batch variance",
+            )
         if relative_change >= -0.01 and spike_count <= 6:
             return CATEGORY_SLOW, "higher-is-better metric is improving, flat, or noisy but not strengthening quickly"
         return CATEGORY_BAD, "higher-is-better metric deteriorated or showed repeated spikes"
