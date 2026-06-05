@@ -102,6 +102,47 @@ def test_parse_seq4096_log_captures_train_val_and_train_bpb(tmp_path: Path) -> N
     assert frame.loc[frame["step"] == 500, "val_bpb"].iloc[0] == pytest.approx(1.3641)
 
 
+def test_training_adjustment_proposal_command_logs_seq4096_controls_to_wandb(tmp_path: Path) -> None:
+    module = load_module()
+
+    command = module.build_training_adjustment_proposal_command(
+        python_bin="/venv/bin/python",
+        repo_root=tmp_path,
+        output_dir=tmp_path / "outputs" / "step-00000750",
+        target_bpb=1.09,
+        gate_step=10000,
+        checkpoint_step=750,
+        run_path="entity/project/run-id",
+    )
+
+    assert command[:2] == [
+        "/venv/bin/python",
+        str(tmp_path / "scripts" / "propose_training_adjustments.py"),
+    ]
+    assert command[command.index("--analysis-dir") + 1] == str(tmp_path / "outputs" / "step-00000750")
+    assert command[command.index("--target-bpb") + 1] == "1.09"
+    assert command[command.index("--gate-step") + 1] == "10000"
+    assert command[command.index("--checkpoint-step") + 1] == "750"
+    assert command[command.index("--wandb-run-path") + 1] == "entity/project/run-id"
+
+
+def test_training_adjustment_proposal_command_can_skip_wandb_for_local_dry_run(tmp_path: Path) -> None:
+    module = load_module()
+
+    command = module.build_training_adjustment_proposal_command(
+        python_bin="python",
+        repo_root=tmp_path,
+        output_dir=tmp_path / "analysis",
+        target_bpb=1.2,
+        gate_step=4000,
+        checkpoint_step=0,
+        run_path="",
+    )
+
+    assert "--checkpoint-step" in command
+    assert "--wandb-run-path" not in command
+
+
 def test_parse_seq4096_log_captures_low_train_bpb_trigger_validation(tmp_path: Path) -> None:
     module = load_module()
     log_path = tmp_path / "low_bpb_trigger.log"

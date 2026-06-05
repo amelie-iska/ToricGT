@@ -2400,6 +2400,33 @@ def build_advanced_geometry_command(
     ]
 
 
+def build_training_adjustment_proposal_command(
+    *,
+    python_bin: str,
+    repo_root: Path,
+    output_dir: Path,
+    target_bpb: float,
+    gate_step: int,
+    checkpoint_step: int,
+    run_path: str,
+) -> list[str]:
+    command = [
+        str(python_bin),
+        str(Path(repo_root) / "scripts" / "propose_training_adjustments.py"),
+        "--analysis-dir",
+        str(output_dir),
+        "--target-bpb",
+        str(float(target_bpb)),
+        "--gate-step",
+        str(int(gate_step)),
+        "--checkpoint-step",
+        str(int(checkpoint_step)),
+    ]
+    if run_path:
+        command.extend(["--wandb-run-path", str(run_path)])
+    return command
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -2602,16 +2629,15 @@ def run_periodic_analysis(args: argparse.Namespace, checkpoint: Path, step: int)
         artifact_report=artifact_report,
         history_root=Path(args.output_root).parent,
     )
-    proposal_cmd = [
-        args.python,
-        str(root / "scripts" / "propose_training_adjustments.py"),
-        "--analysis-dir",
-        str(output_dir),
-        "--target-bpb",
-        str(args.target_bpb),
-        "--gate-step",
-        str(args.gate_step),
-    ]
+    proposal_cmd = build_training_adjustment_proposal_command(
+        python_bin=args.python,
+        repo_root=root,
+        output_dir=output_dir,
+        target_bpb=args.target_bpb,
+        gate_step=args.gate_step,
+        checkpoint_step=step,
+        run_path=args.run_path,
+    )
     command_status["training_adjustment_proposal"] = run_command(
         proposal_cmd,
         logs_dir / "training_adjustment_proposal.log",
