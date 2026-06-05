@@ -42,3 +42,27 @@ def test_combinatorial_toric_metrics_zero_for_too_short_windows():
 
     assert out["toric_cca_topology_loss"].item() == 0.0
     assert out["toric_cca_windows"].item() == 0.0
+
+
+def test_combinatorial_toric_metrics_sanitize_nonfinite_hidden():
+    hidden = torch.randn(1, 24, 16, requires_grad=True)
+    with torch.no_grad():
+        hidden[0, 4, 3] = float("nan")
+        hidden[0, 8, 5] = float("inf")
+    positions = torch.arange(hidden.shape[1]).view(1, -1)
+
+    out = combinatorial_toric_cca_topology_loss(
+        hidden,
+        positions,
+        config=CombinatorialToricConfig(
+            max_points=8,
+            max_windows=1,
+            window_size=16,
+            step_stride=12,
+            num_chambers=6,
+            max_relations=8,
+        ),
+    )
+
+    for key, value in out.items():
+        assert torch.isfinite(value).all(), key

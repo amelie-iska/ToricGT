@@ -290,6 +290,22 @@ def test_koszul_persistence_loss_reports_affine_audit_metrics():
     assert out["koszul_windows"].item() >= 1
 
 
+def test_koszul_persistence_loss_sanitizes_nonfinite_hidden():
+    hidden = torch.randn(1, 16, 12)
+    hidden[0, 3, 2] = float("nan")
+    hidden[0, 7, 5] = float("inf")
+    positions = torch.arange(16).expand(1, 16)
+
+    out = koszul_persistence_loss(
+        hidden,
+        positions,
+        config=KoszulPersistenceConfig(max_points=8, max_windows=1, window_size=12),
+    )
+
+    for key, value in out.items():
+        assert torch.isfinite(value).all(), key
+
+
 def test_gflownet_adapter_preserves_score_before_update():
     cfg = tiny_config(use_gflownet_policy=True, gflownet_num_actions=4, gflownet_hidden_dim=16)
     model = DenseRandomOrderToricLM(cfg).eval()

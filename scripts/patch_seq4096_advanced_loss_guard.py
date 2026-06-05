@@ -22,7 +22,22 @@ def replace_once(text: str, old: str, new: str) -> str:
 
 def install_finite_guard(text: str) -> tuple[str, bool]:
     if "def finite_aux_scalar" in text and "advanced/aux_loss_nonfinite_suppressed" in text:
-        return text, False
+        if "advanced/log_only" in text and "effective_total = weighted.new_zeros(()) if log_only else scale * weighted" in text:
+            return text, False
+        text = replace_once(
+            text,
+            """    total = finite_aux_scalar("aux_loss_total", scale * weighted)
+    metrics["advanced/weighted_unscaled_loss"] = weighted.detach()
+    metrics["advanced/runtime_scale"] = torch.as_tensor(scale, device=weighted.device, dtype=weighted.dtype)
+""",
+            """    effective_total = weighted.new_zeros(()) if log_only else scale * weighted
+    total = finite_aux_scalar("aux_loss_total", effective_total)
+    metrics["advanced/weighted_unscaled_loss"] = weighted.detach()
+    metrics["advanced/log_only"] = torch.as_tensor(float(log_only), device=weighted.device, dtype=weighted.dtype)
+    metrics["advanced/runtime_scale"] = torch.as_tensor(scale, device=weighted.device, dtype=weighted.dtype)
+""",
+        )
+        return text, True
 
     text = replace_once(
         text,
@@ -36,6 +51,7 @@ def install_finite_guard(text: str) -> tuple[str, bool]:
         """        koszul = d2_resid + 0.25 * leakage\n        weighted = weighted + weights[\"koszul\"] * koszul\n""": """        koszul = d2_resid + 0.25 * leakage\n        koszul = finite_aux_scalar(\"koszul_bgg_loss\", koszul)\n        weighted = weighted + weights[\"koszul\"] * koszul\n""",
         """        analogy = analogue / denom\n        weighted = weighted + weights[\"analogy\"] * analogy\n""": """        analogy = analogue / denom\n        analogy = finite_aux_scalar(\"analogy_loss\", analogy)\n        weighted = weighted + weights[\"analogy\"] * analogy\n""",
         """    total = scale * weighted\n    metrics[\"advanced/weighted_unscaled_loss\"] = weighted.detach()\n""": """    weighted = finite_aux_scalar(\"weighted_unscaled_loss\", weighted)\n    total = finite_aux_scalar(\"aux_loss_total\", scale * weighted)\n    metrics[\"advanced/weighted_unscaled_loss\"] = weighted.detach()\n""",
+        """    total = finite_aux_scalar(\"aux_loss_total\", scale * weighted)\n    metrics[\"advanced/weighted_unscaled_loss\"] = weighted.detach()\n    metrics[\"advanced/runtime_scale\"] = torch.as_tensor(scale, device=weighted.device, dtype=weighted.dtype)\n""": """    effective_total = weighted.new_zeros(()) if log_only else scale * weighted\n    total = finite_aux_scalar(\"aux_loss_total\", effective_total)\n    metrics[\"advanced/weighted_unscaled_loss\"] = weighted.detach()\n    metrics[\"advanced/log_only\"] = torch.as_tensor(float(log_only), device=weighted.device, dtype=weighted.dtype)\n    metrics[\"advanced/runtime_scale\"] = torch.as_tensor(scale, device=weighted.device, dtype=weighted.dtype)\n""",
         """            aux_loss, aux_metrics = advanced_embedding_losses(base_model, args, x, runtime_scale=runtime_scale)\n            if runtime_scale > 0.0 and args.advanced_loss_max_ce_ratio > 0.0:\n""": """            aux_loss, aux_metrics = advanced_embedding_losses(base_model, args, x, runtime_scale=runtime_scale)\n            if not torch.isfinite(aux_loss.detach()):\n                aux_metrics[\"advanced/aux_loss_nonfinite_suppressed\"] = torch.ones((), device=device, dtype=torch.float32)\n                aux_loss = torch.zeros_like(ce_loss)\n            else:\n                aux_metrics[\"advanced/aux_loss_nonfinite_suppressed\"] = torch.zeros((), device=device, dtype=torch.float32)\n            if runtime_scale > 0.0 and args.advanced_loss_max_ce_ratio > 0.0:\n""",
     }
     for old, new in replacements.items():

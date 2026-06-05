@@ -89,7 +89,15 @@ def _soft_rank(matrix: torch.Tensor, temperature: float) -> torch.Tensor:
     # Rank metrics are diagnostics.  Detaching avoids making tiny SVDs the
     # dominant gradient path during the competition run.
     with torch.no_grad():
-        singular = torch.linalg.svdvals(matrix.float())
+        safe = torch.nan_to_num(matrix.detach().float(), nan=0.0, posinf=0.0, neginf=0.0)
+        # These matrices are tiny and audit-only.  Running the SVD on CPU avoids
+        # occasional cuSOLVER non-convergence from poisoning an otherwise valid
+        # training step, while the returned scalar remains on the original device.
+        try:
+            singular = torch.linalg.svdvals(safe.cpu()).to(device=matrix.device)
+        except RuntimeError:
+            return matrix.new_zeros(())
+        singular = torch.nan_to_num(singular, nan=0.0, posinf=0.0, neginf=0.0)
         return (singular / (singular + max(float(temperature), 1e-5))).sum()
 
 
@@ -173,7 +181,7 @@ def koszul_persistence_loss(
     cfg = config or KoszulPersistenceConfig()
     if hidden.ndim != 3 or hidden.shape[1] < 4:
         return _zero_like(hidden)
-    x_all = hidden.float()
+    x_all = torch.nan_to_num(hidden.float(), nan=0.0, posinf=0.0, neginf=0.0)
     starts = _window_starts(int(x_all.shape[1]), cfg)
     if not starts:
         return _zero_like(hidden)
@@ -199,7 +207,7 @@ def koszul_persistence_loss(
             points, pos_points = _sample_window(window, pos_window, int(cfg.max_points))
             if points.shape[0] < 4:
                 continue
-            points = F.normalize(points, dim=-1)
+            points = torch.nan_to_num(F.normalize(points, dim=-1), nan=0.0, posinf=0.0, neginf=0.0)
             actions, chart_probs, _chart_logits, _dist = _local_actions(points, pos_points, cfg)
             d1, d2, d3 = _koszul_blocks(actions)
             exactness = (d1 @ d2).pow(2).mean()
@@ -274,16 +282,17 @@ def koszul_persistence_loss(
     be_multiplier_residual = mean("be_multiplier")
     betti_mass = mean("betti")
     loss = exactness_residual + 0.35 * syzygy_residual + 0.10 * fitting_residual + 0.10 * be_rank_residual
+    loss = torch.nan_to_num(loss, nan=0.0, posinf=1.0e4, neginf=0.0).clamp_min(0.0)
     return {
         "koszul_persistence_loss": loss,
-        "koszul_exactness_residual": exactness_residual.detach(),
-        "koszul_syzygy_residual": syzygy_residual.detach(),
-        "koszul_fitting_rank_residual": fitting_residual.detach(),
-        "koszul_buchsbaum_eisenbud_rank_residual": be_rank_residual.detach(),
-        "koszul_buchsbaum_eisenbud_multiplier_residual": be_multiplier_residual.detach(),
-        "koszul_multigraded_betti_mass": betti_mass.detach(),
-        "koszul_toric_affine_chart_entropy": mean("entropy").detach(),
-        "koszul_toric_affine_chart_coverage": mean("coverage").detach(),
-        "koszul_chart_transition_resolution_shift": mean("shift").detach(),
+        "koszul_exactness_residual": torch.nan_to_num(exactness_residual.detach(), nan=0.0, posinf=1.0e4, neginf=0.0),
+        "koszul_syzygy_residual": torch.nan_to_num(syzygy_residual.detach(), nan=0.0, posinf=1.0e4, neginf=0.0),
+        "koszul_fitting_rank_residual": torch.nan_to_num(fitting_residual.detach(), nan=0.0, posinf=1.0e4, neginf=0.0),
+        "koszul_buchsbaum_eisenbud_rank_residual": torch.nan_to_num(be_rank_residual.detach(), nan=0.0, posinf=1.0e4, neginf=0.0),
+        "koszul_buchsbaum_eisenbud_multiplier_residual": torch.nan_to_num(be_multiplier_residual.detach(), nan=0.0, posinf=1.0e4, neginf=0.0),
+        "koszul_multigraded_betti_mass": torch.nan_to_num(betti_mass.detach(), nan=0.0, posinf=1.0e4, neginf=0.0),
+        "koszul_toric_affine_chart_entropy": torch.nan_to_num(mean("entropy").detach(), nan=0.0, posinf=1.0, neginf=0.0),
+        "koszul_toric_affine_chart_coverage": torch.nan_to_num(mean("coverage").detach(), nan=0.0, posinf=1.0, neginf=0.0),
+        "koszul_chart_transition_resolution_shift": torch.nan_to_num(mean("shift").detach(), nan=0.0, posinf=1.0e4, neginf=0.0),
         "koszul_windows": hidden.new_tensor(float(len(terms["exactness"]))).detach(),
     }

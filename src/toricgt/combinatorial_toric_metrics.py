@@ -112,7 +112,8 @@ def _cyclic_fan_masks(chambers: int, device: torch.device) -> tuple[torch.Tensor
 
 
 def _window_toric_terms(points: torch.Tensor, cfg: CombinatorialToricConfig) -> dict[str, torch.Tensor]:
-    points = F.normalize(points.float(), dim=-1)
+    points = torch.nan_to_num(points.float(), nan=0.0, posinf=0.0, neginf=0.0)
+    points = torch.nan_to_num(F.normalize(points, dim=-1), nan=0.0, posinf=0.0, neginf=0.0)
     zero = points.sum() * 0.0
     chambers = max(4, int(cfg.num_chambers))
     directions = _fixed_chart_directions(points.shape[-1], chambers, points.device, points.dtype)
@@ -188,7 +189,7 @@ def combinatorial_toric_cca_topology_loss(
     if hidden.ndim != 3 or hidden.shape[1] < 4:
         return _zero_like(hidden)
 
-    x = hidden.float()
+    x = torch.nan_to_num(hidden.float(), nan=0.0, posinf=0.0, neginf=0.0)
     zero = x.sum() * 0.0
     starts = _window_starts(int(x.shape[1]), cfg)
     if not starts:
