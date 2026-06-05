@@ -43,8 +43,7 @@ if [[ ! -f "$TRAINER_PATH" ]]; then
   exit 1
 fi
 if ! grep -q "finite_aux_scalar" "$TRAINER_PATH"; then
-  echo "trainer is missing the finite advanced-loss guard: $TRAINER_PATH" >&2
-  exit 1
+  "$PYTHON" "$REPO_ROOT/scripts/patch_seq4096_advanced_loss_guard.py"     --trainer "$TRAINER_PATH"     --python "$PYTHON"
 fi
 for session in "$TRAIN_TMUX" "$ANALYSIS_TMUX" "$MIRROR_TMUX" "$DIAG_TMUX" "$GATE_TMUX"; do
   if tmux has-session -t "$session" 2>/dev/null; then
