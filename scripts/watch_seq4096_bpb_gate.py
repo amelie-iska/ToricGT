@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import subprocess
 import time
@@ -16,10 +17,22 @@ VAL_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+)\s+val_loss:(?P<loss>[0-9.eE+-]+)"
     r"\s+val_bpb:(?P<bpb>[0-9.eE+-]+)"
 )
+TRAIN_RE = re.compile(
+    r"step:(?P<step>\d+)/(?P<total>\d+)\s+train_loss:(?P<loss>[0-9.eE+-]+|nan|inf|-inf)"
+    r".*\s+train_bpb:(?P<bpb>[0-9.eE+-]+|nan|inf|-inf)"
+)
 
 
 @dataclass(frozen=True)
 class ValPoint:
+    step: int
+    total: int
+    loss: float
+    bpb: float
+
+
+@dataclass(frozen=True)
+class TrainPoint:
     step: int
     total: int
     loss: float
@@ -58,6 +71,24 @@ def parse_vals(path: Path) -> list[ValPoint]:
     return [points[step] for step in sorted(points)]
 
 
+def parse_trains(path: Path) -> list[TrainPoint]:
+    if not path.exists():
+        return []
+    points: dict[int, TrainPoint] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = TRAIN_RE.search(line)
+        if not match:
+            continue
+        point = TrainPoint(
+            step=int(match.group("step")),
+            total=int(match.group("total")),
+            loss=float(match.group("loss")),
+            bpb=float(match.group("bpb")),
+        )
+        points[point.step] = point
+    return [points[step] for step in sorted(points)]
+
+
 def tmux_has(session: str) -> bool:
     return subprocess.run(
         ["tmux", "has-session", "-t", session],
@@ -83,7 +114,10 @@ def main() -> None:
     last_state = ""
     while True:
         vals = parse_vals(log_path)
+        trains = parse_trains(log_path)
         latest = vals[-1] if vals else None
+        latest_train = trains[-1] if trains else None
+        nonfinite_train = next((point for point in trains if not (math.isfinite(point.loss) and math.isfinite(point.bpb))), None)
         gate_vals = [point for point in vals if point.step <= args.gate_step]
         best_gate = min(gate_vals, key=lambda point: point.bpb) if gate_vals else None
         latest_step = latest.step if latest else 0
@@ -93,7 +127,12 @@ def main() -> None:
         gate_observed = latest_step >= args.gate_step or (not train_alive and latest_step > 0)
 
         action = "waiting"
-        if target_reached:
+        if nonfinite_train is not None:
+            action = "nonfinite_training_stop_for_retune"
+            if args.kill_on_miss and train_alive:
+                tmux_kill(args.train_tmux)
+                train_alive = False
+        elif target_reached:
             action = "target_reached_continue"
         elif continuation_pass and gate_observed:
             action = "continuation_pass_continue"
@@ -113,6 +152,8 @@ def main() -> None:
             "target_bpb": args.target_bpb,
             "continue_threshold_bpb": args.continue_threshold_bpb,
             "latest_validation": None if latest is None else asdict(latest),
+            "latest_train": None if latest_train is None else asdict(latest_train),
+            "first_nonfinite_train": None if nonfinite_train is None else asdict(nonfinite_train),
             "best_validation_at_or_before_gate": None if best_gate is None else asdict(best_gate),
             "target_reached": target_reached,
             "continuation_pass": continuation_pass,
@@ -139,6 +180,7 @@ def main() -> None:
             "continuation_pass_continue",
             "gate_missed_stop_for_retune",
             "gate_missed_training_stopped_for_retune",
+            "nonfinite_training_stop_for_retune",
         }:
             return
         time.sleep(max(args.poll_seconds, 1.0))
