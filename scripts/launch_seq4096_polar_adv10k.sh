@@ -150,8 +150,6 @@ ANALYSIS_CMD=(
   --gate-step "$GATE_STEP"
   --python "$PYTHON"
   --training-tmux "$TRAIN_TMUX"
-  --codex-review-hook "$REPO_ROOT/scripts/codex_training_review_resume.sh"
-  --codex-review-tmux-prefix "toricgt_codex_review_${RUN_ID}"
 )
 
 MIRROR_CMD=(
