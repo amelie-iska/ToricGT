@@ -143,6 +143,20 @@ def json_value(data: dict[str, Any], *keys: str, default: float = 0.0) -> float:
     return default
 
 
+def summary_value(data: dict[str, Any], *keys: str, default: float = 0.0) -> float:
+    """Read advanced-analysis summaries from top-level fields or nested means."""
+
+    for key in keys:
+        if key in data:
+            return finite(data.get(key), default=default)
+    means = data.get("means")
+    if isinstance(means, dict):
+        for key in keys:
+            if key in means:
+                return finite(means.get(key), default=default)
+    return default
+
+
 def analysis_step(root: Path, explicit_step: int) -> int:
     if explicit_step > 0:
         return int(explicit_step)
@@ -369,7 +383,7 @@ def compute_structural_pressures(
             default=0.0,
         ),
         json_value(fineweb_diag, "toric/slepian_leakage", "diagnostics/latest/slepian_leakage", default=0.0),
-        json_value(geometry, "mean_toric_slepian_leakage", default=0.0),
+        summary_value(geometry, "mean_toric_slepian_leakage", "slepian_leakage", default=0.0),
     )
     slepian_concentration = first_positive(
         metric_value(
@@ -382,7 +396,7 @@ def compute_structural_pressures(
             default=0.0,
         ),
         json_value(fineweb_diag, "toric/slepian_concentration", "diagnostics/latest/slepian_concentration", default=0.0),
-        json_value(geometry, "mean_toric_slepian_concentration", default=0.0),
+        summary_value(geometry, "mean_toric_slepian_concentration", "slepian_concentration", default=0.0),
     )
     slepian_pressure = max_pressure(bounded(slepian_leakage, 1.0), low_pressure(slepian_concentration, 0.72, 0.72))
 
@@ -402,20 +416,20 @@ def compute_structural_pressures(
     directed_loss = max_pressure(
         metric_value(stats_by_name, ("topology/step_directed_loss", "topology/directed_loss"), default=0.0),
         json_value(fineweb_diag, "topology/directed_topology_loss", "diagnostics/latest/directed_topology_loss", default=0.0),
-        json_value(geometry, "mean_topology_directed_map_loss", default=0.0),
+        summary_value(geometry, "mean_topology_directed_map_loss", "topology_directed_map_loss", default=0.0),
     )
     hdbscan_noise = max_pressure(
         metric_value(stats_by_name, ("topology/step_hdbscan_noise_fraction",), default=0.0),
-        json_value(geometry, "mean_topology_hdbscan_noise_fraction", default=0.0),
+        summary_value(geometry, "mean_topology_hdbscan_noise_fraction", "topology_hdbscan_noise_fraction", default=0.0),
     )
     hdbscan_stability = first_positive(
         metric_value(stats_by_name, ("topology/step_hdbscan_stability", "topology/hdbscan_stability"), default=0.0),
-        json_value(geometry, "mean_topology_hdbscan_stability", default=0.0),
+        summary_value(geometry, "mean_topology_hdbscan_stability", "topology_hdbscan_stability", default=0.0),
     )
     cycle_flux = abs(
         max_pressure(
             metric_value(stats_by_name, ("topology/step_directed_cycle_flux",), default=0.0),
-            json_value(geometry, "mean_topology_directed_cycle_flux", default=0.0),
+            summary_value(geometry, "mean_topology_directed_cycle_flux", "topology_directed_cycle_flux", default=0.0),
         )
     )
     topology_pressure = max_pressure(
@@ -428,12 +442,12 @@ def compute_structural_pressures(
 
     toric_margin = min(
         metric_value(stats_by_name, ("toric/active_face_margin", "train/toric_active_face_margin"), default=0.0),
-        json_value(geometry, "mean_toric_geometry_active_face_margin", default=0.0),
+        summary_value(geometry, "mean_toric_geometry_active_face_margin", "toric_active_face_margin", default=0.0),
     )
-    toric_shadow_margin = json_value(geometry, "mean_toric_shadow_mean_margin", default=0.0)
+    toric_shadow_margin = summary_value(geometry, "mean_toric_shadow_mean_margin", "toric_mean_margin", default=0.0)
     toric_bend = max_pressure(
         metric_value(stats_by_name, ("toric/bend_magnitude", "train/toric_bend_magnitude"), default=0.0),
-        json_value(geometry, "mean_toric_shadow_mean_bend", default=0.0),
+        summary_value(geometry, "mean_toric_shadow_mean_bend", "toric_mean_bend", default=0.0),
     )
     toric_binom = max_pressure(
         metric_value(
@@ -442,7 +456,7 @@ def compute_structural_pressures(
             default=0.0,
         ),
         json_value(fineweb_diag, "toric/binomial_residual", "diagnostics/latest/toric_binomial_residual", default=0.0),
-        json_value(geometry, "mean_toric_geometry_binomial_residual", default=0.0),
+        summary_value(geometry, "mean_toric_geometry_binomial_residual", "toric_cca_binomial_residual", default=0.0),
     )
     toric_pressure = max_pressure(
         low_pressure(toric_margin, 0.04, 2.0),
@@ -451,37 +465,59 @@ def compute_structural_pressures(
         bounded(toric_binom, 1.0),
     )
 
-    cca_topology_loss = metric_value(
-        stats_by_name,
-        ("00_primary/toric_cca_topology_loss", "08_toric_tropical_bgg/advanced/toric_cca_topology_loss"),
-        default=0.0,
+    cca_topology_loss = max_pressure(
+        metric_value(
+            stats_by_name,
+            ("00_primary/toric_cca_topology_loss", "08_toric_tropical_bgg/advanced/toric_cca_topology_loss"),
+            default=0.0,
+        ),
+        summary_value(geometry, "toric_cca_topology_loss", default=0.0),
     )
-    cca_binomial = metric_value(
-        stats_by_name,
-        ("08_toric_tropical_bgg/advanced/toric_cca_binomial_residual",),
-        default=0.0,
+    cca_binomial = max_pressure(
+        metric_value(
+            stats_by_name,
+            ("08_toric_tropical_bgg/advanced/toric_cca_binomial_residual",),
+            default=0.0,
+        ),
+        summary_value(geometry, "toric_cca_binomial_residual", default=0.0),
     )
-    cca_nonface = metric_value(
-        stats_by_name,
-        ("08_toric_tropical_bgg/advanced/toric_cca_stanley_reisner_nonface_mass",),
-        default=0.0,
+    cca_nonface = max_pressure(
+        metric_value(
+            stats_by_name,
+            ("08_toric_tropical_bgg/advanced/toric_cca_stanley_reisner_nonface_mass",),
+            default=0.0,
+        ),
+        summary_value(geometry, "toric_cca_stanley_reisner_nonface_mass", default=0.0),
     )
-    cca_betti1 = metric_value(
-        stats_by_name,
-        ("08_toric_tropical_bgg/advanced/toric_cca_betti1_proxy",),
-        default=0.0,
+    cca_betti1 = max_pressure(
+        metric_value(
+            stats_by_name,
+            ("08_toric_tropical_bgg/advanced/toric_cca_betti1_proxy",),
+            default=0.0,
+        ),
+        summary_value(geometry, "toric_cca_betti1_proxy", default=0.0),
     )
-    cca_coverage = metric_value(
-        stats_by_name,
-        ("08_toric_tropical_bgg/advanced/toric_cca_chamber_coverage",),
-        default=float("nan"),
+    cca_coverage = first_positive(
+        metric_value(
+            stats_by_name,
+            ("08_toric_tropical_bgg/advanced/toric_cca_chamber_coverage",),
+            default=float("nan"),
+        ),
+        summary_value(geometry, "toric_cca_chamber_coverage", default=float("nan")),
     )
+    cca_exact_nonface = summary_value(geometry, "toric_cca_exact_sr_nonface_edge_fraction", default=0.0)
+    cca_exact_betti_mismatch = summary_value(geometry, "toric_cca_exact_betti_mismatch", default=0.0)
+    cca_exact_audit_score = summary_value(geometry, "toric_cca_exact_audit_backed_score", default=0.0)
+    cca_exact_relation_pass = summary_value(geometry, "toric_cca_exact_relation_pass_rate", default=0.0)
     cca_pressure = max_pressure(
         bounded(cca_topology_loss, 1.0),
         bounded(cca_binomial, 4.0),
         bounded(cca_nonface, 0.08),
         bounded(cca_betti1, 24.0),
         low_pressure(cca_coverage, 0.90, 0.90),
+        bounded(cca_exact_nonface, 0.35),
+        bounded(cca_exact_betti_mismatch, 4.0),
+        low_pressure(cca_exact_audit_score, 0.65, 0.65),
     )
 
     bgg_d2 = max_pressure(
@@ -596,6 +632,10 @@ def compute_structural_pressures(
             "toric_cca_stanley_reisner_nonface_mass": cca_nonface,
             "toric_cca_betti1_proxy": cca_betti1,
             "toric_cca_chamber_coverage": cca_coverage,
+            "toric_cca_exact_sr_nonface_edge_fraction": cca_exact_nonface,
+            "toric_cca_exact_betti_mismatch": cca_exact_betti_mismatch,
+            "toric_cca_exact_audit_backed_score": cca_exact_audit_score,
+            "toric_cca_exact_relation_pass_rate": cca_exact_relation_pass,
             "bgg_d2_residual": bgg_d2,
             "bgg_standard_leakage": bgg_leak,
             "koszul_loss": koszul_loss,
@@ -696,6 +736,16 @@ def wandb_payload(proposal: dict[str, Any]) -> dict[str, float]:
     if isinstance(families, dict):
         for key, value in families.items():
             payload[f"analysis_control/family_pressure/{key}"] = finite(value, default=0.0)
+    raw = structural.get("raw")
+    if isinstance(raw, dict):
+        exact_keys = (
+            "toric_cca_exact_sr_nonface_edge_fraction",
+            "toric_cca_exact_betti_mismatch",
+            "toric_cca_exact_audit_backed_score",
+            "toric_cca_exact_relation_pass_rate",
+        )
+        for key in exact_keys:
+            payload[f"analysis_control/exact_cca/{key}"] = finite(raw.get(key), default=0.0)
     loss_policy = proposal["decision"].get("loss_policy", {})
     if isinstance(loss_policy, dict):
         for key, value in loss_policy.items():

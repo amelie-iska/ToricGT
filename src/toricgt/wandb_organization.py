@@ -290,6 +290,8 @@ def _category_alias(key: str) -> str | None:
         return f"12_optimization/{key}"
     if key.startswith("system/"):
         return f"13_system/{key.split('/', 1)[1]}"
+    if key.startswith("analysis_control/"):
+        return f"15_analysis_media/control/{key.split('/', 1)[1]}"
     if key.startswith(("analysis/", "reasoning_simplex/")):
         return f"15_analysis_media/{key}"
     if key.startswith(("metrics_status/", "diagnostics/")):

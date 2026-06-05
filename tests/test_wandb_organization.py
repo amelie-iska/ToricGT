@@ -107,3 +107,20 @@ def test_artifact_roundtrip_metrics_are_primary() -> None:
     assert organized["00_primary/artifact_int8_zlib_mb"] == 15.885926
     assert organized["00_primary/artifact_within_limit"] == 1.0
     assert organized["11_artifact_size/int8_roundtrip_bpb"] == 1.2906
+
+
+def test_analysis_control_exact_cca_routes_to_analysis_category() -> None:
+    organized = organize_wandb_payload(
+        {
+            "trainer/step": 750,
+            "analysis_control/exact_cca/toric_cca_exact_sr_nonface_edge_fraction": 0.42,
+            "analysis_control/family_pressure/combinatorial_cca_topology": 0.91,
+        }
+    )
+
+    assert (
+        organized["15_analysis_media/control/exact_cca/toric_cca_exact_sr_nonface_edge_fraction"]
+        == 0.42
+    )
+    assert organized["15_analysis_media/control/family_pressure/combinatorial_cca_topology"] == 0.91
+    assert "analysis_control/exact_cca/toric_cca_exact_sr_nonface_edge_fraction" not in organized
