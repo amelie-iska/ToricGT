@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# Resume the stable Seq4096 FineWeb basin with cleaned W&B metrics, PolarQuant,
+# and medium-conservative advanced losses.  The +10K gate is trainer step 30000
+# when resuming from the step-20000 checkpoint.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PARAMETER_GOLF_ROOT="$REPO_ROOT/amelie-iska/parameter-golf"
+PYTHON="${PYTHON:-/home/iska/miniconda3/envs/tokengt/bin/python}"
+PROJECT="${WANDB_PROJECT:-toricgt-parameter-golf}"
+ENTITY="${WANDB_ENTITY:-amelie-iska-math}"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+
+BASE_RUN_ID="${BASE_RUN_ID:-toricgt_seq4096_oai_bpb1p2085_stableadv_20260604T235447Z}"
+BASE_CKPT="${BASE_CKPT:-$PARAMETER_GOLF_ROOT/checkpoints/$BASE_RUN_ID/${BASE_RUN_ID}_step_020000.pt}"
+RUN_ID="${RUN_ID:-toricgt_seq4096_oai_bpb1p1686_polar_adv10k_${STAMP}}"
+TRAIN_TMUX="${TRAIN_TMUX:-${RUN_ID}_train}"
+ANALYSIS_TMUX="${ANALYSIS_TMUX:-${RUN_ID}_analysis}"
+MIRROR_TMUX="${MIRROR_TMUX:-${RUN_ID}_mirror}"
+DIAG_TMUX="${DIAG_TMUX:-${RUN_ID}_diag}"
+GATE_TMUX="${GATE_TMUX:-${RUN_ID}_gate}"
+
+ITERATIONS="${ITERATIONS:-40000}"
+GATE_STEP="${GATE_STEP:-30000}"
+TARGET_BPB="${TARGET_BPB:-1.09}"
+CONTINUE_THRESHOLD_BPB="${CONTINUE_THRESHOLD_BPB:-1.17}"
+ANALYSIS_START_STEP="${ANALYSIS_START_STEP:-20250}"
+ANALYSIS_INTERVAL_STEPS="${ANALYSIS_INTERVAL_STEPS:-500}"
+
+CKPT_DIR="${CKPT_DIR:-$PARAMETER_GOLF_ROOT/checkpoints/$RUN_ID}"
+LOG_PATH="${LOG_PATH:-$PARAMETER_GOLF_ROOT/logs/$RUN_ID.txt}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/post_resume_analysis/$RUN_ID}"
+STATE_PATH="${STATE_PATH:-$REPO_ROOT/outputs/$RUN_ID.10k_gate_state.json}"
+DIAG_JSON="${DIAG_JSON:-$REPO_ROOT/logs/$RUN_ID.full_diag.latest.json}"
+COMMAND_DIR="$REPO_ROOT/logs/$RUN_ID/supervisor"
+
+if [[ ! -f "$BASE_CKPT" ]]; then
+  echo "missing base checkpoint: $BASE_CKPT" >&2
+  exit 1
+fi
+if [[ ! -x "$PYTHON" ]]; then
+  echo "missing python executable: $PYTHON" >&2
+  exit 1
+fi
+for session in "$TRAIN_TMUX" "$ANALYSIS_TMUX" "$MIRROR_TMUX" "$DIAG_TMUX" "$GATE_TMUX"; do
+  if tmux has-session -t "$session" 2>/dev/null; then
+    echo "tmux session already exists: $session" >&2
+    exit 1
+  fi
+done
+
+mkdir -p "$CKPT_DIR" "$(dirname "$LOG_PATH")" "$OUTPUT_ROOT" "$COMMAND_DIR" "$(dirname "$STATE_PATH")"
+
+TRAIN_CMD=(
+  env
+  "PYTHONPATH=$REPO_ROOT/src"
+  "TORICGT_WANDB_RAW_MODE=off"
+  "RUN_ID=$RUN_ID"
+  "DATA_PATH=./data/datasets/fineweb10B_sp1024"
+  "TOKENIZER_PATH=./data/tokenizers/fineweb_1024_bpe.model"
+  "VOCAB_SIZE=1024"
+  "WANDB=1"
+  "WANDB_PROJECT=$PROJECT"
+  "WANDB_ENTITY=$ENTITY"
+  "WANDB_RUN_ID=$RUN_ID"
+  "WANDB_RUN_NAME=$RUN_ID"
+  "WANDB_RESUME=allow"
+  "WANDB_MODE=online"
+  "TARGET_BPB=$TARGET_BPB"
+  "ARTIFACT_SIZE_LIMIT_BYTES=16000000"
+  "EXPORT_PRUNE_FRACTION=0.12"
+  "CHECKPOINT_DIR=$CKPT_DIR"
+  "RESUME_CHECKPOINT=$BASE_CKPT"
+  "RESET_OPTIMIZER_ON_RESUME=0"
+  "RESET_RNG_ON_RESUME=0"
+  "RESET_LOADER_ON_RESUME=0"
+  "ITERATIONS=$ITERATIONS"
+  "MAX_WALLCLOCK_SECONDS=0"
+  "VAL_LOSS_EVERY=250"
+  "TRAIN_LOG_EVERY=50"
+  "WANDB_LOG_EVERY=1"
+  "CHECKPOINT_EVERY=250"
+  "TRAIN_SEQ_LEN=4096"
+  "VAL_BATCH_SIZE=524288"
+  "TRAIN_BATCH_TOKENS=1048576"
+  "WARMUP_STEPS=20"
+  "WARMDOWN_ITERS=3000"
+  "TIED_EMBED_LR=0.030"
+  "MATRIX_LR=0.020"
+  "SCALAR_LR=0.020"
+  "MUON_MOMENTUM=0.99"
+  "MUON_MOMENTUM_WARMUP_START=0.92"
+  "MUON_MOMENTUM_WARMUP_STEPS=1500"
+  "BIGRAM_BIAS=1"
+  "BIGRAM_BIAS_LR=0.012"
+  "BIGRAM_BIAS_SCALE=1.0"
+  "POLARQUANT_KV_BITS=8"
+  "POLARQUANT_TRAIN=1"
+  "POLARQUANT_TRAIN_SAMPLE_TOKENS=128"
+  "POLARQUANT_EVAL_SAMPLE_TOKENS=256"
+  "POLARQUANT_SEED=271828"
+  "ADVANCED_LOSS_SCALE=0.008"
+  "GRAPHCG_LOSS_WEIGHT=0.010"
+  "TORIC_TROPICAL_LOSS_WEIGHT=0.003"
+  "SLEPIAN_LOSS_WEIGHT=0.008"
+  "KOSZUL_BGG_LOSS_WEIGHT=0.00003"
+  "ANALOGY_LOSS_WEIGHT=0.00006"
+  "ADVANCED_LOSS_SAMPLE_TOKENS=384"
+  "TORIC_TROPICAL_FAN_BINS=8"
+  "ADVANCED_LOSS_LOG_ONLY=0"
+  "ADVANCED_LOSS_START_STEP=20000"
+  "ADVANCED_LOSS_END_STEP=0"
+  "ADVANCED_LOSS_EVERY=4"
+  "ADVANCED_LOSS_WARMUP_STEPS=1000"
+  "ADVANCED_LOSS_MIN_BEST_VAL_BPB=1.21"
+  "ADVANCED_LOSS_MAX_CE_RATIO=0.00025"
+  "CHECKPOINT_ON_TRAIN_BPB_BELOW=1.06"
+  "CHECKPOINT_ON_TRAIN_BPB_COOLDOWN_STEPS=250"
+  "CHECKPOINT_ON_TRAIN_BPB_MAX=2"
+  "VAL_ON_TRAIN_BPB_CHECKPOINT=1"
+  "$PYTHON"
+  -u
+  records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/train_gpt.py
+)
+
+ANALYSIS_CMD=(
+  env
+  "PYTHONPATH=$REPO_ROOT/src"
+  "TORICGT_WANDB_RAW_MODE=off"
+  "WANDB_PROJECT=$PROJECT"
+  "WANDB_ENTITY=$ENTITY"
+  "BPB_TARGET=$TARGET_BPB"
+  "$PYTHON"
+  "$REPO_ROOT/scripts/watch_seq4096_analysis.py"
+  --checkpoint-dir "$CKPT_DIR"
+  --log "$LOG_PATH"
+  --run-path "$ENTITY/$PROJECT/$RUN_ID"
+  --output-root "$OUTPUT_ROOT"
+  --start-step "$ANALYSIS_START_STEP"
+  --interval-steps "$ANALYSIS_INTERVAL_STEPS"
+  --poll-seconds 30
+  --target-bpb "$TARGET_BPB"
+  --gate-step "$GATE_STEP"
+  --python "$PYTHON"
+  --training-tmux "$TRAIN_TMUX"
+  --codex-review-hook "$REPO_ROOT/scripts/codex_training_review_resume.sh"
+  --codex-review-tmux-prefix "toricgt_codex_review_${RUN_ID}"
+)
+
+MIRROR_CMD=(
+  env
+  "PYTHONPATH=$REPO_ROOT/src"
+  "TORICGT_WANDB_RAW_MODE=off"
+  "WANDB_PROJECT=$PROJECT"
+  "WANDB_ENTITY=$ENTITY"
+  "$PYTHON"
+  "$REPO_ROOT/scripts/mirror_fineweb_log_to_wandb.py"
+  --log "$LOG_PATH"
+  --run-id "$RUN_ID"
+  --target-bpb "$TARGET_BPB"
+  --poll-seconds 15
+  --diagnostics-json "$DIAG_JSON"
+  --gate-state-json "$STATE_PATH"
+)
+
+DIAG_CMD=(
+  env
+  "PYTHONPATH=$REPO_ROOT/src"
+  "TORICGT_WANDB_RAW_MODE=off"
+  "WANDB_PROJECT=$PROJECT"
+  "WANDB_ENTITY=$ENTITY"
+  "$PYTHON"
+  "$REPO_ROOT/scripts/mirror_fineweb_full_diagnostics_to_wandb.py"
+  --log "$LOG_PATH"
+  --run-id "$RUN_ID"
+  --target-bpb "$TARGET_BPB"
+  --poll-seconds 60
+  --output-json "$DIAG_JSON"
+)
+
+GATE_CMD=(
+  env
+  "PYTHONPATH=$REPO_ROOT/src"
+  "$PYTHON"
+  "$REPO_ROOT/scripts/watch_seq4096_bpb_gate.py"
+  --log "$LOG_PATH"
+  --run-id "$RUN_ID"
+  --train-tmux "$TRAIN_TMUX"
+  --gate-step "$GATE_STEP"
+  --target-bpb "$TARGET_BPB"
+  --continue-threshold-bpb "$CONTINUE_THRESHOLD_BPB"
+  --state "$STATE_PATH"
+  --poll-seconds 30
+  --kill-on-miss
+)
+
+printf "%q " "${TRAIN_CMD[@]}" > "$COMMAND_DIR/train_command.sh"
+printf "\n" >> "$COMMAND_DIR/train_command.sh"
+printf "%q " "${ANALYSIS_CMD[@]}" > "$COMMAND_DIR/analysis_command.sh"
+printf "\n" >> "$COMMAND_DIR/analysis_command.sh"
+printf "%q " "${MIRROR_CMD[@]}" > "$COMMAND_DIR/mirror_command.sh"
+printf "\n" >> "$COMMAND_DIR/mirror_command.sh"
+printf "%q " "${DIAG_CMD[@]}" > "$COMMAND_DIR/full_diag_command.sh"
+printf "\n" >> "$COMMAND_DIR/full_diag_command.sh"
+printf "%q " "${GATE_CMD[@]}" > "$COMMAND_DIR/gate_command.sh"
+printf "\n" >> "$COMMAND_DIR/gate_command.sh"
+chmod 700 "$COMMAND_DIR"/*.sh
+
+tmux new-session -d -s "$TRAIN_TMUX" "cd '$PARAMETER_GOLF_ROOT' && bash '$COMMAND_DIR/train_command.sh' 2>&1 | tee -a '$LOG_PATH'"
+tmux new-session -d -s "$ANALYSIS_TMUX" "cd '$REPO_ROOT' && bash '$COMMAND_DIR/analysis_command.sh' 2>&1 | tee -a '$REPO_ROOT/logs/$RUN_ID.analysis_watcher.txt'"
+tmux new-session -d -s "$MIRROR_TMUX" "cd '$REPO_ROOT' && bash '$COMMAND_DIR/mirror_command.sh' 2>&1 | tee -a '$REPO_ROOT/logs/$RUN_ID.wandb_mirror.txt'"
+tmux new-session -d -s "$DIAG_TMUX" "cd '$REPO_ROOT' && bash '$COMMAND_DIR/full_diag_command.sh' 2>&1 | tee -a '$REPO_ROOT/logs/$RUN_ID.full_diag.txt'"
+tmux new-session -d -s "$GATE_TMUX" "cd '$REPO_ROOT' && bash '$COMMAND_DIR/gate_command.sh' 2>&1 | tee -a '$REPO_ROOT/logs/$RUN_ID.10k_gate.txt'"
+
+cat <<EOF
+started Seq4096 PolarQuant advanced +10K gate run
+run id:        $RUN_ID
+wandb:         https://wandb.ai/$ENTITY/$PROJECT/runs/$RUN_ID
+train tmux:    $TRAIN_TMUX
+analysis tmux: $ANALYSIS_TMUX
+mirror tmux:   $MIRROR_TMUX
+diag tmux:     $DIAG_TMUX
+gate tmux:     $GATE_TMUX
+checkpoint:    $BASE_CKPT
+checkpoint dir:$CKPT_DIR
+log:           $LOG_PATH
+analysis root: $OUTPUT_ROOT
+gate state:    $STATE_PATH
+target BPB:    $TARGET_BPB
+continue if:   best <= $CONTINUE_THRESHOLD_BPB by trainer step $GATE_STEP
+EOF

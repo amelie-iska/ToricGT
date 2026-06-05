@@ -29,11 +29,11 @@ def test_primary_aliases_promote_oai_and_training_scorecard() -> None:
     assert organized["00_primary/oai_bpb"] == 1.187
     assert organized["00_primary/full_dataset_active"] == 1.0
     assert organized["00_primary/artifact_mb"] == 11.699487
-    assert organized["01_oai/deterministic_bpb"] == 1.187
+    assert organized["01_oai/val_bpb"] == 1.187
     assert organized["02_train/bpb"] == 1.24
     assert organized["03_validation/bpb"] == 1.29
     assert organized["10_data_curriculum/full_curated_train_split_active"] == 1.0
-    assert organized["oai_competition/bpb"] == 1.187
+    assert "oai_competition/bpb" not in organized
 
 
 def test_category_aliases_route_advanced_losses_once() -> None:
@@ -80,3 +80,30 @@ def test_primary_aliases_do_not_emit_missing_metrics() -> None:
     aliases = primary_metric_aliases({"trainer/step": 1})
 
     assert aliases == {"trainer/step": 1}
+
+
+def test_raw_aliases_can_be_prefixed_for_legacy_compatibility(monkeypatch) -> None:
+    monkeypatch.setenv("TORICGT_WANDB_RAW_MODE", "legacy")
+
+    organized = organize_wandb_payload({"trainer/step": 1, "bpb": 1.2, "train_bpb": 1.3})
+
+    assert organized["01_oai/val_bpb"] == 1.2
+    assert organized["02_train/bpb"] == 1.3
+    assert organized["99_legacy/bpb"] == 1.2
+    assert organized["99_legacy/train_bpb"] == 1.3
+
+
+def test_artifact_roundtrip_metrics_are_primary() -> None:
+    organized = organize_wandb_payload(
+        {
+            "trainer/step": 20_000,
+            "final/int8_zlib_roundtrip_bpb": 1.2906,
+            "artifact/int8_zlib_total_bytes": 15_885_926,
+            "artifact/under_size_limit": 1.0,
+        }
+    )
+
+    assert organized["00_primary/int8_roundtrip_bpb"] == 1.2906
+    assert organized["00_primary/artifact_int8_zlib_mb"] == 15.885926
+    assert organized["00_primary/artifact_within_limit"] == 1.0
+    assert organized["11_artifact_size/int8_roundtrip_bpb"] == 1.2906

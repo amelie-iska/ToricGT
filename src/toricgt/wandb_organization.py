@@ -1,17 +1,19 @@
 """Canonical W&B metric organization for ToricGT training and analyses.
 
 The training stack emits many historical aliases because older watchdogs,
-analysis scripts, and notebooks consume them.  This module keeps those raw keys
-available while adding a smaller ordered dashboard surface:
+analysis scripts, and notebooks consume them.  This module adds a smaller
+ordered dashboard surface and suppresses those raw aliases by default:
 
 * ``00_primary/*``: the scorecard a human should inspect first.
 * ``01_oai/*`` through ``16_status/*``: stable, visible categories.
-* raw historical namespaces are marked hidden with ``wandb.define_metric``.
+* raw historical namespaces can be re-enabled through
+  ``TORICGT_WANDB_RAW_MODE=raw`` or ``TORICGT_WANDB_RAW_MODE=legacy``.
 """
 
 from __future__ import annotations
 
 import math
+import os
 from collections import OrderedDict
 from typing import Any, Iterable, Mapping
 
@@ -38,9 +40,16 @@ VISIBLE_METRIC_PREFIXES = (
     "16_status",
 )
 
+RAW_MODE_ENV = "TORICGT_WANDB_RAW_MODE"
+RAW_MODE_DEFAULT = "off"
+
 RAW_HIDDEN_PATTERNS = (
+    "99_legacy/*",
     "train/*",
     "val/*",
+    "bpb",
+    "val_bpb",
+    "train_bpb",
     "oai_competition/*",
     "fineweb/*",
     "fineweb_calibration/*",
@@ -105,6 +114,17 @@ MAXIMIZE_PATTERNS = (
 )
 
 
+def _raw_mode_from_env() -> str:
+    mode = os.environ.get(RAW_MODE_ENV, RAW_MODE_DEFAULT).strip().lower()
+    if mode in {"0", "false", "no", "off", "disabled"}:
+        return "off"
+    if mode in {"1", "true", "yes", "on", "raw"}:
+        return "raw"
+    if mode in {"legacy", "prefixed", "compat"}:
+        return "legacy"
+    return RAW_MODE_DEFAULT
+
+
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
 
@@ -131,24 +151,70 @@ def _category_alias(key: str) -> str | None:
     if key == STEP_METRIC or key.startswith(tuple(prefix + "/" for prefix in VISIBLE_METRIC_PREFIXES)):
         return None
 
+    if key == "bpb" or key == "val_bpb":
+        return "01_oai/val_bpb"
+    if key == "train_bpb":
+        return "02_train/bpb"
+
     if key.startswith("oai_competition/"):
         rest = key.split("/", 1)[1]
         rest = {
-            "bpb": "deterministic_bpb",
-            "loss": "deterministic_loss",
-            "best_bpb": "best_deterministic_bpb",
+            "bpb": "val_bpb",
+            "loss": "val_loss",
+            "best_bpb": "best_val_bpb",
         }.get(rest, rest)
         return f"01_oai/{rest}"
     if key.startswith("openai_parameter_golf/"):
-        return f"01_oai/openai_parameter_golf/{key.split('/', 1)[1]}"
+        rest = key.split("/", 1)[1]
+        if rest == "bpb":
+            return "01_oai/val_bpb"
+        if rest == "train_bpb":
+            return "02_train/bpb"
+        if rest == "best_bpb":
+            return "01_oai/best_val_bpb"
+        if rest == "target_bpb":
+            return "01_oai/target_bpb"
+        return f"01_oai/openai_parameter_golf/{rest}"
     if key.startswith("competition/"):
         return f"01_oai/competition/{key.split('/', 1)[1]}"
     if key.startswith("fineweb/"):
-        return f"01_oai/fineweb/{key.split('/', 1)[1]}"
+        rest = key.split("/", 1)[1]
+        if rest == "val_bpb":
+            return "01_oai/val_bpb"
+        if rest == "best_val_bpb":
+            return "01_oai/best_val_bpb"
+        if rest == "target_bpb":
+            return "01_oai/target_bpb"
+        if rest == "target_gap_bpb":
+            return "01_oai/gap_to_target"
+        if rest == "target_reached":
+            return "01_oai/target_reached"
+        if rest == "train_bpb":
+            return "02_train/bpb"
+        if rest == "train_loss":
+            return "02_train/loss"
+        if rest == "val_loss":
+            return "03_validation/loss"
+        return f"01_oai/fineweb/{rest}"
     if key.startswith("fineweb_calibration/"):
         return f"01_oai/fineweb_calibration/{key.split('/', 1)[1]}"
     if key.startswith("bpb/"):
-        return f"01_oai/bpb_alias/{key.split('/', 1)[1]}"
+        rest = key.split("/", 1)[1]
+        if rest == "val":
+            return "01_oai/val_bpb"
+        if rest == "best":
+            return "01_oai/best_val_bpb"
+        if rest == "train":
+            return "02_train/bpb"
+        if rest == "target":
+            return "01_oai/target_bpb"
+        if rest == "gap_to_target":
+            return "01_oai/gap_to_target"
+        if rest == "target_reached":
+            return "01_oai/target_reached"
+        if rest == "improvement_from_initial":
+            return "01_oai/val_delta_from_checkpoint_initial"
+        return f"01_oai/bpb_diagnostic/{rest}"
 
     if key.startswith("val/"):
         return f"03_validation/{key.split('/', 1)[1]}"
@@ -178,8 +244,30 @@ def _category_alias(key: str) -> str | None:
         return f"10_data_curriculum/{key.split('/', 1)[1]}"
     if key.startswith("polarquant/"):
         return f"11_artifact_size/polarquant/{key.split('/', 1)[1]}"
-    if key.startswith(("artifact/", "model/")):
+    if key.startswith("artifact/"):
+        rest = key.split("/", 1)[1]
+        if rest == "under_size_limit":
+            return "11_artifact_size/within_limit"
+        if rest == "int8_zlib_total_bytes":
+            return "11_artifact_size/int8_zlib_total_bytes"
+        if rest == "int8_zlib_model_bytes":
+            return "11_artifact_size/int8_zlib_model_bytes"
+        if rest == "raw_total_bytes":
+            return "11_artifact_size/raw_total_bytes"
+        if rest == "raw_model_bytes":
+            return "11_artifact_size/raw_model_bytes"
+        return f"11_artifact_size/artifact/{rest}"
+    if key.startswith("model/"):
         return f"11_artifact_size/{key}"
+    if key.startswith("final/"):
+        rest = key.split("/", 1)[1]
+        if rest == "int8_zlib_roundtrip_bpb":
+            return "11_artifact_size/int8_roundtrip_bpb"
+        if rest == "int8_zlib_roundtrip_loss":
+            return "11_artifact_size/int8_roundtrip_loss"
+        if rest == "int8_zlib_roundtrip_eval_ms":
+            return "11_artifact_size/int8_roundtrip_eval_ms"
+        return f"11_artifact_size/final/{rest}"
     if key.startswith(("phase/", "adaptive/", "advanced_control/", "eval/")):
         return f"14_phase_adaptive/{key}"
     if key.startswith(("time/", "progress/", "trainer/")):
@@ -228,6 +316,7 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/validation_bpb", ("val/bpb", "fineweb/val_bpb", "bpb/val"))
     _add_first(out, payload, "00_primary/train_loss", ("train/loss", "fineweb/train_loss"))
     _add_first(out, payload, "00_primary/validation_loss", ("val/loss", "fineweb/val_loss"))
+    _add_first(out, payload, "00_primary/int8_roundtrip_bpb", ("final/int8_zlib_roundtrip_bpb",))
     _add_first(out, payload, "00_primary/learning_rate", ("train/lr",))
     _add_first(out, payload, "00_primary/grad_norm", ("train/grad_norm",))
     _add_first(out, payload, "00_primary/nonfinite_update_skip", ("train/nonfinite_update_skip",))
@@ -241,7 +330,7 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/trajectory_memory_loss", ("train/trajectory_memory_loss",))
     _add_first(out, payload, "00_primary/complexity_prediction_target_ncd", ("complexity/val/prediction_target_ncd_lzma_mean",))
     _add_first(out, payload, "00_primary/vram_allocated_gb", ("system/vram_allocated_gb",))
-    _add_first(out, payload, "00_primary/artifact_within_limit", ("artifact/within_limit",))
+    _add_first(out, payload, "00_primary/artifact_within_limit", ("artifact/within_limit", "artifact/under_size_limit"))
     _add_first(
         out,
         payload,
@@ -256,9 +345,12 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     )
     _add_first(out, payload, "00_primary/polarquant_saved_mb", ("polarquant/estimated_saved_mb",))
 
-    bytes_value = _first_numeric(payload, ("artifact/initial_bytes", "artifact/final_bytes"))
+    bytes_value = _first_numeric(payload, ("artifact/initial_bytes", "artifact/final_bytes", "artifact/raw_total_bytes"))
     if bytes_value is not None:
         out["00_primary/artifact_mb"] = bytes_value / 1_000_000.0
+    int8_bytes_value = _first_numeric(payload, ("artifact/int8_zlib_total_bytes",))
+    if int8_bytes_value is not None:
+        out["00_primary/artifact_int8_zlib_mb"] = int8_bytes_value / 1_000_000.0
 
     target = _first_numeric(payload, ("fineweb/target_bpb", "openai_parameter_golf/target_bpb", "bpb/target"))
     oai_bpb = out.get("00_primary/oai_bpb")
@@ -270,11 +362,12 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     return out
 
 
-def organize_wandb_payload(payload: Mapping[str, Any], *, include_raw: bool = True) -> OrderedDict[str, Any]:
+def organize_wandb_payload(payload: Mapping[str, Any], *, include_raw: bool | str | None = None) -> OrderedDict[str, Any]:
     """Add visible ordered aliases to a raw W&B payload.
 
-    Raw keys are retained by default for compatibility; ``configure_wandb_metrics``
-    marks those historical namespaces hidden in the W&B UI.
+    By default only canonical aliases are emitted.  Set
+    ``TORICGT_WANDB_RAW_MODE=raw`` to retain old metric names, or
+    ``TORICGT_WANDB_RAW_MODE=legacy`` to log them under ``99_legacy/*``.
     """
 
     out = primary_metric_aliases(payload)
@@ -282,9 +375,18 @@ def organize_wandb_payload(payload: Mapping[str, Any], *, include_raw: bool = Tr
         alias = _category_alias(str(key))
         if alias:
             out.setdefault(_clean_name(alias), value)
-    if include_raw:
+    if include_raw is None:
+        raw_mode = _raw_mode_from_env()
+    elif isinstance(include_raw, str):
+        raw_mode = include_raw.strip().lower()
+    else:
+        raw_mode = "raw" if include_raw else "off"
+    if raw_mode == "raw":
         for key, value in payload.items():
             out.setdefault(str(key), value)
+    elif raw_mode == "legacy":
+        for key, value in payload.items():
+            out.setdefault(_clean_name(f"99_legacy/{key}"), value)
     return out
 
 
