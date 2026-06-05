@@ -60,6 +60,10 @@ def test_combinatorial_toric_metrics_are_finite_and_differentiable():
     assert torch.isfinite(out["toric_cca_symbolic_taylor_lcm_syzygy_mass"])
     assert torch.isfinite(out["toric_cca_symbolic_taylor_full_resolution_mass"])
     assert torch.isfinite(out["toric_cca_symbolic_hilbert_betti_pressure"])
+    assert torch.isfinite(out["toric_cca_symbolic_dg_augmentation_ideal_mass"])
+    assert out["toric_cca_symbolic_dg_d_squared_residual"].item() == 0.0
+    assert out["toric_cca_symbolic_dg_leibniz_residual"].item() == 0.0
+    assert out["toric_cca_symbolic_resolution_num_vertices"].item() == 6.0
     assert out["toric_cca_symbolic_resolution_minimal_total_betti"].item() > 0.0
     assert out["toric_cca_symbolic_resolution_projective_dimension"].item() > 0.0
     assert torch.isfinite(out["toric_cca_koszul_exactness_residual"])

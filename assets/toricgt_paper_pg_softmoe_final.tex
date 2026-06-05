@@ -2426,13 +2426,13 @@ It also records the Taylor free resolution of $I_\Delta$: if $I_\Delta=\langle m
        {\operatorname{lcm}(m_j:j\in J\setminus\{j_r\})}
   e_{J\setminus\{j_r\}}.
 \]
-This Taylor complex is a full symbolic multigraded free resolution, while the Hochster table gives the minimal Betti numbers, projective dimension, regularity, and nonminimality gap.
+This Taylor complex is a full symbolic multigraded free resolution and carries the usual DG-algebra structure: $d^2=0$, $d(ab)=d(a)b+(-1)^{|a|}ad(b)$, and the multiplication of basis elements is governed by lcm multidegrees.  The Hochster table gives the minimal Betti numbers, projective dimension, regularity, and nonminimality gap.
 
 The exact symbolic data are discrete, but the train-time maps are differentiable because they are polynomial evaluations over soft chamber coordinates.  With
 \[
   x_i(H)=\frac1n\sum_t p_i(h_t),
 \]
-the Stanley--Reisner generator loss is $\mean_{F\in\mathcal G(I_\Delta)}\prod_{i\in F}x_i(H)$, Taylor lcm-syzygy mass is the corresponding average over $\operatorname{lcm}(m_a,m_b)$, and the Hilbert/Betti pressure multiplies these polynomial maps by constants derived from the exact Betti table, projective dimension, and regularity.  Thus the symbolic multigraded ring is used exactly for audits and differentiably for optimization.
+the Stanley--Reisner generator loss is $\mean_{F\in\mathcal G(I_\Delta)}\prod_{i\in F}x_i(H)$, Taylor lcm-syzygy mass is the corresponding average over $\operatorname{lcm}(m_a,m_b)$, full Taylor multidegree mass averages over all positive-degree Taylor basis elements using exact compressed multiplicities, and DG augmentation mass measures the positive-degree Taylor ideal evaluated on the same soft variables.  The Hilbert/Betti pressure multiplies these polynomial maps by constants derived from the exact Betti table, projective dimension, and regularity.  Thus the symbolic multigraded ring is used exactly for audits and differentiably for optimization.  The BPB hypothesis is that these losses lower next-byte conditional entropy by forcing hidden byte features into cleaner multigraded factors; any promotion is accepted only when matched OAI validation BPB is improved or unchanged.
 
 The corresponding audit metrics are deliberately literal:
 \begin{verbatim}

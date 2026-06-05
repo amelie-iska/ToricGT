@@ -5,6 +5,7 @@ from .soft_moe import GraphTokenSoftMoE, PrefixCausalSoftMoE
 from .combinatorial_toric_metrics import CombinatorialToricConfig, combinatorial_toric_cca_topology_loss
 from .symbolic_multigraded_resolution import (
     SymbolicResolutionMetrics,
+    cyclic_stanley_reisner_betti_rows,
     cyclic_stanley_reisner_generator_masks,
     cyclic_stanley_reisner_resolution_dict,
     cyclic_stanley_reisner_resolution_metrics,
@@ -30,6 +31,7 @@ __all__ = [
     "TrajectoryRetrievalHead",
     "ToricGeometryConfig",
     "combinatorial_toric_cca_topology_loss",
+    "cyclic_stanley_reisner_betti_rows",
     "cyclic_stanley_reisner_generator_masks",
     "cyclic_stanley_reisner_resolution_dict",
     "cyclic_stanley_reisner_resolution_metrics",

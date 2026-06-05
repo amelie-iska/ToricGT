@@ -66,6 +66,7 @@ def test_symbolic_cca_resolution_metrics_are_primary_and_grouped() -> None:
         "advanced/toric_cca_symbolic_resolution_loss": 0.07,
         "advanced/toric_cca_symbolic_hilbert_betti_pressure": 0.09,
         "advanced/toric_cca_symbolic_taylor_full_resolution_mass": 0.11,
+        "advanced/toric_cca_symbolic_dg_augmentation_ideal_mass": 0.13,
         "advanced/toric_cca_koszul_buchsbaum_eisenbud_multiplier_residual": 0.02,
     }
 
@@ -76,6 +77,7 @@ def test_symbolic_cca_resolution_metrics_are_primary_and_grouped() -> None:
     assert organized["00_primary/cca_buchsbaum_eisenbud_multiplier_residual"] == 0.02
     assert organized["08_toric_tropical_bgg/advanced/toric_cca_symbolic_hilbert_betti_pressure"] == 0.09
     assert organized["08_toric_tropical_bgg/advanced/toric_cca_symbolic_taylor_full_resolution_mass"] == 0.11
+    assert organized["08_toric_tropical_bgg/advanced/toric_cca_symbolic_dg_augmentation_ideal_mass"] == 0.13
 
 
 def test_polarquant_metrics_promote_to_primary_and_artifact_size() -> None:

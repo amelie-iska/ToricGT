@@ -56,6 +56,11 @@ from toricgt.reasoning_geometry import (
     triangle_grid,
 )
 from toricgt.slepian_torus import ToricSlepianConfig, toric_slepian_audit
+from toricgt.symbolic_multigraded_resolution import (
+    cyclic_stanley_reisner_betti_rows,
+    cyclic_stanley_reisner_generator_masks,
+    cyclic_taylor_multidegree_counts,
+)
 from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step_filtration_stats_np
 from toricgt.toric_geometry_tasks import empirical_toric_shadow_stats_np, make_binomial_relations, make_exponent_table
 
@@ -812,6 +817,7 @@ def combinatorial_cca_metrics(points: np.ndarray, topology_config: ReasoningTopo
             "toric_cca_symbolic_taylor_lcm_syzygy_mass": 0.0,
             "toric_cca_symbolic_taylor_full_resolution_mass": 0.0,
             "toric_cca_symbolic_hilbert_betti_pressure": 0.0,
+            "toric_cca_symbolic_resolution_num_vertices": 0.0,
             "toric_cca_symbolic_resolution_minimal_total_betti": 0.0,
             "toric_cca_symbolic_resolution_projective_dimension": 0.0,
             "toric_cca_symbolic_resolution_regularity": 0.0,
@@ -1295,6 +1301,58 @@ def plot_combinatorial_cca_exact(record: dict[str, Any], out: Path) -> None:
     plt.close(fig)
 
 
+def plot_symbolic_resolution_complex(record: dict[str, Any], out: Path) -> None:
+    chambers = int(max(4, min(12, round(float(record.get("toric_cca_symbolic_resolution_num_vertices", 8.0) or 8.0)))))
+    generators = set(cyclic_stanley_reisner_generator_masks(chambers))
+    betti_rows = cyclic_stanley_reisner_betti_rows(chambers)
+    taylor_rows = cyclic_taylor_multidegree_counts(chambers)
+    max_hom = max([row[0] for row in betti_rows] + [0])
+    max_card = chambers
+    betti_grid = np.zeros((max_hom + 1, max_card + 1), dtype=float)
+    for homological, _support, cardinality, beta in betti_rows:
+        betti_grid[homological, cardinality] += float(beta)
+    max_taylor_hom = max([row[0] for row in taylor_rows] + [0])
+    taylor_grid = np.zeros((max_taylor_hom + 1, max_card + 1), dtype=float)
+    for homological, mask, count in taylor_rows:
+        taylor_grid[homological, int(mask).bit_count()] += float(count)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5.8), constrained_layout=True, facecolor=DARK_BG)
+    style_dark_axes(fig, axes)
+
+    theta = np.linspace(0.0, 2.0 * np.pi, chambers, endpoint=False)
+    xy = np.stack([np.cos(theta), np.sin(theta)], axis=1)
+    axes[0].scatter(xy[:, 0], xy[:, 1], s=120, c="#39b8ff", edgecolors="#e8fbff", linewidths=0.8, zorder=3)
+    for idx, (x, y) in enumerate(xy):
+        axes[0].text(x * 1.14, y * 1.14, str(idx), ha="center", va="center", color=DARK_TEXT, fontsize=9)
+    for i in range(chambers):
+        for j in range(i + 1, chambers):
+            mask = (1 << i) | (1 << j)
+            color = "#ff4fd8" if mask in generators else "#54f7a3"
+            alpha = 0.42 if mask in generators else 0.18
+            lw = 1.4 if mask in generators else 0.8
+            axes[0].plot([xy[i, 0], xy[j, 0]], [xy[i, 1], xy[j, 1]], color=color, alpha=alpha, linewidth=lw)
+    axes[0].set_aspect("equal")
+    axes[0].set_xticks([])
+    axes[0].set_yticks([])
+    axes[0].set_title("Stanley-Reisner fan: green faces, magenta nonfaces")
+
+    im1 = axes[1].imshow(np.log1p(betti_grid), origin="lower", aspect="auto", cmap="magma")
+    axes[1].set_xlabel("multidegree support size")
+    axes[1].set_ylabel("homological degree")
+    axes[1].set_title("Exact Hochster Betti table log1p(beta)")
+    fig.colorbar(im1, ax=axes[1], shrink=0.82)
+
+    im2 = axes[2].imshow(np.log1p(taylor_grid), origin="lower", aspect="auto", cmap="viridis")
+    axes[2].set_xlabel("Taylor lcm support size")
+    axes[2].set_ylabel("Taylor homological degree")
+    axes[2].set_title("Full Taylor resolution multidegree counts")
+    fig.colorbar(im2, ax=axes[2], shrink=0.82)
+    fig.suptitle(f"{record['record_id']} exact symbolic multigraded resolution")
+    fig._suptitle.set_color("white")
+    save_dark(fig, out)
+    plt.close(fig)
+
+
 def plot_persistence_morphisms(record: dict[str, Any], out: Path) -> None:
     keys = [
         "exact_h0_dim_mean",
@@ -1438,6 +1496,7 @@ def plot_record_artifacts(record: dict[str, Any], geometry_dir: Path) -> list[st
         ("exact_persistence_morphisms", plot_persistence_morphisms),
         ("combinatorial_cca_audit", plot_combinatorial_cca),
         ("combinatorial_cca_exact_audit", plot_combinatorial_cca_exact),
+        ("symbolic_resolution_complex", plot_symbolic_resolution_complex),
     ):
         path = topo_dir / f"{base}_{suffix}.png"
         fn(record, path)
@@ -1653,6 +1712,7 @@ def aggregate_summary(records: list[dict[str, Any]], *, checkpoint: Path, step: 
             "toric_cca_symbolic_hilbert_betti_pressure": mean(
                 "toric_cca_symbolic_hilbert_betti_pressure"
             ),
+            "toric_cca_symbolic_resolution_num_vertices": mean("toric_cca_symbolic_resolution_num_vertices"),
             "toric_cca_symbolic_resolution_minimal_total_betti": mean(
                 "toric_cca_symbolic_resolution_minimal_total_betti"
             ),

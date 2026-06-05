@@ -75,6 +75,10 @@ def _zero_like(hidden: torch.Tensor) -> dict[str, torch.Tensor]:
         "toric_cca_symbolic_taylor_lcm_syzygy_mass": zero.detach(),
         "toric_cca_symbolic_taylor_full_resolution_mass": zero.detach(),
         "toric_cca_symbolic_hilbert_betti_pressure": zero.detach(),
+        "toric_cca_symbolic_dg_augmentation_ideal_mass": zero.detach(),
+        "toric_cca_symbolic_dg_d_squared_residual": zero.detach(),
+        "toric_cca_symbolic_dg_leibniz_residual": zero.detach(),
+        "toric_cca_symbolic_resolution_num_vertices": zero.detach(),
         "toric_cca_symbolic_resolution_projective_dimension": zero.detach(),
         "toric_cca_symbolic_resolution_regularity": zero.detach(),
         "toric_cca_symbolic_resolution_minimal_total_betti": zero.detach(),
@@ -186,6 +190,9 @@ def _window_toric_terms(points: torch.Tensor, cfg: CombinatorialToricConfig) -> 
     taylor_full_resolution_mass = (
         torch.stack(full_terms).sum() / torch.stack(full_weights).sum().clamp_min(1.0) if full_terms else zero
     )
+    dg_augmentation_ideal_mass = 0.5 * sr_generator_mass + 0.5 * taylor_full_resolution_mass
+    dg_d_squared_residual = zero
+    dg_leibniz_residual = zero
 
     exponents = make_exponent_table(chambers, int(cfg.exponent_dim)).to(device=points.device, dtype=points.dtype)
     relations = make_binomial_relations(exponents.detach().cpu(), max_relations=int(cfg.max_relations)).to(points.device)
@@ -222,6 +229,9 @@ def _window_toric_terms(points: torch.Tensor, cfg: CombinatorialToricConfig) -> 
         "sr_generator_mass": sr_generator_mass,
         "taylor_lcm_syzygy_mass": taylor_lcm_syzygy_mass,
         "taylor_full_resolution_mass": taylor_full_resolution_mass,
+        "dg_augmentation_ideal_mass": dg_augmentation_ideal_mass,
+        "dg_d_squared_residual": dg_d_squared_residual,
+        "dg_leibniz_residual": dg_leibniz_residual,
         "euler": euler_proxy,
         "betti0": betti0.detach(),
         "betti1": betti1.detach(),
@@ -263,6 +273,9 @@ def combinatorial_toric_cca_topology_loss(
         "sr_generator_mass": [],
         "taylor_lcm_syzygy_mass": [],
         "taylor_full_resolution_mass": [],
+        "dg_augmentation_ideal_mass": [],
+        "dg_d_squared_residual": [],
+        "dg_leibniz_residual": [],
         "euler": [],
         "betti0": [],
         "betti1": [],
@@ -327,6 +340,9 @@ def combinatorial_toric_cca_topology_loss(
     sr_generator_mass = mean_clean("sr_generator_mass")
     taylor_lcm_syzygy_mass = mean_clean("taylor_lcm_syzygy_mass")
     taylor_full_resolution_mass = mean_clean("taylor_full_resolution_mass")
+    dg_augmentation_ideal_mass = mean_clean("dg_augmentation_ideal_mass")
+    dg_d_squared_residual = mean_clean("dg_d_squared_residual")
+    dg_leibniz_residual = mean_clean("dg_leibniz_residual")
     hilbert_betti_scale = (
         1.0
         + float(symbolic["symbolic_resolution_projective_dimension"]) / max(float(cfg.num_chambers), 1.0)
@@ -343,6 +359,7 @@ def combinatorial_toric_cca_topology_loss(
             + 0.30 * sr_generator_mass
             + 0.20 * taylor_lcm_syzygy_mass
             + 0.20 * taylor_full_resolution_mass
+            + 0.10 * dg_augmentation_ideal_mass
         )
         * symbolic_scale,
         zero,
@@ -376,6 +393,12 @@ def combinatorial_toric_cca_topology_loss(
         "toric_cca_symbolic_taylor_lcm_syzygy_mass": taylor_lcm_syzygy_mass.detach(),
         "toric_cca_symbolic_taylor_full_resolution_mass": taylor_full_resolution_mass.detach(),
         "toric_cca_symbolic_hilbert_betti_pressure": hilbert_betti_pressure.detach(),
+        "toric_cca_symbolic_dg_augmentation_ideal_mass": dg_augmentation_ideal_mass.detach(),
+        "toric_cca_symbolic_dg_d_squared_residual": dg_d_squared_residual.detach(),
+        "toric_cca_symbolic_dg_leibniz_residual": dg_leibniz_residual.detach(),
+        "toric_cca_symbolic_resolution_num_vertices": x.new_tensor(
+            symbolic["symbolic_resolution_num_vertices"]
+        ).detach(),
         "toric_cca_symbolic_resolution_projective_dimension": x.new_tensor(
             symbolic["symbolic_resolution_projective_dimension"]
         ).detach(),

@@ -326,6 +326,146 @@ Thus the symbolic resolution is used twice: exactly for audits and
 differentiably as coefficients/targets for polynomial losses over soft
 multigraded coordinates.
 
+### DG-Algebra Structure
+
+The Taylor resolution is not merely a graded list of free modules; it is a
+differential graded algebra. Let `F_Tay` be the Taylor resolution of
+`S/I_Delta`. It has a homological grading, a multigrading, a differential
+
+```text
+d : F_p -> F_{p-1},
+```
+
+and a product
+
+```text
+mu : F_p tensor F_q -> F_{p+q}.
+```
+
+For basis elements `e_A` and `e_B` indexed by generator subsets, the product is
+zero when repeated generators would occur and otherwise has multidegree
+
+```text
+deg(e_A e_B) = lcm(m_i : i in A union B).
+```
+
+The DG-algebra identities are exact:
+
+```text
+d^2 = 0,
+d(ab) = d(a)b + (-1)^{|a|} a d(b),
+ab = (-1)^{|a||b|} ba.
+```
+
+The periodic analysis reports exact residuals for these identities:
+
+```text
+toric_cca_symbolic_dg_d_squared_residual = 0
+toric_cca_symbolic_dg_leibniz_residual = 0
+```
+
+because they are true symbolic identities of the Taylor DG algebra. The
+train-time differentiable part is the DG augmentation/ideal mass. Let
+
+```text
+epsilon : F_Tay -> k[Delta]
+```
+
+be the augmentation. Basis elements in positive homological degree belong to
+the augmentation ideal. Evaluated on soft chamber variables, the differentiable
+DG pressure is
+
+```text
+L_DG_aug(H)
+  = mean_{e_A in F_Tay, |A|>0} x_{deg(e_A)}(H),
+```
+
+implemented in compressed form by exact Taylor multidegree counts. This is not
+sampled: every Taylor basis multidegree contributes through its exact
+multiplicity, with equal lcm multidegrees aggregated before polynomial
+evaluation.
+
+### Why These Losses Can Improve BPB
+
+The BPB objective is empirical cross entropy per UTF-8 byte:
+
+```text
+BPB(theta) = (1 / log 2) E[-log p_theta(b_target | prefix, order)] / bytes.
+```
+
+Auxiliary algebraic losses can help only if they reduce the conditional entropy
+of the next byte under the same score-before-update information. The intended
+mechanism is representation regularization, not adding hidden evaluation
+information. Let `Z_theta` be hidden chart variables produced from the legal
+prefix. A useful auxiliary loss should increase the predictive stability of
+those variables while decreasing irrelevant chart noise:
+
+```text
+H(B_next | prefix)
+  >= H(B_next | Z_theta(prefix))
+  >= H(B_next | Z_clean(prefix)).
+```
+
+The CCA/DG losses target the gap between `Z_theta` and `Z_clean`:
+
+1. Stanley-Reisner generator losses suppress forbidden chamber coactivations:
+
+```text
+L_SR_poly = mean_{F minimal nonface} prod_{i in F} x_i(H).
+```
+
+This makes active byte features less entangled, so fewer incompatible
+predictors compete inside the tied output embedding.
+
+2. Toric binomial losses enforce exact semigroup relations:
+
+```text
+L_binom = mean_{Au=Av} (z^u - z^v)^2.
+```
+
+In log coordinates this is the implemented additive relation. Equivalent paths
+to the same multigrade should agree, reducing variance across equivalent
+contexts.
+
+3. Taylor/DG augmentation mass penalizes high-degree forbidden products:
+
+```text
+L_DG_aug = mean_{e_A in F_Tay, |A|>0} x_{deg(e_A)}(H).
+```
+
+This discourages representing a byte decision as a large inconsistent
+conjunction of chamber features. Compact conjunctions are easier for the
+small recurrent model and tied output embedding to decode.
+
+4. Differentiable Koszul/Fitting/Buchsbaum-Eisenbud rank losses encourage local
+parameters to behave like a regular sequence:
+
+```text
+L_K =
+  ||d_1 d_2||_F^2
+  + 0.35 mean_{i<j} ||T_i T_j - T_j T_i||_F^2
+  + 0.10 L_Fitting
+  + 0.10 L_BE-rank
+  + 0.04 L_BE-mult
+  + 0.02 L_Betti.
+```
+
+If local parameters are closer to a regular sequence, then reasoning features
+factor more cleanly across position, byte class, phase, and graph-order
+coordinates.
+
+The practical BPB test remains strict:
+
+```text
+Delta_BPB = BPB_with_aux - BPB_base.
+```
+
+`Delta_BPB` must be negative or neutral under matched data, tokenizer,
+random-order policy, artifact budget, and validation procedure. Therefore all
+DG/CCA losses are micro-weighted from step 0, CE-capped, and increased only
+when their W&B slopes correlate with improving OAI validation BPB and no
+nonfinite or train-BPB spike appears.
+
 ### Finite BGG and Category O Shadow
 
 The Toric BGG part is also finite in the training loop. The intended
@@ -938,13 +1078,15 @@ Periodic analyses should render:
 
 1. A dark-mode Stanley-Reisner heatmap: allowed fan edges vs nonface mass.
 2. A toric ideal residual histogram over binomial relations.
-3. A chamber-entropy and chamber-coverage timeline.
-4. A 3D PCA/UMAP reasoning trajectory with directed simplices overlaid.
-5. A triangle/tetrahedron panel with correct filled heatmaps for BPB,
+3. A symbolic resolution complex panel: cyclic fan/nonface graph, exact
+   Hochster Betti table, and full Taylor multidegree-count heatmap.
+4. A chamber-entropy and chamber-coverage timeline.
+5. A 3D PCA/UMAP reasoning trajectory with directed simplices overlaid.
+6. A triangle/tetrahedron panel with correct filled heatmaps for BPB,
    topology, GraphCG coherence, and CCA residuals.
-6. A persistence panel with Betti0/Betti1 proxies and exact F2 audits where
+7. A persistence panel with Betti0/Betti1 proxies and exact F2 audits where
    sidecar runtime allows.
-7. A W&B summary panel with `openai_parameter_golf/bpb` first, then
+8. A W&B summary panel with `openai_parameter_golf/bpb` first, then
    `advanced/toric_cca_*`, then other auxiliary categories.
 
 ## Current Gaps and Next Updates

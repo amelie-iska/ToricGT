@@ -256,6 +256,23 @@ def cyclic_stanley_reisner_resolution_metrics(num_vertices: int) -> SymbolicReso
     )
 
 
+@functools.lru_cache(maxsize=64)
+def cyclic_stanley_reisner_betti_rows(num_vertices: int) -> tuple[tuple[int, int, int, int], ...]:
+    """Exact Hochster Betti rows ``(i, support_mask, support_size, beta)``."""
+
+    n = max(1, int(num_vertices))
+    faces = cyclic_flag_faces(n)
+    rows: list[tuple[int, int, int, int]] = [(0, 0, 0, 1)]
+    for support in range(1, 1 << n):
+        support_size = support.bit_count()
+        for i in range(0, support_size + 1):
+            q = support_size - i - 1
+            dim = reduced_homology_dim_f2(faces, support, q)
+            if dim:
+                rows.append((int(i), int(support), int(support_size), int(dim)))
+    return tuple(rows)
+
+
 def cyclic_stanley_reisner_resolution_dict(num_vertices: int) -> dict[str, float]:
     metrics = cyclic_stanley_reisner_resolution_metrics(num_vertices)
     return {
