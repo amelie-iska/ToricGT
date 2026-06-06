@@ -46,7 +46,7 @@
 \maketitle
 
 \begin{abstract}
-We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The research model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and uses permutation-equivariant Soft-MoE routing in upper graph blocks.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate OpenAI Parameter-Golf track projects byte chunks to random-order graph positions and trains a dense recurrent micro language model with tied embeddings, toric position phases, tropical-ring attention, compact noncommutative-toric memory, strict-prefix GFlowNet graph-of-thought actions, BigramHash/CaseOps byte features, SmearGate confidence, stripped multi-token auxiliary heads, score-first test-time bias adaptation, and bit-packed 6-bit row-quantized export.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, artifact bytes, BPB, and GFlowNet diversity rather than scalar accuracy alone.
+We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The research model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and uses permutation-equivariant Soft-MoE routing in upper graph blocks.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate OpenAI Parameter-Golf track projects byte chunks to random-order graph positions and trains a dense recurrent micro language model with tied embeddings, toric position phases, tropical-ring attention, compact noncommutative-toric memory, strict-prefix GFlowNet graph-of-thought actions, BigramHash/CaseOps byte features, SmearGate confidence, stripped multi-token auxiliary heads, score-first test-time bias adaptation, and bit-packed 6-bit row-quantized export.  We also describe behavior-modification protocols in which learned GraphCG concept axes, toric-tropical chambers, and finite commutative-algebra certificates constrain hidden graph-of-thought trajectories to policy corridors for helpfulness, accuracy, tone, rigor, and detail.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, artifact bytes, BPB, corridor occupancy, and GFlowNet diversity rather than scalar accuracy alone.
 \end{abstract}
 
 \section{Introduction}
@@ -306,6 +306,37 @@ then in the concept chart this chamber becomes
 \end{equation}
 Thus GraphCG pulls Newton normal fans and affine chamber walls into a steerable basis.  Low GraphCG covariance and high chart margins mean that toric active faces are aligned with reusable concept axes rather than smeared across arbitrary hidden directions.  This is why the current recovery enables GraphCG before enabling heavier toric losses: it first improves the coordinate chart in which fan, bend, braid, and Coxeter losses will later act.
 
+\paragraph{Behavior corridors and assistant-axis generalization.}
+The same chart makes behavior steering computable.  Anthropic's Assistant Axis is a one-dimensional contrast direction in activation space: the mean Assistant activation minus the mean activation of other personas; capping activations inside a calibrated interval reduces persona drift while mostly preserving capability \cite{lu2026assistantaxis}.  ToricGT treats this as the rank-one case of a larger toric-tropical steering atlas \cite{schreiber2026tropicalquivers}.  Let $B_\ell=[d_1,\ldots,d_r]$ be the GraphCG chart at layer or reasoning vertex $\ell$, $\xi_t=B_\ell^\top h_t$, and let $\Sigma_B$ be the pulled-back normal fan of the active tropical probes.  A behavior policy $\pi$ specifies desirable coordinates for safety, epistemic caution, tone, detail, rigor, and domain style by a chamber-indexed corridor
+\begin{equation}
+  K_{\pi,C}=\{\xi:\ell_j(C,\pi)\le s_j(\xi)\le u_j(C,\pi)\ \forall j,\quad
+  g_a(\xi)\le 0\ \forall a\},
+  \qquad C\in\Sigma_B .
+\end{equation}
+Affine hyperplanes $\ip{\alpha,\xi}=k$ cut each chamber into alcoves.  Good behavior is not forced to a single point; it occupies an allowed polyhedral band whose width depends on task and context.  The training and inference penalty is
+\begin{equation}
+  \mathcal L_{\mathrm{corr}}=
+  \frac1T\sum_t \operatorname{dist}(\xi_t,K_{\pi,C(\xi_t)})^2+
+  \lambda_{\mathrm{wall}}\sum_{a,t}\operatorname{softplus}(\tau g_a(\xi_t))+
+  \lambda_{\mathrm{occ}}\norm{\widehat\mu_{\Sigma}-\mu_\pi^\star}_2^2 .
+\end{equation}
+For a single Assistant direction $v$ and interval $[\ell,u]$, $B=v/\norm{v}$ and $K=[\ell,u]$ recover activation capping:
+\begin{equation}
+  h\mapsto h+
+  \frac{\operatorname{clip}(\ip{v}{h},[\ell,u])-\ip{v}{h}}{\norm{v}_2^2}v .
+\end{equation}
+The ToricGT version is richer because it can regulate many disentangled axes, use different corridors in different toric chambers, and monitor wall-crossing rates, chamber occupancy, and BPB jointly.
+
+At a graph-of-thought vertex $q_t$, the hidden state also carries a finite reasoning complex $\Delta_t$, a Stanley--Reisner ring $k[\Delta_t]$, and a small multigraded certificate.  The behavior protocol therefore adds algebraic gates:
+\begin{equation}
+  \mathcal L_{\mathrm{alg\text{-}beh}}=
+  \lambda_{\mathrm{SR}}\sum_{F\notin\Delta_\pi}\prod_{i\in F}x_i(\xi_t)
+  +\lambda_{\mathrm{binom}}\sum_{x^u-x^v\in I_A}
+     \left(\ip{u}{x(\xi_t)}-\ip{v}{x(\xi_t)}\right)^2
+  +\lambda_{\mathrm{res}}\norm{\partial_{t-1}\partial_t}_F^2 .
+\end{equation}
+Nonface mass blocks unwanted coactivations, toric-binomial residuals preserve the intended affine chart, and differential residuals keep reasoning steps compatible with the symbolic complex.  Memory retrieval is filtered through the same corridors: retrieved trajectory nodes must be close in GraphCG coordinates, compatible in chamber label, and useful under a score-valid analogy helper.  Analogical transport $P_{s\to t}$ is rewarded when it maps a source corridor and source complex to the target corridor and target complex, so the model learns to steer not only single activations but whole directed reasoning trajectories.
+
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.98\linewidth]{fig_graphcg_topology_analogy_map.pdf}
@@ -476,6 +507,16 @@ Shengchao Liu, Chengpeng Wang, Jiarui Lu, Weili Nie, Hanchen Wang, Zhuoxinran Li
 Gouki Minegishi, Jingyuan Feng, Hiroki Furuta, Takeshi Kojima, Yusuke Iwasawa, and Yutaka Matsuo.
 \newblock Emergent analogical reasoning in Transformers.
 \newblock arXiv:2602.01992, 2026.
+
+\bibitem{lu2026assistantaxis}
+Christina Lu, Jack Gallagher, Jonathan Michala, Kyle Fish, and Jack Lindsey.
+\newblock The Assistant Axis: Situating and Stabilizing the Default Persona of Language Models.
+\newblock arXiv:2601.10387, 2026.
+
+\bibitem{schreiber2026tropicalquivers}
+Amelie Schreiber.
+\newblock Tropical Quivers of Architectures: a research program for composed embedding-space models.
+\newblock GitHub repository \url{https://github.com/amelie-iska/Tropical_Quivers_of_Archs}, 2026.
 
 \bibitem{kim2022tokengt}
 Jinwoo Kim, Tien Dat Nguyen, Seonwoo Min, Sungjun Cho, Moontae Lee, Honglak Lee, and Seunghoon Hong.

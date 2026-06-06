@@ -15,7 +15,9 @@
 \usepackage[nameinlink,noabbrev]{cleveref}
 
 \graphicspath{{./}{./toricgt_pg_softmoe_figures/}{./toricgt_extended_figures/}}
-\newfontfamily\hebrewfont{Noto Serif Hebrew}
+\IfFontExistsTF{Noto Serif Hebrew}
+  {\newfontfamily\hebrewfont{Noto Serif Hebrew}}
+  {\newfontfamily\hebrewfont{Arial Unicode MS}}
 \newcommand{\heb}[1]{{\hebrewfont #1}}
 
 \hypersetup{
@@ -64,6 +66,7 @@
 \newcommand{\diag}{\operatorname{diag}}
 \newcommand{\argmax}{\operatorname*{arg\,max}}
 \newcommand{\argmin}{\operatorname*{arg\,min}}
+\newcommand{\mean}{\operatorname*{mean}}
 \newcommand{\supp}{\operatorname{supp}}
 \newcommand{\Tr}{\operatorname{Tr}}
 \newcommand{\rank}{\operatorname{rank}}
@@ -90,7 +93,7 @@
 \maketitle
 
 \begin{abstract}
-This manuscript extends the ToricGT framework into a more formal, didactic, and proof-heavy specification.  ToricGT is a graph-to-graph architecture that combines TokenGT-style node and edge tokenization, exact ring evaluation of attention, tropical max-plus heads for dynamic-programming structure, finite noncommutative-torus channels for projective phase memory, and embedding-space Generative Flow Network fine-tuning.  We formalize bounded typed graph domains, prove equivariance of tokenization, masking, attention, decoding, and projective toric transports, and reduce bounded graph-to-graph universality to sequence-to-sequence Transformer universality.  We then give exact blockwise tropical ring-attention proofs, stability lemmas for active faces, and constructive simulations of Bellman-Ford-style semiring recurrences.  Motivated by the toric geometry of ReLU neural networks, we add a toric-geometric layer of explanation: tropical heads induce Newton polytopes and normal fans, active faces become exposed faces of those polytopes, and kink/bend diagnostics are interpreted as discrete analogues of Cartier-divisor intersection numbers.  The operator-algebra layer is sharpened by normal-form, cocycle, trace, finite Weyl-pair, and irrational-spiral projection theorems.  A new Hebrew morphology section defines root-template graphs for biblical and classical Hebrew, including radical alignment, binyan/template structure, source-span graphs, paradigm graphs, and semiring alignment losses.  We add a visualization contract for auditing reasoning capacity: equivariance orbits, tropical active faces, toric phase maps, Hebrew paradigm lattices, GFlowNet reward landscapes, and proof-dependency graphs.  We integrate Soft-MoE routing as a typed, fully differentiable expert-slot layer for ToricGT graph tokens, prove its permutation equivariance, give low-rank and shared-expert variants for compact artifacts, and specify a Parameter-Golf-constrained micro-ToricGT language-model track with byte-accurate artifact accounting, BPB scoring, quantization-aware training, record-folder checklists, and compliance risk controls.  Finally, we integrate PolarQuant-style random preconditioning and recursive polar-angle quantization as an optional long-context KV-cache layer for ToricGT ring attention, with perturbation bounds showing when quantized keys and values preserve tropical outputs and active argmax faces.  This revision also adds two implementation-facing layers requested for the training program: Soft-MoE feed-forward replacement blocks adapted to graph tokens, and a Parameter-Golf compression track that turns ToricGT ideas into a self-contained micro language model satisfying the OpenAI Model Craft Challenge constraints.  The result is a mathematically controlled specification for a small, reproducible model family aimed at graph-structured mathematical, algebraic, tropical, toric-geometric, Hebrew-morphological, and parameter-constrained language-model reasoning.
+This manuscript extends the ToricGT framework into a more formal, didactic, and proof-heavy specification.  ToricGT is a graph-to-graph architecture that combines TokenGT-style node and edge tokenization, exact ring evaluation of attention, tropical max-plus heads for dynamic-programming structure, finite noncommutative-torus channels for projective phase memory, and embedding-space Generative Flow Network fine-tuning.  We formalize bounded typed graph domains, prove equivariance of tokenization, masking, attention, decoding, and projective toric transports, and reduce bounded graph-to-graph universality to sequence-to-sequence Transformer universality.  We then give exact blockwise tropical ring-attention proofs, stability lemmas for active faces, and constructive simulations of Bellman-Ford-style semiring recurrences.  Motivated by the toric geometry of ReLU neural networks, we add a toric-geometric layer of explanation: tropical heads induce Newton polytopes and normal fans, active faces become exposed faces of those polytopes, and kink/bend diagnostics are interpreted as discrete analogues of Cartier-divisor intersection numbers.  The operator-algebra layer is sharpened by normal-form, cocycle, trace, finite Weyl-pair, and irrational-spiral projection theorems.  A new Hebrew morphology section defines root-template graphs for biblical and classical Hebrew, including radical alignment, binyan/template structure, source-span graphs, paradigm graphs, and semiring alignment losses.  We add a visualization contract for auditing reasoning capacity: equivariance orbits, tropical active faces, toric phase maps, Hebrew paradigm lattices, GFlowNet reward landscapes, and proof-dependency graphs.  We integrate Soft-MoE routing as a typed, fully differentiable expert-slot layer for ToricGT graph tokens, prove its permutation equivariance, give low-rank and shared-expert variants for compact artifacts, and specify a Parameter-Golf-constrained micro-ToricGT language-model track with byte-accurate artifact accounting, BPB scoring, quantization-aware training, record-folder checklists, and compliance risk controls.  We further formulate behavior-modification protocols that generalize Assistant-Axis activation capping to GraphCG-disentangled, toric-tropical corridor and alcove control over graph-of-thought trajectories, memory retrieval, and analogical transfer.  Finally, we integrate PolarQuant-style random preconditioning and recursive polar-angle quantization as an optional long-context KV-cache layer for ToricGT ring attention, with perturbation bounds showing when quantized keys and values preserve tropical outputs and active argmax faces.  This revision also adds two implementation-facing layers requested for the training program: Soft-MoE feed-forward replacement blocks adapted to graph tokens, and a Parameter-Golf compression track that turns ToricGT ideas into a self-contained micro language model satisfying the OpenAI Model Craft Challenge constraints.  The result is a mathematically controlled specification for a small, reproducible model family aimed at graph-structured mathematical, algebraic, tropical, toric-geometric, Hebrew-morphological, behavior-steered, and parameter-constrained language-model reasoning.
 \end{abstract}
 
 \tableofcontents
@@ -1753,6 +1756,141 @@ soft triangle density $\sum_{ijk}A_{ij}A_{jk}A_{ik}$, directed transitive residu
   \max(0,\Omega_{ij})\max(0,\Omega_{jk})\max(0,\Omega_{ki}).
 \end{equation}
 
+\subsection{Behavior modification protocols as toric-tropical corridor control}
+
+The preceding GraphCG and directed-persistence machinery also gives a concrete way to steer model behavior.  The intended use is not opaque personality scripting; it is an auditable control layer for keeping hidden reasoning in regions associated with helpfulness, harmlessness, calibration, appropriate tone, rigor, and level of detail, while discouraging regions associated with hallucination, sycophancy, unsafe compliance, brittle role-play, or ungrounded verbosity.  Recent interpretability work on the Assistant Axis identifies a one-dimensional persona direction in activation space and shows that activation capping in a normal Assistant interval can reduce persona drift \cite{lu2026assistantaxis}.  The tropical-quiver steering atlas gives the natural generalization: replace one global direction by a chamberwise family of steering coordinates, corridors, and local quadratic metrics \cite{schreiber2026tropicalquivers}.
+
+Let $h_{\ell,t}\in\R^d$ be the residual state at layer or graph-of-thought vertex $\ell$ and time $t$.  Let
+\begin{equation}
+  B_\ell=[d_{\ell,1},\ldots,d_{\ell,r}]\in\R^{d\times r},
+  \qquad
+  \xi_{\ell,t}=B_\ell\transpose h_{\ell,t}
+\end{equation}
+be the GraphCG chart.  A policy $\pi$ supplies signed labels, reward-model scores, verifier outcomes, style labels, refusal/helpfulness labels, and memory-compatibility tags.  From these data the trainer estimates behavior coordinates
+\begin{equation}
+  S_{\pi,C}(\xi)=W_{\pi,C}\xi+b_{\pi,C}
+\end{equation}
+on each occupied toric-tropical cell $C$ of the pulled-back normal fan.  The desired behavior corridor is a closed polytope
+\begin{equation}
+  K_{\pi,C}
+  =
+  \{y\in\R^m:\ell_j(C,\pi)\le y_j\le u_j(C,\pi)\ \forall j,\quad
+  R_{\pi,C}y\le r_{\pi,C}\}.
+\end{equation}
+The interval coordinates may encode Assistant-likeness, epistemic caution, citation/verification demand, concision, warmth, mathematical rigor, refusal confidence, or domain tone.  The halfspaces encode interactions that should not be separable: for example, high warmth may be allowed only with adequate truthfulness margin, and high confidence may be allowed only when verifier support and memory provenance are strong.
+
+The inference-time correction is the cellwise projection
+\begin{equation}
+  \Pi_{\pi,C}(h^+)
+  \in
+  \argmin_{\tilde h\in h^++\operatorname{im}(B_\ell)}
+  \frac12\norm{\tilde h-h^+}_{G_C}^2
+  +\lambda_C\operatorname{dist}(S_{\pi,C}(B_\ell\transpose \tilde h),K_{\pi,C})^2
+  +\eta_C\,\mathcal A_{\pi,C}(\tilde h).
+  \label{eq:toricgt-behavior-projection}
+\end{equation}
+Here $G_C\succ0$ is a local metric and $\mathcal A_{\pi,C}$ is an algebraic barrier defined below.  If $r=1$, $B=v/\norm{v}_2$, $S(h)=\ip{v}{h}$, $K=[a,b]$, $G_C=I$, and $\eta_C=0$, then \eqref{eq:toricgt-behavior-projection} reduces to ordinary Assistant-Axis capping:
+\begin{equation}
+  h\longmapsto
+  h+\frac{\operatorname{clip}(\ip{v}{h},[a,b])-\ip{v}{h}}{\norm{v}_2^2}\,v .
+\end{equation}
+Thus the Assistant Axis is not discarded; it is the rank-one chart of the more general protocol.  The ToricGT extension adds multiple learned axes, chamber-dependent intervals, graph-of-thought topology, memory provenance, and algebraic certificates.
+
+\paragraph{Alcoves and wall-crossing control.}
+Inside a toric chamber, affine roots or learned concept normals $\alpha_q$ cut the GraphCG coordinates by hyperplanes
+\begin{equation}
+  H_{q,k}=\{\xi:\ip{\alpha_q}{\xi}=k\}.
+\end{equation}
+The connected components of
+\begin{equation}
+  C\setminus \bigcup_{q,k}H_{q,k}
+\end{equation}
+are behavior alcoves.  They refine broad cells into pragmatic operating regions: concise technical proof, exploratory brainstorming, careful refusal plus safe alternative, grounded uncertainty, or long-form tutorial.  During training, the policy supplies a target alcove distribution $\mu^\star_\pi$ rather than a single alcove.  The occupancy term
+\begin{equation}
+  \mathcal L_{\mathrm{occ}}
+  =
+  \sum_A\left(\widehat\mu_\theta(A)-\mu_\pi^\star(A)\right)^2
+  +\lambda_{\mathrm{hit}}\operatorname{BH}_\theta
+\end{equation}
+penalizes long-run drift into bad regions and excessive grazing of walls.  The boundary-hit rate $\operatorname{BH}_\theta$ is important because many unwanted behaviors are not stable modes at first; they appear as repeated small wall crossings that eventually trap the conversation in the wrong persona, style, or evidence posture.
+
+\paragraph{Commutative-algebra behavior barriers.}
+At a reasoning vertex $q_t$, let $\Delta_t$ be the directed or undirected simplicial complex built from nearby GraphCG relation arrows, and let $x_i(\xi_t)$ be soft chamber coordinates.  For a desired policy complex $\Delta_\pi$, the Stanley--Reisner barrier is
+\begin{equation}
+  \mathcal L_{\mathrm{SR\text{-}beh}}
+  =
+  \sum_{F\notin\Delta_\pi}\prod_{i\in F}x_i(\xi_t),
+\end{equation}
+so forbidden coactivations such as ``high confidence'' plus ``low evidence'' plus ``unsafe compliance'' receive direct polynomial pressure.  If $A$ is the finite exponent table for the active toric chart, the toric-ideal barrier is
+\begin{equation}
+  \mathcal L_{I_A\text{-}\mathrm{beh}}
+  =
+  \sum_{x^u-x^v\in I_A^{\le D}}
+  \left(\sum_i u_i \log(x_i+\epsilon)-\sum_i v_i \log(x_i+\epsilon)\right)^2 .
+\end{equation}
+This keeps behavior coordinates compatible with the affine semigroup chart instead of allowing the steering head to invent inconsistent local coordinates.  The exact sidecar computes the corresponding Stanley--Reisner ideals, toric-binomial relations, Fitting summaries, Taylor-resolution ranks, and DG-algebra checks; the trainer sees bounded differentiable polynomial evaluations.  The algebraic piece of \eqref{eq:toricgt-behavior-projection} can therefore be chosen as
+\begin{equation}
+  \mathcal A_{\pi,C}
+  =
+  \lambda_{\mathrm{SR}}\mathcal L_{\mathrm{SR\text{-}beh}}
+  +\lambda_{I_A}\mathcal L_{I_A\text{-}\mathrm{beh}}
+  +\lambda_{\partial^2}\norm{\partial_{t-1}\partial_t}_F^2
+  +\lambda_{\mathrm{DG}}\norm{d(ab)-d(a)b-(-1)^{|a|}ad(b)}^2 .
+\end{equation}
+These terms make the protocol more robust than a scalar classifier: it controls which combinations of latent behavior variables may coexist, whether those combinations lie on the intended toric chart, and whether graph-of-thought transitions form a coherent complex.
+
+\paragraph{Training objective.}
+For supervised or preference-labeled data, the behavior protocol is trained with a small auxiliary weight on top of BPB or task loss:
+\begin{equation}
+\begin{aligned}
+  \mathcal L_{\mathrm{BMP}}
+  ={}&
+  \mathcal L_{\mathrm{LM/BPB}}
+  +\lambda_{\mathrm{corr}}\Eop_{\ell,t}
+     \operatorname{dist}(S_{\pi,C}(\xi_{\ell,t}),K_{\pi,C})^2\\
+  &+\lambda_{\mathrm{wall}}\Eop_{\ell,t,q}
+     \operatorname{softplus}\bigl(\tau(g_q(\xi_{\ell,t})-m_q)\bigr)
+  +\lambda_{\mathrm{occ}}\mathcal L_{\mathrm{occ}}
+  +\lambda_{\mathrm{alg}}\mathcal A_{\pi,C}\\
+  &+\lambda_{\mathrm{gfn}}\mathcal L_{\mathrm{GFlowNet\text{-}corr}}
+  +\lambda_{\mathrm{mem}}\mathcal L_{\mathrm{memory\text{-}corr}}
+  +\lambda_{\mathrm{ana}}\mathcal L_{\mathrm{analogy\text{-}corr}} .
+\end{aligned}
+\end{equation}
+The GFlowNet reward is modified by a corridor factor
+\begin{equation}
+  R_{\mathrm{corr}}(\tau)
+  =
+  R_{\mathrm{task}}(\tau)
+  \exp\left(-\beta\sum_t
+  \operatorname{dist}(S_{\pi,C_t}(\xi_t),K_{\pi,C_t})^2
+  -\beta_{\mathrm{bad}}\sum_t \mathcal L_{\mathrm{SR\text{-}beh}}(t)\right),
+\end{equation}
+so graph-of-thought search prefers terminal answers reached through stable, evidence-compatible reasoning paths.  The weights should start conservatively: the base BPB and verifier losses remain primary, while corridor and algebraic terms become stronger only after ablations show reduced unsafe behavior or hallucination without BPB damage.
+
+\paragraph{Memory and analogy.}
+Trajectory memory becomes a graph $M=(V_M,E_M)$ whose vertices store hidden summaries, corridor labels, source provenance, verifier outcomes, and small certificate hashes.  Retrieval uses not only cosine similarity but also chamber compatibility:
+\begin{equation}
+  \operatorname{score}(q,m)
+  =
+  \lambda_h\ip{\operatorname{norm} h_q}{\operatorname{norm} h_m}
+  -\lambda_C\operatorname{dist}(S_{\pi,C_q}(\xi_q),K_{\pi,C_m})^2
+  +\lambda_v\,\operatorname{Verifier}(m)
+  -\lambda_{\mathrm{bad}}\mathcal L_{\mathrm{SR\text{-}beh}}(m).
+\end{equation}
+Analogical transfer is allowed when a source corridor can be transported into the target corridor.  For a soft transport $P_{s\to t}$ and affine map $A_{s\to t}$ between behavior coordinates, use
+\begin{equation}
+  \mathcal L_{\mathrm{analogy\text{-}corr}}
+  =
+  \norm{S_t(P_{s\to t}\xi_s)-A_{s\to t}S_s(\xi_s)}_2^2
+  +\operatorname{dist}(S_t(P_{s\to t}\xi_s),K_{\pi,C_t})^2
+  +\mathcal L_{\mathrm{map}}(P_{s\to t}).
+\end{equation}
+This prevents analogy from becoming surface-level mimicry.  The transported reasoning graph must land in the right behavioral corridor and must preserve enough filtered topological structure to remain auditable.
+
+\paragraph{Operational protocol.}
+A practical implementation uses five stages.  First, learn or refresh GraphCG axes from contrastive examples of desired and undesired behaviors, using orthogonality and covariance penalties.  Second, fit Assistant-Axis-like and domain-specific behavior coordinates in the chart, but store them as chamberwise corridors rather than global scalars.  Third, train with the small $\mathcal L_{\mathrm{BMP}}$ auxiliary while logging BPB, verifier accuracy, corridor distance, wall-hit rate, bad-nonface mass, toric-binomial residual, memory-corridor compatibility, and analogy-corridor residual.  Fourth, at inference time apply projection \eqref{eq:toricgt-behavior-projection} only when the state leaves the calibrated safe band, mirroring light-touch activation capping.  Fifth, run periodic sidecar audits that materialize the exact complexes, ideals, free-resolution summaries, Fitting minors, DG products, and persistence morphisms for sampled trajectories.  A protocol is promoted only when the behavioral metric improves and the BPB or task metric does not regress beyond a predeclared tolerance.
+
 \subsection{DEC conservative reasoning flow}
 
 The directed simplicial layer also admits a conservative-flow interpretation inspired by discrete exterior calculus (DEC) discretizations of incompressible Navier--Stokes equations on simplicial surface meshes \cite{mohamed2016dec}.  Mohamed, Hirani, and Samtaney rewrite the continuous equations using exterior derivative, Hodge star, wedge product, and interior product, then replace these operators by DEC analogues.  The central lesson for ToricGT is not to simulate a fluid, but to audit whether a discrete trajectory respects conservative algebraic identities beyond pointwise prediction loss.  In the DEC paper, mass and vorticity conservation and kinetic-energy behavior reveal physical fidelity of the discretization; in ToricGT, analogous quantities reveal whether graph-of-thought hidden flows are organized or merely oscillatory.
@@ -2739,6 +2877,16 @@ Shengchao Liu, Chengpeng Wang, Jiarui Lu, Weili Nie, Hanchen Wang, Zhuoxinran Li
 Gouki Minegishi, Jingyuan Feng, Hiroki Furuta, Takeshi Kojima, Yusuke Iwasawa, and Yutaka Matsuo.
 \newblock Emergent analogical reasoning in Transformers.
 \newblock arXiv:2602.01992, 2026.
+
+\bibitem{lu2026assistantaxis}
+Christina Lu, Jack Gallagher, Jonathan Michala, Kyle Fish, and Jack Lindsey.
+\newblock The Assistant Axis: Situating and Stabilizing the Default Persona of Language Models.
+\newblock arXiv:2601.10387, 2026.
+
+\bibitem{schreiber2026tropicalquivers}
+Amelie Schreiber.
+\newblock Tropical Quivers of Architectures: a research program for composed embedding-space models.
+\newblock GitHub repository \url{https://github.com/amelie-iska/Tropical_Quivers_of_Archs}, 2026.
 
 \bibitem{edelsbrunner2002topological}
 Herbert Edelsbrunner, David Letscher, and Afra Zomorodian.

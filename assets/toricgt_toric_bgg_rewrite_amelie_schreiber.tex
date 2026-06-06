@@ -15,7 +15,9 @@
 \usepackage[nameinlink,noabbrev]{cleveref}
 
 \graphicspath{{./}{./toricgt_pg_softmoe_figures/}{./toricgt_extended_figures/}}
-\newfontfamily\hebrewfont{Noto Serif Hebrew}
+\IfFontExistsTF{Noto Serif Hebrew}
+  {\newfontfamily\hebrewfont{Noto Serif Hebrew}}
+  {\newfontfamily\hebrewfont{Arial Unicode MS}}
 \newcommand{\heb}[1]{{\hebrewfont #1}}
 
 \hypersetup{
@@ -101,7 +103,7 @@
 
 
 \begin{abstract}
-ToricGT is a graph-token Transformer framework for algebraic and graph-structured reasoning under stringent compression and evaluation constraints.  The paper makes the toric component operational rather than decorative.  We introduce a Toric BGG training layer built from finite shadows of hypertoric category $\mathcal O$, oriented-matroid category $\mathcal O$, multigraded BGG correspondences, toric Tate resolutions, and Euler-Koszul complexes.  These objects supply small, verifiable certificates for reasoning trajectories: sign-vector posets, standard filtrations, sparse differentials, Betti profiles, Gale-dual labels, active faces of Newton polytopes, and homological consistency checks.  The certificates are attached through low-rank probes to the existing ToricGT stack: TokenGT-style node/edge tokenization, tropical ring attention, noncommutative torus phase channels, Soft-MoE routing, GraphCG concept axes, embedding-space GFlowNet search, and trajectory-retrieval memory.  We prove equivariance and stability statements for graph-token layers, tropical active faces, Soft-MoE dispatch, prefix-causal byte scoring, BGG differentials, incidence-algebra proxies, chain-map supervision, Gale-dual curricula, and BPB-safe interpolation heads.  The methodology is designed for implementation: certificates are cached on CPU, GPU losses have small rank and sparse support, activation gates are staged, ablations are explicit, and evaluation remains centered on BPB and held-out reasoning quality.  The central design principle is that toric BGG theory should improve training by organizing hidden reasoning into exact finite complexes, while deployable models retain only the components that improve validation BPB, graph-reasoning accuracy, retrieval quality, or out-of-distribution algebraic generalization under an auditable artifact budget.
+ToricGT is a graph-token Transformer framework for algebraic and graph-structured reasoning under stringent compression and evaluation constraints.  The paper makes the toric component operational rather than decorative.  We introduce a Toric BGG training layer built from finite shadows of hypertoric category $\mathcal O$, oriented-matroid category $\mathcal O$, multigraded BGG correspondences, toric Tate resolutions, and Euler-Koszul complexes.  These objects supply small, verifiable certificates for reasoning trajectories: sign-vector posets, standard filtrations, sparse differentials, Betti profiles, Gale-dual labels, active faces of Newton polytopes, and homological consistency checks.  The certificates are attached through low-rank probes to the existing ToricGT stack: TokenGT-style node/edge tokenization, tropical ring attention, noncommutative torus phase channels, Soft-MoE routing, GraphCG concept axes, embedding-space GFlowNet search, and trajectory-retrieval memory.  We prove equivariance and stability statements for graph-token layers, tropical active faces, Soft-MoE dispatch, prefix-causal byte scoring, BGG differentials, incidence-algebra proxies, chain-map supervision, Gale-dual curricula, BPB-safe interpolation heads, and behavior-corridor projections.  We also develop behavior-modification protocols that generalize Assistant-Axis capping into GraphCG-disentangled toric-tropical corridors and alcoves, with Stanley--Reisner, toric-ideal, Fitting, free-resolution, and DG-algebra barriers for graph-of-thought trajectories, memory, and analogy.  The methodology is designed for implementation: certificates are cached on CPU, GPU losses have small rank and sparse support, activation gates are staged, ablations are explicit, and evaluation remains centered on BPB and held-out reasoning quality.  The central design principle is that toric BGG theory should improve training by organizing hidden reasoning into exact finite complexes, while deployable models retain only the components that improve validation BPB, graph-reasoning accuracy, retrieval quality, behavior reliability, or out-of-distribution algebraic generalization under an auditable artifact budget.
 \end{abstract}
 
 
@@ -796,7 +798,7 @@ for all $k$.  If $z\in C_k$ is a cycle with $\norm{z}\leq1$, then $F_kz$ is with
 \begin{proof}
 If $dz=0$, then
 \begin{equation}
-  \norm{d'F_kz}=\norm{(d'F_k-F_{k-1}d)z}\leq\epsilon\norm z\leq\epsilon.
+  \norm{d'F_kz}=\norm{(d'F_k-F_{k-1}d)z}\leq\epsilon\norm{z}\leq\epsilon.
 \end{equation}
 If $z=dw$, then
 \begin{equation}
@@ -898,6 +900,199 @@ An isomorphism of chain complexes preserves the ranks of cycles, boundaries, and
 \end{proof}
 
 This proposition explains why BGG signatures are useful memory keys.  A helper trajectory that is isomorphic as a finite complex is not just semantically similar; it carries the same resolution structure.  That is a stronger retrieval criterion than cosine similarity of final hidden states.
+
+\subsection{Behavior protocols from toric-tropical corridors and algebraic certificates}
+\label{subsec:behavior-corridors-bgg}
+
+The same finite certificate machinery can be used for behavior modification in a precise and auditable sense.  The goal is to constrain the model's hidden graph-of-thought trajectory to regions associated with wanted behavior--helpfulness, calibrated accuracy, groundedness, appropriate tone, suitable amount of detail, mathematical rigor, and safe refusal when needed--while avoiding regions associated with unwanted behavior such as unsafe compliance, sycophancy, hallucination, brittle persona drift, or ungrounded overconfidence.  Anthropic's Assistant Axis identifies a single contrast direction in activation space and treats activation capping as a way to keep the model near its default Assistant persona \cite{lu2026assistantaxis}.  ToricGT uses that axis as a baseline special case.  The general object is a chamberwise toric-tropical steering atlas in the sense of the Tropical Quivers program \cite{schreiber2026tropicalquivers}, enriched by GraphCG axes and exact commutative-algebra certificates.
+
+\begin{definition}[GraphCG behavior chart]
+Fix a layer, memory port, or reasoning vertex $q$ and let $h_q\in\R^d$ be its hidden state.  A behavior chart is a full-column-rank matrix
+\begin{equation}
+  B_q=[d_{q,1},\ldots,d_{q,r}]\in\R^{d\times r},
+  \qquad
+  \xi_q=B_q\transpose h_q ,
+\end{equation}
+learned by GraphCG-style contrastive editing.  A subset of axes may be aligned with interpretable behavior factors such as Assistant-likeness, citation demand, refusal strength, proof rigor, emotional warmth, verbosity, domain register, or uncertainty.  The chart is admissible for steering only when its orthogonality, covariance, and intervention-identifiability metrics pass held-out audits.
+\end{definition}
+
+Let $\Sigma_B$ be the pullback of the relevant tropical normal fans to the chart coordinates.  If a tropical probe has slopes $a_i$ and biases $b_i$, its chamber is
+\begin{equation}
+  C_i^B=\{\xi:\ip{B_q\transpose(a_i-a_j)}{\xi}\ge b_j-b_i\ \forall j\}.
+\end{equation}
+A behavior policy $\pi$ assigns to each occupied chamber $C$ a steering map
+\begin{equation}
+  S_{\pi,C}(\xi)=W_{\pi,C}\xi+b_{\pi,C}
+\end{equation}
+and a target corridor
+\begin{equation}
+  K_{\pi,C}=\{y:\ell_j(C,\pi)\le y_j\le u_j(C,\pi),\ R_{\pi,C}y\le r_{\pi,C}\}.
+\end{equation}
+Intervals encode calibrated one-dimensional bands, while the matrix inequalities encode interactions between dimensions.  For example, warmth and empathy may be wide when the evidence state is high and the user is not asking for harmful action, but narrow when the relevant verifier score or memory provenance is weak.
+
+\begin{definition}[Behavior alcove]
+Given normals $\alpha_1,\ldots,\alpha_m$ in the GraphCG chart and integer or learned thresholds $k$, define the affine arrangement
+\begin{equation}
+  \mathcal H_\pi=\{\xi:\ip{\alpha_j}{\xi}=k\}.
+\end{equation}
+The connected components of $C\setminus\bigcup\mathcal H_\pi$ are behavior alcoves.  Alcoves refine broad toric chambers into local operating modes such as concise technical proof, long tutorial, careful refusal with safe alternative, grounded uncertainty, or exploratory brainstorming.
+\end{definition}
+
+The inference-time projection is
+\begin{equation}
+  \Pi_{\pi,C}(h^+)
+  \in
+  \argmin_{\tilde h\in h^++\operatorname{im}(B_q)}
+  \frac12\norm{\tilde h-h^+}_{G_C}^2
+  +\lambda_C\dist(S_{\pi,C}(B_q\transpose\tilde h),K_{\pi,C})^2
+  +\eta_C\mathcal A_{\pi,C}(\tilde h),
+  \label{eq:bgg-behavior-projection}
+\end{equation}
+where $G_C\succ0$ and $\mathcal A_{\pi,C}$ is an algebraic barrier.  If $r=1$, $B=v/\norm{v}_2$, $S(h)=\ip{v}{h}$, $K=[a,b]$, and $\mathcal A_{\pi,C}=0$, then
+\begin{equation}
+  \Pi(h)=h+\frac{\operatorname{clip}(\ip{v}{h},[a,b])-\ip{v}{h}}{\norm{v}_2^2}v,
+\end{equation}
+which is exactly one-dimensional activation capping.  Thus the Assistant Axis is the rank-one Euclidean corridor case; ToricGT's protocol adds multiple axes, cellwise corridors, alcove occupancy, graph-of-thought topology, and algebraic consistency.
+
+\paragraph{Affine toric and Stanley--Reisner behavior constraints.}
+For an active cone $\sigma$ in the pulled-back fan, let
+\begin{equation}
+  U_\sigma=\Spec k[\sigma^\vee\cap M]
+\end{equation}
+be the affine toric chart.  A sampled reasoning vertex produces soft chamber variables $x_i(\xi)\ge0$.  If $A=[a_1,\ldots,a_m]$ is the finite exponent table, then the toric ideal
+\begin{equation}
+  I_A=\ker\bigl(k[x_1,\ldots,x_m]\to k[t_1^{\pm1},\ldots,t_s^{\pm1}],\ x_i\mapsto t^{a_i}\bigr)
+\end{equation}
+contains the binomial equalities that should hold in the chart.  For low-degree exact relations $x^u-x^v\in I_A^{\le D}$, the differentiable barrier is
+\begin{equation}
+  \mathcal L_{I_A}^{\mathrm{beh}}
+  =
+  \sum_{x^u-x^v\in I_A^{\le D}}
+  \left(\sum_i u_i\log(x_i+\epsilon)-\sum_i v_i\log(x_i+\epsilon)\right)^2 .
+\end{equation}
+If $\Delta_\pi$ is the desired behavior complex, its Stanley--Reisner ideal
+\begin{equation}
+  I_{\Delta_\pi}=\langle x_F=\prod_{i\in F}x_i:F\notin\Delta_\pi\rangle
+\end{equation}
+penalizes forbidden coactivations by
+\begin{equation}
+  \mathcal L_{\mathrm{SR}}^{\mathrm{beh}}
+  =
+  \sum_{F\notin\Delta_\pi}\prod_{i\in F}x_i(\xi).
+\end{equation}
+Examples of nonfaces include high-confidence/no-evidence, warm-validation/unsafe-advice, refusal/no-safe-alternative when a safe answer exists, and long-form-detail/low-verifier-support.  These are not merely classifier labels; they are monomial constraints in the face ring $k[\Delta_\pi]$.
+
+\paragraph{Free resolutions, Fitting gates, and DG-algebra structure.}
+Let $M_\pi=k[\Delta_\pi]$ or a finite quotient of $k[\sigma^\vee\cap M]$ describing the desired local behavior module.  A symbolic sidecar computes a multigraded free resolution
+\begin{equation}
+  F_\bullet:\quad
+  \cdots\to\bigoplus_\alpha S(-\alpha)^{\beta_{2,\alpha}}
+  \xrightarrow{d_2}
+  \bigoplus_\alpha S(-\alpha)^{\beta_{1,\alpha}}
+  \xrightarrow{d_1}
+  S\to M_\pi\to0 .
+\end{equation}
+The train-time state predicts soft matrices $\widehat d_i(\xi)$ and soft multigraded masses $\widehat\beta_{i,\alpha}(\xi)$.  The resolution barrier contains
+\begin{equation}
+  \mathcal L_{\mathrm{res}}^{\mathrm{beh}}
+  =
+  \sum_i\norm{\widehat d_i(\xi)\widehat d_{i+1}(\xi)}_F^2
+  +\lambda_\beta\sum_{i,\alpha}
+  \left(\widehat\beta_{i,\alpha}(\xi)-\beta_{i,\alpha}^{\pi}\right)^2 .
+\end{equation}
+For a presentation $S^{b}\xrightarrow{\widehat d_1}S^a\to M\to0$, Fitting ideals
+\begin{equation}
+  \mathrm{Fitt}_j(M)=I_{a-j}(\widehat d_1)
+\end{equation}
+track rank jumps.  In behavior steering, unexpected Fitting jumps indicate that the local behavior module has crossed from a stable helpful region into a different algebraic stratum.  The differentiable gate uses soft determinantal minors and logs exact minors in periodic analyses:
+\begin{equation}
+  \mathcal L_{\mathrm{Fitt}}^{\mathrm{beh}}
+  =
+  \sum_{J}
+  w_J\left(\det(\widehat d_1[J]\widehat d_1[J]\transpose+\epsilon I)-
+  \rho_J^\pi\right)^2 .
+\end{equation}
+When the resolution has a Taylor or Koszul DG-algebra product, the product must satisfy
+\begin{equation}
+  d^2=0,\qquad
+  d(ab)=d(a)b+(-1)^{|a|}ad(b).
+\end{equation}
+The DG behavior loss is
+\begin{equation}
+  \mathcal L_{\mathrm{DG}}^{\mathrm{beh}}
+  =
+  \norm{d^2}_F^2+
+  \Eop_{a,b}\norm{d(ab)-d(a)b-(-1)^{|a|}ad(b)}_2^2+
+  \lambda_{\mathrm{aug}}\sum_{|a|>0}\abs{\varepsilon(a)}^2 .
+\end{equation}
+These terms are useful because they make the behavior constraint compositional: a sequence of reasoning moves should remain a valid complex, not merely keep each individual activation near a classifier boundary.
+
+\paragraph{Graph-of-thought, memory, and analogy.}
+A graph-of-thought trajectory is a directed graph of reasoning vertices
+\begin{equation}
+  q_0\to q_1\to\cdots\to q_T,
+\end{equation}
+where each $q_t$ carries a hidden state, a behavior alcove, a finite complex $\Delta_t$, and a certificate signature $\Sigma_{\mathrm{TBGG}}(q_t)$.  The corridor objective is
+\begin{equation}
+\begin{aligned}
+  \mathcal L_{\mathrm{BMP}}
+  ={}&
+  \mathcal L_{\mathrm{LM/BPB}}
+  +\lambda_{\mathrm{corr}}\sum_{t}\dist(S_{\pi,C_t}(\xi_t),K_{\pi,C_t})^2
+  +\lambda_{\mathrm{wall}}\operatorname{BH}_\theta\\
+  &+\lambda_{\mathrm{alg}}
+  \bigl(\mathcal L_{I_A}^{\mathrm{beh}}
+       +\mathcal L_{\mathrm{SR}}^{\mathrm{beh}}
+       +\mathcal L_{\mathrm{res}}^{\mathrm{beh}}
+       +\mathcal L_{\mathrm{Fitt}}^{\mathrm{beh}}
+       +\mathcal L_{\mathrm{DG}}^{\mathrm{beh}}\bigr)\\
+  &+\lambda_{\mathrm{gfn}}\mathcal L_{\mathrm{GFlowNet\text{-}corr}}
+  +\lambda_{\mathrm{mem}}\mathcal L_{\mathrm{memory\text{-}corr}}
+  +\lambda_{\mathrm{ana}}\mathcal L_{\mathrm{analogy\text{-}corr}} .
+\end{aligned}
+\end{equation}
+The GFlowNet terminal reward is multiplied by a corridor factor
+\begin{equation}
+  R_{\mathrm{corr}}(\tau)=
+  R_{\mathrm{task}}(\tau)
+  \exp\left(-\gamma\sum_t\dist(S_{\pi,C_t}(\xi_t),K_{\pi,C_t})^2
+  -\gamma_{\mathrm{alg}}\sum_t
+  \bigl(\mathcal L_{\mathrm{SR}}^{\mathrm{beh}}+\mathcal L_{I_A}^{\mathrm{beh}}\bigr)\right).
+\end{equation}
+Thus the search policy prefers answers reached by helpful, algebraically coherent reasoning paths.
+
+The memory index is a graph $M=(V_M,E_M)$ whose vertices store $(h,\xi,C,A,\Delta,\Sigma_{\mathrm{TBGG}},q)$: hidden state, GraphCG coordinate, chamber, exponent table, complex, certificate signature, and verifier or BPB-derived quality.  Retrieval score becomes
+\begin{equation}
+  r(q,m)
+  =
+  \lambda_h\ip{\frac{h_q}{\norm{h_q}_2+\epsilon}}{\frac{h_m}{\norm{h_m}_2+\epsilon}}
+  +\lambda_\Sigma\ip{\Sigma(q)}{\Sigma(m)}
+  -\lambda_C\dist(S_{\pi,C_q}(\xi_q),K_{\pi,C_m})^2
+  -\lambda_{\mathrm{bad}}\mathcal L_{\mathrm{SR}}^{\mathrm{beh}}(m).
+\end{equation}
+Analogical reasoning is accepted only when a source behavior corridor transports to the target corridor.  With a soft transport $P_{s\to t}$ and affine coordinate map $A_{s\to t}$, define
+\begin{equation}
+  \mathcal L_{\mathrm{analogy\text{-}corr}}
+  =
+  \norm{S_t(P_{s\to t}\xi_s)-A_{s\to t}S_s(\xi_s)}_2^2
+  +\dist(S_t(P_{s\to t}\xi_s),K_{\pi,C_t})^2
+  +\norm{\partial_tP_{s\to t}-P_{s\to t}\partial_s}_F^2 .
+\end{equation}
+This distinguishes helpful analogy from superficial mimicry: the analogy must preserve filtered topological structure and land in an acceptable behavior alcove.
+
+\paragraph{Why the algebra can improve BPB and behavior.}
+The BPB mechanism is indirect but testable.  Better GraphCG axes reduce superposition among byte-level concepts; corridor regularization prevents hidden trajectories from wasting capacity on unstable behavioral modes; Stanley--Reisner nonface penalties suppress incompatible feature coactivations; toric-binomial constraints make active chambers reusable across contexts; and resolution/DG losses make multi-step reasoning compositional.  These effects can lower conditional entropy when they make prefixes more predictable, but they must be subordinate to the base likelihood.  The correct training rule is therefore conservative: enable corridor metrics at analysis time, train them with micro weights, promote only those whose ablation improves BPB, verifier accuracy, memory retrieval, or out-of-distribution reasoning, and keep deployable artifacts free of any training-only certificate that does not improve the audited score.
+
+\paragraph{Computable protocol.}
+The implementation follows a finite recipe.
+\begin{enumerate}[leftmargin=2em]
+  \item Build contrastive behavior sets and learn GraphCG axes $B_q$; retain axes only if intervention and disentanglement audits pass.
+  \item Fit chamberwise steering maps $S_{\pi,C}$ and corridors $K_{\pi,C}$ from helpful/unhelpful labels, verifier support, policy tags, and style/detail targets.
+  \item Construct exact small certificates $(A,\Delta,I_A,F_\bullet,\mathrm{Fitt},\mathrm{DG})$ for sampled reasoning windows.
+  \item Train with $\mathcal L_{\mathrm{BMP}}$ at BPB-safe weights and CE-ratio caps; log corridor distance, alcove occupancy, wall hits, SR nonface mass, toric-binomial residuals, Fitting jumps, Betti drift, DG residuals, memory compatibility, and analogy-corridor residuals.
+  \item At inference, use \eqref{eq:bgg-behavior-projection} only when hidden states leave calibrated bands; otherwise leave the model untouched.
+  \item Periodically materialize exact symbolic resolutions and topological objects in sidecar analyses to verify that differentiable metrics still correspond to the intended algebraic objects.
+\end{enumerate}
 
 \subsection{Losses used in training}
 
@@ -3247,6 +3442,16 @@ Shengchao Liu, Chengpeng Wang, Jiarui Lu, Weili Nie, Hanchen Wang, Zhuoxinran Li
 Gouki Minegishi, Jingyuan Feng, Hiroki Furuta, Takeshi Kojima, Yusuke Iwasawa, and Yutaka Matsuo.
 \newblock Emergent analogical reasoning in Transformers.
 \newblock arXiv:2602.01992, 2026.
+
+\bibitem{lu2026assistantaxis}
+Christina Lu, Jack Gallagher, Jonathan Michala, Kyle Fish, and Jack Lindsey.
+\newblock The Assistant Axis: Situating and Stabilizing the Default Persona of Language Models.
+\newblock arXiv:2601.10387, 2026.
+
+\bibitem{schreiber2026tropicalquivers}
+Amelie Schreiber.
+\newblock Tropical Quivers of Architectures: a research program for composed embedding-space models.
+\newblock GitHub repository \url{https://github.com/amelie-iska/Tropical_Quivers_of_Archs}, 2026.
 
 \bibitem{edelsbrunner2002topological}
 Herbert Edelsbrunner, David Letscher, and Afra Zomorodian.
