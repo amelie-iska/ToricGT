@@ -145,3 +145,36 @@ def test_analysis_control_exact_cca_routes_to_analysis_category() -> None:
     )
     assert organized["15_analysis_media/control/family_pressure/combinatorial_cca_topology"] == 0.91
     assert "analysis_control/exact_cca/toric_cca_exact_sr_nonface_edge_fraction" not in organized
+
+
+def test_nonfinite_and_optimizer_diagnostics_stay_visible() -> None:
+    organized = organize_wandb_payload(
+        {
+            "trainer/step": 588,
+            "train/nonfinite_update_skip": 1.0,
+            "train/nonfinite_microbatch_skip_count": 1.0,
+            "train/nonfinite_ce_loss_count": 0.0,
+            "train/nonfinite_aux_loss_count": 0.0,
+            "train/nonfinite_param_count": 0.0,
+            "train/nonfinite_grad_count": 2.0,
+            "optim/grad_norm": 0.12,
+            "optim/max_abs_param": 1.5,
+            "optim/max_abs_grad": 0.9,
+            "optim/token_lr": 0.001,
+        }
+    )
+
+    assert organized["00_primary/nonfinite_update_skip"] == 1.0
+    assert organized["00_primary/nonfinite_microbatch_skip_count"] == 1.0
+    assert organized["00_primary/nonfinite_ce_loss_count"] == 0.0
+    assert organized["00_primary/nonfinite_aux_loss_count"] == 0.0
+    assert organized["00_primary/nonfinite_grad_count"] == 2.0
+    assert organized["00_primary/grad_norm"] == 0.12
+    assert organized["00_primary/learning_rate"] == 0.001
+    assert organized["00_primary/max_abs_param"] == 1.5
+    assert organized["00_primary/max_abs_grad"] == 0.9
+    assert organized["12_optimization/train/nonfinite_microbatch_skip_count"] == 1.0
+    assert organized["12_optimization/train/nonfinite_ce_loss_count"] == 0.0
+    assert organized["12_optimization/optim/grad_norm"] == 0.12
+    assert organized["12_optimization/optim/token_lr"] == 0.001
+    assert "train/nonfinite_update_skip" not in organized

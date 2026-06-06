@@ -14,6 +14,7 @@ import argparse
 import importlib.util
 import json
 import math
+import os
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -90,8 +91,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bigram-bias-scale", type=float, default=1.0)
     parser.add_argument("--hash-ngram-bias-order", type=int, default=3)
     parser.add_argument("--hash-ngram-bias-scale", type=float, default=1.0)
-    parser.add_argument("--polarquant-kv-bits", type=int, default=0)
-    parser.add_argument("--polarquant-eval-sample-tokens", type=int, default=0)
+    parser.add_argument("--polarquant-kv-bits", type=int, default=int(os.environ.get("POLARQUANT_KV_BITS", 8)))
+    parser.add_argument(
+        "--polarquant-eval-sample-tokens",
+        type=int,
+        default=int(os.environ.get("POLARQUANT_EVAL_SAMPLE_TOKENS", 256)),
+    )
     parser.add_argument("--polarquant-seed", type=int, default=271828)
     return parser.parse_args()
 
@@ -119,6 +124,8 @@ def infer_compact_config(
     hash_ngram_bias_order: int = 3,
     hash_ngram_bias_scale: float = 1.0,
     polarquant_kv_bits: int = 0,
+    polarquant_train: bool = False,
+    polarquant_train_sample_tokens: int = 0,
     polarquant_eval_sample_tokens: int = 0,
     polarquant_seed: int = 271828,
 ) -> CompactSeq4096Config:
@@ -175,9 +182,49 @@ def infer_compact_config(
         bigram_bias_scale=float(bigram_bias_scale),
         hash_ngram_bias_scale=float(hash_ngram_bias_scale),
         polarquant_kv_bits=int(polarquant_kv_bits),
+        polarquant_train=bool(polarquant_train),
+        polarquant_train_sample_tokens=int(polarquant_train_sample_tokens),
         polarquant_eval_sample_tokens=int(polarquant_eval_sample_tokens),
         polarquant_seed=int(polarquant_seed),
     )
+
+
+COMPACT_CONFIG_OVERRIDE_KEYS = {
+    "logit_softcap",
+    "rope_base",
+    "qk_gain_init",
+    "bigram_bias_scale",
+    "hash_ngram_bias_order",
+    "hash_ngram_bias_scale",
+    "polarquant_kv_bits",
+    "polarquant_train",
+    "polarquant_train_sample_tokens",
+    "polarquant_eval_sample_tokens",
+    "polarquant_seed",
+}
+
+
+def checkpoint_config_overrides(checkpoint_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    """Load compact config metadata saved in the checkpoint or sidecar."""
+
+    config: dict[str, Any] = {}
+    payload_config = payload.get("config")
+    if isinstance(payload_config, dict):
+        config.update(payload_config)
+    for candidate in (
+        checkpoint_path.with_suffix(checkpoint_path.suffix + ".config.json"),
+        checkpoint_path.with_suffix(".config.json"),
+        checkpoint_path.parent / "run_config.json",
+    ):
+        if not candidate.exists():
+            continue
+        try:
+            sidecar_config = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(sidecar_config, dict):
+            config.update(sidecar_config)
+    return {key: value for key, value in config.items() if key in COMPACT_CONFIG_OVERRIDE_KEYS}
 
 
 def checkpoint_kind(payload: dict[str, Any]) -> str:
@@ -229,7 +276,9 @@ def evaluate_checkpoint(
     if checkpoint_kind(payload) != "seq4096_compact_gpt":
         raise ValueError(f"checkpoint is not a compact Seq4096 GPT payload: kind={checkpoint_kind(payload)}")
     state_dict = payload["model"]
-    config = infer_compact_config(state_dict, **config_kwargs)
+    merged_config_kwargs = dict(config_kwargs)
+    merged_config_kwargs.update(checkpoint_config_overrides(checkpoint_path, payload))
+    config = infer_compact_config(state_dict, **merged_config_kwargs)
     sp = spm.SentencePieceProcessor(model_file=tokenizer_path)
     if int(sp.vocab_size()) != int(config.vocab_size):
         raise ValueError(f"tokenizer vocab_size={int(sp.vocab_size())} does not match checkpoint vocab_size={config.vocab_size}")

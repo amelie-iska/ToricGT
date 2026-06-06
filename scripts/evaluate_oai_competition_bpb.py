@@ -149,9 +149,9 @@ def run_compact_seq4096_eval(args: argparse.Namespace, checkpoint_path: Path) ->
             "bigram_bias_scale": 1.0,
             "hash_ngram_bias_order": 3,
             "hash_ngram_bias_scale": 1.0,
-            "polarquant_kv_bits": 0,
-            "polarquant_eval_sample_tokens": 0,
-            "polarquant_seed": 271828,
+            "polarquant_kv_bits": int(os.environ.get("POLARQUANT_KV_BITS", 8)),
+            "polarquant_eval_sample_tokens": int(os.environ.get("POLARQUANT_EVAL_SAMPLE_TOKENS", 256)),
+            "polarquant_seed": int(os.environ.get("POLARQUANT_SEED", 271828)),
         },
     )
     summary = compact_eval.oai_metric_summary(

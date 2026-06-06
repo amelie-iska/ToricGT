@@ -1427,3 +1427,105 @@ recommended restart path is:
    Hochster Betti, Taylor rank, Buchsbaum-Eisenbud, Fitting-rank, and
    Stanley-Reisner diagnostics against BPB movement before making weight
    increases.
+
+## 2026-06-05 Live audit: step 1250 and anomaly visibility
+
+Current run:
+`toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z`.
+
+Refreshed W&B audit:
+`outputs/metric_audits/toricgt_advdg_stable_step0_polar_seq4096_current_stats_refresh`.
+
+One-off DG/Fitting sidecar generated from the step-1000 checkpoint:
+`outputs/post_resume_analysis/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z/step-00001000-dg-fitting-sidecar`.
+
+### BPB progress
+
+- Step 1000 validation/OpenAI BPB: `1.3561554995`.
+- Step 1250 validation/OpenAI BPB: `1.3330`.
+- Step 1250 train BPB: `1.3347`.
+- Interpretation: the run is still descending and should not be interrupted.
+  The 10K gate policy remains the right controller: aim for `<1.09`; continue
+  if `<1.17`; otherwise restart from the best finite checkpoint.
+
+### Advanced metric behavior through the refreshed audit
+
+- Primary BPB improved materially: `00_primary/oai_bpb` first-window median
+  `1.6041` to last-window median `1.39158`, with best summary BPB
+  `1.3561554995` before the step-1250 validation landed.
+- Train BPB/loss improved quickly but remains noisy, with frequent train-BPB
+  spikes from per-batch byte/token composition; treat validation BPB as the
+  competition authority.
+- GraphCG is helpful but noisy: `advanced/graphcg_loss` has fallen roughly
+  59% in the audit window.
+- Koszul/BGG is helpful: `advanced/koszul_bgg_loss` has fallen roughly 52%.
+- Toric/tropical is helpful but weaker: `advanced/toric_tropical_loss` is down
+  roughly 28%.
+- CCA topology remains mixed: exact symbolic and Buchsbaum-Eisenbud residuals
+  are stable-to-improving, while the aggregate topology loss can rise.  Keep
+  CCA active at micro weight before the 10K BPB gate; raise it only after the
+  official step-1250 and later DG/Fitting sidecars show BPB-aligned structure.
+- Slepian/Pollak remains weak at train time: do not increase its weight until
+  leakage/concentration improves without hurting validation BPB.
+
+### Nonfinite anomaly audit
+
+- W&B reported `0` nonfinite/string-NaN metric families in
+  `nonfinite_anomalies.json`.
+- History nevertheless showed one guarded optimizer skip:
+  `00_primary/nonfinite_update_skip = 1` at W&B step `588`.
+- The surrounding rows show finite train loss/BPB, `advanced/backprop_enabled=0`,
+  and all available advanced-family nonfinite flags at `0`.  This points to a
+  caught microbatch/gradient guard event, not an advanced-loss NaN cascade.
+- The training guard behaved correctly: the optimizer update was skipped and
+  training continued to lower validation BPB.
+
+### W&B cleanup fix made from the anomaly
+
+The active process only exposed the aggregate skip flag, which made root-cause
+analysis needlessly indirect.  The W&B organizer now preserves:
+
+```text
+00_primary/nonfinite_microbatch_skip_count
+00_primary/nonfinite_ce_loss_count
+00_primary/nonfinite_aux_loss_count
+00_primary/nonfinite_param_count
+00_primary/nonfinite_grad_count
+00_primary/grad_norm
+00_primary/learning_rate
+12_optimization/train/nonfinite_*
+12_optimization/optim/*
+```
+
+Regression test:
+`tests/test_wandb_organization.py::test_nonfinite_and_optimizer_diagnostics_stay_visible`.
+
+This change does not affect the active training process numerically.  It will
+make the next run, and any newly spawned W&B logging process that imports the
+current source, materially easier to diagnose.
+
+### PolarQuant metadata correction
+
+The first step-1250 sampled OAI sidecar reported `polarquant_kv_bits=0` because
+the compact checkpoint did not store a config dict and the evaluator filled in
+old hard-coded defaults.  That was a metadata/evaluator fallback bug, not
+evidence that the active run was launched without PolarQuant.
+
+Fixes applied:
+
+- future Seq4096 checkpoints now save a compact `config` dict;
+- future checkpoint directories write `run_config.json`;
+- the Seq4096 evaluator loads config overrides from the checkpoint or sidecar;
+- Seq4096 training and evaluation default PolarQuant to 8-bit unless explicitly
+  overridden;
+- the active run directory now has a `run_config.json` sidecar matching its
+  launch command.
+
+Corrected sampled step-1250 OAI sidecar:
+`outputs/post_resume_analysis/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z/step-00001250/oai_competition/seq4096_summary_fixed_config.json`.
+
+Corrected sampled BPB moved from `1.5576954817` to `1.5288431654`, with
+`compact_config.polarquant_kv_bits=8`, `polarquant_train=true`, and
+`logit_softcap=24.0`.  This sampled CPU check is diagnostic only; the
+authoritative run validation BPB for the training gate remains the full-val
+step-1250 value `1.3330`.

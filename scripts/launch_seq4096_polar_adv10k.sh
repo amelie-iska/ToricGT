@@ -54,6 +54,34 @@ done
 
 mkdir -p "$CKPT_DIR" "$(dirname "$LOG_PATH")" "$OUTPUT_ROOT" "$COMMAND_DIR" "$(dirname "$STATE_PATH")"
 
+cat > "$CKPT_DIR/run_config.json" <<EOF
+{
+  "bigram_bias": true,
+  "bigram_bias_scale": 1.0,
+  "hash_ngram_bias": false,
+  "hash_ngram_bias_buckets": 2048,
+  "hash_ngram_bias_order": 3,
+  "hash_ngram_bias_scale": 1.0,
+  "logit_softcap": 24.0,
+  "mlp_mult": 2,
+  "model_dim": 512,
+  "num_heads": 8,
+  "num_kv_heads": 4,
+  "num_layers": 9,
+  "polarquant_eval_sample_tokens": 256,
+  "polarquant_kv_bits": 8,
+  "polarquant_seed": 271828,
+  "polarquant_train": true,
+  "polarquant_train_sample_tokens": 16,
+  "polarquant_train_start_step": 0,
+  "polarquant_train_warmup_steps": 512,
+  "qk_gain_init": 1.25,
+  "rope_base": 10000.0,
+  "tie_embeddings": true,
+  "vocab_size": 1024
+}
+EOF
+
 TRAIN_CMD=(
   env
   "PYTHONPATH=$REPO_ROOT/src"

@@ -71,6 +71,23 @@ def test_infer_compact_config_from_seq4096_state_dict() -> None:
     assert config.hash_ngram_bias_buckets == 128
 
 
+def test_checkpoint_config_sidecar_overrides_polarquant_defaults(tmp_path: Path) -> None:
+    module = load_module()
+    checkpoint = tmp_path / "run_step_000250.pt"
+    payload = {"step": 250, "model": fake_state_dict()}
+    (tmp_path / "run_config.json").write_text(
+        '{"polarquant_kv_bits": 8, "polarquant_eval_sample_tokens": 256, "polarquant_seed": 123}\n',
+        encoding="utf-8",
+    )
+
+    overrides = module.checkpoint_config_overrides(checkpoint, payload)
+    config = module.infer_compact_config(fake_state_dict(), **overrides)
+
+    assert config.polarquant_kv_bits == 8
+    assert config.polarquant_eval_sample_tokens == 256
+    assert config.polarquant_seed == 123
+
+
 def test_infer_compact_config_rejects_non_seq4096_payload() -> None:
     module = load_module()
 

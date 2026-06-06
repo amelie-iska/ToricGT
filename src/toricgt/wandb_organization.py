@@ -230,10 +230,10 @@ def _category_alias(key: str) -> str | None:
             return f"07_topology_geometry/train/{rest}"
         if any(token in lower for token in ("toric", "tropical", "bgg", "category_o", "koszul", "slepian", "pollak")):
             return f"08_toric_tropical_bgg/train/{rest}"
+        if any(token in lower for token in ("lr", "grad", "shock", "guard", "update", "nonfinite", "skip")):
+            return f"12_optimization/train/{rest}"
         if any(token in lower for token in ("loss", "entropy", "mtp", "contrastive")):
             return f"04_losses/train/{rest}"
-        if any(token in lower for token in ("lr", "grad", "shock", "guard", "update")):
-            return f"12_optimization/train/{rest}"
         return f"02_train/{rest}"
 
     if key.startswith("advanced/"):
@@ -260,6 +260,8 @@ def _category_alias(key: str) -> str | None:
         return f"10_data_curriculum/{key.split('/', 1)[1]}"
     if key.startswith("polarquant/"):
         return f"11_artifact_size/polarquant/{key.split('/', 1)[1]}"
+    if key.startswith("optim/"):
+        return f"12_optimization/optim/{key.split('/', 1)[1]}"
     if key.startswith("artifact/"):
         rest = key.split("/", 1)[1]
         if rest == "under_size_limit":
@@ -335,8 +337,8 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/train_loss", ("train/loss", "fineweb/train_loss"))
     _add_first(out, payload, "00_primary/validation_loss", ("val/loss", "fineweb/val_loss"))
     _add_first(out, payload, "00_primary/int8_roundtrip_bpb", ("final/int8_zlib_roundtrip_bpb",))
-    _add_first(out, payload, "00_primary/learning_rate", ("train/lr",))
-    _add_first(out, payload, "00_primary/grad_norm", ("train/grad_norm",))
+    _add_first(out, payload, "00_primary/learning_rate", ("train/lr", "optim/token_lr", "optim/matrix_lr"))
+    _add_first(out, payload, "00_primary/grad_norm", ("train/grad_norm", "optim/grad_norm"))
     _add_first(out, payload, "00_primary/nonfinite_update_skip", ("train/nonfinite_update_skip",))
     _add_first(out, payload, "00_primary/nonfinite_microbatch_skip_count", ("train/nonfinite_microbatch_skip_count",))
     _add_first(out, payload, "00_primary/nonfinite_ce_loss_count", ("train/nonfinite_ce_loss_count",))
