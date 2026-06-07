@@ -21,6 +21,8 @@ Every row is converted to a graph before tokenization.
    \]
 3. Raw text rows become a document root plus reasoning-step spans and branch/merge edges.
 4. The dataset loader expands directories and globs, so `data/curated_hf_shards/train/*.parquet` uses the full shard set.
+5. OAI Parameter-Golf `fineweb10B_sp1024/*.bin` shards are read with the challenge-format header, streamed by memmap, decoded with `fineweb_1024_bpe.model`, and converted into the same branch/merge graph format.
+6. Curated reasoning shards and FineWeb token shards are path-interleaved, so FineWeb participates from step 0 instead of waiting behind a long sequential pass over the reasoning parquet shards.
 
 The graphification invariant is:
 \[
@@ -157,3 +159,10 @@ The ramp should be:
 ## Launch Config
 
 Use `config/train.full_tokengt_got_fineweb_derived.yaml` after the focused tests pass.  It enables the full shard glob, conservative DAG/memory/derived losses, W&B logging, checkpointing, and periodic derived-category example JSON output.
+
+The launch config now includes both:
+
+- `data/curated_hf_shards/train/*.parquet`
+- `amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_train_*.bin`
+
+with `interleave_data_paths: true`, `fineweb_tokens_per_graph: 4096`, and `fineweb_stride_tokens: 2048`.

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Iterable
 
 import pyarrow.parquet as pq
+import numpy as np
 import torch
 from torch.utils.data import IterableDataset
 
@@ -24,6 +25,7 @@ from .graph_tokenizer import GraphBatch
 class GraphTrainingItem:
     graph: GraphBatch
     target: torch.Tensor
+    metadata: dict[str, object] | None = None
 
 
 TEXT_COLUMNS = (
@@ -43,7 +45,7 @@ TEXT_COLUMNS = (
 
 
 def expand_dataset_paths(paths: Iterable[str | Path]) -> list[Path]:
-    """Expand explicit files, directories, and shell-style parquet/jsonl globs."""
+    """Expand explicit files, directories, and shell-style parquet/jsonl/bin globs."""
 
     expanded: list[Path] = []
     for raw_path in paths:
@@ -55,9 +57,74 @@ def expand_dataset_paths(paths: Iterable[str | Path]) -> list[Path]:
         if path.is_dir():
             expanded.extend(sorted(path.glob("*.parquet")))
             expanded.extend(sorted(path.glob("*.jsonl")))
+            expanded.extend(sorted(path.glob("*.bin")))
         else:
             expanded.append(path)
     return expanded
+
+
+def interleave_dataset_paths(paths: Iterable[Path]) -> list[Path]:
+    """Round-robin expanded paths by source type so FineWeb appears early."""
+
+    groups: dict[str, list[Path]] = {".parquet": [], ".bin": [], ".jsonl": [], "other": []}
+    for path in paths:
+        groups[path.suffix if path.suffix in groups else "other"].append(path)
+    ordered_suffixes = [".parquet", ".bin", ".jsonl", "other"]
+    out: list[Path] = []
+    max_len = max((len(groups[suffix]) for suffix in ordered_suffixes), default=0)
+    for index in range(max_len):
+        for suffix in ordered_suffixes:
+            values = groups[suffix]
+            if index < len(values):
+                out.append(values[index])
+    return out
+
+
+def load_competition_token_memmap(path: str | Path) -> np.memmap:
+    """Read a Parameter-Golf challenge-format uint16 token shard as a memmap."""
+
+    file_path = Path(path)
+    header_bytes = 256 * np.dtype("<i4").itemsize
+    token_bytes = np.dtype("<u2").itemsize
+    header = np.fromfile(file_path, dtype="<i4", count=256)
+    if header.size != 256 or int(header[0]) != 20240520 or int(header[1]) != 1:
+        raise ValueError(f"unexpected challenge shard header for {file_path}")
+    num_tokens = int(header[2])
+    expected_size = header_bytes + num_tokens * token_bytes
+    if file_path.stat().st_size != expected_size:
+        raise ValueError(f"challenge shard size mismatch for {file_path}: expected {expected_size} bytes")
+    return np.memmap(file_path, dtype="<u2", mode="r", offset=header_bytes, shape=(num_tokens,))
+
+
+def _load_sentencepiece_tokenizer(tokenizer_path: str | Path):
+    try:
+        import sentencepiece as spm
+    except Exception:
+        return None
+    path = Path(tokenizer_path)
+    if not path.exists():
+        return None
+    processor = spm.SentencePieceProcessor()
+    try:
+        processor.Load(str(path))
+    except Exception:
+        return None
+    return processor
+
+
+def decode_sp1024_tokens(tokens: np.ndarray, tokenizer=None) -> str:
+    """Decode FineWeb sp1024 token ids to text, with a deterministic fallback."""
+
+    ids = [int(token) for token in np.asarray(tokens, dtype=np.int64).tolist()]
+    if tokenizer is not None:
+        try:
+            return str(tokenizer.DecodeIds(ids))
+        except Exception:
+            try:
+                return str(tokenizer.decode(ids))
+            except Exception:
+                pass
+    return " ".join(f"<sp{token}>" for token in ids)
 
 
 def stable_partition_id(
@@ -301,7 +368,13 @@ def graph_json_to_item(graph_json: str, cfg: ModelConfig) -> GraphTrainingItem:
         node_mask=node_mask,
         edge_mask=edge_mask,
     )
-    return GraphTrainingItem(graph=graph, target=target)
+    metadata = {
+        "dataset": payload.get("dataset", ""),
+        "task_family": payload.get("task_family", ""),
+        "record_id": payload.get("record_id", ""),
+        "trajectory_kind": payload.get("trajectory_kind", ""),
+    }
+    return GraphTrainingItem(graph=graph, target=target, metadata=metadata)
 
 
 def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, torch.Tensor]:
@@ -319,7 +392,7 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
 
 
 class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
-    """Stream graph records from curated Parquet or normalized JSONL files."""
+    """Stream graph records from curated Parquet, JSONL, or FineWeb token shards."""
 
     def __init__(
         self,
@@ -330,19 +403,28 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
         num_subsets: int = 1,
         subset_salt: int = 17,
         subset_columns: tuple[str, ...] = ("group_hash", "content_hash", "record_id"),
+        interleave_paths: bool = False,
+        fineweb_tokenizer_path: str | Path = "amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model",
+        fineweb_tokens_per_graph: int = 1024,
+        fineweb_stride_tokens: int = 1024,
     ) -> None:
         super().__init__()
         if num_subsets < 1:
             raise ValueError("num_subsets must be positive")
         if subset_id is not None and not (0 <= subset_id < num_subsets):
             raise ValueError("subset_id must be in [0, num_subsets)")
-        self.paths = expand_dataset_paths(paths)
+        expanded_paths = expand_dataset_paths(paths)
+        self.paths = interleave_dataset_paths(expanded_paths) if interleave_paths else expanded_paths
         self.cfg = cfg
         self.parquet_batch_size = parquet_batch_size
         self.subset_id = subset_id
         self.num_subsets = num_subsets
         self.subset_salt = subset_salt
         self.subset_columns = subset_columns
+        self.interleave_paths = bool(interleave_paths)
+        self.fineweb_tokenizer_path = Path(fineweb_tokenizer_path)
+        self.fineweb_tokens_per_graph = max(1, int(fineweb_tokens_per_graph))
+        self.fineweb_stride_tokens = max(1, int(fineweb_stride_tokens))
 
     def _keep_record(self, record: dict[str, object]) -> bool:
         if self.subset_id is None:
@@ -352,29 +434,77 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
             values = [record.get("graph_json", "")]
         return stable_partition_id(values, self.num_subsets, self.subset_salt) == self.subset_id
 
+    def _iter_jsonl_path(self, path: Path):
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                if self._keep_record(record):
+                    yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg)
+
+    def _iter_parquet_path(self, path: Path):
+        parquet_file = pq.ParquetFile(path)
+        available = set(parquet_file.schema_arrow.names)
+        columns = [column for column in TEXT_COLUMNS if column in available]
+        if "graph_json" not in columns and not columns:
+            columns = list(parquet_file.schema_arrow.names)
+        if self.subset_id is not None:
+            columns.extend(column for column in self.subset_columns if column in available)
+        columns = sorted(set(columns))
+        for batch in parquet_file.iter_batches(batch_size=self.parquet_batch_size, columns=columns):
+            batch_dict = batch.to_pydict()
+            row_count = len(next(iter(batch_dict.values()))) if batch_dict else 0
+            for row_idx in range(row_count):
+                record = {column: batch_dict[column][row_idx] for column in batch_dict}
+                if self._keep_record(record):
+                    yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg)
+
+    def _iter_fineweb_bin_path(self, path: Path):
+        tokens = load_competition_token_memmap(path)
+        tokenizer = _load_sentencepiece_tokenizer(self.fineweb_tokenizer_path)
+        chunk = self.fineweb_tokens_per_graph
+        stride = self.fineweb_stride_tokens
+        if int(tokens.shape[0]) < chunk:
+            starts = [0]
+        else:
+            starts = range(0, int(tokens.shape[0]) - chunk + 1, stride)
+        for start in starts:
+            end = min(int(start) + chunk, int(tokens.shape[0]))
+            token_slice = np.asarray(tokens[int(start) : end], dtype=np.int32)
+            record_id = f"{path.stem}:{int(start)}:{int(end)}"
+            record = {
+                "dataset": "fineweb10B_sp1024",
+                "source": str(path),
+                "task_family": "fineweb_language_modeling_graph",
+                "record_id": record_id,
+                "content_hash": hashlib.blake2b(token_slice.tobytes(), digest_size=12).hexdigest(),
+                "text": decode_sp1024_tokens(token_slice, tokenizer=tokenizer),
+            }
+            if self._keep_record(record):
+                yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg)
+
+    def _iter_path(self, path: Path):
+        if path.suffix == ".jsonl":
+            yield from self._iter_jsonl_path(path)
+        elif path.suffix == ".bin":
+            yield from self._iter_fineweb_bin_path(path)
+        else:
+            yield from self._iter_parquet_path(path)
+
     def __iter__(self):
-        for path in self.paths:
-            if path.suffix == ".jsonl":
-                with path.open("r", encoding="utf-8") as handle:
-                    for line in handle:
-                        if not line.strip():
-                            continue
-                        record = json.loads(line)
-                        if self._keep_record(record):
-                            yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg)
-            else:
-                parquet_file = pq.ParquetFile(path)
-                available = set(parquet_file.schema_arrow.names)
-                columns = [column for column in TEXT_COLUMNS if column in available]
-                if "graph_json" not in columns and not columns:
-                    columns = list(parquet_file.schema_arrow.names)
-                if self.subset_id is not None:
-                    columns.extend(column for column in self.subset_columns if column in available)
-                columns = sorted(set(columns))
-                for batch in parquet_file.iter_batches(batch_size=self.parquet_batch_size, columns=columns):
-                    batch_dict = batch.to_pydict()
-                    row_count = len(next(iter(batch_dict.values()))) if batch_dict else 0
-                    for row_idx in range(row_count):
-                        record = {column: batch_dict[column][row_idx] for column in batch_dict}
-                        if self._keep_record(record):
-                            yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg)
+        if not self.interleave_paths:
+            for path in self.paths:
+                yield from self._iter_path(path)
+            return
+        active = [(path, iter(self._iter_path(path))) for path in self.paths]
+        index = 0
+        while active:
+            path, iterator = active[index]
+            try:
+                yield next(iterator)
+                index = (index + 1) % len(active)
+            except StopIteration:
+                active.pop(index)
+                if active:
+                    index %= len(active)

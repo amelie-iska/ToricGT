@@ -11,9 +11,15 @@ notes:
 data:
   data_path:
     - data/curated_hf_shards/train/*.parquet
+    - amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_train_*.bin
   val_data_path:
     - data/curated_hf_shards/validation/*.parquet
+    - amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_val_*.bin
   parquet_batch_size: 512
+  interleave_data_paths: true
+  fineweb_tokenizer_path: amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model
+  fineweb_tokens_per_graph: 4096
+  fineweb_stride_tokens: 2048
   full_dataset_run: true
   fineweb_mix_ratio: 0.65
   target_artifact_bytes: 16000000

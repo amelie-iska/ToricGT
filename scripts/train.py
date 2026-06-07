@@ -212,6 +212,13 @@ def main() -> None:
     parser.add_argument("--soft-moe-slots", type=int, default=2)
     parser.add_argument("--data-path", action="append", default=[], help="Curated Parquet path. Can be repeated.")
     parser.add_argument("--parquet-batch-size", type=int, default=512)
+    parser.add_argument("--interleave-data-paths", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--fineweb-tokenizer-path",
+        default="amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model",
+    )
+    parser.add_argument("--fineweb-tokens-per-graph", type=int, default=1024)
+    parser.add_argument("--fineweb-stride-tokens", type=int, default=1024)
     parser.add_argument("--d-model", type=int, default=192)
     parser.add_argument("--num-heads", type=int, default=6)
     parser.add_argument("--num-layers", type=int, default=6)
@@ -335,7 +342,15 @@ def main() -> None:
     subset_iters: list[object] = []
     if args.data_path:
         if curriculum is None:
-            dataset = CuratedGraphIterableDataset(args.data_path, model_cfg, parquet_batch_size=args.parquet_batch_size)
+            dataset = CuratedGraphIterableDataset(
+                args.data_path,
+                model_cfg,
+                parquet_batch_size=args.parquet_batch_size,
+                interleave_paths=args.interleave_data_paths,
+                fineweb_tokenizer_path=args.fineweb_tokenizer_path,
+                fineweb_tokens_per_graph=args.fineweb_tokens_per_graph,
+                fineweb_stride_tokens=args.fineweb_stride_tokens,
+            )
             loader = DataLoader(dataset, batch_size=train_cfg.batch_size, collate_fn=collate_graph_items, num_workers=0)
             data_iter = iter(loader)
         else:
@@ -347,6 +362,10 @@ def main() -> None:
                     subset_id=subset_id,
                     num_subsets=curriculum.num_subsets,
                     subset_salt=args.expert_curriculum_salt,
+                    interleave_paths=args.interleave_data_paths,
+                    fineweb_tokenizer_path=args.fineweb_tokenizer_path,
+                    fineweb_tokens_per_graph=args.fineweb_tokens_per_graph,
+                    fineweb_stride_tokens=args.fineweb_stride_tokens,
                 )
                 subset_loader = DataLoader(
                     dataset,
@@ -358,7 +377,15 @@ def main() -> None:
                 subset_iters.append(iter(subset_loader))
     val_loader = None
     if args.val_data_path:
-        val_dataset = CuratedGraphIterableDataset(args.val_data_path, model_cfg, parquet_batch_size=args.parquet_batch_size)
+        val_dataset = CuratedGraphIterableDataset(
+            args.val_data_path,
+            model_cfg,
+            parquet_batch_size=args.parquet_batch_size,
+            interleave_paths=args.interleave_data_paths,
+            fineweb_tokenizer_path=args.fineweb_tokenizer_path,
+            fineweb_tokens_per_graph=args.fineweb_tokens_per_graph,
+            fineweb_stride_tokens=args.fineweb_stride_tokens,
+        )
         val_loader = DataLoader(val_dataset, batch_size=train_cfg.batch_size, collate_fn=collate_graph_items, num_workers=0)
 
     run = None
@@ -383,6 +410,10 @@ def main() -> None:
                 "derived_category_example_samples": args.derived_category_example_samples,
                 "full_dataset_run": args.full_dataset_run,
                 "fineweb_mix_ratio": args.fineweb_mix_ratio,
+                "interleave_data_paths": args.interleave_data_paths,
+                "fineweb_tokenizer_path": args.fineweb_tokenizer_path,
+                "fineweb_tokens_per_graph": args.fineweb_tokens_per_graph,
+                "fineweb_stride_tokens": args.fineweb_stride_tokens,
                 "target_artifact_bytes": args.target_artifact_bytes,
             },
         )
@@ -586,6 +617,9 @@ def main() -> None:
                 "train/step": step,
                 "data/full_curated_train_split_active": float(bool(args.full_dataset_run)),
                 "data/fineweb_mix_ratio": args.fineweb_mix_ratio,
+                "data/interleave_data_paths": float(bool(args.interleave_data_paths)),
+                "data/fineweb_tokens_per_graph": float(args.fineweb_tokens_per_graph),
+                "data/fineweb_stride_tokens": float(args.fineweb_stride_tokens),
                 "artifact/target_size_limit_bytes": args.target_artifact_bytes,
             }
             for key, value in got_metric_sums.items():
