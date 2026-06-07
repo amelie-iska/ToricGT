@@ -25,6 +25,7 @@ class GraphBatch:
     lm_input_ids: Optional[torch.Tensor] = None
     lm_target_ids: Optional[torch.Tensor] = None
     lm_mask: Optional[torch.Tensor] = None
+    lm_target_byte_lengths: Optional[torch.Tensor] = None
 
 
 @dataclass

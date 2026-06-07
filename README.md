@@ -8,6 +8,8 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 
 ![Dark-mode ToricGT torus reasoning animation](assets/toricgt_torus_reasoning_dark.gif)
 
+![ToricGT GoT Reasoning Trajectory in Toric Embedding Space](assets/toricgt_pg_softmoe_figures/GoT-ToricGT.png)
+
 <p align="center">
   <a href="./assets/toricgt_paper_pg_softmoe_final.tex"><img src="https://img.shields.io/badge/arXiv-94133F?style=for-the-badge&logo=arxiv" alt="arXiv"/></a>
   <a href="https://github.com/amelie-iska/ToricGT/"><img src="https://img.shields.io/badge/📝%20GitHub-007A87?style=for-the-badge&logoColor=grey" alt="GitHub"/></a>
@@ -74,6 +76,9 @@ the likelihood/BPB objective:
 
 - `BPB / LM`: the primary objective is byte-level negative log likelihood,
   `BPB = loss / log(2)` when the scored units are bytes.
+  TokenGT graph-node FineWeb metrics are reported separately as SP1024
+  bits/token plus a decoded-byte estimated BPB proxy; only the byte-level
+  evaluator writes official OpenAI Parameter-Golf BPB.
 - `GFlowNet trajectory balance`: for a sampled graph-of-thought trajectory
   `tau`, `L_TB = (log Z + sum log P_F - log R(tau) - sum log P_B)^2`.
 - `GraphCG disentanglement`: learned basis vectors should align with reusable
@@ -1002,6 +1007,15 @@ loads the GPT-style checkpoint directly and future live reviews write
 `oai_competition/seq4096_summary.json`. The default live-review invocation is a
 sampled CPU probe for checkpoint/alias sanity; the trainer's full validation
 BPB is still the authoritative OpenAI Parameter-Golf gate.
+
+TokenGT graph checkpoints expose a different FineWeb readout through their
+optional graph-node SP1024 LM head. That path logs
+`tokengt/*_graph_node_sp1024_bpt` and
+`tokengt/*_graph_node_sp1024_estimated_bpb`, where the estimate divides
+SP1024 bits/token by the decoded UTF-8 bytes/token on the sampled shard. Those
+two metrics are useful for transfer diagnostics, but they are not aliases for
+`oai_competition/bpb` or
+`03_validation/oai_parameter_golf_restricted_fineweb_bpb`.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a

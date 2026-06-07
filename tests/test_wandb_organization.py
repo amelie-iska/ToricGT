@@ -73,6 +73,29 @@ def test_restricted_fineweb_oai_bpb_is_validation_metric() -> None:
     assert organized["03_validation/oai_parameter_golf_restricted_fineweb_tokens"] == 32768.0
 
 
+def test_tokengt_graph_node_sp1024_metrics_are_not_official_oai_bpb() -> None:
+    payload = {
+        "trainer/step": 500,
+        "tokengt/train_graph_node_sp1024_bpt": 8.7,
+        "tokengt/train_graph_node_sp1024_estimated_bpb": 2.9,
+        "tokengt/restricted_fineweb_graph_node_sp1024_bpt": 8.5,
+        "tokengt/restricted_fineweb_graph_node_sp1024_estimated_bpb": 2.8,
+        "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_available": 0.0,
+    }
+
+    organized = organize_wandb_payload(payload)
+
+    assert organized["00_primary/tokengt_train_sp1024_bpt"] == 8.7
+    assert organized["00_primary/tokengt_train_estimated_bpb"] == 2.9
+    assert organized["00_primary/tokengt_restricted_sp1024_bpt"] == 8.5
+    assert organized["00_primary/tokengt_restricted_estimated_bpb"] == 2.8
+    assert organized["02_train/train_graph_node_sp1024_bpt"] == 8.7
+    assert organized["03_validation/restricted_fineweb_graph_node_sp1024_bpt"] == 8.5
+    assert "00_primary/oai_parameter_golf_restricted_fineweb_bpb" not in organized
+    assert "03_validation/oai_parameter_golf_restricted_fineweb_bpb" not in organized
+    assert organized["03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_available"] == 0.0
+
+
 def test_visible_metric_prefixes_pass_through() -> None:
     payload = {
         "trainer/step": 500,

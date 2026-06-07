@@ -365,23 +365,30 @@ def record_to_graph_json(record: dict[str, object], cfg: ModelConfig) -> str:
 def _lm_tensors_from_tokens(
     tokens: np.ndarray | None,
     cfg: ModelConfig,
-) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+    tokenizer=None,
+) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
     if tokens is None:
-        return None, None, None
+        return None, None, None, None
     token_ids = np.asarray(tokens, dtype=np.int64).reshape(-1)
     if token_ids.size < 2:
-        return None, None, None
+        return None, None, None, None
     length = min(int(cfg.max_nodes), int(token_ids.size) - 1)
     if length <= 0:
-        return None, None, None
+        return None, None, None, None
     vocab_size = max(1, int(getattr(cfg, "lm_vocab_size", 1024)))
     input_ids = torch.zeros(cfg.max_nodes, dtype=torch.long)
     target_ids = torch.zeros(cfg.max_nodes, dtype=torch.long)
     lm_mask = torch.zeros(cfg.max_nodes, dtype=torch.bool)
+    target_byte_lengths = torch.zeros(cfg.max_nodes, dtype=torch.float32)
     input_ids[:length] = torch.from_numpy(np.clip(token_ids[:length], 0, vocab_size - 1)).long()
-    target_ids[:length] = torch.from_numpy(np.clip(token_ids[1 : length + 1], 0, vocab_size - 1)).long()
+    target_slice = np.clip(token_ids[1 : length + 1], 0, vocab_size - 1)
+    target_ids[:length] = torch.from_numpy(target_slice).long()
     lm_mask[:length] = True
-    return input_ids, target_ids, lm_mask
+    if tokenizer is not None:
+        decoded = decode_sp1024_tokens(target_slice, tokenizer)
+        total_bytes = max(1, len(decoded.encode("utf-8", errors="replace")))
+        target_byte_lengths[:length] = float(total_bytes) / float(length)
+    return input_ids, target_ids, lm_mask, target_byte_lengths
 
 
 def graph_json_to_item(
@@ -389,6 +396,7 @@ def graph_json_to_item(
     cfg: ModelConfig,
     *,
     lm_tokens: np.ndarray | None = None,
+    tokenizer=None,
 ) -> GraphTrainingItem:
     raw_payload = json.loads(graph_json or "{}")
     is_fineweb_lm_graph = (
@@ -440,7 +448,7 @@ def graph_json_to_item(
     target = torch.zeros(cfg.max_nodes, cfg.output_dim, dtype=torch.float32)
     copy_dim = min(cfg.output_dim, cfg.node_feature_dim)
     target[:, :copy_dim] = node_features[:, :copy_dim]
-    lm_input_ids, lm_target_ids, lm_mask = _lm_tensors_from_tokens(lm_tokens, cfg)
+    lm_input_ids, lm_target_ids, lm_mask, lm_target_byte_lengths = _lm_tensors_from_tokens(lm_tokens, cfg, tokenizer)
     graph = GraphBatch(
         node_features=node_features,
         edge_features=edge_features,
@@ -450,6 +458,7 @@ def graph_json_to_item(
         lm_input_ids=lm_input_ids,
         lm_target_ids=lm_target_ids,
         lm_mask=lm_mask,
+        lm_target_byte_lengths=lm_target_byte_lengths,
     )
     metadata = {
         "dataset": payload.get("dataset", ""),
@@ -467,6 +476,7 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
     lm_input_ids = None
     lm_target_ids = None
     lm_mask = None
+    lm_target_byte_lengths = None
     if any_lm:
         lm_input_ids = torch.stack(
             [
@@ -492,6 +502,14 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
                 for item in items
             ]
         )
+        lm_target_byte_lengths = torch.stack(
+            [
+                item.graph.lm_target_byte_lengths
+                if item.graph.lm_target_byte_lengths is not None
+                else torch.zeros_like(items[0].graph.node_mask, dtype=torch.float32)
+                for item in items
+            ]
+        )
     graph = GraphBatch(
         node_features=torch.stack([item.graph.node_features for item in items]),
         edge_features=torch.stack([item.graph.edge_features for item in items]),
@@ -501,6 +519,7 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
         lm_input_ids=lm_input_ids,
         lm_target_ids=lm_target_ids,
         lm_mask=lm_mask,
+        lm_target_byte_lengths=lm_target_byte_lengths,
     )
     target = torch.stack([item.target for item in items])
     return graph, target
@@ -579,6 +598,7 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
 
     def _iter_fineweb_bin_path(self, path: Path):
         tokens = load_competition_token_memmap(path)
+        tokenizer = _load_sentencepiece_tokenizer(self.fineweb_tokenizer_path)
         chunk = self.fineweb_tokens_per_graph
         stride = self.fineweb_stride_tokens
         if int(tokens.shape[0]) < chunk:
@@ -607,6 +627,7 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
                     ),
                     self.cfg,
                     lm_tokens=token_slice,
+                    tokenizer=tokenizer,
                 )
 
     def _iter_path(self, path: Path):

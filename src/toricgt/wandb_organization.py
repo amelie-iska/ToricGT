@@ -210,6 +210,11 @@ def _category_alias(key: str) -> str | None:
         return f"01_oai/fineweb/{rest}"
     if key.startswith("fineweb_calibration/"):
         return f"01_oai/fineweb_calibration/{key.split('/', 1)[1]}"
+    if key.startswith("tokengt/"):
+        rest = key.split("/", 1)[1]
+        if rest.startswith("train_"):
+            return f"02_train/{rest}"
+        return f"03_validation/{rest}"
     if key.startswith("bpb/"):
         rest = key.split("/", 1)[1]
         if rest == "val":
@@ -370,6 +375,33 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     )
     _add_first(out, payload, "00_primary/train_bpb", ("train/bpb", "fineweb/train_bpb", "bpb/train"))
     _add_first(out, payload, "00_primary/validation_bpb", ("val/bpb", "fineweb/val_bpb", "bpb/val"))
+    _add_first(
+        out,
+        payload,
+        "00_primary/tokengt_train_sp1024_bpt",
+        ("tokengt/train_graph_node_sp1024_bpt",),
+    )
+    _add_first(
+        out,
+        payload,
+        "00_primary/tokengt_train_estimated_bpb",
+        ("tokengt/train_graph_node_sp1024_estimated_bpb",),
+    )
+    _add_first(
+        out,
+        payload,
+        "00_primary/tokengt_restricted_sp1024_bpt",
+        ("tokengt/restricted_fineweb_graph_node_sp1024_bpt", "tokengt/fineweb_graph_node_sp1024_bpt"),
+    )
+    _add_first(
+        out,
+        payload,
+        "00_primary/tokengt_restricted_estimated_bpb",
+        (
+            "tokengt/restricted_fineweb_graph_node_sp1024_estimated_bpb",
+            "tokengt/fineweb_graph_node_sp1024_estimated_bpb",
+        ),
+    )
     _add_first(
         out,
         payload,

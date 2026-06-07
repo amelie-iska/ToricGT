@@ -2126,6 +2126,52 @@ Under these conditions the reported objective is
   =\frac{\sum_{t=1}^{T}-\log_2 q_t(b_t\mid b_{<t})}{\sum_{t=1}^{T}\ell(t)}.
 \end{equation}
 
+\paragraph{Metric taxonomy and SP1024 conversion.}
+The implementation keeps three FineWeb quantities separate.  The official
+Parameter-Golf quantity is the byte-denominated score above; it is logged only
+when a byte-level or score-before-update evaluator has actually produced it.
+The TokenGT research model also exposes a graph-node SP1024 language-model
+head.  For a graph batch with SP1024 targets $z_1,\ldots,z_m$ and graph-node
+predictive distributions $p_i$, its native scalar is
+\begin{equation}
+  \operatorname{BPT}_{\mathrm{SP1024}}
+  =
+  \frac{1}{m}\sum_{i=1}^{m}-\log_2 p_i(z_i),
+\end{equation}
+bits per SP1024 graph node.  This number is useful for checking whether the
+graph LM head is learning, but it is not the Parameter-Golf BPB because its
+denominator is graph-token count, not UTF-8 bytes.  When the SP1024 shard and
+tokenizer are available, ToricGT also reports a sample-aligned byte-normalized
+proxy.  Let $D(z_{1:m})$ be the UTF-8 string obtained by decoding the scored
+target SP1024 sequence and set
+\begin{equation}
+  \widehat\rho_{\mathrm{bytes/token}}
+  =
+  \frac{\operatorname{bytes}(D(z_{1:m}))}{m}.
+\end{equation}
+Then the reported proxy is
+\begin{equation}
+  \widehat{\operatorname{BPB}}_{\mathrm{SP1024}\to\mathrm{byte}}
+  =
+  \frac{\operatorname{BPT}_{\mathrm{SP1024}}}
+       {\widehat\rho_{\mathrm{bytes/token}}}
+  =
+  \frac{\sum_i-\log_2 p_i(z_i)}
+       {\operatorname{bytes}(D(z_{1:m}))}.
+\end{equation}
+This conversion is valid as a diagnostic normalization for the graph-node
+head, and it is often more interpretable than raw SP1024 bits/token.  It is
+still marked as estimated because the model being scored is not emitting a
+byte-level next-symbol distribution over the same prequential process.  Thus
+dashboards must display all three concepts under different names:
+\[
+\operatorname{BPB}_{\mathrm{OAI,official}},\qquad
+\operatorname{BPT}_{\mathrm{SP1024,TokenGT}},\qquad
+\widehat{\operatorname{BPB}}_{\mathrm{SP1024}\to\mathrm{byte}}.
+\]
+Only the first should decide Parameter-Golf success; the latter two guide
+TokenGT training and ablations.
+
 \begin{proposition}[Score-before-update prevents validation leakage]
 Assume $q_t$ satisfies strict prefix dependence and the online state update has the form $s_{t+1}=U(s_t,b_t)$ after the loss term at $t$ is recorded.  Then the cumulative validation loss is a proper left-to-right log score and no term in the sum can depend on future validation bytes.
 \end{proposition}
@@ -3349,6 +3395,19 @@ The same algebraic comparison appears in four places.
   so high-reward reasoning paths are encouraged to live in coherent components or controlled degenerations of varieties of complexes.
   \item \textbf{Checkpoint analysis.}  Periodic analyses render Betti tables, Taylor ranks, Hochster rows, Fitting summaries, DG product tables, cone residuals, and degeneration movement across checkpoints.  A metric becomes a train-time loss only after this exact sidecar evidence agrees with the differentiable surrogate and BPB does not regress.
 \end{enumerate}
+
+In the live TokenGT training loop this distinction is enforced operationally.
+Derived-category losses are active from step zero at micro weights: the
+chain-map residual, mapping-cone residual, projective-resolution distance,
+Betti transport residual, exact projective dimension, exact regularity, and
+minimal total Betti mass are logged under the toric--tropical--BGG metric
+family.  The differentiable train-time term is intentionally small, while
+periodic sidecars write exact finite certificates for review.  These losses
+can shape graph-of-thought hidden trajectories, memory retrieval, analogy, and
+GFlowNet rewards, but they do not by themselves authorize an official
+Parameter-Golf BPB claim.  Official byte BPB, TokenGT SP1024 bits/token, and
+SP1024-to-byte estimated BPB are therefore reported simultaneously and kept in
+separate namespaces.
 
 \paragraph{Pseudocode.}
 The implementation is deliberately audit-first.

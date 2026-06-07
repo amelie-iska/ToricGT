@@ -233,6 +233,7 @@ def move_batch(batch: GraphBatch, target: torch.Tensor, device: str) -> tuple[Gr
             lm_input_ids=_optional_to_device(batch.lm_input_ids, device),
             lm_target_ids=_optional_to_device(batch.lm_target_ids, device),
             lm_mask=_optional_to_device(batch.lm_mask, device),
+            lm_target_byte_lengths=_optional_to_device(batch.lm_target_byte_lengths, device),
         ),
         target.to(device),
     )
@@ -277,11 +278,24 @@ def fineweb_lm_metrics(out: dict[str, torch.Tensor], batch: GraphBatch) -> dict[
     selected_targets = targets[mask]
     loss = F.cross_entropy(selected_logits, selected_targets)
     tokens = mask.sum().to(dtype=loss.dtype)
-    return {
+    metrics = {
         "loss": loss,
-        "bpb": loss / math.log(2.0),
+        "bits_per_token": loss / math.log(2.0),
         "tokens": tokens,
     }
+    if batch.lm_target_byte_lengths is not None:
+        byte_lengths = batch.lm_target_byte_lengths.to(device=logits.device, dtype=loss.dtype)[mask]
+        estimated_bytes = byte_lengths.clamp_min(0.0).sum()
+        if bool((estimated_bytes > 0).detach().cpu()):
+            estimated_bits = loss * tokens / math.log(2.0)
+            metrics.update(
+                {
+                    "estimated_bpb": estimated_bits / estimated_bytes.clamp_min(1e-6),
+                    "estimated_bytes": estimated_bytes,
+                    "mean_target_bytes_per_token": estimated_bytes / tokens.clamp_min(1.0),
+                }
+            )
+    return metrics
 
 
 @torch.no_grad()
@@ -297,6 +311,7 @@ def evaluate_loader(
     count = 0
     lm_nll_total = 0.0
     lm_tokens_total = 0.0
+    lm_estimated_bytes_total = 0.0
     data_iter = iter(loader)
     for _ in range(max_batches):
         try:
@@ -314,6 +329,8 @@ def evaluate_loader(
             tokens = float(lm["tokens"].detach().cpu())
             lm_nll_total += float(lm["loss"].detach().cpu()) * tokens
             lm_tokens_total += tokens
+            if "estimated_bytes" in lm:
+                lm_estimated_bytes_total += float(lm["estimated_bytes"].detach().cpu())
     model.train()
     metrics = {"masked_mse": total / max(count, 1)}
     if lm_tokens_total > 0:
@@ -321,10 +338,18 @@ def evaluate_loader(
         metrics.update(
             {
                 "fineweb_lm_loss": lm_loss,
-                "fineweb_lm_bpb": lm_loss / math.log(2.0),
+                "fineweb_lm_bits_per_token": lm_loss / math.log(2.0),
                 "fineweb_lm_tokens": lm_tokens_total,
             }
         )
+        if lm_estimated_bytes_total > 0:
+            metrics.update(
+                {
+                    "fineweb_lm_estimated_bpb": (lm_nll_total / math.log(2.0)) / lm_estimated_bytes_total,
+                    "fineweb_lm_estimated_bytes": lm_estimated_bytes_total,
+                    "fineweb_lm_mean_target_bytes_per_token": lm_estimated_bytes_total / lm_tokens_total,
+                }
+            )
     return metrics
 
 
@@ -726,6 +751,7 @@ def main() -> None:
         trajectory_memory_dag_similarity_value = 0.0
         fineweb_lm_nll_value = 0.0
         fineweb_lm_tokens_value = 0.0
+        fineweb_lm_estimated_bytes_value = 0.0
         derived_category_loss_value = 0.0
         got_metric_sums: dict[str, float] = {}
         trajectory_metric_sums: dict[str, float] = {}
@@ -842,6 +868,8 @@ def main() -> None:
                 lm_tokens = float(fineweb_lm["tokens"].detach().cpu())
                 fineweb_lm_nll_value += float(fineweb_lm["loss"].detach().cpu()) * lm_tokens
                 fineweb_lm_tokens_value += lm_tokens
+                if "estimated_bytes" in fineweb_lm:
+                    fineweb_lm_estimated_bytes_value += float(fineweb_lm["estimated_bytes"].detach().cpu())
             if got_metrics is not None:
                 got_dag_loss_value += float(got_metrics["got_dag_loss"].detach())
                 for key, value in got_metrics.items():
@@ -881,7 +909,17 @@ def main() -> None:
         mean_trajectory_memory_entropy = trajectory_memory_entropy_value / max(train_cfg.grad_accum_steps, 1)
         mean_trajectory_memory_dag_similarity = trajectory_memory_dag_similarity_value / max(train_cfg.grad_accum_steps, 1)
         mean_fineweb_lm_loss = fineweb_lm_nll_value / fineweb_lm_tokens_value if fineweb_lm_tokens_value > 0 else 0.0
-        mean_fineweb_lm_bpb = mean_fineweb_lm_loss / math.log(2.0) if fineweb_lm_tokens_value > 0 else 0.0
+        mean_fineweb_lm_bits_per_token = mean_fineweb_lm_loss / math.log(2.0) if fineweb_lm_tokens_value > 0 else 0.0
+        mean_fineweb_lm_estimated_bpb = (
+            (fineweb_lm_nll_value / math.log(2.0)) / fineweb_lm_estimated_bytes_value
+            if fineweb_lm_estimated_bytes_value > 0
+            else 0.0
+        )
+        mean_fineweb_lm_bytes_per_token = (
+            fineweb_lm_estimated_bytes_value / fineweb_lm_tokens_value
+            if fineweb_lm_tokens_value > 0 and fineweb_lm_estimated_bytes_value > 0
+            else 0.0
+        )
         mean_derived_category_loss = derived_category_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_distill_loss = distill_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_teacher_loss = teacher_loss_value / max(train_cfg.grad_accum_steps, 1)
@@ -929,14 +967,21 @@ def main() -> None:
             if fineweb_lm_tokens_value > 0:
                 metrics.update(
                     {
-                        "fineweb/train_loss": mean_fineweb_lm_loss,
-                        "fineweb/train_bpb": mean_fineweb_lm_bpb,
-                        "fineweb/train_tokens": fineweb_lm_tokens_value,
+                        "tokengt/train_graph_node_sp1024_loss": mean_fineweb_lm_loss,
+                        "tokengt/train_graph_node_sp1024_bpt": mean_fineweb_lm_bits_per_token,
+                        "tokengt/train_graph_node_sp1024_tokens": fineweb_lm_tokens_value,
                         "train/fineweb_lm_loss": mean_fineweb_lm_loss,
-                        "train/fineweb_lm_bpb": mean_fineweb_lm_bpb,
                         "train/fineweb_lm_tokens": fineweb_lm_tokens_value,
                     }
                 )
+                if fineweb_lm_estimated_bytes_value > 0:
+                    metrics.update(
+                        {
+                            "tokengt/train_graph_node_sp1024_estimated_bpb": mean_fineweb_lm_estimated_bpb,
+                            "tokengt/train_graph_node_sp1024_estimated_bytes": fineweb_lm_estimated_bytes_value,
+                            "tokengt/train_graph_node_sp1024_mean_target_bytes_per_token": mean_fineweb_lm_bytes_per_token,
+                        }
+                    )
             metrics.update(artifact_metrics)
             for key, value in got_metric_sums.items():
                 metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
@@ -1070,44 +1115,74 @@ def main() -> None:
                 model.set_active_soft_moe_experts([assignment.active_expert])
             val_loss = float(val_metrics.get("masked_mse", 0.0))
             message = f"validation step={step + 1} masked_mse={val_loss:.6f}"
-            if "fineweb_lm_bpb" in val_metrics:
-                message += f" fineweb_bpb={val_metrics['fineweb_lm_bpb']:.6f}"
-            if "fineweb_lm_bpb" in restricted_fineweb_metrics:
+            if "fineweb_lm_bits_per_token" in val_metrics:
+                message += f" tokengt_sp1024_bpt={val_metrics['fineweb_lm_bits_per_token']:.6f}"
+                if "fineweb_lm_estimated_bpb" in val_metrics:
+                    message += f" tokengt_est_bpb={val_metrics['fineweb_lm_estimated_bpb']:.6f}"
+            if "fineweb_lm_bits_per_token" in restricted_fineweb_metrics:
                 message += (
-                    " restricted_fineweb_bpb="
-                    f"{restricted_fineweb_metrics['fineweb_lm_bpb']:.6f}"
+                    " restricted_tokengt_sp1024_bpt="
+                    f"{restricted_fineweb_metrics['fineweb_lm_bits_per_token']:.6f}"
                 )
+                if "fineweb_lm_estimated_bpb" in restricted_fineweb_metrics:
+                    message += (
+                        " restricted_tokengt_est_bpb="
+                        f"{restricted_fineweb_metrics['fineweb_lm_estimated_bpb']:.6f}"
+                    )
             pbar.write(message)
             if run is not None:
                 payload = {"val/masked_mse": val_loss, "trainer/step": step + 1, "train/step": step + 1}
-                if "fineweb_lm_bpb" in val_metrics:
+                if "fineweb_lm_bits_per_token" in val_metrics:
                     payload.update(
                         {
-                            "fineweb/val_loss": float(val_metrics["fineweb_lm_loss"]),
-                            "fineweb/val_bpb": float(val_metrics["fineweb_lm_bpb"]),
-                            "fineweb/val_tokens": float(val_metrics["fineweb_lm_tokens"]),
+                            "tokengt/fineweb_graph_node_sp1024_loss": float(val_metrics["fineweb_lm_loss"]),
+                            "tokengt/fineweb_graph_node_sp1024_bpt": float(val_metrics["fineweb_lm_bits_per_token"]),
+                            "tokengt/fineweb_graph_node_sp1024_tokens": float(val_metrics["fineweb_lm_tokens"]),
                             "val/fineweb_lm_loss": float(val_metrics["fineweb_lm_loss"]),
-                            "val/fineweb_lm_bpb": float(val_metrics["fineweb_lm_bpb"]),
                             "val/fineweb_lm_tokens": float(val_metrics["fineweb_lm_tokens"]),
                         }
                     )
-                if "fineweb_lm_bpb" in restricted_fineweb_metrics:
+                    if "fineweb_lm_estimated_bpb" in val_metrics:
+                        payload.update(
+                            {
+                                "tokengt/fineweb_graph_node_sp1024_estimated_bpb": float(
+                                    val_metrics["fineweb_lm_estimated_bpb"]
+                                ),
+                                "tokengt/fineweb_graph_node_sp1024_estimated_bytes": float(
+                                    val_metrics["fineweb_lm_estimated_bytes"]
+                                ),
+                                "tokengt/fineweb_graph_node_sp1024_mean_target_bytes_per_token": float(
+                                    val_metrics["fineweb_lm_mean_target_bytes_per_token"]
+                                ),
+                            }
+                        )
+                if "fineweb_lm_bits_per_token" in restricted_fineweb_metrics:
                     restricted_loss = float(restricted_fineweb_metrics["fineweb_lm_loss"])
-                    restricted_bpb = float(restricted_fineweb_metrics["fineweb_lm_bpb"])
+                    restricted_bpt = float(restricted_fineweb_metrics["fineweb_lm_bits_per_token"])
                     restricted_tokens = float(restricted_fineweb_metrics["fineweb_lm_tokens"])
                     payload.update(
                         {
-                            "openai_parameter_golf/restricted_fineweb_loss": restricted_loss,
-                            "openai_parameter_golf/restricted_fineweb_bpb": restricted_bpb,
-                            "openai_parameter_golf/restricted_fineweb_tokens": restricted_tokens,
-                            "fineweb/restricted_val_loss": restricted_loss,
-                            "fineweb/restricted_val_bpb": restricted_bpb,
-                            "fineweb/restricted_val_tokens": restricted_tokens,
-                            "03_validation/oai_parameter_golf_restricted_fineweb_loss": restricted_loss,
-                            "03_validation/oai_parameter_golf_restricted_fineweb_bpb": restricted_bpb,
-                            "03_validation/oai_parameter_golf_restricted_fineweb_tokens": restricted_tokens,
+                            "tokengt/restricted_fineweb_graph_node_sp1024_loss": restricted_loss,
+                            "tokengt/restricted_fineweb_graph_node_sp1024_bpt": restricted_bpt,
+                            "tokengt/restricted_fineweb_graph_node_sp1024_tokens": restricted_tokens,
+                            "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_available": 0.0,
+                            "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_note_code": 1.0,
                         }
                     )
+                    if "fineweb_lm_estimated_bpb" in restricted_fineweb_metrics:
+                        payload.update(
+                            {
+                                "tokengt/restricted_fineweb_graph_node_sp1024_estimated_bpb": float(
+                                    restricted_fineweb_metrics["fineweb_lm_estimated_bpb"]
+                                ),
+                                "tokengt/restricted_fineweb_graph_node_sp1024_estimated_bytes": float(
+                                    restricted_fineweb_metrics["fineweb_lm_estimated_bytes"]
+                                ),
+                                "tokengt/restricted_fineweb_graph_node_sp1024_mean_target_bytes_per_token": float(
+                                    restricted_fineweb_metrics["fineweb_lm_mean_target_bytes_per_token"]
+                                ),
+                            }
+                        )
                 run.log(organize_wandb_payload(payload))
         if args.checkpoint_every > 0 and (step + 1) % args.checkpoint_every == 0:
             save_checkpoint(

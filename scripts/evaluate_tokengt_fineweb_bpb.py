@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Evaluate TokenGT LM-head checkpoints on FineWeb SP1024 graph-node BPB.
+"""Evaluate TokenGT LM-head checkpoints on FineWeb SP1024 graph-node loss.
 
 This is the TokenGT checkpoint-family analogue of the OAI Parameter-Golf
 FineWeb check.  It scores next-token SP1024 targets that are attached to
 FineWeb graph vertices by ``CuratedGraphIterableDataset``.  The metric is not a
-byte-level random-order LM BPB; it is the graph-node SP1024 BPB exposed by
-TokenGT's optional LM head.
+byte-level random-order LM BPB; it is graph-node SP1024 bits/token exposed by
+TokenGT's optional LM head, with an optional sample-decoded byte-normalized
+estimate for comparison.
 """
 
 from __future__ import annotations
@@ -98,6 +99,9 @@ def move_batch(batch: GraphBatch, device: str) -> GraphBatch:
         lm_input_ids=batch.lm_input_ids.to(device) if batch.lm_input_ids is not None else None,
         lm_target_ids=batch.lm_target_ids.to(device) if batch.lm_target_ids is not None else None,
         lm_mask=batch.lm_mask.to(device) if batch.lm_mask is not None else None,
+        lm_target_byte_lengths=batch.lm_target_byte_lengths.to(device)
+        if batch.lm_target_byte_lengths is not None
+        else None,
     )
 
 
@@ -155,6 +159,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
 
     total_nll = 0.0
     total_tokens = 0.0
+    total_estimated_bytes = 0.0
     batches = 0
     max_batches = max(1, int(args.batches))
     with torch.no_grad():
@@ -176,6 +181,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 targets = batch.lm_target_ids.to(device=logits.device, dtype=torch.long).clamp(0, logits.shape[-1] - 1)
                 loss = F.cross_entropy(logits.float()[mask], targets[mask])
                 tokens = float(mask.sum().detach().cpu())
+                if batch.lm_target_byte_lengths is not None:
+                    byte_lengths = batch.lm_target_byte_lengths.to(device=logits.device, dtype=logits.float().dtype)[mask]
+                    total_estimated_bytes += float(byte_lengths.clamp_min(0.0).sum().detach().cpu())
             total_nll += float(loss.detach().cpu()) * tokens
             total_tokens += tokens
             batches += 1
@@ -185,41 +193,52 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     if total_tokens <= 0:
         return unavailable_summary(checkpoint_path, "no FineWeb LM target tokens were found during evaluation")
     loss_value = total_nll / total_tokens
-    bpb = loss_value / math.log(2.0)
+    bits_per_token = loss_value / math.log(2.0)
+    estimated_bpb = (total_nll / math.log(2.0)) / total_estimated_bytes if total_estimated_bytes > 0 else None
+    mean_bytes_per_token = total_estimated_bytes / total_tokens if total_estimated_bytes > 0 else None
     step = int(payload.get("step", 0) or 0)
     summary: dict[str, Any] = {
         "checkpoint": str(checkpoint_path),
         "step": step,
         "source": "tokengt_graph_node_sp1024_lm",
         "metric_namespace": "fineweb",
-        "note": "TokenGT graph-node SP1024 next-token BPB on the OAI FineWeb shard; not byte-level random-order LM BPB.",
-        "oai_competition/available": 1.0,
-        "oai_competition/bpb_available": 1.0,
+        "note": "TokenGT graph-node SP1024 next-token bits/token on the OAI FineWeb shard; estimated BPB divides by sample decoded UTF-8 bytes/token and is not official byte-level random-order LM BPB.",
+        "oai_competition/available": 0.0,
+        "oai_competition/bpb_available": 0.0,
         "oai_competition/source_sp1024_graph_nodes": 1.0,
         "oai_competition/official_byte_level_bpb_available": 0.0,
         "oai_competition/eval_scope": "tokengt_graph_node_sp1024_sampled",
-        "oai_competition/loss": float(loss_value),
-        "oai_competition/bpb": float(bpb),
-        "oai_competition/deterministic_loss": float(loss_value),
-        "oai_competition/deterministic_bpb": float(bpb),
         "oai_competition/eval_batches": float(batches),
         "oai_competition/eval_tokens": float(total_tokens),
-        "fineweb/val_loss": float(loss_value),
-        "fineweb/val_bpb": float(bpb),
-        "fineweb/val_tokens": float(total_tokens),
-        "fineweb/restricted_val_loss": float(loss_value),
-        "fineweb/restricted_val_bpb": float(bpb),
-        "fineweb/restricted_val_tokens": float(total_tokens),
-        "openai_parameter_golf/restricted_fineweb_loss": float(loss_value),
-        "openai_parameter_golf/restricted_fineweb_bpb": float(bpb),
-        "openai_parameter_golf/restricted_fineweb_tokens": float(total_tokens),
-        "03_validation/oai_parameter_golf_restricted_fineweb_loss": float(loss_value),
-        "03_validation/oai_parameter_golf_restricted_fineweb_bpb": float(bpb),
-        "03_validation/oai_parameter_golf_restricted_fineweb_tokens": float(total_tokens),
-        "tokengt/fineweb_graph_node_loss": float(loss_value),
-        "tokengt/fineweb_graph_node_bpb": float(bpb),
-        "bpb/oai_competition": float(bpb),
+        "tokengt/fineweb_graph_node_sp1024_loss": float(loss_value),
+        "tokengt/fineweb_graph_node_sp1024_bpt": float(bits_per_token),
+        "tokengt/fineweb_graph_node_sp1024_tokens": float(total_tokens),
+        "tokengt/restricted_fineweb_graph_node_sp1024_loss": float(loss_value),
+        "tokengt/restricted_fineweb_graph_node_sp1024_bpt": float(bits_per_token),
+        "tokengt/restricted_fineweb_graph_node_sp1024_tokens": float(total_tokens),
+        "03_validation/tokengt_fineweb_graph_node_sp1024_loss": float(loss_value),
+        "03_validation/tokengt_fineweb_graph_node_sp1024_bpt": float(bits_per_token),
+        "03_validation/tokengt_fineweb_graph_node_sp1024_tokens": float(total_tokens),
+        "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_available": 0.0,
     }
+    if estimated_bpb is not None and mean_bytes_per_token is not None:
+        summary.update(
+            {
+                "tokengt/fineweb_graph_node_sp1024_estimated_bpb": float(estimated_bpb),
+                "tokengt/fineweb_graph_node_sp1024_estimated_bytes": float(total_estimated_bytes),
+                "tokengt/fineweb_graph_node_sp1024_mean_target_bytes_per_token": float(mean_bytes_per_token),
+                "tokengt/restricted_fineweb_graph_node_sp1024_estimated_bpb": float(estimated_bpb),
+                "tokengt/restricted_fineweb_graph_node_sp1024_estimated_bytes": float(total_estimated_bytes),
+                "tokengt/restricted_fineweb_graph_node_sp1024_mean_target_bytes_per_token": float(
+                    mean_bytes_per_token
+                ),
+                "03_validation/tokengt_fineweb_graph_node_sp1024_estimated_bpb": float(estimated_bpb),
+                "03_validation/tokengt_fineweb_graph_node_sp1024_estimated_bytes": float(total_estimated_bytes),
+                "03_validation/tokengt_fineweb_graph_node_sp1024_mean_target_bytes_per_token": float(
+                    mean_bytes_per_token
+                ),
+            }
+        )
     return summary
 
 
@@ -228,14 +247,17 @@ def write_report(summary: dict[str, Any], output_json: Path) -> None:
     report.write_text(
         "\n".join(
             [
-                "# TokenGT FineWeb BPB",
+                "# TokenGT FineWeb Graph-Node SP1024 Metrics",
                 "",
                 f"- Checkpoint: `{summary.get('checkpoint', 'n/a')}`",
                 f"- Step: `{summary.get('step', 'n/a')}`",
                 f"- Source: `{summary.get('source', 'n/a')}`",
-                f"- BPB: `{summary.get('fineweb/val_bpb', summary.get('oai_competition/bpb', 'n/a'))}`",
-                f"- Loss: `{summary.get('fineweb/val_loss', summary.get('oai_competition/loss', 'n/a'))}`",
-                f"- Eval tokens: `{summary.get('fineweb/val_tokens', summary.get('oai_competition/eval_tokens', 'n/a'))}`",
+                f"- Bits/token: `{summary.get('tokengt/fineweb_graph_node_sp1024_bpt', 'n/a')}`",
+                f"- Estimated BPB: `{summary.get('tokengt/fineweb_graph_node_sp1024_estimated_bpb', 'n/a')}`",
+                f"- Loss: `{summary.get('tokengt/fineweb_graph_node_sp1024_loss', 'n/a')}`",
+                f"- Eval tokens: `{summary.get('tokengt/fineweb_graph_node_sp1024_tokens', 'n/a')}`",
+                f"- Estimated bytes: `{summary.get('tokengt/fineweb_graph_node_sp1024_estimated_bytes', 'n/a')}`",
+                f"- Official OAI byte BPB available: `{summary.get('oai_competition/official_byte_level_bpb_available', 0.0)}`",
                 "",
                 str(summary.get("note", summary.get("reason", ""))),
             ]
@@ -271,8 +293,12 @@ def main() -> None:
         output_json.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         write_report(summary, output_json)
     log_to_wandb(args.wandb_run_path, summary)
-    if summary.get("oai_competition/available") and not math.isfinite(float(summary["oai_competition/bpb"])):
-        raise RuntimeError(f"non-finite TokenGT FineWeb BPB: {summary['oai_competition/bpb']}")
+    if "tokengt/fineweb_graph_node_sp1024_bpt" in summary and not math.isfinite(
+        float(summary["tokengt/fineweb_graph_node_sp1024_bpt"])
+    ):
+        raise RuntimeError(
+            f"non-finite TokenGT FineWeb graph-node bits/token: {summary['tokengt/fineweb_graph_node_sp1024_bpt']}"
+        )
     print(json.dumps(summary, indent=2, sort_keys=True))
 
 
