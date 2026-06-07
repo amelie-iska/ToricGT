@@ -7,6 +7,7 @@ import argparse
 import gc
 import json
 import math
+import os
 import random
 from contextlib import nullcontext
 from dataclasses import asdict
@@ -43,6 +44,43 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def load_optional_training_tokens(path: str | Path = "keys.txt") -> None:
+    """Load local auth tokens without printing or checkpointing them."""
+
+    key_path = Path(path)
+    if not key_path.exists():
+        return
+    aliases = {
+        "hf_token": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HUB_TOKEN"),
+        "huggingface_token": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HUB_TOKEN"),
+        "hugging_face": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HUB_TOKEN"),
+        "hugging_face_token": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HUB_TOKEN"),
+        "wandb": ("WANDB_API_KEY",),
+        "wandb_token": ("WANDB_API_KEY",),
+        "wandb_api_key": ("WANDB_API_KEY",),
+    }
+    try:
+        lines = key_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            raw_key, raw_value = line.split("=", 1)
+        elif ":" in line:
+            raw_key, raw_value = line.split(":", 1)
+        else:
+            continue
+        key = raw_key.strip().lower().replace("-", "_").replace(" ", "_")
+        value = raw_value.strip().strip('"').strip("'")
+        if not value:
+            continue
+        for env_name in aliases.get(key, ()):
+            os.environ.setdefault(env_name, value)
 
 
 def autocast_context(device: str, precision: str):
@@ -361,6 +399,7 @@ def run_artifact_probe(
 
 
 def main() -> None:
+    load_optional_training_tokens()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=None, help="YAML file whose keys become CLI defaults.")
     parser.add_argument("--steps", type=int, default=100)

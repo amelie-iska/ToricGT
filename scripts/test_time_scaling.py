@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import json
 import subprocess
@@ -14,13 +15,28 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from toricgt.cli_config import apply_yaml_defaults, parse_config_path
+from toricgt.cli_config import flatten_cli_config, load_yaml_config, parse_config_path
 from toricgt.config import ModelConfig
 from toricgt.datasets import TEST_TIME_SCALING_DATASETS
 from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items
 from toricgt.graph_tokenizer import GraphBatch
 from toricgt.metrics import masked_mse
 from toricgt.model import ToricTokenGT
+
+
+def apply_known_yaml_defaults(parser: argparse.ArgumentParser, path: str | Path | None) -> None:
+    """Apply only this script's keys from a broader training YAML."""
+
+    payload = flatten_cli_config(load_yaml_config(path)) if path is not None else {}
+    if not payload:
+        return
+    # The trainer's full YAML contains train/validation paths. For this script,
+    # held-out test data should be selected explicitly or by the test-time
+    # scaling defaults, never inherited from the training split.
+    payload.pop("data_path", None)
+    payload.pop("val_data_path", None)
+    actions = {action.dest for action in parser._actions if action.dest != "help"}
+    parser.set_defaults(**{key: value for key, value in payload.items() if key in actions})
 
 
 def synthetic_batch(cfg: ModelConfig, batch_size: int, device: str) -> tuple[GraphBatch, torch.Tensor]:
@@ -45,6 +61,9 @@ def move_batch(batch: GraphBatch, target: torch.Tensor, device: str) -> tuple[Gr
             edge_index=batch.edge_index.to(device),
             node_mask=batch.node_mask.to(device),
             edge_mask=batch.edge_mask.to(device),
+            lm_input_ids=batch.lm_input_ids.to(device) if batch.lm_input_ids is not None else None,
+            lm_target_ids=batch.lm_target_ids.to(device) if batch.lm_target_ids is not None else None,
+            lm_mask=batch.lm_mask.to(device) if batch.lm_mask is not None else None,
         ),
         target.to(device),
     )
@@ -102,6 +121,20 @@ def sample_gflownet_stats(
     }
 
 
+def expanded_data_paths(raw_paths: list[str] | str | None) -> list[str] | None:
+    if raw_paths is None:
+        return None
+    values = [raw_paths] if isinstance(raw_paths, str) else list(raw_paths)
+    paths: list[str] = []
+    for value in values:
+        if any(token in value for token in ("*", "?", "[")):
+            matches = sorted(glob.glob(value))
+            paths.extend(matches or [value])
+        else:
+            paths.append(value)
+    return paths
+
+
 def make_loader(args: argparse.Namespace, cfg: ModelConfig):
     if args.data_path is None:
         return None
@@ -109,6 +142,7 @@ def make_loader(args: argparse.Namespace, cfg: ModelConfig):
         args.data_path,
         cfg,
         parquet_batch_size=args.parquet_batch_size,
+        interleave_paths=True,
     )
     return DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_graph_items, num_workers=0)
 
@@ -117,11 +151,11 @@ def default_new_eval_path(args: argparse.Namespace) -> str | None:
     if args.synthetic:
         return None
     if args.data_path is not None:
-        return args.data_path
+        return expanded_data_paths(args.data_path)
     eval_dir = Path(args.new_eval_dir)
     test_path = eval_dir / "test.parquet"
     if test_path.exists():
-        return str(test_path)
+        return [str(test_path)]
     if args.no_auto_curate_new_data:
         raise FileNotFoundError(
             f"{test_path} does not exist. Remove --no-auto-curate-new-data or pass --data-path explicitly."
@@ -158,7 +192,7 @@ def default_new_eval_path(args: argparse.Namespace) -> str | None:
         )
     )
     subprocess.run(cmd, check=True, env=env)
-    return str(test_path)
+    return [str(test_path)]
 
 
 def main() -> None:
@@ -167,6 +201,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument(
         "--data-path",
+        action="append",
         default=None,
         help="Curated test Parquet/JSONL path. Defaults to auto-curated OpenAI/NVIDIA held-out data.",
     )
@@ -187,10 +222,11 @@ def main() -> None:
     parser.add_argument("--curation-normalize-batch-size", type=int, default=256)
     parser.add_argument("--curation-chunk-size", type=int, default=5000)
     parser.add_argument("--output-json", default=None)
-    apply_yaml_defaults(parser, parse_config_path())
+    apply_known_yaml_defaults(parser, parse_config_path())
     args = parser.parse_args()
     if args.checkpoint is None:
         parser.error("--checkpoint is required unless supplied by --config")
+    used_default_new_eval = args.data_path is None and not args.synthetic
     args.data_path = default_new_eval_path(args)
 
     payload = torch.load(args.checkpoint, map_location=args.device, weights_only=False)
@@ -272,7 +308,7 @@ def main() -> None:
     payload_out = {
         "checkpoint": args.checkpoint,
         "data_path": args.data_path,
-        "default_test_time_scaling_datasets": list(TEST_TIME_SCALING_DATASETS) if not args.synthetic else [],
+        "default_test_time_scaling_datasets": list(TEST_TIME_SCALING_DATASETS) if used_default_new_eval else [],
         "budgets": args.budgets,
         "summary": summary,
     }

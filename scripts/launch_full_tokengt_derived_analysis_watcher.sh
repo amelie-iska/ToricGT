@@ -34,6 +34,8 @@ COMMAND=(env PYTHONPATH=src "$PYTHON_BIN" scripts/watch_training_analysis.py
   --output-root "$OUTPUT_ROOT"
   --config config/train.full_tokengt_got_fineweb_derived.yaml
   --data-glob 'data/curated_hf_shards/validation/*.parquet'
+  --test-data-glob 'data/curated_hf_shards/test/*.parquet'
+  --test-time-scaling-batches 8
   --device cpu
   --precision fp32
   --derived-category-example-dir "$CHECKPOINT_DIR/derived_category_examples"

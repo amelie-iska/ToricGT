@@ -72,6 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-path", default="")
     parser.add_argument("--output-root", default="outputs/post_resume_analysis")
     parser.add_argument("--data-glob", default="data/curated_hf_shards/validation/*.parquet")
+    parser.add_argument("--test-data-glob", default="data/curated_hf_shards/test/*.parquet")
     parser.add_argument("--config", default="config/train.parameter_golf_random_order_dense.yaml")
     parser.add_argument("--seq-len", type=int, default=1024)
     parser.add_argument("--simplex-samples", type=int, default=8)
@@ -106,6 +107,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--memory-trace-max-files", type=int, default=8)
     parser.add_argument("--memory-trace-max-queries", type=int, default=96)
     parser.add_argument("--skip-memory-trace-analysis", action="store_true")
+    parser.add_argument("--skip-test-time-scaling", action="store_true")
+    parser.add_argument("--test-time-scaling-batches", type=int, default=8)
+    parser.add_argument("--test-time-scaling-budgets", type=int, nargs="+", default=[1, 4, 16])
     parser.add_argument("--seed", type=int, default=10017)
     parser.add_argument("--target-bpb", type=float, default=float(os.environ.get("BPB_TARGET", "1.2")))
     parser.add_argument("--gate-step", type=int, default=int(os.environ.get("BPB_GATE_STEP", "4000")))
@@ -303,12 +307,14 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     oai_dir = base / "oai_competition"
     derived_dir = base / "derived_category"
     memory_dir = base / "memory_trace"
+    test_time_dir = base / "test_time_scaling"
     category = load_json(metrics_dir / "category_summary.json")
     geometry = load_json(geometry_dir / "reasoning_geometry_summary.json")
     simplex = load_json(simplex_dir / "reasoning_simplex_summary.json")
     oai = load_json(oai_dir / "summary.json")
     derived = load_json(derived_dir / "summary.json")
     memory = load_json(memory_dir / "summary.json")
+    test_time = load_json(test_time_dir / "summary.json")
     checkpoint_meta = load_json(metrics_dir / "checkpoint_meta.json")
     proposal = load_json(base / "training_adjustment_proposal.json")
     lines = [
@@ -406,6 +412,28 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
                 f"- Report: `{memory_dir / 'REPORT.md'}`",
             ]
         )
+    if test_time:
+        test_summary = test_time.get("summary", {}) if isinstance(test_time.get("summary", {}), dict) else {}
+        budgets = test_summary.get("summary", {}) if isinstance(test_summary.get("summary", {}), dict) else {}
+        lines.extend(
+            [
+                "",
+                "## Held-Out Test-Time Scaling",
+                f"- Output directory: `{test_time_dir}`",
+                f"- Data path: `{test_summary.get('data_path', 'n/a')}`",
+                f"- Budgets: `{test_summary.get('budgets', 'n/a')}`",
+            ]
+        )
+        for budget, values in sorted(budgets.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else 0):
+            if not isinstance(values, dict):
+                continue
+            lines.append(
+                "- Budget "
+                f"`{budget}`: best oracle MSE `{values.get('best_oracle_mse', 'n/a')}`, "
+                f"reward `{values.get('best_reward_proxy', 'n/a')}`, "
+                f"policy entropy `{values.get('policy_entropy', 'n/a')}`, "
+                f"action diversity `{values.get('action_diversity', 'n/a')}`"
+            )
     if proposal:
         decision = proposal.get("decision", {}) if isinstance(proposal.get("decision", {}), dict) else {}
         bpb_gate = proposal.get("bpb_gate", {}) if isinstance(proposal.get("bpb_gate", {}), dict) else {}
@@ -731,6 +759,32 @@ def main() -> None:
             ],
             cwd=repo,
             log_path=base / "logs" / "memory_trace.log",
+        )
+    if not args.skip_test_time_scaling:
+        run_optional_command(
+            [
+                sys.executable,
+                "scripts/test_time_scaling.py",
+                "--checkpoint",
+                str(checkpoint),
+                "--config",
+                args.config,
+                "--data-path",
+                args.test_data_glob,
+                "--output-json",
+                str(base / "test_time_scaling" / "summary.json"),
+                "--device",
+                args.device,
+                "--batch-size",
+                "2",
+                "--batches",
+                str(args.test_time_scaling_batches),
+                "--budgets",
+                *[str(budget) for budget in args.test_time_scaling_budgets],
+                "--no-auto-curate-new-data",
+            ],
+            cwd=repo,
+            log_path=base / "logs" / "test_time_scaling.log",
         )
     proposal_command = [
         sys.executable,

@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-RUN_ID="${RUN_ID:-toricgt_full_tokengt_got_fineweb_derived_$(date -u +%Y%m%dT%H%M%SZ)}"
+RUN_ID="${RUN_ID:-toricgt_oai_toricgt_full_$(date -u +%Y%m%dT%H%M%SZ)}"
 SESSION="${SESSION:-$RUN_ID}"
 PYTHON_BIN="${PYTHON_BIN:-/home/iska/miniconda3/envs/tokengt/bin/python}"
 CONFIG="${CONFIG:-config/train.full_tokengt_got_fineweb_derived.yaml}"
