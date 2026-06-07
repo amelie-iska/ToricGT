@@ -243,6 +243,64 @@ def text_to_graph_json(
     return json.dumps(payload, ensure_ascii=False)
 
 
+def fineweb_tokens_to_graph_json(
+    tokens: np.ndarray,
+    *,
+    dataset: str = "fineweb10B_sp1024",
+    record_id: str = "",
+    max_nodes: int = 256,
+) -> str:
+    """Represent a FineWeb SP1024 slice as a token-position branch/merge DAG."""
+
+    token_ids = [int(token) for token in np.asarray(tokens, dtype=np.int64).reshape(-1).tolist()]
+    node_count = min(max(1, int(max_nodes)), max(1, len(token_ids) - 1))
+    nodes = [
+        {
+            "id": f"tok_{idx:04d}",
+            "type": "sp1024_token_position",
+            "text": f"<sp{token_ids[idx] if idx < len(token_ids) else 0}>",
+        }
+        for idx in range(node_count)
+    ]
+    edges: list[dict[str, str]] = []
+    source_idx = 0
+    idx = 1
+    while idx < node_count:
+        left = idx
+        if idx + 1 >= node_count:
+            edges.append(
+                {
+                    "source": f"tok_{source_idx:04d}",
+                    "target": f"tok_{left:04d}",
+                    "type": "tail_continuation",
+                }
+            )
+            break
+        right = idx + 1
+        edges.append({"source": f"tok_{source_idx:04d}", "target": f"tok_{left:04d}", "type": "branch_left"})
+        edges.append({"source": f"tok_{source_idx:04d}", "target": f"tok_{right:04d}", "type": "branch_right"})
+        if idx + 2 < node_count:
+            merge = idx + 2
+            edges.append({"source": f"tok_{left:04d}", "target": f"tok_{merge:04d}", "type": "merge_candidate"})
+            edges.append({"source": f"tok_{right:04d}", "target": f"tok_{merge:04d}", "type": "merge_candidate"})
+            source_idx = merge
+            idx += 3
+        else:
+            edges.append({"source": f"tok_{left:04d}", "target": f"tok_{right:04d}", "type": "merge_candidate"})
+            source_idx = right
+            idx += 2
+    payload = {
+        "task_family": "fineweb_language_modeling_graph",
+        "dataset": dataset,
+        "record_id": record_id,
+        "trajectory_kind": "branch_merge_dag",
+        "node_basis": "sp1024_token_positions",
+        "nodes": nodes,
+        "edges": edges,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def ensure_branch_merge_graph_json(graph_json: str) -> str:
     """Add conservative branch/merge edges to older linear graph records."""
 
@@ -545,7 +603,16 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
                 "text": decode_sp1024_tokens(token_slice, tokenizer=tokenizer),
             }
             if self._keep_record(record):
-                yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg, lm_tokens=token_slice)
+                yield graph_json_to_item(
+                    fineweb_tokens_to_graph_json(
+                        token_slice,
+                        dataset="fineweb10B_sp1024",
+                        record_id=record_id,
+                        max_nodes=self.cfg.max_nodes,
+                    ),
+                    self.cfg,
+                    lm_tokens=token_slice,
+                )
 
     def _iter_path(self, path: Path):
         if path.suffix == ".jsonl":

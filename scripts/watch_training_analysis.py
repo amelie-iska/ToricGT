@@ -78,6 +78,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--geometry-records", type=int, default=4)
     parser.add_argument("--geometry-branches", type=int, default=6)
     parser.add_argument(
+        "--tokengt-bpb-batches",
+        type=int,
+        default=8,
+        help="Validation batches for TokenGT graph-node SP1024 FineWeb BPB checkpoints.",
+    )
+    parser.add_argument("--tokengt-bpb-token-glob", default="")
+    parser.add_argument("--tokengt-bpb-tokenizer-path", default="")
+    parser.add_argument(
         "--skip-simplex-geometry",
         action="store_true",
         help="Skip random-order simplex/geometry scripts; useful for TokenGT checkpoints that only need exact derived-category analysis.",
@@ -513,12 +521,40 @@ def main() -> None:
     oai_config = config.get("oai_competition", {}) if isinstance(config.get("oai_competition", {}), dict) else {}
     token_gt_checkpoint = is_tokengt_checkpoint(checkpoint)
     if not args.skip_oai_competition_eval and token_gt_checkpoint:
-        write_oai_unavailable_summary(
-            base,
-            checkpoint,
-            step,
-            "TokenGT graph checkpoints do not expose byte-level language-model logits required for OAI Parameter-Golf BPB.",
+        command = [
+            sys.executable,
+            "scripts/evaluate_tokengt_fineweb_bpb.py",
+            "--checkpoint",
+            str(checkpoint),
+            "--config",
+            args.config,
+            "--output-json",
+            str(base / "oai_competition" / "summary.json"),
+            "--device",
+            args.device,
+            "--precision",
+            args.precision,
+            "--batches",
+            str(args.tokengt_bpb_batches),
+        ]
+        if args.run_path:
+            command.extend(["--wandb-run-path", args.run_path])
+        if args.tokengt_bpb_token_glob:
+            command.extend(["--token-glob", args.tokengt_bpb_token_glob])
+        if args.tokengt_bpb_tokenizer_path:
+            command.extend(["--tokenizer-path", args.tokengt_bpb_tokenizer_path])
+        ok = run_optional_command(
+            command,
+            cwd=repo,
+            log_path=base / "logs" / "tokengt_fineweb_bpb.log",
         )
+        if not ok:
+            write_oai_unavailable_summary(
+                base,
+                checkpoint,
+                step,
+                "TokenGT graph-node SP1024 FineWeb BPB evaluator failed; see logs/tokengt_fineweb_bpb.log.",
+            )
     elif bool(oai_config.get("enabled", False)) and not args.skip_oai_competition_eval:
         command = [
             sys.executable,

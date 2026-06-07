@@ -131,6 +131,7 @@ def test_fineweb_bin_tokens_stream_as_branch_merge_graph(tmp_path):
     assert batch.lm_target_ids is not None
     assert batch.lm_mask is not None
     assert int(batch.lm_mask.sum().item()) == 30
+    assert int(batch.node_mask.sum().item()) >= 30
     assert int(batch.lm_input_ids[0, 0].item()) == 1
     assert int(batch.lm_target_ids[0, 0].item()) == 2
     assert torch.isfinite(loss)
