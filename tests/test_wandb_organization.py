@@ -130,6 +130,25 @@ def test_category_aliases_route_advanced_losses_once() -> None:
     assert organized["16_status/metrics_status/hessian_enabled"] == 1.0
 
 
+def test_tokengt_graph_objective_is_primary_and_topology_grouped() -> None:
+    payload = {
+        "trainer/step": 20,
+        "train/tokengt_graph_loss": 0.018,
+        "tokengt_graph/edge_bce": 0.42,
+        "tokengt_graph/direction_loss": 0.03,
+        "tokengt_graph/cycle_loss": 0.01,
+    }
+
+    organized = organize_wandb_payload(payload)
+
+    assert organized["00_primary/tokengt_graph_loss"] == 0.018
+    assert organized["07_topology_geometry/train/tokengt_graph_loss"] == 0.018
+    assert organized["07_topology_geometry/tokengt_graph/edge_bce"] == 0.42
+    assert organized["07_topology_geometry/tokengt_graph/direction_loss"] == 0.03
+    assert organized["07_topology_geometry/tokengt_graph/cycle_loss"] == 0.01
+    assert "tokengt_graph/edge_bce" not in organized
+
+
 def test_graph_of_thought_dag_metrics_are_primary_and_grouped() -> None:
     payload = {
         "trainer/step": 32,

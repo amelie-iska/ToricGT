@@ -193,6 +193,16 @@ class RandomOrderLMConfig:
     slepian_pollak_modes: int = 8
     slepian_pollak_bandwidth: float = 0.075
     slepian_pollak_target_concentration: float = 0.72
+    use_tokengt_causal_graph: bool = False
+    tokengt_graph_max_nodes: int = 128
+    tokengt_graph_neighbor_radius: int = 2
+    tokengt_graph_temperature: float = 0.25
+    tokengt_graph_edge_weight: float = 0.50
+    tokengt_graph_direction_weight: float = 0.20
+    tokengt_graph_position_weight: float = 0.20
+    tokengt_graph_byte_class_weight: float = 0.10
+    tokengt_graph_cycle_weight: float = 0.05
+    tokengt_graph_noncausal_policy: str = "causal_when_possible"
     aux_mtp_offsets: int = 2
     contrastive_temperature: float = 0.2
     trajectory_flow_viscosity: float = 0.05
@@ -1567,6 +1577,163 @@ class DenseRandomOrderToricLM(nn.Module):
             "slepian_pollak_bandwidth": hidden.new_tensor(float(self.config.slepian_pollak_bandwidth)).detach(),
         }
 
+    def _tokengt_causal_graph_losses(
+        self,
+        hidden: torch.Tensor,
+        target_tokens: torch.Tensor,
+        target_positions: torch.Tensor | None,
+    ) -> dict[str, torch.Tensor]:
+        """TokenGT-style graph supervision that preserves byte-level scoring.
+
+        The byte stream gives a causal reveal order even when the source text is
+        viewed as a graph.  When that order is meaningful, edges are directed
+        from earlier scored vertices to later scored vertices.  If a configured
+        source admits cycles or has no trustworthy causal orientation, the same
+        local-neighborhood graph is used as an undirected structural regularizer
+        and the acyclicity/direction terms are disabled.
+        """
+
+        if not bool(self.config.use_tokengt_causal_graph):
+            return {}
+        zero = hidden.new_zeros(())
+        if hidden.ndim != 3 or hidden.shape[1] < 3 or target_positions is None:
+            return {
+                "tokengt_graph_loss": zero,
+                "tokengt_graph_edge_bce": zero.detach(),
+                "tokengt_graph_direction_loss": zero.detach(),
+                "tokengt_graph_position_loss": zero.detach(),
+                "tokengt_graph_byte_class_loss": zero.detach(),
+                "tokengt_graph_cycle_loss": zero.detach(),
+                "tokengt_graph_edge_density": zero.detach(),
+                "tokengt_graph_causal_edge_fraction": zero.detach(),
+                "tokengt_graph_policy_causal": zero.detach(),
+            }
+
+        batch, length, _ = hidden.shape
+        max_nodes = max(3, min(int(self.config.tokengt_graph_max_nodes), int(length)))
+        if max_nodes < length:
+            sample_idx = torch.linspace(0, length - 1, steps=max_nodes, device=hidden.device).round().to(torch.long)
+            sample_idx = torch.unique_consecutive(sample_idx)
+            if sample_idx.numel() < 3:
+                sample_idx = torch.arange(min(length, 3), device=hidden.device)
+        else:
+            sample_idx = torch.arange(length, device=hidden.device)
+        n = int(sample_idx.numel())
+        if n < 3:
+            return {"tokengt_graph_loss": zero}
+
+        h = torch.nan_to_num(hidden[:, sample_idx, :].float(), nan=0.0, posinf=30.0, neginf=-30.0)
+        h = F.normalize(h, dim=-1)
+        positions = target_positions[:, sample_idx].to(device=hidden.device, dtype=torch.float32)
+        tokens = target_tokens[:, sample_idx].to(device=hidden.device)
+
+        pair_cos = torch.matmul(h, h.transpose(1, 2)).clamp(-1.0, 1.0)
+        temperature = max(float(self.config.tokengt_graph_temperature), 1e-4)
+        edge_logits = pair_cos / temperature
+        pos_delta = positions.unsqueeze(2) - positions.unsqueeze(1)
+        original_distance = pos_delta.abs()
+        offdiag = ~torch.eye(n, dtype=torch.bool, device=hidden.device).view(1, n, n)
+        offdiag = offdiag.expand(batch, n, n)
+        radius = max(1.0, float(self.config.tokengt_graph_neighbor_radius))
+        undirected_edges = offdiag & (original_distance > 0) & (original_distance <= radius)
+
+        reveal_rank = sample_idx.to(dtype=torch.float32, device=hidden.device)
+        reveal_delta = reveal_rank.view(1, 1, n) - reveal_rank.view(1, n, 1)
+        policy = str(self.config.tokengt_graph_noncausal_policy or "causal_when_possible").lower()
+        causal_policy = policy in {"causal", "causal_when_possible", "directed", "directed_acyclic", "dag"}
+        if causal_policy:
+            directed_edges = undirected_edges & (reveal_delta > 0)
+            labels = directed_edges.float()
+        else:
+            directed_edges = undirected_edges
+            labels = undirected_edges.float()
+        candidates = offdiag
+        candidate_values = edge_logits[candidates]
+        candidate_labels = labels[candidates]
+        positive_count = candidate_labels.sum()
+        negative_count = candidate_labels.numel() - positive_count
+        if candidate_labels.numel() > 0 and float(positive_count.detach().cpu()) > 0.0:
+            pos_weight = (negative_count / positive_count.clamp_min(1.0)).clamp(1.0, 64.0).detach()
+            edge_loss = F.binary_cross_entropy_with_logits(candidate_values, candidate_labels, pos_weight=pos_weight)
+        else:
+            edge_loss = zero
+
+        max_distance = original_distance[candidates].amax().clamp_min(1.0) if candidate_labels.numel() else zero + 1.0
+        target_distance = torch.log1p(original_distance) / torch.log1p(max_distance)
+        hidden_distance = 0.5 * (1.0 - pair_cos)
+        position_loss = F.smooth_l1_loss(hidden_distance[candidates], target_distance[candidates])
+
+        raw_byte = tokens.to(torch.long) - int(self.config.byte_offset)
+        valid_byte = (raw_byte >= 0) & (raw_byte < 256)
+        byte_class = torch.full_like(raw_byte, 6)
+        whitespace = valid_byte & (
+            (raw_byte == ord(" "))
+            | (raw_byte == ord("\t"))
+            | (raw_byte == ord("\n"))
+            | (raw_byte == ord("\r"))
+        )
+        digit = valid_byte & (raw_byte >= ord("0")) & (raw_byte <= ord("9"))
+        lower = valid_byte & (raw_byte >= ord("a")) & (raw_byte <= ord("z"))
+        upper = valid_byte & (raw_byte >= ord("A")) & (raw_byte <= ord("Z"))
+        punctuation = valid_byte & (
+            ((raw_byte >= ord("!")) & (raw_byte <= ord("/")))
+            | ((raw_byte >= ord(":")) & (raw_byte <= ord("@")))
+            | ((raw_byte >= ord("[")) & (raw_byte <= ord("`")))
+            | ((raw_byte >= ord("{")) & (raw_byte <= ord("~")))
+        )
+        high_bit = valid_byte & (raw_byte >= 128)
+        byte_class = torch.where(whitespace, torch.zeros_like(byte_class), byte_class)
+        byte_class = torch.where(digit, torch.ones_like(byte_class), byte_class)
+        byte_class = torch.where(lower, torch.full_like(byte_class, 2), byte_class)
+        byte_class = torch.where(upper, torch.full_like(byte_class, 3), byte_class)
+        byte_class = torch.where(punctuation, torch.full_like(byte_class, 4), byte_class)
+        byte_class = torch.where(high_bit, torch.full_like(byte_class, 5), byte_class)
+        byte_class = torch.where(valid_byte, byte_class, torch.full_like(byte_class, 7))
+        same_class = (byte_class.unsqueeze(2) == byte_class.unsqueeze(1)) & offdiag
+        class_candidates = offdiag & ((byte_class.unsqueeze(2) != 7) | (byte_class.unsqueeze(1) != 7))
+        if bool(class_candidates.any().detach().cpu()):
+            byte_class_loss = F.binary_cross_entropy_with_logits(
+                edge_logits[class_candidates],
+                same_class[class_candidates].float(),
+            )
+        else:
+            byte_class_loss = zero
+
+        direction_loss = zero
+        cycle_loss = zero
+        if causal_policy:
+            if bool(directed_edges.any().detach().cpu()):
+                b_idx, src_idx, dst_idx = directed_edges.nonzero(as_tuple=True)
+                phase = self.toric_phase(self._phase_features(positions).to(device=hidden.device, dtype=hidden.dtype)).float()
+                hidden_delta = h[b_idx, dst_idx, :] - h[b_idx, src_idx, :]
+                phase_delta = phase[b_idx, dst_idx, :] - phase[b_idx, src_idx, :]
+                alignment = F.cosine_similarity(hidden_delta, phase_delta, dim=-1, eps=1e-6)
+                direction_loss = torch.relu(0.15 - alignment).pow(2).mean()
+            backward_local = undirected_edges & (reveal_delta < 0)
+            if bool(backward_local.any().detach().cpu()):
+                cycle_loss = torch.sigmoid(edge_logits[backward_local]).mean()
+
+        total = (
+            float(self.config.tokengt_graph_edge_weight) * edge_loss
+            + float(self.config.tokengt_graph_direction_weight) * direction_loss
+            + float(self.config.tokengt_graph_position_weight) * position_loss
+            + float(self.config.tokengt_graph_byte_class_weight) * byte_class_loss
+            + float(self.config.tokengt_graph_cycle_weight) * cycle_loss
+        )
+        density = undirected_edges.float().mean()
+        causal_fraction = directed_edges.float().sum() / undirected_edges.float().sum().clamp_min(1.0)
+        return {
+            "tokengt_graph_loss": torch.nan_to_num(total, nan=0.0, posinf=1.0e4, neginf=0.0),
+            "tokengt_graph_edge_bce": edge_loss.detach(),
+            "tokengt_graph_direction_loss": direction_loss.detach(),
+            "tokengt_graph_position_loss": position_loss.detach(),
+            "tokengt_graph_byte_class_loss": byte_class_loss.detach(),
+            "tokengt_graph_cycle_loss": cycle_loss.detach(),
+            "tokengt_graph_edge_density": density.detach(),
+            "tokengt_graph_causal_edge_fraction": causal_fraction.detach(),
+            "tokengt_graph_policy_causal": hidden.new_tensor(1.0 if causal_policy else 0.0).detach(),
+        }
+
     def forward_from_previous(
         self,
         previous_tokens: torch.Tensor,
@@ -1662,6 +1829,7 @@ class DenseRandomOrderToricLM(nn.Module):
             out["toric_memory_entropy"] = aux["toric_memory_entropy"].float()
         hidden = aux.get("hidden")
         if hidden is not None:
+            out.update(self._tokengt_causal_graph_losses(hidden, target_tokens, target_positions))
             out.update(self._graphcg_losses(hidden))
             out.update(self._analogy_lattice_losses(hidden, target_tokens))
             if self.toric_geometry_probe is not None and target_positions is not None:

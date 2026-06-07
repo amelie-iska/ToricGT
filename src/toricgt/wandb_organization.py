@@ -70,6 +70,7 @@ RAW_HIDDEN_PATTERNS = (
     "analysis/*",
     "reasoning_simplex/*",
     "topology/*",
+    "tokengt_graph/*",
     "toric/*",
     "tropical/*",
     "bgg_category_o/*",
@@ -215,6 +216,8 @@ def _category_alias(key: str) -> str | None:
         if rest.startswith("train_"):
             return f"02_train/{rest}"
         return f"03_validation/{rest}"
+    if key.startswith("tokengt_graph/"):
+        return f"07_topology_geometry/tokengt_graph/{key.split('/', 1)[1]}"
     if key.startswith("bpb/"):
         rest = key.split("/", 1)[1]
         if rest == "val":
@@ -243,6 +246,8 @@ def _category_alias(key: str) -> str | None:
             return f"05_gflownet/train/{rest}"
         if "graphcg" in lower:
             return f"06_graphcg/train/{rest}"
+        if "tokengt_graph" in lower:
+            return f"07_topology_geometry/train/{rest}"
         if any(
             token in lower
             for token in ("derived_category", "mapping_cone", "chain_map", "projective_resolution", "betti_transport", "boundary_2")
@@ -428,6 +433,7 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/full_dataset_active", ("data/full_curated_train_split_active",))
     _add_first(out, payload, "00_primary/fineweb_mix_ratio", ("data/fineweb_mix_ratio", "fineweb_calibration/mix_ratio"))
     _add_first(out, payload, "00_primary/gflownet_loss", ("train/gflownet_loss",))
+    _add_first(out, payload, "00_primary/tokengt_graph_loss", ("train/tokengt_graph_loss", "tokengt_graph/loss"))
     _add_first(out, payload, "00_primary/graphcg_loss", ("train/graphcg_loss",))
     _add_first(out, payload, "00_primary/toric_bgg_loss", ("train/toric_bgg_loss",))
     _add_first(out, payload, "00_primary/koszul_persistence_loss", ("train/koszul_persistence_loss",))

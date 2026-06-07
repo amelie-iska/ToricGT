@@ -1,0 +1,373 @@
+model:
+  # Official Parameter-Golf scoring remains byte-level. TokenGT-style graph
+  # structure is internal auxiliary supervision over the same random-order
+  # reveal trajectory, so checkpoints still load in evaluate_oai_competition_bpb.
+  vocab_size: 272
+  byte_offset: 16
+  special_token_mode: reasoning_memory
+  use_advanced_reasoning_tokens: true
+  max_seq_len: 1024
+  d_model: 448
+  num_heads: 8
+  num_layers: 7
+  recurrent_passes: 2
+  ffn_multiplier: 4
+  dropout: 0.0
+  attention: hybrid
+  ring_block_size: 256
+  target_artifact_bytes: 15250000
+
+  # PolarQuant is enabled for the deployed KV-cache path by default. Training
+  # stays in the stable dense path; QAT/export regularization ramps later.
+  polarquant_kv_bits: 8
+  polarquant_radius_bits: 16
+  polarquant_precondition: false
+  polarquant_train: false
+  polarquant_train_sample_tokens: 0
+  polarquant_eval_sample_tokens: 0
+
+  use_bigram_hash: true
+  bigram_hash_buckets: 4096
+  bigram_hash_weight: 0.35
+  use_caseops_features: true
+  caseops_weight: 0.35
+  use_revealed_neighbor_context: true
+  revealed_neighbor_radius: 2
+  revealed_neighbor_context_weight: 0.55
+  use_revealed_context_prior: true
+  revealed_context_prior_alpha: 0.18
+  revealed_context_prior_weight: 0.22
+  revealed_context_prior_mode: mixture
+  use_smear_gate: true
+  smear_temperature_min: 0.55
+  smear_temperature_max: 1.65
+
+  use_gflownet_policy: true
+  gflownet_num_actions: 16
+  gflownet_hidden_dim: 224
+  gflownet_action_scale: 0.08
+
+  # Every byte stream receives an internal graph: vertices are reveal steps,
+  # local byte-neighborhood edges are causal when reveal order is meaningful,
+  # and noncausal/cyclic sources fall back to undirected structural matching.
+  use_tokengt_causal_graph: true
+  tokengt_graph_max_nodes: 128
+  tokengt_graph_neighbor_radius: 2
+  tokengt_graph_temperature: 0.25
+  tokengt_graph_edge_weight: 0.50
+  tokengt_graph_direction_weight: 0.20
+  tokengt_graph_position_weight: 0.20
+  tokengt_graph_byte_class_weight: 0.10
+  tokengt_graph_cycle_weight: 0.05
+  tokengt_graph_noncausal_policy: causal_when_possible
+
+  use_graphcg: true
+  graphcg_num_directions: auto
+  graphcg_min_directions: 16
+  graphcg_max_directions: 192
+  graphcg_memory_fraction: 0.08
+  graphcg_direction_safety: 0.90
+  graphcg_alpha: 0.10
+  graphcg_temperature: 0.20
+  graphcg_max_codes: 192
+  graphcg_orthogonal_weight: 0.12
+  graphcg_covariance_weight: 0.05
+  graphcg_sparsity_weight: 0.00005
+
+  use_analogy_lattice: true
+  analogy_lattice_max_pairs: 256
+  analogy_lattice_stride: 1
+  analogy_lattice_temperature: 0.20
+  analogy_lattice_basis_weight: 0.50
+  analogy_lattice_parallelogram_weight: 0.35
+  analogy_lattice_topology_weight: 0.35
+  analogy_topology_max_points_per_group: 16
+  analogy_topology_max_groups: 24
+  analogy_topology_k: 4
+  analogy_topology_filtration_levels: 4
+  analogy_topology_radius_min: 0.55
+  analogy_topology_radius_max: 1.65
+  analogy_topology_chain_weight: 0.25
+  analogy_topology_inclusion_weight: 0.10
+  analogy_topology_directed: true
+  analogy_topology_directed_weight: 0.35
+  analogy_topology_skew_scale: 0.35
+  analogy_topology_cycle_weight: 0.10
+  analogy_hdbscan_enabled: true
+  analogy_hdbscan_weight: 0.20
+  analogy_hdbscan_min_cluster_size: 4
+  analogy_hdbscan_min_samples: 4
+  analogy_hdbscan_stability_threshold: 0.18
+  analogy_step_topology_weight: 0.25
+  analogy_step_topology_max_points: 24
+  analogy_step_topology_max_windows: 6
+  analogy_step_topology_window_size: 32
+  analogy_step_topology_step_stride: 8
+  analogy_step_topology_time_bias: 0.18
+
+  use_toric_geometry_tasks: true
+  toric_geometry_num_exponents: 16
+  toric_geometry_exponent_dim: 4
+  toric_geometry_probe_rank: 12
+  toric_geometry_quant_bits: 6
+  toric_geometry_teacher_temperature: 0.55
+  toric_geometry_margin: 0.18
+  toric_geometry_fan_weight: 1.0
+  toric_geometry_bend_weight: 0.30
+  toric_geometry_binom_weight: 0.30
+  toric_geometry_moment_weight: 0.50
+  toric_geometry_coxeter_weight: 0.20
+  toric_geometry_braid_weight: 0.10
+  toric_geometry_leaf_weight: 0.25
+  toric_geometry_max_positions: 256
+  use_toric_bgg: true
+  toric_bgg_num_standard_tokens: 8
+  toric_bgg_probe_rank: 8
+  toric_bgg_signature_dim: 16
+  toric_bgg_max_positions: 64
+  toric_bgg_d2_weight: 1.0
+  toric_bgg_standard_weight: 0.25
+  toric_bgg_koszul_weight: 0.15
+  toric_bgg_gale_weight: 0.10
+  toric_bgg_signature_weight: 0.10
+  use_koszul_persistence: true
+  koszul_max_points: 24
+  koszul_max_windows: 4
+  koszul_window_size: 32
+  koszul_step_stride: 8
+  koszul_num_parameters: 3
+  koszul_temperature: 0.12
+  koszul_chart_exponents: 12
+  koszul_rank_temperature: 0.05
+  use_slepian_pollak: true
+  slepian_pollak_max_positions: 256
+  slepian_pollak_modes: 8
+  slepian_pollak_bandwidth: 0.075
+  slepian_pollak_target_concentration: 0.72
+  use_toric_memory: true
+  toric_memory_slots: 32
+  toric_memory_weight: 0.08
+  use_trajectory_memory_head: true
+  trajectory_memory_projection_dim: 160
+  trajectory_memory_teacher_temperature: 0.20
+  trajectory_memory_retrieval_temperature: 0.20
+  trajectory_memory_distill_weight: 0.25
+  trajectory_memory_quality_weight: 0.10
+  trajectory_memory_topology_weight: 0.20
+  trajectory_memory_graphcg_weight: 0.30
+  trajectory_memory_toric_weight: 0.20
+  aux_mtp_offsets: 2
+  contrastive_temperature: 0.20
+  trajectory_flow_viscosity: 0.05
+
+data:
+  train_parquet_glob: data/curated_hf_shards/train/*.parquet
+  val_parquet_glob: data/curated_hf_shards/validation/*.parquet
+  rows_per_batch: 128
+  num_workers: 2
+  include_graph_projection: false
+  graph_projection_max_chars: 4096
+  coprime_row_stride: true
+  interleave_row_groups: true
+  resume_aware_stream_seed: true
+  stream_origin_step: 0
+  stream_burnin_steps: 0
+  document_separator: "\n\n"
+  difficulty_curriculum_enabled: true
+  easy_min_estimated_tokens: 0
+  easy_max_estimated_tokens: 0
+  medium_start_step: 0
+  medium_mix_ratio: 0.08
+  medium_min_estimated_tokens: 129
+  medium_max_estimated_tokens: 384
+  medium_include_graph_projection: false
+  hard_start_step: 10000
+  hard_mix_ratio: 0.00
+  hard_min_estimated_tokens: 385
+  hard_include_graph_projection: true
+  hard_task_family_keywords: [math, code, graph, got, reasoning, health, physics, biomed, biochem]
+  complex_start_step: 10000
+  complex_mix_ratio: 0.00
+  complex_min_estimated_tokens: 385
+  complex_include_graph_projection: true
+  complex_task_family_keywords: [math, code, graph, got, reasoning, health, physics, biomed, biochem]
+
+oai_competition:
+  enabled: true
+  val_token_glob: amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_val_*.bin
+  tokenizer_path: amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model
+  eval_interval: 250
+  eval_batches: 8
+  order_samples: 2
+  gflownet_samples: 4
+  score_first_enabled: true
+  sp_tokens_per_decode: 4096
+  workers: 0
+
+fineweb_calibration:
+  enabled: true
+  train_token_glob: amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_train_*.bin
+  tokenizer_path: amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model
+  mix_ratio: 0.75
+  sp_tokens_per_decode: 4096
+  workers: 0
+
+training:
+  checkpoint_dir: checkpoints/parameter_golf_random_order_hybrid_tokengt
+  max_steps: 100000
+  batch_size: 2
+  grad_accum_steps: 16
+  lr: 0.000032
+  weight_decay: 0.03
+  warmup_steps: 3000
+  grad_clip_norm: 0.85
+  precision: bf16
+  device: cuda
+  seed: 31
+  log_interval: 10
+  eval_interval: 250
+  eval_batches: 20
+  eval_order_samples: 2
+  eval_gflownet_samples: 4
+  ckpt_interval: 250
+  resize_position_embedding: true
+  causal_audit_interval: 500
+  shock_guard_enabled: true
+  shock_guard_start_step: 0
+  shock_guard_end_step: 12000
+  shock_guard_loss_ratio: 1.08
+  shock_guard_loss_delta: 0.14
+  shock_guard_grad_norm: 0.85
+  shock_guard_update_scale: 0.35
+  robust_micro_loss_guard_enabled: true
+  robust_micro_loss_guard_start_step: 0
+  robust_micro_loss_guard_end_step: 12000
+  robust_micro_loss_guard_ratio: 1.16
+  robust_micro_loss_guard_delta: 0.24
+  robust_micro_loss_guard_min_scale: 0.55
+
+  gflownet_loss_weight: 0.00012
+  gflownet_entropy_weight: 0.00004
+  gflownet_entropy_target: 2.0
+  tokengt_graph_loss_weight: 0.00008
+  graphcg_loss_weight: 0.00008
+  analogy_lattice_loss_weight: 0.00005
+  toric_geometry_loss_weight: 0.00004
+  toric_bgg_loss_weight: 0.00002
+  koszul_persistence_loss_weight: 0.000015
+  slepian_pollak_loss_weight: 0.000015
+  trajectory_memory_loss_weight: 0.00002
+  trajectory_flow_loss_weight: 0.00005
+  contrastive_loss_weight: 0.0005
+  toric_entropy_floor: 0.20
+  toric_entropy_loss_weight: 0.00025
+  mtp_loss_weight: 0.01
+  qat_loss_weight: 0.0
+  qat_bits: 6
+  qat_max_tensors: 2
+  qat_start_step: 25000
+  qat_warmup_steps: 5000
+  trajectory_flow_target: 0.075
+  eval_score_first_bias_lr: 0.025
+  eval_score_first_bias_decay: 0.98
+  eval_score_first_bias_clip: 3.0
+
+complexity:
+  enabled: true
+  eval_every: 100
+  eval_samples: 2
+  compressors: [zlib, lzma]
+
+adaptive_training:
+  enabled: false
+
+hessian:
+  enabled: false
+
+phase_curriculum:
+  enabled: true
+  phases:
+    - name: byte_bpb_hybrid_bootstrap
+      start_step: 0
+      end_step: 10000
+      lr_multiplier: 1.0
+      fineweb_mix_ratio: 0.75
+      medium_mix_ratio: 0.08
+      hard_mix_ratio: 0.0
+      complex_mix_ratio: 0.0
+      gflownet_loss_weight: 0.00012
+      gflownet_entropy_weight: 0.00004
+      tokengt_graph_loss_weight: 0.00008
+      graphcg_loss_weight: 0.00008
+      analogy_lattice_loss_weight: 0.00005
+      toric_geometry_loss_weight: 0.00004
+      toric_bgg_loss_weight: 0.00002
+      koszul_persistence_loss_weight: 0.000015
+      slepian_pollak_loss_weight: 0.000015
+      trajectory_memory_loss_weight: 0.00002
+      trajectory_flow_loss_weight: 0.00005
+      contrastive_loss_weight: 0.0005
+      mtp_loss_weight: 0.01
+      toric_entropy_loss_weight: 0.00025
+      qat_loss_weight: 0.0
+    - name: reasoning_alignment_10k_25k
+      start_step: 10000
+      end_step: 25000
+      lr_multiplier: 0.90
+      fineweb_mix_ratio: 0.55
+      medium_mix_ratio: 0.25
+      hard_mix_ratio: 0.03
+      complex_mix_ratio: 0.03
+      gflownet_loss_weight: 0.00020
+      gflownet_entropy_weight: 0.00006
+      tokengt_graph_loss_weight: 0.00012
+      graphcg_loss_weight: 0.00012
+      analogy_lattice_loss_weight: 0.00008
+      toric_geometry_loss_weight: 0.00006
+      toric_bgg_loss_weight: 0.00003
+      koszul_persistence_loss_weight: 0.00002
+      slepian_pollak_loss_weight: 0.00002
+      trajectory_memory_loss_weight: 0.00006
+      trajectory_flow_loss_weight: 0.00008
+      contrastive_loss_weight: 0.001
+      mtp_loss_weight: 0.015
+      toric_entropy_loss_weight: 0.00035
+      qat_loss_weight: 0.0
+    - name: full_advanced_reasoning_and_quantization
+      start_step: 25000
+      end_step:
+      lr_multiplier: 0.75
+      fineweb_mix_ratio: 0.40
+      medium_mix_ratio: 0.45
+      hard_mix_ratio: 0.08
+      complex_mix_ratio: 0.08
+      gflownet_loss_weight: 0.00030
+      gflownet_entropy_weight: 0.00008
+      tokengt_graph_loss_weight: 0.00016
+      graphcg_loss_weight: 0.00016
+      analogy_lattice_loss_weight: 0.00012
+      toric_geometry_loss_weight: 0.00008
+      toric_bgg_loss_weight: 0.00004
+      koszul_persistence_loss_weight: 0.00003
+      slepian_pollak_loss_weight: 0.00003
+      trajectory_memory_loss_weight: 0.00010
+      trajectory_flow_loss_weight: 0.00012
+      contrastive_loss_weight: 0.0015
+      mtp_loss_weight: 0.02
+      toric_entropy_loss_weight: 0.00050
+      qat_loss_weight: 0.0000001
+      qat_start_step: 25000
+      qat_warmup_steps: 5000
+
+checkpoint_publishing:
+  enabled: false
+
+export:
+  bits: 6
+  quantization_mode: row
+  compression: lzma
+
+logging:
+  wandb: true
+  project: toricgt-parameter-golf
+  run_name: oai-random-order-byte-tokengt-hybrid

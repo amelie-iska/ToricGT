@@ -103,7 +103,7 @@
 
 
 \begin{abstract}
-ToricGT is a graph-token Transformer framework for algebraic and graph-structured reasoning under stringent compression and evaluation constraints.  The paper makes the toric component operational rather than decorative.  We introduce a Toric BGG training layer built from finite shadows of hypertoric category $\mathcal O$, oriented-matroid category $\mathcal O$, multigraded BGG correspondences, toric Tate resolutions, and Euler-Koszul complexes.  These objects supply small, verifiable certificates for reasoning trajectories: sign-vector posets, standard filtrations, sparse differentials, Betti profiles, Gale-dual labels, active faces of Newton polytopes, and homological consistency checks.  The certificates are attached through low-rank probes to the existing ToricGT stack: TokenGT-style node/edge tokenization, tropical ring attention, noncommutative torus phase channels, Soft-MoE routing, GraphCG concept axes, embedding-space GFlowNet search, and trajectory-retrieval memory.  We prove equivariance and stability statements for graph-token layers, tropical active faces, Soft-MoE dispatch, prefix-causal byte scoring, BGG differentials, incidence-algebra proxies, chain-map supervision, Gale-dual curricula, BPB-safe interpolation heads, and behavior-corridor projections.  We also develop behavior-modification protocols that generalize Assistant-Axis capping into GraphCG-disentangled toric-tropical corridors and alcoves, with Stanley--Reisner, toric-ideal, Fitting, free-resolution, and DG-algebra barriers for graph-of-thought trajectories, memory, and analogy.  The methodology is designed for implementation: certificates are cached on CPU, GPU losses have small rank and sparse support, activation gates are staged, ablations are explicit, and evaluation remains centered on BPB and held-out reasoning quality.  The central design principle is that toric BGG theory should improve training by organizing hidden reasoning into exact finite complexes, while deployable models retain only the components that improve validation BPB, graph-reasoning accuracy, retrieval quality, behavior reliability, or out-of-distribution algebraic generalization under an auditable artifact budget.
+ToricGT is a graph-token Transformer framework for algebraic and graph-structured reasoning under stringent compression and evaluation constraints.  The paper makes the toric component operational rather than decorative.  We introduce a Toric BGG training layer built from finite shadows of hypertoric category $\mathcal O$, oriented-matroid category $\mathcal O$, multigraded BGG correspondences, toric Tate resolutions, and Euler-Koszul complexes.  These objects supply small, verifiable certificates for reasoning trajectories: sign-vector posets, standard filtrations, sparse differentials, Betti profiles, Gale-dual labels, active faces of Newton polytopes, and homological consistency checks.  The certificates are attached through low-rank probes to the existing ToricGT stack: TokenGT-style node/edge tokenization, tropical ring attention, noncommutative torus phase channels, Soft-MoE routing, GraphCG concept axes, embedding-space GFlowNet search, and trajectory-retrieval memory.  For the Parameter-Golf branch we add a byte-scored TokenGT hybrid: official BPB remains a byte-level prequential log score, while FineWeb byte paths and graph-of-thought examples receive causal or noncausal TokenGT-style graph losses on hidden reveal trajectories.  We prove equivariance and stability statements for graph-token layers, tropical active faces, Soft-MoE dispatch, prefix-causal byte scoring, BGG differentials, incidence-algebra proxies, chain-map supervision, Gale-dual curricula, BPB-safe interpolation heads, and behavior-corridor projections.  We also develop behavior-modification protocols that generalize Assistant-Axis capping into GraphCG-disentangled toric-tropical corridors and alcoves, with Stanley--Reisner, toric-ideal, Fitting, free-resolution, and DG-algebra barriers for graph-of-thought trajectories, memory, and analogy.  The methodology is designed for implementation: certificates are cached on CPU, GPU losses have small rank and sparse support, activation gates are staged, ablations are explicit, and evaluation remains centered on BPB and held-out reasoning quality.  The central design principle is that toric BGG theory should improve training by organizing hidden reasoning into exact finite complexes, while deployable models retain only the components that improve validation BPB, graph-reasoning accuracy, retrieval quality, behavior reliability, or out-of-distribution algebraic generalization under an auditable artifact budget.
 \end{abstract}
 
 
@@ -2171,6 +2171,68 @@ dashboards must display all three concepts under different names:
 \]
 Only the first should decide Parameter-Golf success; the latter two guide
 TokenGT training and ablations.
+
+\paragraph{Byte-scored TokenGT hybrid objective.}
+The clean way to use TokenGT structure in the contest-facing branch is not to
+replace byte scoring by graph-token scoring.  Instead, ToricGT keeps a
+byte-level random-order language model and attaches a TokenGT-style graph loss
+to its hidden reveal trajectory.  Let $\pi$ be the random reveal permutation,
+let $h_k$ be the hidden state used to score $b_{\pi_k}$, and let
+$p_k=\pi_k$ be the original byte position.  The internal graph has vertices
+$v_k=(h_k,p_k)$ and local path-neighborhood edges
+\begin{equation}
+  A_{ij}=\mathbf 1\{0<|p_i-p_j|\le r\}.
+\end{equation}
+When the source admits a meaningful causal orientation, the directed edge label
+is $E_{ij}=A_{ij}\mathbf 1\{i<j\}$, so edges point from earlier scored vertices
+to later scored vertices.  This is the ordinary FineWeb path graph made
+score-before-update compatible.  When a source graph is undirected, cyclic, or
+has no trusted causal semantics, ToricGT sets $E_{ij}=A_{ij}$ and disables the
+direction and cycle penalties below; the graph loss then acts only as an
+undirected structural regularizer.
+
+With $s_{ij}=\langle \bar h_i,\bar h_j\rangle/\tau$, coarse byte-class label
+$C_{ij}$, hidden distance $d_h(i,j)$, and toric phase map $\phi(p)$, the
+implemented differentiable objective is
+\begin{align}
+  \mathcal L_{\mathrm{ByteTokenGT}}
+  &=
+  a_e\,\mathrm{BCE}(s_{ij},E_{ij})
+  +a_p\,\mathrm{SmoothL1}\!\left(d_h(i,j),\frac{\log(1+|p_i-p_j|)}{\log(1+\max |p_a-p_b|)}\right)\\
+  &\quad
+  +a_c\,\mathrm{BCE}(s_{ij},C_{ij})
+  +a_d\,\mathbb E_{i\to j}\left[\max\{0,m-\cos(h_j-h_i,\phi(p_j)-\phi(p_i))\}^2\right]\\
+  &\quad
+  +a_{\mathrm{cyc}}\,
+  \mathbb E_{\substack{A_{ij}=1\\ i>j}}\sigma(s_{ij}).
+\end{align}
+The $a_d$ and $a_{\mathrm{cyc}}$ terms are multiplied by zero under the
+noncausal policy.  The full loss used by the hybrid run is then
+\begin{equation}
+  \mathcal L
+  =
+  \mathcal L_{\mathrm{byte\ CE}}
+  +\lambda_{\mathrm{ByteTokenGT}}\mathcal L_{\mathrm{ByteTokenGT}}
+  +\lambda_{\mathrm{GFN}}\mathcal L_{\mathrm{TB}}
+  +\lambda_{\mathrm{GraphCG}}\mathcal L_{\mathrm{GraphCG}}
+  +\lambda_{\mathrm{TBGG}}\mathcal L_{\mathrm{TBGG}}
+  +\lambda_{\mathrm{Koszul}}\mathcal L_{\mathrm{Koszul}}
+  +\lambda_{\mathrm{Slepian}}\mathcal L_{\mathrm{Slepian}}
+  +\lambda_{\mathrm{mem}}\mathcal L_{\mathrm{memory}}
+  +\cdots.
+\end{equation}
+Thus the advanced graph, toric, topological, BGG, Koszul, Slepian--Pollak,
+GFlowNet, GraphCG, and memory terms are bona fide optimizer objectives with
+explicit weights.  The byte CE term remains primary because it is exactly the
+quantity whose average in base two gives official BPB.  The auxiliary weights
+are intentionally small at step zero and can be raised by phase curricula after
+the restricted FineWeb BPB slope is stable.
+In the current byte-accounted configuration the hybrid branch uses
+$d=448$, $8$ heads, seven stored dense blocks, and two recurrent passes.  A
+6-bit row-quantized LZMA artifact probe is $15{,}206{,}131$ bytes, leaving
+$793{,}869$ bytes under the $16{,}000{,}000$ byte model-artifact cap; if a
+future counted bundle includes more code, the $d=416$ variant is the safer
+fallback.
 
 \begin{proposition}[Score-before-update prevents validation leakage]
 Assume $q_t$ satisfies strict prefix dependence and the online state update has the form $s_{t+1}=U(s_t,b_t)$ after the loss term at $t$ is recorded.  Then the cumulative validation loss is a proper left-to-right log score and no term in the sum can depend on future validation bytes.

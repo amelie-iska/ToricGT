@@ -46,7 +46,7 @@
 \maketitle
 
 \begin{abstract}
-We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The research model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and uses permutation-equivariant Soft-MoE routing in upper graph blocks.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate OpenAI Parameter-Golf track projects byte chunks to random-order graph positions and trains a dense recurrent micro language model with tied embeddings, toric position phases, tropical-ring attention, compact noncommutative-toric memory, strict-prefix GFlowNet graph-of-thought actions, BigramHash/CaseOps byte features, SmearGate confidence, stripped multi-token auxiliary heads, score-first test-time bias adaptation, and bit-packed 6-bit row-quantized export.  We also describe behavior-modification protocols in which learned GraphCG concept axes, toric-tropical chambers, and finite commutative-algebra certificates constrain hidden graph-of-thought trajectories to policy corridors for helpfulness, accuracy, tone, rigor, and detail.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, artifact bytes, BPB, corridor occupancy, and GFlowNet diversity rather than scalar accuracy alone.
+We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The research model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and uses permutation-equivariant Soft-MoE routing in upper graph blocks.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate OpenAI Parameter-Golf track projects byte chunks to random-order graph positions and trains a dense recurrent micro language model with tied embeddings, toric position phases, tropical-ring attention, compact noncommutative-toric memory, strict-prefix GFlowNet graph-of-thought actions, BigramHash/CaseOps byte features, SmearGate confidence, stripped multi-token auxiliary heads, score-first test-time bias adaptation, and bit-packed 6-bit row-quantized export.  Its hybrid byte-TokenGT objective keeps official BPB as a byte-level prequential log score while applying causal or noncausal graph supervision to hidden reveal trajectories.  We also describe behavior-modification protocols in which learned GraphCG concept axes, toric-tropical chambers, and finite commutative-algebra certificates constrain hidden graph-of-thought trajectories to policy corridors for helpfulness, accuracy, tone, rigor, and detail.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, artifact bytes, BPB, corridor occupancy, and GFlowNet diversity rather than scalar accuracy alone.
 \end{abstract}
 
 \section{Introduction}
@@ -235,6 +235,28 @@ For a byte chunk $b=(b_1,\ldots,b_T)$, sample a content-independent order $\pi\i
 \end{equation}
 BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  A byte-safe GFlowNet policy samples latent graph-of-thought action embeddings from the prefix-visible hidden state, and validation can average multiple action samples.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.  Curated \texttt{graph\_json} records are projected into compact node/edge byte traces so graph structure is visible to this adapter.  Graph-of-thought trajectories are modeled as branch/merge DAGs \(G_\tau=(V_\tau,E_\tau)\), not as single lines: vertices with \(\operatorname{outdeg}>1\) explore alternatives, vertices with \(\operatorname{indeg}>1\) join or reconcile them, and the local diamond \(a\to\{b,c\}\to d\) is the basic cell.
 
+The current hybrid keeps this byte distribution as the official scored object
+and adds a TokenGT-style hidden-graph objective.  For reveal hidden states
+$h_i$ at byte positions $p_i=\pi_i$, local path edges are
+$A_{ij}=\mathbf 1\{0<|p_i-p_j|\le r\}$ and causal labels are
+$E_{ij}=A_{ij}\mathbf 1\{i<j\}$ whenever such an orientation is meaningful.
+Cyclic or noncausal sources instead use $E_{ij}=A_{ij}$ and turn off direction
+and cycle penalties.  A compact version of the loss is
+\[
+  \mathcal L_{\rm ByteTokenGT}
+  =
+  a_e{\rm BCE}(\langle\bar h_i,\bar h_j\rangle/\tau,E_{ij})
+  +a_p{\rm SmoothL1}(d_h(i,j),\log(1+|p_i-p_j|))
+  +a_d\mathbb E_{i\to j}\max(0,m-\cos(h_j-h_i,\phi(p_j)-\phi(p_i)))^2
+  +a_{\rm cyc}\mathbb E_{i>j,A_{ij}=1}\sigma(\langle\bar h_i,\bar h_j\rangle/\tau).
+\]
+Thus FineWeb is graph-structured as a sequential path graph for training, but
+the reported Parameter-Golf metric remains byte-denominated BPB.
+The current byte-accounted hybrid config uses $d=448$, $8$ heads, seven stored
+dense blocks, and two recurrent passes; its 6-bit row-quantized LZMA artifact
+probe is $15{,}206{,}131$ bytes, leaving $793{,}869$ bytes below the
+$16{,}000{,}000$ byte cap.
+
 The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.  The local mirror of \texttt{AmelieSchreiber/toricgt-curated-splits} is used in the competition-safe split: train shards feed supervised BPB optimization, validation shards feed score-first validation, and test shards are reserved for held-out GFlowNet test-time scaling.  The byte loader packs multiple source rows into one chunk; after warmup the training iterator switches to larger technical records, and a 2048-byte packed-context config can resume from a 1024-byte checkpoint by resizing only the learned position table.  This exploits the tropical-ring upper layers for longer composite reasoning trajectories while preserving the strict prequential scoring contract.
 
 The next inference-scaling layer is anticipative trajectory memory.  Completed graph-of-thought DAGs are stored as compact keys
@@ -267,7 +289,7 @@ Earlier \texttt{oai} recovery runs used BPB-only repair gates and kept heavier g
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.86\linewidth]{fig_oai_step2250_reasoning_k_bpb.png}
+  \includegraphics[width=0.86\linewidth]{fig_oai_step37250_reasoning_k_bpb.png}
   \caption{Historical step-$2250$ \texttt{oai} recovery diagnostic.  Branches are embedded in the reasoning/K$(x\mid\mathrm{helpers})$/BPB simplex from model-computed statistics.  The checkpoint still favored the low-BPB corner over longer reasoning budgets, motivating later gated GraphCG/GFlowNet promotion while heavier toric, Koszul, and Toric BGG geometry stayed gated.}
   \label{fig:oai-step2250-condensed}
 \end{figure}

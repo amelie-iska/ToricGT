@@ -780,6 +780,7 @@ PHASE_CONTROL_KEYS = {
     "analogy_lattice_loss_weight",
     "koszul_persistence_loss_weight",
     "slepian_pollak_loss_weight",
+    "tokengt_graph_loss_weight",
     "trajectory_flow_loss_weight",
     "trajectory_memory_loss_weight",
     "contrastive_loss_weight",
@@ -2346,6 +2347,21 @@ def main() -> None:
             "slepian_pollak_target_concentration",
             0.72,
         ),
+        use_tokengt_causal_graph=config_get(file_config, "model", "use_tokengt_causal_graph", False),
+        tokengt_graph_max_nodes=config_get(file_config, "model", "tokengt_graph_max_nodes", 128),
+        tokengt_graph_neighbor_radius=config_get(file_config, "model", "tokengt_graph_neighbor_radius", 2),
+        tokengt_graph_temperature=config_get(file_config, "model", "tokengt_graph_temperature", 0.25),
+        tokengt_graph_edge_weight=config_get(file_config, "model", "tokengt_graph_edge_weight", 0.50),
+        tokengt_graph_direction_weight=config_get(file_config, "model", "tokengt_graph_direction_weight", 0.20),
+        tokengt_graph_position_weight=config_get(file_config, "model", "tokengt_graph_position_weight", 0.20),
+        tokengt_graph_byte_class_weight=config_get(file_config, "model", "tokengt_graph_byte_class_weight", 0.10),
+        tokengt_graph_cycle_weight=config_get(file_config, "model", "tokengt_graph_cycle_weight", 0.05),
+        tokengt_graph_noncausal_policy=config_get(
+            file_config,
+            "model",
+            "tokengt_graph_noncausal_policy",
+            "causal_when_possible",
+        ),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
         use_trajectory_memory_head=(
@@ -2549,6 +2565,7 @@ def main() -> None:
     toric_bgg_loss_weight = config_get_float(file_config, "training", "toric_bgg_loss_weight", 0.0)
     koszul_persistence_loss_weight = config_get(file_config, "training", "koszul_persistence_loss_weight", 0.0)
     slepian_pollak_loss_weight = config_get_float(file_config, "training", "slepian_pollak_loss_weight", 0.0)
+    tokengt_graph_loss_weight = config_get_float(file_config, "training", "tokengt_graph_loss_weight", 0.0)
     toric_entropy_floor = (
         args.toric_entropy_floor
         if args.toric_entropy_floor is not None
@@ -3204,6 +3221,7 @@ def main() -> None:
                     "toric_bgg_loss_weight": toric_bgg_loss_weight,
                     "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
                     "slepian_pollak_loss_weight": slepian_pollak_loss_weight,
+                    "tokengt_graph_loss_weight": tokengt_graph_loss_weight,
                     "toric_entropy_floor": toric_entropy_floor,
                     "toric_entropy_loss_weight": toric_entropy_loss_weight,
                     "mtp_loss_weight": mtp_loss_weight,
@@ -3389,6 +3407,7 @@ def main() -> None:
                 "metrics_status/bgg_category_o_probe_instantiated": float(model_config.use_toric_bgg),
                 "metrics_status/koszul_persistence_probe_instantiated": float(model_config.use_koszul_persistence),
                 "metrics_status/slepian_pollak_probe_instantiated": float(model_config.use_slepian_pollak),
+                "metrics_status/tokengt_causal_graph_probe_instantiated": float(model_config.use_tokengt_causal_graph),
                 "metrics_status/complexity_enabled": float(complexity_enabled),
                 "metrics_status/hessian_enabled": float(hessian_enabled),
                 "oai_competition/enabled": float(oai_competition_eval_enabled),
@@ -3491,6 +3510,7 @@ def main() -> None:
             "toric_bgg_loss_weight": toric_bgg_loss_weight,
             "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
             "slepian_pollak_loss_weight": slepian_pollak_loss_weight,
+            "tokengt_graph_loss_weight": tokengt_graph_loss_weight,
             "trajectory_flow_target": trajectory_flow_target,
             "trajectory_memory_loss_weight": trajectory_memory_loss_weight,
             "use_trajectory_memory_head": model_config.use_trajectory_memory_head,
@@ -3645,6 +3665,15 @@ def main() -> None:
         step_slepian_pollak_effective_modes = 0.0
         step_slepian_pollak_modes = 0.0
         step_slepian_pollak_bandwidth = 0.0
+        step_tokengt_graph_loss = 0.0
+        step_tokengt_graph_edge_bce = 0.0
+        step_tokengt_graph_direction_loss = 0.0
+        step_tokengt_graph_position_loss = 0.0
+        step_tokengt_graph_byte_class_loss = 0.0
+        step_tokengt_graph_cycle_loss = 0.0
+        step_tokengt_graph_edge_density = 0.0
+        step_tokengt_graph_causal_edge_fraction = 0.0
+        step_tokengt_graph_policy_causal = 0.0
         step_robust_micro_loss_guard_fraction = 0.0
         step_robust_micro_loss_guard_scale = 0.0
         step_robust_micro_loss_guard_cap = 0.0
@@ -3766,6 +3795,10 @@ def main() -> None:
             0.0,
             control_float(phase_controls, "slepian_pollak_loss_weight", slepian_pollak_loss_weight),
         )
+        effective_tokengt_graph_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "tokengt_graph_loss_weight", tokengt_graph_loss_weight),
+        )
         effective_mtp_loss_weight = max(0.0, control_float(phase_controls, "mtp_loss_weight", mtp_loss_weight))
         effective_contrastive_loss_weight = max(
             0.0,
@@ -3788,6 +3821,7 @@ def main() -> None:
         effective_toric_bgg_loss_weight *= structural_loss_multiplier
         effective_koszul_persistence_loss_weight *= structural_loss_multiplier
         effective_slepian_pollak_loss_weight *= structural_loss_multiplier
+        effective_tokengt_graph_loss_weight *= structural_loss_multiplier
         effective_trajectory_memory_loss_weight *= structural_loss_multiplier
         effective_toric_entropy_loss_weight = max(
             0.0,
@@ -3860,6 +3894,7 @@ def main() -> None:
                 toric_bgg_loss = out.get("toric_bgg_loss", torch.zeros((), device=device))
                 koszul_persistence_loss = out.get("koszul_persistence_loss", torch.zeros((), device=device))
                 slepian_pollak_loss = out.get("slepian_pollak_loss", torch.zeros((), device=device))
+                tokengt_graph_loss = out.get("tokengt_graph_loss", torch.zeros((), device=device))
                 qat_loss = (
                     quantization_grid_loss(qat_named_params, bits=qat_bits)
                     if effective_qat_loss_weight > 0 and qat_named_params
@@ -3924,6 +3959,11 @@ def main() -> None:
                     total_micro_loss,
                     effective_slepian_pollak_loss_weight,
                     slepian_pollak_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_tokengt_graph_loss_weight,
+                    tokengt_graph_loss,
                 )
                 total_micro_loss = add_weighted_aux_loss(total_micro_loss, effective_qat_loss_weight, qat_loss)
                 total_micro_loss = add_weighted_aux_loss(
@@ -4215,6 +4255,29 @@ def main() -> None:
             step_slepian_pollak_bandwidth += float(
                 out.get("slepian_pollak_bandwidth", torch.zeros(())).detach().cpu()
             )
+            step_tokengt_graph_loss += float(tokengt_graph_loss.detach().cpu())
+            step_tokengt_graph_edge_bce += float(out.get("tokengt_graph_edge_bce", torch.zeros(())).detach().cpu())
+            step_tokengt_graph_direction_loss += float(
+                out.get("tokengt_graph_direction_loss", torch.zeros(())).detach().cpu()
+            )
+            step_tokengt_graph_position_loss += float(
+                out.get("tokengt_graph_position_loss", torch.zeros(())).detach().cpu()
+            )
+            step_tokengt_graph_byte_class_loss += float(
+                out.get("tokengt_graph_byte_class_loss", torch.zeros(())).detach().cpu()
+            )
+            step_tokengt_graph_cycle_loss += float(
+                out.get("tokengt_graph_cycle_loss", torch.zeros(())).detach().cpu()
+            )
+            step_tokengt_graph_edge_density += float(
+                out.get("tokengt_graph_edge_density", torch.zeros(())).detach().cpu()
+            )
+            step_tokengt_graph_causal_edge_fraction += float(
+                out.get("tokengt_graph_causal_edge_fraction", torch.zeros(())).detach().cpu()
+            )
+            step_tokengt_graph_policy_causal += float(
+                out.get("tokengt_graph_policy_causal", torch.zeros(())).detach().cpu()
+            )
             step_qat_loss += float(qat_loss.detach().cpu())
             step_qat_weight += float(effective_qat_loss_weight)
             step_contrastive_loss += float(contrastive_loss.detach().cpu())
@@ -4390,6 +4453,15 @@ def main() -> None:
         step_slepian_pollak_effective_modes /= grad_accum
         step_slepian_pollak_modes /= grad_accum
         step_slepian_pollak_bandwidth /= grad_accum
+        step_tokengt_graph_loss /= grad_accum
+        step_tokengt_graph_edge_bce /= grad_accum
+        step_tokengt_graph_direction_loss /= grad_accum
+        step_tokengt_graph_position_loss /= grad_accum
+        step_tokengt_graph_byte_class_loss /= grad_accum
+        step_tokengt_graph_cycle_loss /= grad_accum
+        step_tokengt_graph_edge_density /= grad_accum
+        step_tokengt_graph_causal_edge_fraction /= grad_accum
+        step_tokengt_graph_policy_causal /= grad_accum
         step_robust_micro_loss_guard_fraction /= grad_accum
         step_robust_micro_loss_guard_scale /= grad_accum
         step_robust_micro_loss_guard_cap /= grad_accum
@@ -4752,6 +4824,23 @@ def main() -> None:
                 "toric/slepian_effective_modes": step_slepian_pollak_effective_modes,
                 "diagnostics/latest/pollak_prolate_slepian_concentration": step_slepian_pollak_concentration,
                 "diagnostics/latest/pollak_prolate_slepian_leakage": step_slepian_pollak_leakage,
+                "train/tokengt_graph_loss": step_tokengt_graph_loss,
+                "train/tokengt_graph_loss_weight": float(effective_tokengt_graph_loss_weight),
+                "train/tokengt_graph_edge_bce": step_tokengt_graph_edge_bce,
+                "train/tokengt_graph_direction_loss": step_tokengt_graph_direction_loss,
+                "train/tokengt_graph_position_loss": step_tokengt_graph_position_loss,
+                "train/tokengt_graph_byte_class_loss": step_tokengt_graph_byte_class_loss,
+                "train/tokengt_graph_cycle_loss": step_tokengt_graph_cycle_loss,
+                "tokengt_graph/loss": step_tokengt_graph_loss,
+                "tokengt_graph/loss_weight": float(effective_tokengt_graph_loss_weight),
+                "tokengt_graph/edge_bce": step_tokengt_graph_edge_bce,
+                "tokengt_graph/direction_loss": step_tokengt_graph_direction_loss,
+                "tokengt_graph/position_loss": step_tokengt_graph_position_loss,
+                "tokengt_graph/byte_class_loss": step_tokengt_graph_byte_class_loss,
+                "tokengt_graph/cycle_loss": step_tokengt_graph_cycle_loss,
+                "tokengt_graph/edge_density": step_tokengt_graph_edge_density,
+                "tokengt_graph/causal_edge_fraction": step_tokengt_graph_causal_edge_fraction,
+                "tokengt_graph/policy_causal": step_tokengt_graph_policy_causal,
                 "artifact/initial_bytes": report.bytes_total,
                 "artifact/estimated_tensor_bytes": estimated_tensor_bytes,
                 "artifact/deployment_parameters": report.deployment_parameters,
@@ -4808,6 +4897,7 @@ def main() -> None:
                 "metrics_status/bgg_category_o_probe_instantiated": float(model_config.use_toric_bgg),
                 "metrics_status/koszul_persistence_probe_instantiated": float(model_config.use_koszul_persistence),
                 "metrics_status/slepian_pollak_probe_instantiated": float(model_config.use_slepian_pollak),
+                "metrics_status/tokengt_causal_graph_probe_instantiated": float(model_config.use_tokengt_causal_graph),
                 "metrics_status/complexity_enabled": float(complexity_enabled),
                 "metrics_status/hessian_enabled": float(hessian_enabled),
                 "metrics_status/oai_competition_enabled": float(oai_competition_eval_enabled),

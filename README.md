@@ -16,7 +16,11 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
   <a href="https://huggingface.co/blog/AmelieSchreiber/toricgt"><img src="https://img.shields.io/badge/HuggingFace-DE9B35.svg?style=for-the-badge&logo=HuggingFace" alt="HF"/></a>
 </p>
 
-*Note: consider PH disambiguation along decision boundaries or of words with multiple meaning*
+*Note: consider PH disambiguation along decision boundaries or of words with multiple meanings*
+
+```bash
+tmux new-session -d -s toricgt_oai_toricgt_full_clone 'cd /home/iska/Documents/amelie/bio/ToricGT && RUN_NAME=toricgt_oai_toricgt_finewebval_metricfix_max16mb_d320l7_b16ga4_clone_$(date -u +%Y%m%dT%H%M%SZ) && WANDB_PROJECT=toricgt WANDB_RUN_NAME=$RUN_NAME PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/train.py --config config/train.full_tokengt_got_fineweb_derived.yaml --checkpoint-dir checkpoints/$RUN_NAME 2>&1 | tee logs/full_tokengt_got_fineweb_derived/$RUN_NAME/train.log'
+```
 
 ## Model Overview
 
@@ -74,11 +78,35 @@ the likelihood/BPB objective:
 +\lambda_{\mathrm{der}}\mathcal L_{\mathrm{derived}}.
 ```
 
+For the official-byte hybrid path, the TokenGT-style term is a real optimizer
+objective rather than a passive diagnostic:
+
+```math
+\mathcal L_{\mathrm{TokenGT}}
+=a_e\,\mathrm{BCE}(\langle h_i,h_j\rangle/\tau,E_{ij})
++a_d\,\mathbb E_{i\to j}\big[\max(0,m-\cos(h_j-h_i,\phi(p_j)-\phi(p_i)))^2\big]
++a_p\,\mathrm{SmoothL1}(d_h(i,j),\log(1+|p_i-p_j|))
++a_c\,\mathrm{BCE}(\langle h_i,h_j\rangle/\tau,C_{ij})
++a_{\circlearrowleft}\,\mathbb E_{\mathrm{back}}\sigma(\langle h_i,h_j\rangle/\tau).
+```
+
+Here `h_i` is the hidden state for reveal vertex `i`, `p_i` is its byte
+position, `E_ij` is the local graph edge label, `C_ij` is a coarse byte-class
+agreement label, and `phi` is the toric phase feature map.  The direction and
+cycle terms are active only for graphs with a meaningful causal orientation.
+
 - `BPB / LM`: the primary objective is byte-level negative log likelihood,
   `BPB = loss / log(2)` when the scored units are bytes.
   TokenGT graph-node FineWeb metrics are reported separately as SP1024
   bits/token plus a decoded-byte estimated BPB proxy; only the byte-level
   evaluator writes official OpenAI Parameter-Golf BPB.
+- `Hybrid byte TokenGT`: the official byte model can now receive TokenGT-style
+  graph supervision without changing the scored byte logits.  Each FineWeb byte
+  chunk is treated as a graph whose vertices are random-order reveal steps and
+  whose local sequential edges are directed when reveal/order causality is
+  meaningful.  Cyclic or noncausal graph sources use the same objective as an
+  undirected structural regularizer rather than forcing an artificial causal
+  orientation.
 - `GFlowNet trajectory balance`: for a sampled graph-of-thought trajectory
   `tau`, `L_TB = (log Z + sum log P_F - log R(tau) - sum log P_B)^2`.
 - `GraphCG disentanglement`: learned basis vectors should align with reusable
@@ -238,7 +266,7 @@ Local implementation:
 - `src/toricgt/synthetic.py`: synthetic rotation-algebra and tropical shortest-path curriculum records.
 - `src/toricgt/polar_cache.py`: recursive polar encode/decode utilities for optional KV-cache compression experiments.
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
-- `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing, advanced reasoning/memory special-token encoding, GraphCG/analogy/topology hooks, Toric BGG/Koszul probes, and differentiable Slepian/Pollak trajectory-concentration losses.
+- `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing, advanced reasoning/memory special-token encoding, official-byte TokenGT-style causal graph supervision, GraphCG/analogy/topology hooks, Toric BGG/Koszul probes, and differentiable Slepian/Pollak trajectory-concentration losses.
 - `src/toricgt/toric_geometry_tasks.py`: training-only low-rank toric probes for Newton active-face, bend, binomial, affine-Coxeter, braid, and phase-foliation signals.
 - `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves used by the geometry audit suite.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, Slepian envelopes, and Soft-MoE-style routing.
@@ -251,6 +279,7 @@ Local implementation:
 - `planning/DATA.md`: dataset research, curation, and segmentation plan.
 - `planning/SEQUENTIAL-FINEWEB-PIVOT.md`: current Parameter-Golf BPB pivot record and launch policy for the sequential FineWeb-first branch.
 - `docs/PARAMETER_GOLF.md`: dense random-order Parameter-Golf adaptation notes.
+- `docs/HYBRID_BYTE_TOKENGT_BPB.md`: official byte-BPB plus TokenGT-style internal graph objective notes and pseudocode.
 
 ## Setup
 
@@ -737,6 +766,24 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   python scripts/train_parameter_golf_random_order.py \
   --config config/train.parameter_golf_random_order_dense.yaml
 ```
+
+Train the official-byte hybrid model with TokenGT-style internal graph losses,
+advanced reasoning/memory tokens, OAI restricted FineWeb validation, and
+medium-conservative advanced objectives active from step 0:
+
+```bash
+RUN_NAME=toricgt_oai_byte_tokengt_hybrid_$(date -u +%Y%m%dT%H%M%SZ)
+WANDB_PROJECT=toricgt-parameter-golf WANDB_RUN_NAME=$RUN_NAME PYTHONPATH=src \
+  python scripts/train_parameter_golf_random_order.py \
+  --config config/train.parameter_golf_random_order_hybrid_tokengt.yaml \
+  --checkpoint-dir checkpoints/$RUN_NAME
+```
+
+The hybrid config uses the largest tested dense byte model that stayed under
+the current exporter cap: `d_model=448`, `num_heads=8`, 7 stored dense blocks,
+2 recurrent passes, 6-bit row quantization, and LZMA export.  The latest local
+artifact probe for that config produced `15,192,560` bytes, leaving `807,440`
+bytes below the `16,000,000` byte Parameter-Golf artifact ceiling.
 
 Launch the fresh native all-phases run with supervised automated check-ins:
 

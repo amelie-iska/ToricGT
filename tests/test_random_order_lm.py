@@ -133,6 +133,47 @@ def test_dense_random_order_lm_loss_and_generation_shapes():
     assert generated.shape == (10,)
 
 
+def test_tokengt_causal_graph_objective_is_finite_and_score_safe():
+    cfg = tiny_config(
+        vocab_size=48,
+        use_tokengt_causal_graph=True,
+        tokengt_graph_max_nodes=10,
+        tokengt_graph_neighbor_radius=2,
+        tokengt_graph_noncausal_policy="causal_when_possible",
+    )
+    model = DenseRandomOrderToricLM(cfg).eval()
+    permutation = torch.arange(10, dtype=torch.long).view(1, 10)
+    tokens_a = torch.tensor([[4, 5, 6, 7, 8, 9, 10, 11, 12, 13]])
+    tokens_b = torch.tensor([[4, 5, 6, 7, 20, 21, 22, 23, 24, 25]])
+    out_a = model(tokens_a, permutation=permutation, return_order=True)
+    out_b = model(tokens_b, permutation=permutation, return_order=True)
+    assert out_a["tokengt_graph_loss"].isfinite()
+    assert out_a["tokengt_graph_edge_bce"].isfinite()
+    assert out_a["tokengt_graph_direction_loss"].isfinite()
+    assert out_a["tokengt_graph_position_loss"].isfinite()
+    assert out_a["tokengt_graph_byte_class_loss"].isfinite()
+    assert out_a["tokengt_graph_cycle_loss"].isfinite()
+    assert out_a["tokengt_graph_policy_causal"].item() == 1.0
+    assert torch.allclose(out_a["logits"][:, 4], out_b["logits"][:, 4], atol=1e-6)
+
+
+def test_tokengt_graph_noncausal_policy_disables_direction_and_cycle_terms():
+    cfg = tiny_config(
+        vocab_size=48,
+        use_tokengt_causal_graph=True,
+        tokengt_graph_max_nodes=10,
+        tokengt_graph_neighbor_radius=2,
+        tokengt_graph_noncausal_policy="undirected_regularizer",
+    )
+    model = DenseRandomOrderToricLM(cfg)
+    tokens = torch.randint(4, cfg.vocab_size, (2, 10))
+    out = model(tokens, sample_ids=torch.arange(2), return_order=True)
+    assert out["tokengt_graph_loss"].isfinite()
+    assert out["tokengt_graph_direction_loss"].item() == 0.0
+    assert out["tokengt_graph_cycle_loss"].item() == 0.0
+    assert out["tokengt_graph_policy_causal"].item() == 0.0
+
+
 def test_gflownet_adapter_losses_and_multi_sample_scaling():
     cfg = tiny_config(vocab_size=48, use_gflownet_policy=True, gflownet_num_actions=4, gflownet_hidden_dim=16)
     model = DenseRandomOrderToricLM(cfg)

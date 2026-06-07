@@ -93,7 +93,7 @@
 \maketitle
 
 \begin{abstract}
-This manuscript extends the ToricGT framework into a more formal, didactic, and proof-heavy specification.  ToricGT is a graph-to-graph architecture that combines TokenGT-style node and edge tokenization, exact ring evaluation of attention, tropical max-plus heads for dynamic-programming structure, finite noncommutative-torus channels for projective phase memory, and embedding-space Generative Flow Network fine-tuning.  We formalize bounded typed graph domains, prove equivariance of tokenization, masking, attention, decoding, and projective toric transports, and reduce bounded graph-to-graph universality to sequence-to-sequence Transformer universality.  We then give exact blockwise tropical ring-attention proofs, stability lemmas for active faces, and constructive simulations of Bellman-Ford-style semiring recurrences.  Motivated by the toric geometry of ReLU neural networks, we add a toric-geometric layer of explanation: tropical heads induce Newton polytopes and normal fans, active faces become exposed faces of those polytopes, and kink/bend diagnostics are interpreted as discrete analogues of Cartier-divisor intersection numbers.  The operator-algebra layer is sharpened by normal-form, cocycle, trace, finite Weyl-pair, and irrational-spiral projection theorems.  A new Hebrew morphology section defines root-template graphs for biblical and classical Hebrew, including radical alignment, binyan/template structure, source-span graphs, paradigm graphs, and semiring alignment losses.  We add a visualization contract for auditing reasoning capacity: equivariance orbits, tropical active faces, toric phase maps, Hebrew paradigm lattices, GFlowNet reward landscapes, and proof-dependency graphs.  We integrate Soft-MoE routing as a typed, fully differentiable expert-slot layer for ToricGT graph tokens, prove its permutation equivariance, give low-rank and shared-expert variants for compact artifacts, and specify a Parameter-Golf-constrained micro-ToricGT language-model track with byte-accurate artifact accounting, BPB scoring, quantization-aware training, record-folder checklists, and compliance risk controls.  We further formulate behavior-modification protocols that generalize Assistant-Axis activation capping to GraphCG-disentangled, toric-tropical corridor and alcove control over graph-of-thought trajectories, memory retrieval, and analogical transfer.  Finally, we integrate PolarQuant-style random preconditioning and recursive polar-angle quantization as an optional long-context KV-cache layer for ToricGT ring attention, with perturbation bounds showing when quantized keys and values preserve tropical outputs and active argmax faces.  This revision also adds two implementation-facing layers requested for the training program: Soft-MoE feed-forward replacement blocks adapted to graph tokens, and a Parameter-Golf compression track that turns ToricGT ideas into a self-contained micro language model satisfying the OpenAI Model Craft Challenge constraints.  The result is a mathematically controlled specification for a small, reproducible model family aimed at graph-structured mathematical, algebraic, tropical, toric-geometric, Hebrew-morphological, behavior-steered, and parameter-constrained language-model reasoning.
+This manuscript extends the ToricGT framework into a more formal, didactic, and proof-heavy specification.  ToricGT is a graph-to-graph architecture that combines TokenGT-style node and edge tokenization, exact ring evaluation of attention, tropical max-plus heads for dynamic-programming structure, finite noncommutative-torus channels for projective phase memory, and embedding-space Generative Flow Network fine-tuning.  We formalize bounded typed graph domains, prove equivariance of tokenization, masking, attention, decoding, and projective toric transports, and reduce bounded graph-to-graph universality to sequence-to-sequence Transformer universality.  We then give exact blockwise tropical ring-attention proofs, stability lemmas for active faces, and constructive simulations of Bellman-Ford-style semiring recurrences.  Motivated by the toric geometry of ReLU neural networks, we add a toric-geometric layer of explanation: tropical heads induce Newton polytopes and normal fans, active faces become exposed faces of those polytopes, and kink/bend diagnostics are interpreted as discrete analogues of Cartier-divisor intersection numbers.  The operator-algebra layer is sharpened by normal-form, cocycle, trace, finite Weyl-pair, and irrational-spiral projection theorems.  A new Hebrew morphology section defines root-template graphs for biblical and classical Hebrew, including radical alignment, binyan/template structure, source-span graphs, paradigm graphs, and semiring alignment losses.  We add a visualization contract for auditing reasoning capacity: equivariance orbits, tropical active faces, toric phase maps, Hebrew paradigm lattices, GFlowNet reward landscapes, and proof-dependency graphs.  We integrate Soft-MoE routing as a typed, fully differentiable expert-slot layer for ToricGT graph tokens, prove its permutation equivariance, give low-rank and shared-expert variants for compact artifacts, and specify a Parameter-Golf-constrained micro-ToricGT language-model track with byte-accurate artifact accounting, BPB scoring, quantization-aware training, record-folder checklists, compliance risk controls, and a byte-scored TokenGT hybrid objective that trains graph structure on hidden reveal trajectories without replacing official byte BPB.  We further formulate behavior-modification protocols that generalize Assistant-Axis activation capping to GraphCG-disentangled, toric-tropical corridor and alcove control over graph-of-thought trajectories, memory retrieval, and analogical transfer.  Finally, we integrate PolarQuant-style random preconditioning and recursive polar-angle quantization as an optional long-context KV-cache layer for ToricGT ring attention, with perturbation bounds showing when quantized keys and values preserve tropical outputs and active argmax faces.  This revision also adds two implementation-facing layers requested for the training program: Soft-MoE feed-forward replacement blocks adapted to graph tokens, and a Parameter-Golf compression track that turns ToricGT ideas into a self-contained micro language model satisfying the OpenAI Model Craft Challenge constraints.  The result is a mathematically controlled specification for a small, reproducible model family aimed at graph-structured mathematical, algebraic, tropical, toric-geometric, Hebrew-morphological, behavior-steered, and parameter-constrained language-model reasoning.
 \end{abstract}
 
 \tableofcontents
@@ -1486,6 +1486,44 @@ is score-before-update valid.
 Induct on $k$.  Before step $1$, only the permutation, BOS symbol, and fixed parameters are known.  Assume before step $k$ that the online state is a function only of already scored bytes $b_{\pi_{<k}}$ and the public order prefix $\pi_{\le k}$.  The predictive distribution for $b_{\pi_k}$ is computed from exactly those quantities.  The byte $b_{\pi_k}$ is inserted into the state only after its log score is recorded.  Since $\pi$ is independent of unscored byte values, the order itself cannot encode future validation information.
 \end{proof}
 
+\subsection{Byte-scored TokenGT hybrid graph loss}
+
+The official Parameter-Golf score should not be replaced by graph-token
+bits-per-token.  The hybrid implementation instead treats the random-order
+hidden states as a TokenGT-style graph while preserving byte logits.  For
+reveal state $h_i$ and original byte position $p_i=\pi_i$, define local
+path-neighborhood labels
+\begin{equation}
+  A_{ij}=\mathbf 1\{0<|p_i-p_j|\le r\}.
+\end{equation}
+If the source has a trustworthy causal orientation, use
+$E_{ij}=A_{ij}\mathbf 1\{i<j\}$.  If the source is cyclic, undirected, or
+otherwise noncausal, use $E_{ij}=A_{ij}$ and set the direction and cycle
+weights to zero.  With normalized hidden states $\bar h_i$, temperature
+$\tau$, coarse byte-class agreement $C_{ij}$, and toric phase map $\phi$, the
+training-only graph objective is
+\begin{align}
+\mathcal L_{\mathrm{ByteTokenGT}}
+&=
+a_e\,{\rm BCE}(\langle \bar h_i,\bar h_j\rangle/\tau,E_{ij})
++a_p\,{\rm SmoothL1}(d_h(i,j),\log(1+|p_i-p_j|))\\
+&\quad
++a_c\,{\rm BCE}(\langle \bar h_i,\bar h_j\rangle/\tau,C_{ij})
++a_d\,\mathbb E_{i\to j}\max(0,m-\cos(h_j-h_i,\phi(p_j)-\phi(p_i)))^2\\
+&\quad
++a_{\rm cyc}\,\mathbb E_{i>j,A_{ij}=1}\sigma(\langle \bar h_i,\bar h_j\rangle/\tau).
+\end{align}
+The total hybrid loss adds
+$\lambda_{\mathrm{ByteTokenGT}}\mathcal L_{\mathrm{ByteTokenGT}}$ to byte CE,
+GFlowNet trajectory balance, GraphCG disentanglement, toric geometry, BGG,
+Koszul, Slepian--Pollak, and memory losses.  Thus FineWeb examples are
+graph-structured as path graphs, graph-of-thought examples may add richer
+structure, and official BPB remains the byte-denominated prequential log score.
+The current byte-accounted hybrid config uses $d=448$, $8$ heads, seven stored
+dense blocks, and two recurrent passes; its 6-bit row-quantized LZMA artifact
+probe is $15{,}206{,}131$ bytes, leaving $793{,}869$ bytes below the
+$16{,}000{,}000$ byte cap.
+
 \subsection{Byte-safe embedding-space GFlowNet actions}
 
 The full ToricGT graph model uses an embedding-space GFlowNet over graph-of-thought states.  The Parameter-Golf adapter uses the score-valid subset of the same idea.  Let $h_k$ be the hidden state at random-order step $k$, computed from $(b_{\pi_{<k}},\pi_{\le k})$.  A small policy head produces
@@ -2163,7 +2201,7 @@ with a slightly increased learning-rate multiplier and tighter gradient clipping
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.82\textwidth]{fig_oai_step2250_reasoning_k_bpb.png}
+  \includegraphics[width=0.82\textwidth]{fig_oai_step37250_reasoning_k_bpb.png}
   \caption{Step-$2250$ \texttt{oai} recovery diagnostic.  The reasoning/K$(x\mid\mathrm{helpers})$/BPB simplex places graph-of-thought branches in a three-way tradeoff among additional reasoning budget, conditional-compression structure, and low BPB.  The early checkpoint still favors low-BPB branches over longer reasoning budgets, so GraphCG and a small GFlowNet objective are activated while heavier toric/Koszul losses remain gated.}
   \label{fig:oai-step2250-simplex}
 \end{figure}
