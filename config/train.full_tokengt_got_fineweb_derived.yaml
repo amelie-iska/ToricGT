@@ -35,7 +35,7 @@ model:
   num_heads: 6
   num_layers: 6
   max_nodes: 384
-  max_edges: 768
+  max_edges: 1536
   no_soft_moe: false
   soft_moe_all_layers: false
   soft_moe_experts: 4
@@ -50,8 +50,8 @@ training:
   gc_every: 10
   max_cpu_rss_gb: 58.0
   device: cuda
-  batch_size: 1
-  grad_accum_steps: 64
+  batch_size: 2
+  grad_accum_steps: 32
   precision: bf16
   seed: 17
   lr: 0.00015
