@@ -65,6 +65,8 @@ def test_graph_of_thought_dag_metrics_are_primary_and_grouped() -> None:
         "train/got_dag_loss": 0.012,
         "train/got_dag_branch_count": 3.0,
         "train/got_dag_merge_count": 2.0,
+        "train/got_dag_branch_merge_edge_fraction": 0.91,
+        "train/got_dag_linear_chain_fraction": 0.09,
         "train/trajectory_memory_dag_similarity": 0.44,
     }
 
@@ -73,8 +75,11 @@ def test_graph_of_thought_dag_metrics_are_primary_and_grouped() -> None:
     assert organized["00_primary/got_dag_loss"] == 0.012
     assert organized["00_primary/got_dag_branch_count"] == 3.0
     assert organized["00_primary/got_dag_merge_count"] == 2.0
+    assert organized["00_primary/got_dag_branch_merge_edge_fraction"] == 0.91
+    assert organized["00_primary/got_dag_linear_chain_fraction"] == 0.09
     assert organized["00_primary/trajectory_memory_dag_similarity"] == 0.44
     assert organized["07_topology_geometry/train/got_dag_loss"] == 0.012
+    assert organized["07_topology_geometry/train/got_dag_linear_chain_fraction"] == 0.09
     assert organized["07_topology_geometry/train/trajectory_memory_dag_similarity"] == 0.44
 
 

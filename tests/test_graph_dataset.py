@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from toricgt.config import ModelConfig
-from toricgt.got_trajectory import graph_json_has_branch_merge
+from toricgt.got_trajectory import graph_json_has_branch_merge, got_dag_summary_np
 from toricgt.graph_dataset import (
     CuratedGraphIterableDataset,
     collate_graph_items,
@@ -58,6 +58,11 @@ def test_text_fallback_builds_branching_merging_graph():
 
     assert payload["trajectory_kind"] == "branch_merge_dag"
     assert graph_json_has_branch_merge(payload)
+    assert "context_order" not in {edge["type"] for edge in payload["edges"]}
+    node_ids = {node["id"]: idx for idx, node in enumerate(payload["nodes"])}
+    edges = np.asarray([[node_ids[edge["source"]], node_ids[edge["target"]]] for edge in payload["edges"]], dtype=np.int64)
+    summary = got_dag_summary_np(len(payload["nodes"]), edges)
+    assert summary["branch_merge_edge_fraction"] > summary["linear_chain_fraction"]
 
 
 def test_record_to_graph_json_upgrades_linear_graph():
@@ -78,6 +83,8 @@ def test_record_to_graph_json_upgrades_linear_graph():
     upgraded = json.loads(record_to_graph_json({"graph_json": json.dumps(payload)}, cfg))
 
     assert graph_json_has_branch_merge(upgraded)
+    assert "next" not in {edge["type"] for edge in upgraded["edges"]}
+    assert upgraded["suppressed_linear_chain_edges"] == 3
 
 
 def write_fake_challenge_bin(path, tokens):

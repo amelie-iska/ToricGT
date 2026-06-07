@@ -84,6 +84,12 @@ TRIANGLE_SPECS = {
         "title": "Directed noncommutative flow simplex",
         "intensity": "score/low_cycle_flux",
     },
+    "branch_merge_non_linear": {
+        "labels": ["branch/merge edges", "low chain collapse", "branch diversity"],
+        "scores": ["score/branch_merge_edges", "score/low_linear_chain", "score/branch_diversity"],
+        "title": "Branch/Merge DAG vs. Linear-Chain Collapse Simplex",
+        "intensity": "score/low_linear_chain",
+    },
 }
 
 
@@ -413,6 +419,12 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                     "got_dag_merge_scatter": float(got["got_dag_merge_scatter_batch"][sample_index].detach().cpu()),
                     "got_dag_simplex_edge_density": float(got["got_dag_simplex_edge_density_batch"][sample_index].detach().cpu()),
                     "got_dag_triangle_density": float(got["got_dag_triangle_density_batch"][sample_index].detach().cpu()),
+                    "got_dag_linear_chain_fraction": float(
+                        got["got_dag_linear_chain_fraction_batch"][sample_index].detach().cpu()
+                    ),
+                    "got_dag_branch_merge_edge_fraction": float(
+                        got["got_dag_branch_merge_edge_fraction_batch"][sample_index].detach().cpu()
+                    ),
                     "derived_feature_projective_dimension": float(derived[sample_index, 7]),
                     "derived_feature_regularity": float(derived[sample_index, 8]),
                     "derived_feature_total_betti": float(derived[sample_index, 9]),
@@ -449,6 +461,8 @@ def enrich_scores(records: list[dict[str, Any]]) -> None:
             "score/low_cycle_flux": ("topology_directed_cycle_flux", False),
             "score/low_asymmetry": ("topology_directed_asymmetry", False),
             "score/branch_diversity": ("got_dag_branch_diversity", True),
+            "score/branch_merge_edges": ("got_dag_branch_merge_edge_fraction", True),
+            "score/low_linear_chain": ("got_dag_linear_chain_fraction", False),
         },
     )
 
@@ -480,6 +494,8 @@ def summarize(records: list[dict[str, Any]], args: argparse.Namespace) -> dict[s
         "mean_got_dag_merge_count": mean("got_dag_merge_count"),
         "mean_got_dag_branch_diversity": mean("got_dag_branch_diversity"),
         "mean_got_dag_merge_scatter": mean("got_dag_merge_scatter"),
+        "mean_got_dag_linear_chain_fraction": mean("got_dag_linear_chain_fraction"),
+        "mean_got_dag_branch_merge_edge_fraction": mean("got_dag_branch_merge_edge_fraction"),
         "mean_topology_directed_asymmetry": mean("topology_directed_asymmetry"),
         "mean_topology_directed_cycle_flux": mean("topology_directed_cycle_flux"),
         "mean_topology_triangle_density": mean("topology_triangle_density"),
@@ -520,6 +536,12 @@ def log_to_wandb(run_path: str, summary: dict[str, Any], step: int) -> None:
             "analysis_control/tokengt_geometry/mean_path_smoothness": summary["mean_path_smoothness"],
             "analysis_control/tokengt_geometry/mean_got_dag_branch_count": summary["mean_got_dag_branch_count"],
             "analysis_control/tokengt_geometry/mean_got_dag_merge_count": summary["mean_got_dag_merge_count"],
+            "analysis_control/tokengt_geometry/mean_got_dag_linear_chain_fraction": summary[
+                "mean_got_dag_linear_chain_fraction"
+            ],
+            "analysis_control/tokengt_geometry/mean_got_dag_branch_merge_edge_fraction": summary[
+                "mean_got_dag_branch_merge_edge_fraction"
+            ],
             "analysis_control/tokengt_geometry/mean_topology_directed_asymmetry": summary["mean_topology_directed_asymmetry"],
             "analysis_control/tokengt_geometry/mean_topology_directed_cycle_flux": summary["mean_topology_directed_cycle_flux"],
             "analysis_control/tokengt_geometry/oai_competition_bpb_available": summary["oai_competition_bpb_available"],

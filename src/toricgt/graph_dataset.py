@@ -194,8 +194,9 @@ def text_to_graph_json(
 ) -> str:
     """Convert raw text into a branch-and-merge graph-of-thought record.
 
-    The root branches into alternative early spans.  Each four-span window forms
-    a diamond ``source -> {branch_a, branch_b} -> merge`` cell.  This keeps
+    The root branches into alternative early spans.  The trajectory is then a
+    branch/merge DAG of local reasoning cells, not a full adjacent-span chain:
+    ``source -> {alternative_a, alternative_b} -> merge``.  This keeps
     full-dataset text rows compatible with TokenGT while preserving the
     graph-of-thought assumption that reasoning trajectories split and rejoin.
     """
@@ -210,32 +211,27 @@ def text_to_graph_json(
     ]
     for idx, span in enumerate(spans):
         nodes.append({"id": f"step_{idx:03d}", "type": "reasoning_step", "text": span})
-    merge_nodes: list[dict[str, str]] = []
     edges: list[dict[str, str]] = []
-    if spans:
-        edges.append({"source": "root", "target": "step_000", "type": "starts_branch"})
-    if len(spans) > 1:
-        edges.append({"source": "root", "target": "step_001", "type": "starts_alternative_branch"})
-    for idx in range(max(0, len(spans) - 1)):
-        edges.append({"source": f"step_{idx:03d}", "target": f"step_{idx + 1:03d}", "type": "context_order"})
-    merge_idx = 0
-    for idx in range(0, max(0, len(spans) - 2), 3):
-        left = f"step_{idx + 1:03d}"
-        right = f"step_{idx + 2:03d}"
-        merge_target = f"step_{min(idx + 3, len(spans) - 1):03d}"
-        branch_source = f"step_{idx:03d}"
-        edges.append({"source": branch_source, "target": left, "type": "branch_left"})
-        edges.append({"source": branch_source, "target": right, "type": "branch_right"})
-        if merge_target not in {left, right}:
+    source = "root"
+    idx = 0
+    while idx < len(spans):
+        left = f"step_{idx:03d}"
+        if idx + 1 >= len(spans):
+            edges.append({"source": source, "target": left, "type": "tail_continuation"})
+            break
+        right = f"step_{idx + 1:03d}"
+        edges.append({"source": source, "target": left, "type": "branch_left"})
+        edges.append({"source": source, "target": right, "type": "branch_right"})
+        if idx + 2 < len(spans):
+            merge_target = f"step_{idx + 2:03d}"
             edges.append({"source": left, "target": merge_target, "type": "merge_candidate"})
             edges.append({"source": right, "target": merge_target, "type": "merge_candidate"})
+            source = merge_target
+            idx += 3
         else:
-            join_id = f"merge_{merge_idx:03d}"
-            merge_idx += 1
-            merge_nodes.append({"id": join_id, "type": "reasoning_merge", "text": "merge local alternatives"})
-            edges.append({"source": left, "target": join_id, "type": "merge_candidate"})
-            edges.append({"source": right, "target": join_id, "type": "merge_candidate"})
-    nodes.extend(merge_nodes)
+            edges.append({"source": left, "target": right, "type": "merge_candidate"})
+            source = right
+            idx += 2
     payload = {
         "task_family": task_family or "text_branch_merge_got",
         "dataset": dataset,
@@ -256,7 +252,10 @@ def ensure_branch_merge_graph_json(graph_json: str) -> str:
     nodes = list(payload.get("nodes") or [])
     if len(nodes) < 4:
         return graph_json
-    edges = list(payload.get("edges") or [])
+    suppressed_types = {"context_order", "next"}
+    original_edges = list(payload.get("edges") or [])
+    edges = [edge for edge in original_edges if str(edge.get("type") or "") not in suppressed_types]
+    suppressed_linear_chain_edges = len(original_edges) - len(edges)
     node_ids = [str(node.get("id", idx)) for idx, node in enumerate(nodes)]
     existing = {(str(edge.get("source")), str(edge.get("target")), str(edge.get("type") or "")) for edge in edges}
     for idx in range(0, len(node_ids) - 3, 3):
@@ -276,6 +275,7 @@ def ensure_branch_merge_graph_json(graph_json: str) -> str:
                 existing.add((src, dst, typ))
     payload["edges"] = edges
     payload["trajectory_kind"] = "branch_merge_dag"
+    payload["suppressed_linear_chain_edges"] = int(suppressed_linear_chain_edges)
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -317,7 +317,7 @@ def record_to_graph_json(record: dict[str, object], cfg: ModelConfig) -> str:
 
 
 def graph_json_to_item(graph_json: str, cfg: ModelConfig) -> GraphTrainingItem:
-    payload = json.loads(graph_json or "{}")
+    payload = json.loads(ensure_branch_merge_graph_json(graph_json or "{}"))
     raw_nodes = list(payload.get("nodes") or [])
     raw_edges = list(payload.get("edges") or [])
     nodes = raw_nodes[: cfg.max_nodes]

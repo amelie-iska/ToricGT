@@ -20,9 +20,11 @@ from torch.nn import functional as F
 class GoTDAGConfig:
     branch_min_variance: float = 0.02
     merge_max_scatter: float = 0.20
+    linear_chain_max_fraction: float = 0.35
     acyclicity_weight: float = 1.0
     branch_weight: float = 0.35
     merge_weight: float = 0.35
+    linearity_weight: float = 0.25
     balance_weight: float = 0.10
     eps: float = 1e-6
 
@@ -133,6 +135,8 @@ def got_dag_metrics(
             "got_dag_balance_residual_batch": h.new_zeros((batch,)),
             "got_dag_simplex_edge_density_batch": h.new_zeros((batch,)),
             "got_dag_triangle_density_batch": h.new_zeros((batch,)),
+            "got_dag_linear_chain_fraction_batch": h.new_zeros((batch,)),
+            "got_dag_branch_merge_edge_fraction_batch": h.new_zeros((batch,)),
             "got_dag_branch_count": zero,
             "got_dag_merge_count": zero,
             "got_dag_edge_count": zero,
@@ -144,6 +148,8 @@ def got_dag_metrics(
             "got_dag_max_in_degree": zero,
             "got_dag_simplex_edge_density": zero,
             "got_dag_triangle_density": zero,
+            "got_dag_linear_chain_fraction": zero,
+            "got_dag_branch_merge_edge_fraction": zero,
         }
 
     src = edge_index[..., 0].clamp(0, max(num_nodes - 1, 0))
@@ -159,6 +165,14 @@ def got_dag_metrics(
     branch_count = branch_soft.sum(dim=1)
     merge_count = merge_soft.sum(dim=1)
     edge_count = valid_f.sum(dim=1).clamp_min(1.0)
+    src_out_degree = out_degree.gather(1, src)
+    dst_in_degree = in_degree.gather(1, dst)
+    branch_incident = (src_out_degree > 1.0) & valid
+    merge_incident = (dst_in_degree > 1.0) & valid
+    branch_merge_incident = branch_incident | merge_incident
+    linear_chain_edge = valid & ~branch_merge_incident
+    linear_chain_fraction = linear_chain_edge.float().sum(dim=1) / edge_count
+    branch_merge_edge_fraction = branch_merge_incident.float().sum(dim=1) / edge_count
 
     batch_index = torch.arange(batch, device=device).unsqueeze(1).expand_as(src)
     h_src = h[batch_index, src]
@@ -198,10 +212,12 @@ def got_dag_metrics(
 
     branch_collapse = F.relu(float(cfg.branch_min_variance) - branch_diversity)
     merge_spread = F.relu(merge_scatter - float(cfg.merge_max_scatter))
+    linearity_penalty = F.relu(linear_chain_fraction - float(cfg.linear_chain_max_fraction))
     loss_per_batch = (
         float(cfg.branch_weight) * branch_collapse
         + float(cfg.merge_weight) * merge_spread
         + float(cfg.acyclicity_weight) * back_edge_fraction
+        + float(cfg.linearity_weight) * linearity_penalty
         + float(cfg.balance_weight) * balance
     )
     if torch.isfinite(edge_len).all():
@@ -219,6 +235,8 @@ def got_dag_metrics(
         "got_dag_balance_residual_batch": balance,
         "got_dag_simplex_edge_density_batch": simplex_edge_density,
         "got_dag_triangle_density_batch": triangle_density,
+        "got_dag_linear_chain_fraction_batch": linear_chain_fraction,
+        "got_dag_branch_merge_edge_fraction_batch": branch_merge_edge_fraction,
         "got_dag_branch_count": branch_count.mean().detach(),
         "got_dag_merge_count": merge_count.mean().detach(),
         "got_dag_edge_count": edge_count.mean().detach(),
@@ -230,6 +248,8 @@ def got_dag_metrics(
         "got_dag_max_in_degree": in_degree.max(dim=1).values.mean().detach(),
         "got_dag_simplex_edge_density": simplex_edge_density.mean().detach(),
         "got_dag_triangle_density": triangle_density.mean().detach(),
+        "got_dag_linear_chain_fraction": linear_chain_fraction.mean().detach(),
+        "got_dag_branch_merge_edge_fraction": branch_merge_edge_fraction.mean().detach(),
     }
 
 
@@ -246,6 +266,8 @@ def got_dag_summary_np(
             "edge_count": 0.0,
             "back_edge_fraction": 0.0,
             "simplex_edge_density": 0.0,
+            "linear_chain_fraction": 0.0,
+            "branch_merge_edge_fraction": 0.0,
         }
     if edges is None:
         edges = default_branch_merge_edges_np(num_nodes)
@@ -258,6 +280,13 @@ def got_dag_summary_np(
         in_degree[int(dst)] += 1.0
     edge_count = float(len(valid))
     possible_edges = max(1.0, float(num_nodes * (num_nodes - 1)))
+    linear_edges = 0
+    branch_merge_edges = 0
+    for src, dst in valid:
+        if out_degree[int(src)] > 1.0 or in_degree[int(dst)] > 1.0:
+            branch_merge_edges += 1
+        else:
+            linear_edges += 1
     return {
         "branch_count": float((out_degree > 1.0).sum()),
         "merge_count": float((in_degree > 1.0).sum()),
@@ -266,6 +295,8 @@ def got_dag_summary_np(
         "simplex_edge_density": edge_count / possible_edges,
         "max_out_degree": float(out_degree.max(initial=0.0)),
         "max_in_degree": float(in_degree.max(initial=0.0)),
+        "linear_chain_fraction": float(linear_edges / edge_count) if edge_count else 0.0,
+        "branch_merge_edge_fraction": float(branch_merge_edges / edge_count) if edge_count else 0.0,
     }
 
 

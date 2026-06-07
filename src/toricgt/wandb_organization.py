@@ -395,6 +395,18 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/got_dag_loss", ("train/got_dag_loss",))
     _add_first(out, payload, "00_primary/got_dag_branch_count", ("train/got_dag_branch_count",))
     _add_first(out, payload, "00_primary/got_dag_merge_count", ("train/got_dag_merge_count",))
+    _add_first(
+        out,
+        payload,
+        "00_primary/got_dag_branch_merge_edge_fraction",
+        ("train/got_dag_branch_merge_edge_fraction",),
+    )
+    _add_first(
+        out,
+        payload,
+        "00_primary/got_dag_linear_chain_fraction",
+        ("train/got_dag_linear_chain_fraction",),
+    )
     _add_first(out, payload, "00_primary/trajectory_memory_dag_similarity", ("train/trajectory_memory_dag_similarity",))
     _add_first(out, payload, "00_primary/derived_category_loss", ("train/derived_category_loss",))
     _add_first(out, payload, "00_primary/derived_category_chain_map_residual", ("train/derived_category_chain_map_residual",))
