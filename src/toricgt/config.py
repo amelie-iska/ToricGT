@@ -68,6 +68,9 @@ class ModelConfig:
     use_lm_context_hash_embeddings: bool = False
     lm_context_hash_buckets: int = 1024
     lm_context_hash_weight: float = 0.35
+    use_lm_revealed_neighbor_hash: bool = False
+    lm_revealed_neighbor_hash_buckets: int = 256
+    lm_revealed_neighbor_hash_weight: float = 0.15
     lm_bos_token_id: int = 0
     use_lm_caseops_features: bool = False
     lm_caseops_feature_dim: int = 10

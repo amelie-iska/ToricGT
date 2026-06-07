@@ -81,6 +81,13 @@ class ToricTokenGT(nn.Module):
             if config.use_lm_head and config.use_lm_context_hash_embeddings and config.lm_context_hash_buckets > 0
             else None
         )
+        self.lm_revealed_neighbor_hash = (
+            nn.Embedding(config.lm_revealed_neighbor_hash_buckets, config.d_model)
+            if config.use_lm_head
+            and config.use_lm_revealed_neighbor_hash
+            and config.lm_revealed_neighbor_hash_buckets > 0
+            else None
+        )
         self.lm_caseops = (
             nn.Linear(config.lm_caseops_feature_dim, config.d_model, bias=False)
             if config.use_lm_head and config.use_lm_caseops_features
@@ -197,6 +204,70 @@ class ToricTokenGT(nn.Module):
         )
         return torch.remainder(hashed, int(self.config.lm_context_hash_buckets)).to(torch.long)
 
+    def _lm_revealed_neighbor_context(
+        self,
+        batch: GraphBatch,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        ranks: torch.Tensor,
+        node_count: int,
+        dtype: torch.dtype,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Aggregate rank-safe graph-neighbor hashes from already revealed nodes."""
+
+        if self.lm_revealed_neighbor_hash is None:
+            return None, None
+        if batch.edge_index.numel() == 0 or batch.edge_mask.numel() == 0:
+            return None, None
+        device = input_ids.device
+        edge_index = batch.edge_index.to(device=device, dtype=torch.long)
+        edge_mask = batch.edge_mask.to(device=device, dtype=torch.bool)
+        node_mask = batch.node_mask[:, :node_count].to(device=device, dtype=torch.bool)
+        context = input_ids.new_zeros((input_ids.shape[0], node_count, self.config.d_model), dtype=torch.float32)
+        counts = input_ids.new_zeros((input_ids.shape[0], node_count), dtype=torch.float32)
+        buckets = int(self.config.lm_revealed_neighbor_hash_buckets)
+        for batch_idx in range(input_ids.shape[0]):
+            active = edge_mask[batch_idx]
+            if not bool(active.any().detach().cpu()):
+                continue
+            endpoints = edge_index[batch_idx, active, :].clamp(0, max(node_count - 1, 0))
+            src = endpoints[:, 0]
+            dst = endpoints[:, 1]
+            valid = node_mask[batch_idx, src] & node_mask[batch_idx, dst]
+            if not bool(valid.any().detach().cpu()):
+                continue
+            src = src[valid]
+            dst = dst[valid]
+            src_rank = ranks[batch_idx, src]
+            dst_rank = ranks[batch_idx, dst]
+            for query, neighbor, direction_code in (
+                (dst, src, 1),
+                (src, dst, 2),
+            ):
+                query_rank = ranks[batch_idx, query]
+                neighbor_rank = ranks[batch_idx, neighbor]
+                legal = neighbor_rank < query_rank
+                if not bool(legal.any().detach().cpu()):
+                    continue
+                query = query[legal]
+                neighbor = neighbor[legal]
+                hashed = (
+                    input_ids[batch_idx, neighbor].to(torch.int64) * 1_000_003
+                    + input_ids[batch_idx, query].to(torch.int64) * 917_609
+                    + positions[batch_idx, query].to(torch.int64) * 65_537
+                    + ranks[batch_idx, query].to(torch.int64) * 32_771
+                    + int(direction_code) * 8_191
+                )
+                hash_ids = torch.remainder(hashed, buckets).to(torch.long)
+                context[batch_idx].index_add_(0, query, self.lm_revealed_neighbor_hash(hash_ids).float())
+                counts[batch_idx].index_add_(0, query, torch.ones_like(query, dtype=torch.float32))
+        if not bool((counts > 0).any().detach().cpu()):
+            return None, None
+        context = context / counts.clamp_min(1.0).unsqueeze(-1)
+        known = ((counts > 0) & node_mask).to(torch.float32)
+        known_fraction = known.sum() / node_mask.to(torch.float32).sum().clamp_min(1.0)
+        return context.to(device=device, dtype=dtype), known_fraction
+
     def _apply_lm_smear_gate(
         self,
         node_x: torch.Tensor,
@@ -226,6 +297,7 @@ class ToricTokenGT(nn.Module):
         input_ids = None
         lm_input = None
         node_rank = None
+        lm_revealed_neighbor_known_fraction = None
         if batch.node_causal_rank is not None:
             node_rank = batch.node_causal_rank[:, : tok.node_positions.numel()].to(device=x.device, dtype=torch.long)
         if batch.lm_input_ids is not None:
@@ -254,6 +326,22 @@ class ToricTokenGT(nn.Module):
             lm_input = hashed * float(self.config.lm_context_hash_weight) if lm_input is None else lm_input + float(
                 self.config.lm_context_hash_weight
             ) * hashed
+        if self.lm_revealed_neighbor_hash is not None and input_ids is not None and node_rank is not None:
+            positions = self._lm_positions(batch, tok.node_positions.numel(), x.device)
+            neighbor_context, lm_revealed_neighbor_known_fraction = self._lm_revealed_neighbor_context(
+                batch,
+                input_ids,
+                positions,
+                node_rank,
+                tok.node_positions.numel(),
+                x.dtype,
+            )
+            if neighbor_context is not None:
+                lm_input = (
+                    neighbor_context * float(self.config.lm_revealed_neighbor_hash_weight)
+                    if lm_input is None
+                    else lm_input + float(self.config.lm_revealed_neighbor_hash_weight) * neighbor_context
+                )
         if self.lm_caseops is not None and batch.lm_input_features is not None:
             features = batch.lm_input_features[:, : tok.node_positions.numel(), :].to(device=x.device, dtype=x.dtype)
             caseops = self.lm_caseops(features)
@@ -298,6 +386,8 @@ class ToricTokenGT(nn.Module):
             "edge_index": batch.edge_index,
             "edge_mask": batch.edge_mask,
         }
+        if lm_revealed_neighbor_known_fraction is not None:
+            outputs["lm_revealed_neighbor_known_fraction"] = lm_revealed_neighbor_known_fraction
         if self.config.use_lm_head:
             if self.tie_lm_head and self.lm_token_emb is not None:
                 lm_logits = F.linear(node_x, self.lm_token_emb.weight[: self.config.lm_vocab_size], self.lm_output_bias)

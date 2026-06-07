@@ -67,6 +67,42 @@ def test_tokengt_optional_lm_head_cpu():
     assert out["lm_logits"].shape == (2, 16, 1024)
 
 
+def test_tokengt_revealed_neighbor_hash_is_rank_safe_cpu():
+    import torch
+
+    cfg = ModelConfig(
+        d_model=32,
+        num_heads=4,
+        num_layers=1,
+        max_nodes=4,
+        max_edges=4,
+        use_lm_head=True,
+        lm_vocab_size=32,
+        use_lm_token_embeddings=True,
+        use_causal_graph_attention=True,
+        use_lm_revealed_neighbor_hash=True,
+        lm_revealed_neighbor_hash_buckets=16,
+    )
+    model = ToricTokenGT(cfg)
+    batch = GraphBatch(
+        node_features=torch.randn(1, 4, cfg.node_feature_dim),
+        edge_features=torch.randn(1, 4, cfg.edge_feature_dim),
+        edge_index=torch.tensor([[[0, 1], [1, 2], [2, 3], [0, 0]]], dtype=torch.long),
+        node_mask=torch.ones(1, 4, dtype=torch.bool),
+        edge_mask=torch.tensor([[1, 1, 1, 0]], dtype=torch.bool),
+        lm_input_ids=torch.tensor([[4, 5, 6, 7]], dtype=torch.long),
+        lm_target_ids=torch.tensor([[5, 6, 7, 8]], dtype=torch.long),
+        lm_mask=torch.ones(1, 4, dtype=torch.bool),
+        lm_target_positions=torch.tensor([[1, 2, 3, 4]], dtype=torch.long),
+        node_causal_rank=torch.tensor([[0, 1, 2, 3]], dtype=torch.long),
+    )
+    out = model(batch)
+
+    assert out["lm_logits"].shape == (1, 4, cfg.lm_vocab_size)
+    assert torch.isfinite(out["lm_logits"]).all()
+    assert torch.isclose(out["lm_revealed_neighbor_known_fraction"], torch.tensor(0.75))
+
+
 def test_tokengt_can_emit_memory_trace_and_derived_certificates_cpu():
     cfg = ModelConfig(
         d_model=32,

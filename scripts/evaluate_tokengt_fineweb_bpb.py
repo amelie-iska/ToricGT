@@ -235,6 +235,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "tokengt/lm_position_embeddings": 1.0 if cfg.use_lm_position_embeddings else 0.0,
         "tokengt/lm_toric_position_features": 1.0 if cfg.use_lm_toric_position_features else 0.0,
         "tokengt/lm_context_hash_embeddings": 1.0 if cfg.use_lm_context_hash_embeddings else 0.0,
+        "tokengt/lm_revealed_neighbor_hash": 1.0 if cfg.use_lm_revealed_neighbor_hash else 0.0,
+        "tokengt/lm_revealed_neighbor_hash_buckets": float(cfg.lm_revealed_neighbor_hash_buckets),
         "tokengt/lm_caseops_features": 1.0 if cfg.use_lm_caseops_features else 0.0,
         "tokengt/lm_smear_gate": 1.0 if cfg.use_lm_smear_gate else 0.0,
         "tokengt/fineweb_graph_node_sp1024_loss": float(loss_value),

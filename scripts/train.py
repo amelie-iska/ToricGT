@@ -474,6 +474,9 @@ def main() -> None:
     parser.add_argument("--use-lm-context-hash-embeddings", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--lm-context-hash-buckets", type=int, default=1024)
     parser.add_argument("--lm-context-hash-weight", type=float, default=0.35)
+    parser.add_argument("--use-lm-revealed-neighbor-hash", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lm-revealed-neighbor-hash-buckets", type=int, default=256)
+    parser.add_argument("--lm-revealed-neighbor-hash-weight", type=float, default=0.15)
     parser.add_argument("--lm-bos-token-id", type=int, default=0)
     parser.add_argument("--use-lm-caseops-features", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--lm-caseops-feature-dim", type=int, default=10)
@@ -577,6 +580,9 @@ def main() -> None:
         use_lm_context_hash_embeddings=args.use_lm_context_hash_embeddings,
         lm_context_hash_buckets=args.lm_context_hash_buckets,
         lm_context_hash_weight=args.lm_context_hash_weight,
+        use_lm_revealed_neighbor_hash=args.use_lm_revealed_neighbor_hash,
+        lm_revealed_neighbor_hash_buckets=args.lm_revealed_neighbor_hash_buckets,
+        lm_revealed_neighbor_hash_weight=args.lm_revealed_neighbor_hash_weight,
         lm_bos_token_id=args.lm_bos_token_id,
         use_lm_caseops_features=args.use_lm_caseops_features,
         lm_caseops_feature_dim=args.lm_caseops_feature_dim,
@@ -1014,6 +1020,8 @@ def main() -> None:
                 "tokengt/lm_toric_position_features": float(bool(model_cfg.use_lm_toric_position_features)),
                 "tokengt/lm_context_hash_embeddings": float(bool(model_cfg.use_lm_context_hash_embeddings)),
                 "tokengt/lm_context_hash_buckets": float(model_cfg.lm_context_hash_buckets),
+                "tokengt/lm_revealed_neighbor_hash": float(bool(model_cfg.use_lm_revealed_neighbor_hash)),
+                "tokengt/lm_revealed_neighbor_hash_buckets": float(model_cfg.lm_revealed_neighbor_hash_buckets),
                 "tokengt/lm_caseops_features": float(bool(model_cfg.use_lm_caseops_features)),
                 "tokengt/lm_smear_gate": float(bool(model_cfg.use_lm_smear_gate)),
                 "artifact/target_size_limit_bytes": args.target_artifact_bytes,
@@ -1053,6 +1061,10 @@ def main() -> None:
                 smear_value = float(out["lm_smear_temperature"].detach().float().cpu())
                 metrics["tokengt/lm_smear_temperature"] = smear_value
                 metrics["train/lm_smear_temperature"] = smear_value
+            if "lm_revealed_neighbor_known_fraction" in out:
+                known_value = float(out["lm_revealed_neighbor_known_fraction"].detach().float().cpu())
+                metrics["tokengt/lm_revealed_neighbor_known_fraction"] = known_value
+                metrics["train/lm_revealed_neighbor_known_fraction"] = known_value
             for key, value in trajectory_metric_sums.items():
                 metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
             for key, value in derived_metric_sums.items():

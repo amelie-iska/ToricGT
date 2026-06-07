@@ -38,9 +38,11 @@ Route (1) also ports the compact OAI/Parameter-Golf baseline optimizations that
 fit the TokenGT abstraction.  The next-run config ties the SP1024 LM head to
 the learned token embedding, applies recurrent block passes for extra compute
 without extra stored weights, adds target-position embeddings and toric
-position phases, uses strict-prefix hash-context embeddings, injects
-SentencePiece operator/class features from the already revealed input token,
-and applies a small SmearGate-style logit temperature.  The old dense
+position phases, uses strict-prefix hash-context embeddings, adds a compact
+revealed-neighbor hash over graph-adjacent nodes whose reveal rank is strictly
+earlier than the query rank, injects SentencePiece operator/class features from
+the already revealed input token, and applies a small SmearGate-style logit
+temperature.  The old dense
 `1024 x 1024` bigram-bias table is disabled in this route because the hash
 context gives a more artifact-efficient version of the same competition trick.
 These features remain score-valid: they depend only on public positions,

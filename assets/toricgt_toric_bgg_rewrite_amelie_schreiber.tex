@@ -2208,6 +2208,20 @@ features are all measurable before the current symbol is scored:
   the current already-revealed input token, the public target position, and
   the reveal rank are hashed into a small embedding table.  This is the
   TokenGT analogue of the OAI baseline's cheap n-gram memory.
+  \item \emph{Revealed-neighbor hash}: for each graph edge with endpoints
+  $u,v$, the node $u$ may contribute a compact hash embedding to $v$ only when
+  $\rho(u)<\rho(v)$, where $\rho$ is the FineWeb linear rank, the DAG
+  topological rank, or the deterministic random reveal rank.  Thus the module
+  is graph-structured while remaining score-before-update measurable:
+  \[
+    h_v^{\mathrm{nbr}}
+    =
+    \frac{1}{\max(1,|\mathcal N^-_\rho(v)|)}
+    \sum_{u\in\mathcal N(v):\,\rho(u)<\rho(v)}
+    E_{\mathrm{nbr}}\!\left(
+      \operatorname{hash}(x_u,x_v,p_v,\rho(v),\operatorname{dir}(u,v))
+    \right).
+  \]
   \item \emph{SP CaseOps}: instead of byte classes, the graph route computes
   SentencePiece operator features from the already revealed input id: control,
   unknown, byte-token, leading-space, alphabetic, digit, punctuation, non-ASCII,
@@ -2216,10 +2230,11 @@ features are all measurable before the current symbol is scored:
   after the graph hidden state is computed.
 \end{enumerate}
 The dense $1024\times1024$ bigram table remains an ablation, but the default
-route uses the smaller hash-context table to preserve artifact margin under the
-$16{,}000{,}000$ byte cap.  None of these transferred modules may inspect the
-unscored target SP token; on noncausal or cyclic graphs, their ordering signal
-is the deterministic random reveal rank rather than an artificial direction.
+route uses smaller prefix and revealed-neighbor hash tables to preserve
+artifact margin under the $16{,}000{,}000$ byte cap.  None of these transferred
+modules may inspect the unscored target SP token; on noncausal or cyclic
+graphs, their ordering signal is the deterministic random reveal rank rather
+than an artificial direction.
 
 \paragraph{Byte-scored TokenGT hybrid objective.}
 The clean way to use TokenGT structure in the contest-facing branch is not to

@@ -53,8 +53,11 @@ model:
   use_lm_toric_position_features: true
   lm_toric_position_weight: 1.0
   use_lm_context_hash_embeddings: true
-  lm_context_hash_buckets: 768
+  lm_context_hash_buckets: 512
   lm_context_hash_weight: 0.35
+  use_lm_revealed_neighbor_hash: true
+  lm_revealed_neighbor_hash_buckets: 256
+  lm_revealed_neighbor_hash_weight: 0.15
   use_lm_caseops_features: true
   lm_caseops_feature_dim: 10
   lm_caseops_weight: 0.25

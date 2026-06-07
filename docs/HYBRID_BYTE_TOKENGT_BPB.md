@@ -71,6 +71,7 @@ recurrent block passes     -> more compute per stored parameter
 target-position embedding  -> OAI-style target-position conditioning
 toric position phase       -> compact sinusoidal/cocycle position features
 strict-prefix hash context -> n-gram-like memory without a dense 1024x1024 table
+revealed-neighbor hash     -> legal graph-adjacent prior from earlier reveal ranks
 SP operator features       -> CaseOps-style token class features for SentencePiece
 SmearGate temperature      -> input-dependent logit sharpness
 ```
@@ -78,8 +79,12 @@ SmearGate temperature      -> input-dependent logit sharpness
 Every term is computed from already revealed input ids, public target
 positions, reveal ranks, or graph structure.  The dense SP1024 bigram-bias
 table remains available as an ablation, but the default causal route disables
-it because the hash-context embedding is a smaller version of the same idea and
-leaves more room under the 16 MB artifact cap.
+it because the hash-context and revealed-neighbor embeddings are smaller
+versions of the same idea and leave more room under the 16 MB artifact cap.  A
+neighbor contributes only when its reveal rank is strictly less than the query
+rank: FineWeb therefore uses the left-to-right chain, DAGs use their
+topological predecessors, and cyclic/noncausal graphs use the deterministic
+random-order reveal.
 
 ## Differentiable Objective
 
