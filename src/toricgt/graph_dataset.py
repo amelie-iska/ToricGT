@@ -522,6 +522,7 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
         fineweb_tokenizer_path: str | Path = "amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model",
         fineweb_tokens_per_graph: int = 1024,
         fineweb_stride_tokens: int = 1024,
+        fineweb_mix_ratio: float = 0.0,
     ) -> None:
         super().__init__()
         if num_subsets < 1:
@@ -540,6 +541,7 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
         self.fineweb_tokenizer_path = Path(fineweb_tokenizer_path)
         self.fineweb_tokens_per_graph = max(1, int(fineweb_tokens_per_graph))
         self.fineweb_stride_tokens = max(1, int(fineweb_stride_tokens))
+        self.fineweb_mix_ratio = float(fineweb_mix_ratio)
 
     def _keep_record(self, record: dict[str, object]) -> bool:
         if self.subset_id is None:
@@ -615,19 +617,39 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
         else:
             yield from self._iter_parquet_path(path)
 
+    def _iter_paths_sequential(self, paths: Iterable[Path]):
+        for path in paths:
+            yield from self._iter_path(path)
+
     def __iter__(self):
         if not self.interleave_paths:
             for path in self.paths:
                 yield from self._iter_path(path)
             return
-        active = [(path, iter(self._iter_path(path))) for path in self.paths]
-        index = 0
+
+        fineweb_paths = [path for path in self.paths if path.suffix == ".bin"]
+        curated_paths = [path for path in self.paths if path.suffix != ".bin"]
+        if not fineweb_paths or not curated_paths:
+            for path in self.paths:
+                yield from self._iter_path(path)
+            return
+
+        active: dict[str, object] = {
+            "curated": iter(self._iter_paths_sequential(curated_paths)),
+            "fineweb": iter(self._iter_paths_sequential(fineweb_paths)),
+        }
+        ratio = min(1.0, max(0.0, self.fineweb_mix_ratio))
+        if ratio <= 0.0:
+            ratio = 0.5
+        step = 0
         while active:
-            path, iterator = active[index]
+            fineweb_due = int((step + 1) * ratio) > int(step * ratio)
+            preferred = "fineweb" if fineweb_due else "curated"
+            if preferred not in active:
+                preferred = "curated" if "curated" in active else "fineweb"
+            iterator = active[preferred]
             try:
                 yield next(iterator)
-                index = (index + 1) % len(active)
+                step += 1
             except StopIteration:
-                active.pop(index)
-                if active:
-                    index %= len(active)
+                active.pop(preferred, None)

@@ -570,6 +570,7 @@ def main() -> None:
                 fineweb_tokenizer_path=args.fineweb_tokenizer_path,
                 fineweb_tokens_per_graph=args.fineweb_tokens_per_graph,
                 fineweb_stride_tokens=args.fineweb_stride_tokens,
+                fineweb_mix_ratio=args.fineweb_mix_ratio,
             )
             loader = DataLoader(dataset, batch_size=train_cfg.batch_size, collate_fn=collate_graph_items, num_workers=0)
             data_iter = iter(loader)
@@ -586,6 +587,7 @@ def main() -> None:
                     fineweb_tokenizer_path=args.fineweb_tokenizer_path,
                     fineweb_tokens_per_graph=args.fineweb_tokens_per_graph,
                     fineweb_stride_tokens=args.fineweb_stride_tokens,
+                    fineweb_mix_ratio=args.fineweb_mix_ratio,
                 )
                 subset_loader = DataLoader(
                     dataset,
@@ -605,6 +607,7 @@ def main() -> None:
             fineweb_tokenizer_path=args.fineweb_tokenizer_path,
             fineweb_tokens_per_graph=args.fineweb_tokens_per_graph,
             fineweb_stride_tokens=args.fineweb_stride_tokens,
+            fineweb_mix_ratio=args.fineweb_mix_ratio,
         )
         val_loader = DataLoader(val_dataset, batch_size=train_cfg.batch_size, collate_fn=collate_graph_items, num_workers=0)
 
