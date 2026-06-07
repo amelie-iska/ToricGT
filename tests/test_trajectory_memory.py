@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import torch
 
@@ -69,6 +71,36 @@ def test_trajectory_retrieval_head_metrics_are_finite():
     assert out["trajectory_memory_derived_similarity"].isfinite()
     assert out["trajectory_memory_derived_projective_dimension"].isfinite()
     assert out["trajectory_memory_derived_regularity"].isfinite()
+
+
+def test_trajectory_retrieval_head_trace_is_json_safe_and_branch_merge_aware():
+    hidden = torch.randn(4, 10, 32)
+    positions = torch.arange(10).repeat(4, 1)
+    nll = torch.rand(4, 10) + 1.0
+    head = TrajectoryRetrievalHead(32)
+    edge_index = torch.tensor([[[0, 1], [0, 2], [1, 3], [2, 3], [3, 4], [3, 5], [4, 6], [5, 6]]] * 4)
+    edge_mask = torch.ones(4, edge_index.shape[1], dtype=torch.bool)
+
+    trace = head.trace(
+        hidden,
+        positions,
+        nll,
+        trajectory_edge_index=edge_index,
+        trajectory_edge_mask=edge_mask,
+        top_k=2,
+    )
+
+    json.dumps(trace)
+    assert trace["enabled"]
+    assert trace["memory_source"] == "in_batch_branch_merge_got_trajectories"
+    assert trace["analogy_teacher"] == "weighted_graphcg_toric_topology_dag_derived_quality"
+    assert len(trace["queries"]) == 4
+    assert len(trace["queries"][0]["top_candidates"]) == 2
+    assert trace["queries"][0]["dag_features"]["branch_count"] > 0.0
+    assert trace["queries"][0]["dag_features"]["merge_count"] > 0.0
+    candidate = trace["queries"][0]["top_candidates"][0]
+    assert "derived_category_similarity" in candidate["components"]
+    assert "teacher_probability" in candidate
 
 
 def test_trajectory_retrieval_teacher_does_not_backprop_nan_gradients():

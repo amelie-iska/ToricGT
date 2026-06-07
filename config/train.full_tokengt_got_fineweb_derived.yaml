@@ -63,6 +63,10 @@ training:
   derived_category_example_every: 1000
   derived_category_example_max_vertices: 6
   derived_category_example_samples: 1
+  write_memory_trace_examples: true
+  memory_trace_example_every: 1000
+  memory_trace_top_k: 3
+  memory_trace_example_samples: 2
 
 curriculum:
   gflownet_loss_weight: 0.01

@@ -95,7 +95,14 @@ class ToricTokenGT(nn.Module):
             start = self.config.num_layers // 2
         return layer_idx >= start
 
-    def forward(self, batch: GraphBatch, *, include_derived_category: bool | None = None) -> dict[str, torch.Tensor | object]:
+    def forward(
+        self,
+        batch: GraphBatch,
+        *,
+        include_derived_category: bool | None = None,
+        include_memory_trace: bool = False,
+        memory_trace_top_k: int = 3,
+    ) -> dict[str, torch.Tensor | object]:
         tok = self.tokenizer(batch)
         x = tok.tokens
         mask = attention_mask_from_token_mask(tok.token_mask)
@@ -132,6 +139,25 @@ class ToricTokenGT(nn.Module):
                 edge_mask=batch.edge_mask,
                 max_vertices=self.config.derived_category_max_vertices,
             )
+        if include_memory_trace:
+            if self.trajectory_memory_head is None:
+                outputs["memory_trace"] = {
+                    "kind": "trajectory_memory_analogical_retrieval_trace",
+                    "enabled": False,
+                    "reason": "trajectory_memory_head_disabled",
+                }
+            else:
+                positions = torch.arange(node_x.shape[1], device=node_x.device).unsqueeze(0).expand(node_x.shape[0], -1)
+                neutral_nll = node_x.new_zeros(node_x.shape[:2])
+                outputs["memory_trace"] = self.trajectory_memory_head.trace(
+                    node_x,
+                    positions,
+                    neutral_nll,
+                    trajectory_node_mask=batch.node_mask,
+                    trajectory_edge_index=batch.edge_index,
+                    trajectory_edge_mask=batch.edge_mask,
+                    top_k=memory_trace_top_k,
+                )
         return outputs
 
     def parameter_count(self) -> int:

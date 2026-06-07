@@ -246,6 +246,10 @@ def main() -> None:
     parser.add_argument("--derived-category-example-every", type=int, default=1000)
     parser.add_argument("--derived-category-example-max-vertices", type=int, default=6)
     parser.add_argument("--derived-category-example-samples", type=int, default=1)
+    parser.add_argument("--write-memory-trace-examples", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--memory-trace-example-every", type=int, default=1000)
+    parser.add_argument("--memory-trace-top-k", type=int, default=3)
+    parser.add_argument("--memory-trace-example-samples", type=int, default=2)
     parser.add_argument("--full-dataset-run", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--fineweb-mix-ratio", type=float, default=0.0)
     parser.add_argument("--target-artifact-bytes", type=int, default=16_000_000)
@@ -278,7 +282,7 @@ def main() -> None:
         soft_moe_num_experts=args.soft_moe_experts,
         soft_moe_slots_per_expert=args.soft_moe_slots,
         soft_moe_start_layer=0 if args.soft_moe_all_layers else None,
-        use_trajectory_memory_head=args.trajectory_memory_loss_weight > 0,
+        use_trajectory_memory_head=args.trajectory_memory_loss_weight > 0 or args.write_memory_trace_examples,
         trajectory_memory_projection_dim=args.trajectory_memory_projection_dim,
         trajectory_memory_dag_weight=args.trajectory_memory_dag_weight,
         trajectory_memory_derived_weight=args.trajectory_memory_derived_weight,
@@ -408,6 +412,10 @@ def main() -> None:
                 "write_derived_category_examples": args.write_derived_category_examples,
                 "derived_category_example_max_vertices": args.derived_category_example_max_vertices,
                 "derived_category_example_samples": args.derived_category_example_samples,
+                "write_memory_trace_examples": args.write_memory_trace_examples,
+                "memory_trace_example_every": args.memory_trace_example_every,
+                "memory_trace_top_k": args.memory_trace_top_k,
+                "memory_trace_example_samples": args.memory_trace_example_samples,
                 "full_dataset_run": args.full_dataset_run,
                 "fineweb_mix_ratio": args.fineweb_mix_ratio,
                 "interleave_data_paths": args.interleave_data_paths,
@@ -458,6 +466,8 @@ def main() -> None:
         teacher_loss_value = 0.0
         graph_tokens_value = 0
         last_batch_for_examples: GraphBatch | None = None
+        last_node_embeddings_for_examples: torch.Tensor | None = None
+        last_per_node_mse_for_examples: torch.Tensor | None = None
         for accum_idx in range(train_cfg.grad_accum_steps):
             if data_iter is None and not subset_loaders:
                 batch, target = synthetic_batch(model_cfg, train_cfg.batch_size, args.device)
@@ -540,8 +550,13 @@ def main() -> None:
                         trajectory_edge_mask=batch.edge_mask,
                     )
                     raw_loss = raw_loss + args.trajectory_memory_loss_weight * trajectory_memory_metrics["trajectory_memory_loss"]
+                elif args.write_memory_trace_examples and model.trajectory_memory_head is not None:
+                    per_node_mse = per_node_prediction_mse(out["node"], target, batch.node_mask)
                 loss = raw_loss / train_cfg.grad_accum_steps
             last_batch_for_examples = batch
+            if args.write_memory_trace_examples and model.trajectory_memory_head is not None:
+                last_node_embeddings_for_examples = out["node_embeddings"].detach()
+                last_per_node_mse_for_examples = per_node_mse.detach()
             raw_loss_value += float(raw_loss.detach())
             supervised_loss_value += float(supervised_loss.detach())
             if distill_loss is not None:
@@ -676,6 +691,51 @@ def main() -> None:
                         "step": int(step + 1),
                         "derived_category_loss_weight": float(args.derived_category_loss_weight),
                         "objects": objects,
+                    },
+                    handle,
+                    indent=2,
+                )
+        if (
+            args.write_memory_trace_examples
+            and model.trajectory_memory_head is not None
+            and last_batch_for_examples is not None
+            and last_node_embeddings_for_examples is not None
+            and last_per_node_mse_for_examples is not None
+            and args.memory_trace_example_every > 0
+            and (step + 1) % args.memory_trace_example_every == 0
+        ):
+            memory_dir = ckpt_dir / "memory_trace_examples"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            trace_samples = max(1, min(int(args.memory_trace_example_samples), last_node_embeddings_for_examples.shape[0]))
+            trace_positions = torch.arange(
+                last_node_embeddings_for_examples.shape[1],
+                device=last_node_embeddings_for_examples.device,
+            ).unsqueeze(0)
+            trace_positions = trace_positions.expand(trace_samples, -1)
+            trace = model.trajectory_memory_head.trace(
+                last_node_embeddings_for_examples[:trace_samples],
+                trace_positions,
+                last_per_node_mse_for_examples[:trace_samples],
+                trajectory_node_mask=last_batch_for_examples.node_mask[:trace_samples],
+                trajectory_edge_index=last_batch_for_examples.edge_index[:trace_samples],
+                trajectory_edge_mask=last_batch_for_examples.edge_mask[:trace_samples],
+                top_k=args.memory_trace_top_k,
+            )
+            derived_objects = derived_category_objects_from_batch(
+                last_batch_for_examples.edge_index[:trace_samples],
+                node_mask=last_batch_for_examples.node_mask[:trace_samples],
+                edge_mask=last_batch_for_examples.edge_mask[:trace_samples],
+                max_vertices=args.derived_category_example_max_vertices,
+            )
+            with (memory_dir / f"step_{step + 1:08d}.json").open("w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "step": int(step + 1),
+                        "trajectory_memory_loss_weight": float(args.trajectory_memory_loss_weight),
+                        "trajectory_memory_dag_weight": float(args.trajectory_memory_dag_weight),
+                        "trajectory_memory_derived_weight": float(args.trajectory_memory_derived_weight),
+                        "memory_trace": trace,
+                        "derived_category_objects": derived_objects,
                     },
                     handle,
                     indent=2,

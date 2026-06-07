@@ -369,6 +369,180 @@ class TrajectoryRetrievalHead(nn.Module):
             "derived": derived_feature,
         }
 
+    @staticmethod
+    def _json_float(value: torch.Tensor | float | int) -> float:
+        if torch.is_tensor(value):
+            return float(torch.nan_to_num(value.detach().float(), nan=0.0, posinf=1e6, neginf=-1e6).cpu().item())
+        if not math.isfinite(float(value)):
+            return 0.0
+        return float(value)
+
+    @staticmethod
+    def _json_vector(values: torch.Tensor) -> list[float]:
+        safe = torch.nan_to_num(values.detach().float(), nan=0.0, posinf=1e6, neginf=-1e6).cpu()
+        return [float(item) for item in safe.reshape(-1).tolist()]
+
+    @torch.no_grad()
+    def trace(
+        self,
+        hidden: torch.Tensor,
+        target_positions: torch.Tensor | None = None,
+        per_token_nll: torch.Tensor | None = None,
+        *,
+        graphcg_basis: torch.Tensor | None = None,
+        trajectory_node_mask: torch.Tensor | None = None,
+        trajectory_edge_index: torch.Tensor | None = None,
+        trajectory_edge_mask: torch.Tensor | None = None,
+        top_k: int = 3,
+    ) -> dict[str, Any]:
+        """Return a JSON-safe analogical memory retrieval trace.
+
+        The trace mirrors the in-batch teacher used during training.  It is an
+        explanation object: each query trajectory reports which other
+        trajectories would be retrieved as analogical memories, how much the
+        model assigned to them, and which chart/toric/topological/DAG/derived
+        components supported that retrieval.
+        """
+
+        batch = int(hidden.shape[0])
+        top_k = max(0, int(top_k))
+        if per_token_nll is None or per_token_nll.shape[0] != batch:
+            per_token_nll = hidden.new_zeros(hidden.shape[:2])
+        elif per_token_nll.ndim == 1:
+            per_token_nll = per_token_nll[:, None]
+        if batch < 2 or top_k < 1:
+            return {
+                "kind": "trajectory_memory_analogical_retrieval_trace",
+                "enabled": True,
+                "batch_size": batch,
+                "top_k": top_k,
+                "queries": [],
+                "reason": "need_at_least_two_trajectories",
+            }
+
+        features = self._summary_features(
+            hidden,
+            target_positions,
+            graphcg_basis,
+            trajectory_node_mask,
+            trajectory_edge_index,
+            trajectory_edge_mask,
+        )
+        query = F.normalize(self.query(features["summary"].to(hidden.dtype)), dim=-1)
+        key = F.normalize(self.key(features["summary"].to(hidden.dtype)), dim=-1)
+        logits = torch.matmul(query, key.transpose(0, 1)) / max(float(self.config.retrieval_temperature), 1e-4)
+        diag = torch.eye(batch, device=hidden.device, dtype=torch.bool)
+        logits = logits.masked_fill(diag, -1e4)
+        probs = torch.softmax(logits, dim=-1)
+
+        quality = -per_token_nll.detach().float().mean(dim=1)
+        quality_z = (quality - quality.mean()) / (quality.std(unbiased=False) + 1e-6)
+        chart = F.normalize(features["chart"].float(), dim=-1)
+        chart_sim = chart @ chart.transpose(0, 1)
+        toric = F.normalize(features["toric"].float(), dim=-1)
+        toric_sim = toric @ toric.transpose(0, 1)
+        topo = features["topology"].float()
+        topo_dist = torch.cdist(topo, topo, p=2)
+        topo_sim = -topo_dist / (topo_dist.mean() + 1e-6)
+        dag_feature = F.normalize(features["dag"].float(), dim=-1)
+        dag_sim = dag_feature @ dag_feature.transpose(0, 1)
+        derived_feature = F.normalize(features["derived"].float(), dim=-1)
+        derived_sim = derived_feature @ derived_feature.transpose(0, 1)
+        teacher_raw = (
+            float(self.config.graphcg_weight) * chart_sim
+            + float(self.config.toric_weight) * toric_sim
+            + float(self.config.topology_weight) * topo_sim
+            + float(self.config.dag_weight) * dag_sim
+            + float(self.config.derived_weight) * derived_sim
+            + quality_z[None, :]
+        )
+        teacher_logits = teacher_raw.masked_fill(diag, -1e4) / max(float(self.config.teacher_temperature), 1e-4)
+        teacher_probs = torch.softmax(teacher_logits, dim=-1)
+        labels = teacher_logits.argmax(dim=-1)
+
+        k = min(top_k, max(1, batch - 1))
+        query_rows: list[dict[str, Any]] = []
+        dag_fields = [
+            "branch_count",
+            "merge_count",
+            "back_edge_fraction",
+            "branch_diversity",
+            "merge_scatter",
+            "balance_residual",
+        ]
+        derived_fields = [
+            "branch_count",
+            "merge_count",
+            "back_edge_fraction",
+            "simplex_edge_density",
+            "triangle_density",
+            "branch_diversity",
+            "merge_scatter",
+            "projective_dimension_norm",
+            "regularity_norm",
+            "total_betti_log_norm",
+            "betti_entropy",
+        ]
+        for query_index in range(batch):
+            candidate_probs, candidate_indices = torch.topk(probs[query_index], k=k)
+            candidates: list[dict[str, Any]] = []
+            for rank, (prob, candidate_index_tensor) in enumerate(zip(candidate_probs, candidate_indices, strict=True), start=1):
+                candidate_index = int(candidate_index_tensor.detach().cpu().item())
+                candidates.append(
+                    {
+                        "rank": int(rank),
+                        "candidate_index": candidate_index,
+                        "model_logit": self._json_float(logits[query_index, candidate_index]),
+                        "retrieval_probability": self._json_float(prob),
+                        "teacher_probability": self._json_float(teacher_probs[query_index, candidate_index]),
+                        "teacher_raw_score": self._json_float(teacher_raw[query_index, candidate_index]),
+                        "is_teacher_argmax": bool(candidate_index == int(labels[query_index].detach().cpu().item())),
+                        "components": {
+                            "graphcg_chart_similarity": self._json_float(chart_sim[query_index, candidate_index]),
+                            "toric_phase_similarity": self._json_float(toric_sim[query_index, candidate_index]),
+                            "topology_similarity": self._json_float(topo_sim[query_index, candidate_index]),
+                            "dag_similarity": self._json_float(dag_sim[query_index, candidate_index]),
+                            "derived_category_similarity": self._json_float(derived_sim[query_index, candidate_index]),
+                            "candidate_quality_z": self._json_float(quality_z[candidate_index]),
+                        },
+                    }
+                )
+            query_rows.append(
+                {
+                    "query_index": int(query_index),
+                    "teacher_argmax_index": int(labels[query_index].detach().cpu().item()),
+                    "retrieval_entropy": self._json_float(
+                        -(probs[query_index] * probs[query_index].clamp_min(1e-8).log()).sum()
+                    ),
+                    "quality_z": self._json_float(quality_z[query_index]),
+                    "dag_features": dict(zip(dag_fields, self._json_vector(features["dag"][query_index]), strict=True)),
+                    "derived_category_features": dict(
+                        zip(derived_fields, self._json_vector(features["derived"][query_index]), strict=True)
+                    ),
+                    "top_candidates": candidates,
+                }
+            )
+
+        return {
+            "kind": "trajectory_memory_analogical_retrieval_trace",
+            "enabled": True,
+            "memory_source": "in_batch_branch_merge_got_trajectories",
+            "analogy_teacher": "weighted_graphcg_toric_topology_dag_derived_quality",
+            "batch_size": batch,
+            "top_k": k,
+            "weights": {
+                "graphcg": float(self.config.graphcg_weight),
+                "toric": float(self.config.toric_weight),
+                "topology": float(self.config.topology_weight),
+                "dag": float(self.config.dag_weight),
+                "derived_category": float(self.config.derived_weight),
+                "quality": 1.0,
+            },
+            "dag_feature_fields": dag_fields,
+            "derived_category_feature_fields": derived_fields,
+            "queries": query_rows,
+        }
+
     def forward(
         self,
         hidden: torch.Tensor,
