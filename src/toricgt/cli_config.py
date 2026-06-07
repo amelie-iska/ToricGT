@@ -24,6 +24,8 @@ IGNORED_CONFIG_SECTIONS = {
     "metadata",
     "notes",
     "phase_plan",
+    "analysis",
+    "oai_competition",
 }
 
 

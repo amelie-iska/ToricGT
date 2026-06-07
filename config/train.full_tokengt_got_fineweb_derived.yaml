@@ -86,3 +86,12 @@ curriculum:
   expert_curriculum_order: braid
   expert_curriculum_salt: 17
   expert_curriculum_distill_weight: 0.02
+
+oai_competition:
+  enabled: true
+  checkpoint_family_note: "TokenGT graph checkpoints do not expose byte-level LM logits; watcher writes an explicit unavailable report while preserving OAI BPB checks for byte-level LM checkpoints."
+
+analysis:
+  tokengt_geometry_suite: true
+  token_gt_geometry_records: 4
+  token_gt_geometry_outputs: "3D branch/merge trajectories, energy landscapes, topology heatmaps, derived-category objects, and triangle heatmaps."

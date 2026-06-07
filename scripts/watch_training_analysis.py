@@ -232,6 +232,52 @@ def is_compact_seq4096_checkpoint(path: Path) -> bool:
     return isinstance(model, dict) and "tok_emb.weight" in model
 
 
+def is_tokengt_checkpoint(path: Path) -> bool:
+    try:
+        import torch
+
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    model = payload.get("model")
+    return isinstance(model, dict) and "tokenizer.node_proj.weight" in model
+
+
+def write_oai_unavailable_summary(base: Path, checkpoint: Path, step: int, reason: str) -> None:
+    output_dir = base / "oai_competition"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "checkpoint": str(checkpoint),
+        "step": int(step),
+        "source": "unavailable_for_checkpoint_family",
+        "oai_competition/available": 0.0,
+        "oai_competition/bpb_available": 0.0,
+        "oai_competition/bpb": None,
+        "oai_competition/loss": None,
+        "reason": reason,
+    }
+    (output_dir / "summary.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    (output_dir / "REPORT.md").write_text(
+        "\n".join(
+            [
+                "# OAI Competition BPB",
+                "",
+                "This checkpoint was not evaluated for byte-level OAI BPB.",
+                "",
+                f"- Checkpoint: `{checkpoint}`",
+                f"- Step: `{step}`",
+                f"- Reason: {reason}",
+                "",
+                "Use this analysis run for TokenGT graph reconstruction, branch/merge topology, derived-category, and analogical-memory diagnostics. Run OAI BPB on a byte-level random-order or compact Seq4096 language-model checkpoint.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def seq4096_training_log_path(repo: Path, run_path: str, checkpoint: Path) -> Path:
     run_id = ""
     parts = [part for part in str(run_path).split("/") if part]
@@ -465,7 +511,15 @@ def main() -> None:
         )
     config = load_yaml(args.config)
     oai_config = config.get("oai_competition", {}) if isinstance(config.get("oai_competition", {}), dict) else {}
-    if bool(oai_config.get("enabled", False)) and not args.skip_oai_competition_eval:
+    token_gt_checkpoint = is_tokengt_checkpoint(checkpoint)
+    if not args.skip_oai_competition_eval and token_gt_checkpoint:
+        write_oai_unavailable_summary(
+            base,
+            checkpoint,
+            step,
+            "TokenGT graph checkpoints do not expose byte-level language-model logits required for OAI Parameter-Golf BPB.",
+        )
+    elif bool(oai_config.get("enabled", False)) and not args.skip_oai_competition_eval:
         command = [
             sys.executable,
             "scripts/evaluate_oai_competition_bpb.py",
@@ -491,6 +545,36 @@ def main() -> None:
         )
     if args.skip_simplex_geometry:
         pass
+    elif token_gt_checkpoint:
+        command = [
+            sys.executable,
+            "scripts/evaluate_tokengt_reasoning_geometry_suite.py",
+            "--checkpoint",
+            str(checkpoint),
+            "--config",
+            args.config,
+            "--output-dir",
+            str(base / "geometry"),
+            "--records",
+            str(args.geometry_records),
+            "--batch-size",
+            "2",
+            "--device",
+            args.device,
+            "--precision",
+            args.precision,
+            "--seed",
+            str(args.seed),
+        ]
+        if args.data_glob:
+            command.extend(["--data-glob", args.data_glob])
+        if args.run_path:
+            command.extend(["--wandb-run-path", args.run_path])
+        run_optional_command(
+            command,
+            cwd=repo,
+            log_path=base / "logs" / "tokengt_reasoning_geometry_suite.log",
+        )
     elif is_compact_seq4096_checkpoint(checkpoint):
         run_optional_command(
             [

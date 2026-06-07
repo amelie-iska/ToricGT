@@ -213,7 +213,13 @@ def plot_ramachandran_style_reasoning(path: np.ndarray, energy: np.ndarray, outp
     plt.close(fig)
 
 
-def plot_energy_landscape(path: np.ndarray, energy: np.ndarray, output: str | Path) -> None:
+def plot_energy_landscape(
+    path: np.ndarray,
+    energy: np.ndarray,
+    output: str | Path,
+    *,
+    edges: np.ndarray | None = None,
+) -> None:
     x = np.linspace(path[:, 0].min() - 0.3, path[:, 0].max() + 0.3, 120)
     y = np.linspace(path[:, 1].min() - 0.3, path[:, 1].max() + 0.3, 120)
     xx, yy = np.meshgrid(x, y)
@@ -233,7 +239,7 @@ def plot_energy_landscape(path: np.ndarray, energy: np.ndarray, output: str | Pa
         + 0.035
     )
     landscape_points = np.column_stack([path[:, 0], path[:, 1], path_z])
-    _plot_branch_merge_edges_3d(ax, landscape_points, linewidth=1.45, alpha=0.70, arrows=False)
+    _plot_branch_merge_edges_3d(ax, landscape_points, edges=edges, linewidth=1.45, alpha=0.70, arrows=False)
     ax.scatter(path[:, 0], path[:, 1], path_z, c=energy, cmap="viridis_r", s=22, edgecolor="none")
     best = int(np.argmin(energy))
     ax.scatter(path[best, 0], path[best, 1], path_z[best] + 0.04, s=120, color="#8cff6a", edgecolor="white")

@@ -36,8 +36,6 @@ COMMAND=(env PYTHONPATH=src "$PYTHON_BIN" scripts/watch_training_analysis.py
   --data-glob 'data/curated_hf_shards/validation/*.parquet'
   --device cpu
   --precision fp32
-  --skip-oai-competition-eval
-  --skip-simplex-geometry
   --derived-category-example-dir "$CHECKPOINT_DIR/derived_category_examples"
   --derived-category-max-files 8
   --derived-category-max-objects 24
