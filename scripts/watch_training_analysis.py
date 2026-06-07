@@ -77,6 +77,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--simplex-samples", type=int, default=8)
     parser.add_argument("--geometry-records", type=int, default=4)
     parser.add_argument("--geometry-branches", type=int, default=6)
+    parser.add_argument(
+        "--skip-simplex-geometry",
+        action="store_true",
+        help="Skip random-order simplex/geometry scripts; useful for TokenGT checkpoints that only need exact derived-category analysis.",
+    )
+    parser.add_argument(
+        "--derived-category-example-dir",
+        default="",
+        help="Directory containing trainer-emitted derived_category_examples JSON. Defaults to <checkpoint-dir>/derived_category_examples.",
+    )
+    parser.add_argument("--derived-category-max-files", type=int, default=8)
+    parser.add_argument("--derived-category-max-objects", type=int, default=24)
+    parser.add_argument("--skip-derived-category-analysis", action="store_true")
     parser.add_argument("--seed", type=int, default=10017)
     parser.add_argument("--target-bpb", type=float, default=float(os.environ.get("BPB_TARGET", "1.2")))
     parser.add_argument("--gate-step", type=int, default=int(os.environ.get("BPB_GATE_STEP", "4000")))
@@ -226,10 +239,12 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     simplex_dir = base / "simplex"
     geometry_dir = base / "geometry"
     oai_dir = base / "oai_competition"
+    derived_dir = base / "derived_category"
     category = load_json(metrics_dir / "category_summary.json")
     geometry = load_json(geometry_dir / "reasoning_geometry_summary.json")
     simplex = load_json(simplex_dir / "reasoning_simplex_summary.json")
     oai = load_json(oai_dir / "summary.json")
+    derived = load_json(derived_dir / "summary.json")
     checkpoint_meta = load_json(metrics_dir / "checkpoint_meta.json")
     proposal = load_json(base / "training_adjustment_proposal.json")
     lines = [
@@ -295,6 +310,21 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
             f"- Nested-simplicial topology plots: `{geometry_dir / 'topology'}`",
         ]
     )
+    if derived:
+        lines.extend(
+            [
+                "",
+                "## Derived-Category / CCA Examples",
+                f"- Output directory: `{derived_dir}`",
+                f"- Objects analyzed: `{derived.get('object_count', 'n/a')}`",
+                f"- Steps: `{derived.get('steps', 'n/a')}`",
+                f"- Mean chain beta_1: `{derived.get('mean_chain_betti1', 'n/a')}`",
+                f"- Mean symbolic projective dimension: `{derived.get('mean_symbolic_projective_dimension', 'n/a')}`",
+                f"- Mean symbolic regularity: `{derived.get('mean_symbolic_regularity', 'n/a')}`",
+                f"- Max Fitting maximal-minor count log10: `{derived.get('max_fitting_minor_count_log10', 'n/a')}`",
+                f"- Report: `{derived_dir / 'REPORT.md'}`",
+            ]
+        )
     if proposal:
         decision = proposal.get("decision", {}) if isinstance(proposal.get("decision", {}), dict) else {}
         bpb_gate = proposal.get("bpb_gate", {}) if isinstance(proposal.get("bpb_gate", {}), dict) else {}
@@ -432,7 +462,9 @@ def main() -> None:
             cwd=repo,
             log_path=base / "logs" / "oai_competition.log",
         )
-    if is_compact_seq4096_checkpoint(checkpoint):
+    if args.skip_simplex_geometry:
+        pass
+    elif is_compact_seq4096_checkpoint(checkpoint):
         run_optional_command(
             [
                 sys.executable,
@@ -516,6 +548,24 @@ def main() -> None:
             ],
             cwd=repo,
             log_path=base / "logs" / "geometry.log",
+        )
+    if not args.skip_derived_category_analysis:
+        derived_example_dir = Path(args.derived_category_example_dir) if args.derived_category_example_dir else checkpoint_dir / "derived_category_examples"
+        run_optional_command(
+            [
+                sys.executable,
+                "scripts/analyze_derived_category_examples.py",
+                "--example-dir",
+                str(derived_example_dir),
+                "--output-dir",
+                str(base / "derived_category"),
+                "--max-files",
+                str(args.derived_category_max_files),
+                "--max-objects",
+                str(args.derived_category_max_objects),
+            ],
+            cwd=repo,
+            log_path=base / "logs" / "derived_category.log",
         )
     proposal_command = [
         sys.executable,
