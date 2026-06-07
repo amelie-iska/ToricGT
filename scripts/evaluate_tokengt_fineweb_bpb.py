@@ -102,6 +102,8 @@ def move_batch(batch: GraphBatch, device: str) -> GraphBatch:
         lm_target_byte_lengths=batch.lm_target_byte_lengths.to(device)
         if batch.lm_target_byte_lengths is not None
         else None,
+        lm_target_positions=batch.lm_target_positions.to(device) if batch.lm_target_positions is not None else None,
+        lm_input_features=batch.lm_input_features.to(device) if batch.lm_input_features is not None else None,
         node_causal_rank=batch.node_causal_rank.to(device) if batch.node_causal_rank is not None else None,
     )
 
@@ -135,8 +137,12 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     if not bool(cfg.use_lm_head):
         return unavailable_summary(checkpoint_path, "checkpoint config does not enable TokenGT LM head")
     model_state = payload.get("model", {})
-    if not isinstance(model_state, dict) or "lm_head.weight" not in model_state:
-        return unavailable_summary(checkpoint_path, "checkpoint state dict does not contain lm_head weights")
+    has_lm_projection = isinstance(model_state, dict) and (
+        "lm_head.weight" in model_state
+        or (cfg.tie_lm_head_to_token_embeddings and "lm_token_emb.weight" in model_state)
+    )
+    if not has_lm_projection:
+        return unavailable_summary(checkpoint_path, "checkpoint state dict does not contain LM projection weights")
 
     device = args.device
     if device == "cuda" and not torch.cuda.is_available():
@@ -224,6 +230,13 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "oai_competition/eval_tokens": float(total_tokens),
         "tokengt/causal_graph_attention": 1.0 if cfg.use_causal_graph_attention else 0.0,
         "tokengt/learned_lm_token_embeddings": 1.0 if cfg.use_lm_token_embeddings else 0.0,
+        "tokengt/tied_lm_head": 1.0 if cfg.tie_lm_head_to_token_embeddings else 0.0,
+        "tokengt/recurrent_passes": float(cfg.recurrent_passes),
+        "tokengt/lm_position_embeddings": 1.0 if cfg.use_lm_position_embeddings else 0.0,
+        "tokengt/lm_toric_position_features": 1.0 if cfg.use_lm_toric_position_features else 0.0,
+        "tokengt/lm_context_hash_embeddings": 1.0 if cfg.use_lm_context_hash_embeddings else 0.0,
+        "tokengt/lm_caseops_features": 1.0 if cfg.use_lm_caseops_features else 0.0,
+        "tokengt/lm_smear_gate": 1.0 if cfg.use_lm_smear_gate else 0.0,
         "tokengt/fineweb_graph_node_sp1024_loss": float(loss_value),
         "tokengt/fineweb_graph_node_sp1024_bpt": float(bits_per_token),
         "tokengt/fineweb_graph_node_sp1024_tokens": float(total_tokens),

@@ -58,6 +58,23 @@ class ModelConfig:
     use_causal_graph_attention: bool = False
     use_lm_bigram_bias: bool = False
     lm_bigram_bias_scale: float = 0.0
+    tie_lm_head_to_token_embeddings: bool = False
+    recurrent_passes: int = 1
+    use_lm_position_embeddings: bool = False
+    lm_max_positions: int = 512
+    lm_position_weight: float = 1.0
+    use_lm_toric_position_features: bool = False
+    lm_toric_position_weight: float = 1.0
+    use_lm_context_hash_embeddings: bool = False
+    lm_context_hash_buckets: int = 1024
+    lm_context_hash_weight: float = 0.35
+    lm_bos_token_id: int = 0
+    use_lm_caseops_features: bool = False
+    lm_caseops_feature_dim: int = 10
+    lm_caseops_weight: float = 0.25
+    use_lm_smear_gate: bool = False
+    lm_smear_temperature_min: float = 0.65
+    lm_smear_temperature_max: float = 1.60
     activation_checkpointing: bool = False
 
 

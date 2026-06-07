@@ -2189,6 +2189,38 @@ Only score-valid byte or causal-token metrics should decide Parameter-Golf
 success; bidirectional graph proxies guide TokenGT representation training
 and ablations.
 
+\paragraph{OAI baseline transfers to causal TokenGT.}
+The causal TokenGT route ports the competition baseline's efficient input
+conditioning rather than replacing TokenGT by the baseline.  The transferred
+features are all measurable before the current symbol is scored:
+\begin{enumerate}[leftmargin=2em]
+  \item \emph{Tied SP1024 output head}: the graph-node LM logits are computed
+  with the learned SP1024 input embedding matrix, saving one dense output
+  projection and aligning input/output geometry.
+  \item \emph{Recurrent block passes}: the same stored TokenGT blocks may be
+  applied multiple times, increasing computation per artifact byte as in the
+  dense Parameter-Golf adapter.
+  \item \emph{Target-position and toric phase features}: public target
+  positions contribute a learned position embedding and a four-dimensional
+  toric phase vector
+  $(\sin 2\pi\theta p,\cos 2\pi\theta p,\sin 2\pi\sqrt2\,p,\cos 2\pi\sqrt2\,p)$.
+  \item \emph{Strict-prefix hash context}: the previous revealed input token,
+  the current already-revealed input token, the public target position, and
+  the reveal rank are hashed into a small embedding table.  This is the
+  TokenGT analogue of the OAI baseline's cheap n-gram memory.
+  \item \emph{SP CaseOps}: instead of byte classes, the graph route computes
+  SentencePiece operator features from the already revealed input id: control,
+  unknown, byte-token, leading-space, alphabetic, digit, punctuation, non-ASCII,
+  and normalized id indicators.
+  \item \emph{SmearGate}: a small input-dependent temperature rescales logits
+  after the graph hidden state is computed.
+\end{enumerate}
+The dense $1024\times1024$ bigram table remains an ablation, but the default
+route uses the smaller hash-context table to preserve artifact margin under the
+$16{,}000{,}000$ byte cap.  None of these transferred modules may inspect the
+unscored target SP token; on noncausal or cyclic graphs, their ordering signal
+is the deterministic random reveal rank rather than an artificial direction.
+
 \paragraph{Byte-scored TokenGT hybrid objective.}
 The clean way to use TokenGT structure in the contest-facing branch is not to
 replace byte scoring by graph-token scoring.  Instead, ToricGT keeps a

@@ -26,6 +26,8 @@ class GraphBatch:
     lm_target_ids: Optional[torch.Tensor] = None
     lm_mask: Optional[torch.Tensor] = None
     lm_target_byte_lengths: Optional[torch.Tensor] = None
+    lm_target_positions: Optional[torch.Tensor] = None
+    lm_input_features: Optional[torch.Tensor] = None
     node_causal_rank: Optional[torch.Tensor] = None
 
 

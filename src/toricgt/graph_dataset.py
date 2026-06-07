@@ -170,6 +170,47 @@ def sentencepiece_target_byte_lengths(
     return out
 
 
+def sentencepiece_input_features(
+    input_ids: np.ndarray,
+    tokenizer=None,
+    feature_dim: int = 10,
+) -> np.ndarray:
+    """Return score-valid SP/operator features from already revealed input ids."""
+
+    ids = np.asarray(input_ids, dtype=np.int64).reshape(-1)
+    features = np.zeros((int(ids.size), max(1, int(feature_dim))), dtype=np.float32)
+    vocab_hint = 1024.0
+    for idx, token in enumerate(ids.tolist()):
+        token_id = int(token)
+        vals = np.zeros((10,), dtype=np.float32)
+        vals[0] = float(max(0, min(token_id, 4095))) / vocab_hint
+        vals[1] = 1.0
+        piece = ""
+        try:
+            if tokenizer is not None:
+                vals[2] = float(bool(tokenizer.is_control(token_id)))
+                vals[3] = float(bool(tokenizer.is_unknown(token_id) or tokenizer.is_unused(token_id)))
+                vals[4] = float(bool(tokenizer.is_byte(token_id)))
+                piece = str(tokenizer.id_to_piece(token_id))
+            else:
+                vals[4] = float(0 <= token_id <= 255)
+        except Exception:
+            vals[3] = 1.0
+            piece = ""
+        if piece:
+            stripped = piece[1:] if piece.startswith("▁") else piece
+            vals[5] = float(piece.startswith("▁"))
+            vals[6] = float(any(ch.isalpha() for ch in stripped))
+            vals[7] = float(any(ch.isdigit() for ch in stripped))
+            vals[8] = float(any((not ch.isalnum()) and (not ch.isspace()) for ch in stripped))
+            vals[9] = float(any(ord(ch) >= 128 for ch in stripped))
+        else:
+            vals[9] = float(token_id >= 128)
+        copy_dim = min(features.shape[1], vals.shape[0])
+        features[idx, :copy_dim] = vals[:copy_dim]
+    return features
+
+
 def deterministic_random_ranks(node_ids: list[str], record_id: str) -> dict[str, int]:
     keyed = []
     for node_id in node_ids:
@@ -472,27 +513,40 @@ def _lm_tensors_from_tokens(
     tokens: np.ndarray | None,
     cfg: ModelConfig,
     tokenizer=None,
-) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+) -> tuple[
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+]:
     if tokens is None:
-        return None, None, None, None
+        return None, None, None, None, None, None
     token_ids = np.asarray(tokens, dtype=np.int64).reshape(-1)
     if token_ids.size < 2:
-        return None, None, None, None
+        return None, None, None, None, None, None
     length = min(int(cfg.max_nodes), int(token_ids.size) - 1)
     if length <= 0:
-        return None, None, None, None
+        return None, None, None, None, None, None
     vocab_size = max(1, int(getattr(cfg, "lm_vocab_size", 1024)))
+    feature_dim = max(1, int(getattr(cfg, "lm_caseops_feature_dim", 10)))
     input_ids = torch.zeros(cfg.max_nodes, dtype=torch.long)
     target_ids = torch.zeros(cfg.max_nodes, dtype=torch.long)
     lm_mask = torch.zeros(cfg.max_nodes, dtype=torch.bool)
     target_byte_lengths = torch.zeros(cfg.max_nodes, dtype=torch.float32)
+    target_positions = torch.zeros(cfg.max_nodes, dtype=torch.long)
+    input_features = torch.zeros(cfg.max_nodes, feature_dim, dtype=torch.float32)
     input_ids[:length] = torch.from_numpy(np.clip(token_ids[:length], 0, vocab_size - 1)).long()
     target_slice = np.clip(token_ids[1 : length + 1], 0, vocab_size - 1)
     target_ids[:length] = torch.from_numpy(target_slice).long()
     lm_mask[:length] = True
     byte_lengths = sentencepiece_target_byte_lengths(token_ids[:length], target_slice, tokenizer)
     target_byte_lengths[:length] = torch.from_numpy(byte_lengths).to(dtype=torch.float32)
-    return input_ids, target_ids, lm_mask, target_byte_lengths
+    target_positions[:length] = torch.arange(1, length + 1, dtype=torch.long)
+    features = sentencepiece_input_features(token_ids[:length], tokenizer, feature_dim=feature_dim)
+    input_features[:length] = torch.from_numpy(features).to(dtype=torch.float32)
+    return input_ids, target_ids, lm_mask, target_byte_lengths, target_positions, input_features
 
 
 def graph_json_to_item(
@@ -562,7 +616,14 @@ def graph_json_to_item(
     target = torch.zeros(cfg.max_nodes, cfg.output_dim, dtype=torch.float32)
     copy_dim = min(cfg.output_dim, cfg.node_feature_dim)
     target[:, :copy_dim] = node_features[:, :copy_dim]
-    lm_input_ids, lm_target_ids, lm_mask, lm_target_byte_lengths = _lm_tensors_from_tokens(lm_tokens, cfg, tokenizer)
+    (
+        lm_input_ids,
+        lm_target_ids,
+        lm_mask,
+        lm_target_byte_lengths,
+        lm_target_positions,
+        lm_input_features,
+    ) = _lm_tensors_from_tokens(lm_tokens, cfg, tokenizer)
     graph = GraphBatch(
         node_features=node_features,
         edge_features=edge_features,
@@ -573,6 +634,8 @@ def graph_json_to_item(
         lm_target_ids=lm_target_ids,
         lm_mask=lm_mask,
         lm_target_byte_lengths=lm_target_byte_lengths,
+        lm_target_positions=lm_target_positions,
+        lm_input_features=lm_input_features,
         node_causal_rank=padded_node_causal_rank,
     )
     metadata = {
@@ -593,6 +656,8 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
     lm_target_ids = None
     lm_mask = None
     lm_target_byte_lengths = None
+    lm_target_positions = None
+    lm_input_features = None
     if any_lm:
         lm_input_ids = torch.stack(
             [
@@ -626,6 +691,31 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
                 for item in items
             ]
         )
+        lm_target_positions = torch.stack(
+            [
+                item.graph.lm_target_positions
+                if item.graph.lm_target_positions is not None
+                else torch.zeros_like(items[0].graph.node_mask, dtype=torch.long)
+                for item in items
+            ]
+        )
+        feature_dim = next(
+            (
+                int(item.graph.lm_input_features.shape[-1])
+                for item in items
+                if item.graph.lm_input_features is not None
+            ),
+            10,
+        )
+        feature_template = torch.zeros(items[0].graph.node_mask.numel(), feature_dim, dtype=torch.float32)
+        lm_input_features = torch.stack(
+            [
+                item.graph.lm_input_features
+                if item.graph.lm_input_features is not None
+                else feature_template
+                for item in items
+            ]
+        )
     node_causal_rank = torch.stack(
         [
             item.graph.node_causal_rank
@@ -644,6 +734,8 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
         lm_target_ids=lm_target_ids,
         lm_mask=lm_mask,
         lm_target_byte_lengths=lm_target_byte_lengths,
+        lm_target_positions=lm_target_positions,
+        lm_input_features=lm_input_features,
         node_causal_rank=node_causal_rank,
     )
     target = torch.stack([item.target for item in items])

@@ -234,6 +234,8 @@ def move_batch(batch: GraphBatch, target: torch.Tensor, device: str) -> tuple[Gr
             lm_target_ids=_optional_to_device(batch.lm_target_ids, device),
             lm_mask=_optional_to_device(batch.lm_mask, device),
             lm_target_byte_lengths=_optional_to_device(batch.lm_target_byte_lengths, device),
+            lm_target_positions=_optional_to_device(batch.lm_target_positions, device),
+            lm_input_features=_optional_to_device(batch.lm_input_features, device),
             node_causal_rank=_optional_to_device(batch.node_causal_rank, device),
         ),
         target.to(device),
@@ -462,6 +464,23 @@ def main() -> None:
     parser.add_argument("--use-causal-graph-attention", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--use-lm-bigram-bias", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--lm-bigram-bias-scale", type=float, default=0.0)
+    parser.add_argument("--tie-lm-head-to-token-embeddings", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--recurrent-passes", type=int, default=1)
+    parser.add_argument("--use-lm-position-embeddings", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lm-max-positions", type=int, default=512)
+    parser.add_argument("--lm-position-weight", type=float, default=1.0)
+    parser.add_argument("--use-lm-toric-position-features", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lm-toric-position-weight", type=float, default=1.0)
+    parser.add_argument("--use-lm-context-hash-embeddings", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lm-context-hash-buckets", type=int, default=1024)
+    parser.add_argument("--lm-context-hash-weight", type=float, default=0.35)
+    parser.add_argument("--lm-bos-token-id", type=int, default=0)
+    parser.add_argument("--use-lm-caseops-features", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lm-caseops-feature-dim", type=int, default=10)
+    parser.add_argument("--lm-caseops-weight", type=float, default=0.25)
+    parser.add_argument("--use-lm-smear-gate", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lm-smear-temperature-min", type=float, default=0.65)
+    parser.add_argument("--lm-smear-temperature-max", type=float, default=1.60)
     parser.add_argument("--activation-checkpointing", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--lm-vocab-size", type=int, default=1024)
     parser.add_argument("--fineweb-lm-loss-weight", type=float, default=0.0)
@@ -548,6 +567,23 @@ def main() -> None:
         use_causal_graph_attention=args.use_causal_graph_attention,
         use_lm_bigram_bias=args.use_lm_bigram_bias,
         lm_bigram_bias_scale=args.lm_bigram_bias_scale,
+        tie_lm_head_to_token_embeddings=args.tie_lm_head_to_token_embeddings,
+        recurrent_passes=args.recurrent_passes,
+        use_lm_position_embeddings=args.use_lm_position_embeddings,
+        lm_max_positions=args.lm_max_positions,
+        lm_position_weight=args.lm_position_weight,
+        use_lm_toric_position_features=args.use_lm_toric_position_features,
+        lm_toric_position_weight=args.lm_toric_position_weight,
+        use_lm_context_hash_embeddings=args.use_lm_context_hash_embeddings,
+        lm_context_hash_buckets=args.lm_context_hash_buckets,
+        lm_context_hash_weight=args.lm_context_hash_weight,
+        lm_bos_token_id=args.lm_bos_token_id,
+        use_lm_caseops_features=args.use_lm_caseops_features,
+        lm_caseops_feature_dim=args.lm_caseops_feature_dim,
+        lm_caseops_weight=args.lm_caseops_weight,
+        use_lm_smear_gate=args.use_lm_smear_gate,
+        lm_smear_temperature_min=args.lm_smear_temperature_min,
+        lm_smear_temperature_max=args.lm_smear_temperature_max,
         activation_checkpointing=args.activation_checkpointing,
     )
     train_cfg = TrainConfig(
@@ -972,6 +1008,14 @@ def main() -> None:
                 "tokengt/causal_graph_attention": float(bool(model_cfg.use_causal_graph_attention)),
                 "tokengt/learned_lm_token_embeddings": float(bool(model_cfg.use_lm_token_embeddings)),
                 "tokengt/lm_bigram_bias": float(bool(model_cfg.use_lm_bigram_bias)),
+                "tokengt/tied_lm_head": float(bool(model_cfg.tie_lm_head_to_token_embeddings)),
+                "tokengt/recurrent_passes": float(model_cfg.recurrent_passes),
+                "tokengt/lm_position_embeddings": float(bool(model_cfg.use_lm_position_embeddings)),
+                "tokengt/lm_toric_position_features": float(bool(model_cfg.use_lm_toric_position_features)),
+                "tokengt/lm_context_hash_embeddings": float(bool(model_cfg.use_lm_context_hash_embeddings)),
+                "tokengt/lm_context_hash_buckets": float(model_cfg.lm_context_hash_buckets),
+                "tokengt/lm_caseops_features": float(bool(model_cfg.use_lm_caseops_features)),
+                "tokengt/lm_smear_gate": float(bool(model_cfg.use_lm_smear_gate)),
                 "artifact/target_size_limit_bytes": args.target_artifact_bytes,
             }
             for mem_key, mem_value in proc_memory_metrics().items():
@@ -1005,6 +1049,10 @@ def main() -> None:
             metrics.update(artifact_metrics)
             for key, value in got_metric_sums.items():
                 metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
+            if "lm_smear_temperature" in out:
+                smear_value = float(out["lm_smear_temperature"].detach().float().cpu())
+                metrics["tokengt/lm_smear_temperature"] = smear_value
+                metrics["train/lm_smear_temperature"] = smear_value
             for key, value in trajectory_metric_sums.items():
                 metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
             for key, value in derived_metric_sums.items():

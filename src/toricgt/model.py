@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 from .config import ModelConfig
@@ -49,10 +52,43 @@ class ToricTokenGT(nn.Module):
         self.norm = nn.LayerNorm(config.d_model)
         self.node_head = nn.Linear(config.d_model, config.output_dim)
         self.edge_head = nn.Linear(config.d_model, config.output_dim)
-        self.lm_head = nn.Linear(config.d_model, config.lm_vocab_size) if config.use_lm_head else None
         self.lm_token_emb = (
             nn.Embedding(config.lm_vocab_size, config.d_model)
             if config.use_lm_head and config.use_lm_token_embeddings
+            else None
+        )
+        self.tie_lm_head = bool(
+            config.use_lm_head and config.tie_lm_head_to_token_embeddings and self.lm_token_emb is not None
+        )
+        self.lm_head = (
+            None
+            if self.tie_lm_head or not config.use_lm_head
+            else nn.Linear(config.d_model, config.lm_vocab_size)
+        )
+        self.lm_output_bias = nn.Parameter(torch.zeros(config.lm_vocab_size)) if self.tie_lm_head else None
+        self.lm_position_emb = (
+            nn.Embedding(max(1, config.lm_max_positions), config.d_model)
+            if config.use_lm_head and config.use_lm_position_embeddings
+            else None
+        )
+        self.lm_toric_phase = (
+            nn.Linear(4, config.d_model, bias=False)
+            if config.use_lm_head and config.use_lm_toric_position_features
+            else None
+        )
+        self.lm_context_hash = (
+            nn.Embedding(config.lm_context_hash_buckets, config.d_model)
+            if config.use_lm_head and config.use_lm_context_hash_embeddings and config.lm_context_hash_buckets > 0
+            else None
+        )
+        self.lm_caseops = (
+            nn.Linear(config.lm_caseops_feature_dim, config.d_model, bias=False)
+            if config.use_lm_head and config.use_lm_caseops_features
+            else None
+        )
+        self.lm_smear_gate = (
+            nn.Sequential(nn.LayerNorm(config.d_model), nn.Linear(config.d_model, 1))
+            if config.use_lm_head and config.use_lm_smear_gate
             else None
         )
         self.lm_bigram_bias = (
@@ -107,6 +143,76 @@ class ToricTokenGT(nn.Module):
             start = self.config.num_layers // 2
         return layer_idx >= start
 
+    def _lm_positions(self, batch: GraphBatch, node_count: int, device: torch.device) -> torch.Tensor:
+        if batch.lm_target_positions is not None:
+            positions = batch.lm_target_positions[:, :node_count].to(device=device, dtype=torch.long)
+        else:
+            positions = torch.arange(node_count, device=device, dtype=torch.long).view(1, -1)
+            positions = positions.expand(batch.node_features.shape[0], -1)
+        return positions
+
+    def _lm_phase_features(self, positions: torch.Tensor) -> torch.Tensor:
+        pos = positions.to(dtype=torch.float32)
+        theta = 2.0 * math.pi * self.config.theta * pos
+        beta = 2.0 * math.pi * 1.4142135623730951 * pos
+        return torch.stack([torch.sin(theta), torch.cos(theta), torch.sin(beta), torch.cos(beta)], dim=-1)
+
+    def _previous_reveal_tokens(self, input_ids: torch.Tensor, ranks: torch.Tensor | None) -> torch.Tensor:
+        bos = int(max(0, min(self.config.lm_bos_token_id, self.config.lm_vocab_size - 1)))
+        if ranks is None:
+            prev = torch.empty_like(input_ids)
+            prev[:, 0] = bos
+            if input_ids.shape[1] > 1:
+                prev[:, 1:] = input_ids[:, :-1]
+            return prev
+        valid_rank = ranks.to(device=input_ids.device, dtype=torch.long)
+        order = torch.argsort(valid_rank, dim=1, stable=True)
+        sorted_inputs = torch.gather(input_ids, 1, order)
+        prev_sorted = torch.empty_like(sorted_inputs)
+        prev_sorted[:, 0] = bos
+        if sorted_inputs.shape[1] > 1:
+            prev_sorted[:, 1:] = sorted_inputs[:, :-1]
+        prev = torch.empty_like(input_ids)
+        prev.scatter_(1, order, prev_sorted)
+        return prev
+
+    def _lm_context_hash_ids(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        ranks: torch.Tensor | None,
+    ) -> torch.Tensor:
+        if self.lm_context_hash is None:
+            raise RuntimeError("LM context hash is disabled")
+        prev_reveal = self._previous_reveal_tokens(input_ids, ranks)
+        if ranks is None:
+            ranks_i64 = torch.arange(input_ids.shape[1], device=input_ids.device).view(1, -1).expand_as(input_ids)
+        else:
+            ranks_i64 = ranks.to(device=input_ids.device, dtype=torch.long)
+        hashed = (
+            prev_reveal.to(torch.int64) * 1_000_003
+            + input_ids.to(torch.int64) * 917_609
+            + positions.to(torch.int64) * 65_537
+            + ranks_i64.to(torch.int64) * 32_771
+        )
+        return torch.remainder(hashed, int(self.config.lm_context_hash_buckets)).to(torch.long)
+
+    def _apply_lm_smear_gate(
+        self,
+        node_x: torch.Tensor,
+        logits: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if self.lm_smear_gate is None:
+            return logits, None
+        lo = float(self.config.lm_smear_temperature_min)
+        hi = float(self.config.lm_smear_temperature_max)
+        if hi <= lo:
+            raise ValueError("lm_smear_temperature_max must be greater than lm_smear_temperature_min")
+        raw = self.lm_smear_gate(node_x).squeeze(-1).float()
+        temperature = lo + (hi - lo) * torch.sigmoid(raw)
+        scaled = logits.float() / temperature.unsqueeze(-1).clamp_min(1e-4)
+        return scaled.to(dtype=logits.dtype), temperature.mean()
+
     def forward(
         self,
         batch: GraphBatch,
@@ -117,24 +223,63 @@ class ToricTokenGT(nn.Module):
     ) -> dict[str, torch.Tensor | object]:
         tok = self.tokenizer(batch)
         x = tok.tokens
-        if self.lm_token_emb is not None and batch.lm_input_ids is not None:
-            input_ids = batch.lm_input_ids.to(device=x.device, dtype=torch.long).clamp(0, self.config.lm_vocab_size - 1)
+        input_ids = None
+        lm_input = None
+        node_rank = None
+        if batch.node_causal_rank is not None:
+            node_rank = batch.node_causal_rank[:, : tok.node_positions.numel()].to(device=x.device, dtype=torch.long)
+        if batch.lm_input_ids is not None:
+            input_ids = batch.lm_input_ids[:, : tok.node_positions.numel()].to(
+                device=x.device,
+                dtype=torch.long,
+            ).clamp(0, self.config.lm_vocab_size - 1)
+        if self.lm_token_emb is not None and input_ids is not None:
             lm_input = self.lm_token_emb(input_ids)
+        if self.lm_position_emb is not None:
+            positions = self._lm_positions(batch, tok.node_positions.numel(), x.device)
+            pos_emb = self.lm_position_emb(positions.clamp(0, self.config.lm_max_positions - 1))
+            lm_input = pos_emb * float(self.config.lm_position_weight) if lm_input is None else lm_input + float(
+                self.config.lm_position_weight
+            ) * pos_emb
+        if self.lm_toric_phase is not None:
+            positions = self._lm_positions(batch, tok.node_positions.numel(), x.device)
+            phase = self.lm_toric_phase(self._lm_phase_features(positions).to(device=x.device, dtype=x.dtype))
+            lm_input = phase * float(self.config.lm_toric_position_weight) if lm_input is None else lm_input + float(
+                self.config.lm_toric_position_weight
+            ) * phase
+        if self.lm_context_hash is not None and input_ids is not None:
+            positions = self._lm_positions(batch, tok.node_positions.numel(), x.device)
+            hash_ids = self._lm_context_hash_ids(input_ids, positions, node_rank)
+            hashed = self.lm_context_hash(hash_ids)
+            lm_input = hashed * float(self.config.lm_context_hash_weight) if lm_input is None else lm_input + float(
+                self.config.lm_context_hash_weight
+            ) * hashed
+        if self.lm_caseops is not None and batch.lm_input_features is not None:
+            features = batch.lm_input_features[:, : tok.node_positions.numel(), :].to(device=x.device, dtype=x.dtype)
+            caseops = self.lm_caseops(features)
+            lm_input = caseops * float(self.config.lm_caseops_weight) if lm_input is None else lm_input + float(
+                self.config.lm_caseops_weight
+            ) * caseops
+        if lm_input is not None:
             if batch.lm_mask is not None:
-                lm_input = lm_input * batch.lm_mask.to(device=x.device, dtype=lm_input.dtype).unsqueeze(-1)
+                lm_input = lm_input * batch.lm_mask[:, : tok.node_positions.numel()].to(
+                    device=x.device,
+                    dtype=lm_input.dtype,
+                ).unsqueeze(-1)
             x = x.clone()
             x[:, tok.node_positions, :] = x[:, tok.node_positions, :] + lm_input
         causal_rank = tok.causal_rank if self.config.use_causal_graph_attention else None
         mask = attention_mask_from_token_mask(tok.token_mask, causal_rank=causal_rank)
-        for block in self.blocks:
-            if self.training and self.config.activation_checkpointing:
-                x = checkpoint(
-                    lambda block_x, block=block: block(block_x, mask=mask, token_mask=tok.token_mask),
-                    x,
-                    use_reentrant=False,
-                )
-            else:
-                x = block(x, mask=mask, token_mask=tok.token_mask)
+        for _ in range(max(1, int(self.config.recurrent_passes))):
+            for block in self.blocks:
+                if self.training and self.config.activation_checkpointing:
+                    x = checkpoint(
+                        lambda block_x, block=block: block(block_x, mask=mask, token_mask=tok.token_mask),
+                        x,
+                        use_reentrant=False,
+                    )
+                else:
+                    x = block(x, mask=mask, token_mask=tok.token_mask)
         x = self.norm(x)
 
         node_x = x[:, tok.node_positions, :]
@@ -153,15 +298,23 @@ class ToricTokenGT(nn.Module):
             "edge_index": batch.edge_index,
             "edge_mask": batch.edge_mask,
         }
-        if self.lm_head is not None:
-            lm_logits = self.lm_head(node_x)
+        if self.config.use_lm_head:
+            if self.tie_lm_head and self.lm_token_emb is not None:
+                lm_logits = F.linear(node_x, self.lm_token_emb.weight[: self.config.lm_vocab_size], self.lm_output_bias)
+            elif self.lm_head is not None:
+                lm_logits = self.lm_head(node_x)
+            else:
+                raise RuntimeError("LM head is enabled but no output projection is configured")
             if self.lm_bigram_bias is not None and batch.lm_input_ids is not None:
                 input_ids = batch.lm_input_ids.to(device=lm_logits.device, dtype=torch.long).clamp(
                     0,
                     self.config.lm_vocab_size - 1,
                 )
                 lm_logits = lm_logits + self.config.lm_bigram_bias_scale * self.lm_bigram_bias(input_ids)
+            lm_logits, smear_temperature = self._apply_lm_smear_gate(node_x, lm_logits)
             outputs["lm_logits"] = lm_logits
+            if smear_temperature is not None:
+                outputs["lm_smear_temperature"] = smear_temperature
         if self.gflownet_policy is not None:
             forward_logits, backward_logits = self.gflownet_policy(pooled)
             outputs["gflownet_forward_logits"] = forward_logits

@@ -62,6 +62,25 @@ causal-token route is allowed to emit the OAI-style restricted FineWeb aliases
 Non-causal or legacy TokenGT runs must keep their graph-node BPB estimates
 under `tokengt/*` proxy namespaces.
 
+The route-(1) TokenGT config ports the OAI baseline efficiency stack in a
+parameter-conscious way:
+
+```text
+tied SP1024 LM head        -> fewer stored weights and better embedding/logit alignment
+recurrent block passes     -> more compute per stored parameter
+target-position embedding  -> OAI-style target-position conditioning
+toric position phase       -> compact sinusoidal/cocycle position features
+strict-prefix hash context -> n-gram-like memory without a dense 1024x1024 table
+SP operator features       -> CaseOps-style token class features for SentencePiece
+SmearGate temperature      -> input-dependent logit sharpness
+```
+
+Every term is computed from already revealed input ids, public target
+positions, reveal ranks, or graph structure.  The dense SP1024 bigram-bias
+table remains available as an ablation, but the default causal route disables
+it because the hash-context embedding is a smaller version of the same idea and
+leaves more room under the 16 MB artifact cap.
+
 ## Differentiable Objective
 
 The training loss remains:

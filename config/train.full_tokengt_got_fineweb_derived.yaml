@@ -45,8 +45,24 @@ model:
   lm_vocab_size: 1024
   use_lm_token_embeddings: true
   use_causal_graph_attention: true
-  use_lm_bigram_bias: true
-  lm_bigram_bias_scale: 0.15
+  tie_lm_head_to_token_embeddings: true
+  recurrent_passes: 2
+  use_lm_position_embeddings: true
+  lm_max_positions: 512
+  lm_position_weight: 1.0
+  use_lm_toric_position_features: true
+  lm_toric_position_weight: 1.0
+  use_lm_context_hash_embeddings: true
+  lm_context_hash_buckets: 768
+  lm_context_hash_weight: 0.35
+  use_lm_caseops_features: true
+  lm_caseops_feature_dim: 10
+  lm_caseops_weight: 0.25
+  use_lm_smear_gate: true
+  lm_smear_temperature_min: 0.65
+  lm_smear_temperature_max: 1.60
+  use_lm_bigram_bias: false
+  lm_bigram_bias_scale: 0.0
   activation_checkpointing: true
 
 training:

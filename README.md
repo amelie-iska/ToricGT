@@ -34,6 +34,19 @@ tokens whose reveal rank is no larger than its own.  This prevents the old
 failure mode where the graph LM head predicted next SP1024 tokens while the
 TokenGT encoder still had full bidirectional access to future nodes.
 
+Route (1) also ports the compact OAI/Parameter-Golf baseline optimizations that
+fit the TokenGT abstraction.  The next-run config ties the SP1024 LM head to
+the learned token embedding, applies recurrent block passes for extra compute
+without extra stored weights, adds target-position embeddings and toric
+position phases, uses strict-prefix hash-context embeddings, injects
+SentencePiece operator/class features from the already revealed input token,
+and applies a small SmearGate-style logit temperature.  The old dense
+`1024 x 1024` bigram-bias table is disabled in this route because the hash
+context gives a more artifact-efficient version of the same competition trick.
+These features remain score-valid: they depend only on public positions,
+reveal/topological/random ranks, graph structure, and already revealed input
+tokens.
+
 **OpenAI competition baseline model**
 
 ```bash
