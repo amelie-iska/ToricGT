@@ -40,6 +40,8 @@ model:
   soft_moe_all_layers: false
   soft_moe_experts: 4
   soft_moe_slots: 2
+  use_lm_head: true
+  lm_vocab_size: 1024
 
 training:
   steps: 100000
@@ -76,6 +78,7 @@ training:
 curriculum:
   gflownet_loss_weight: 0.01
   gflownet_space: embedding
+  fineweb_lm_loss_weight: 0.08
   got_dag_loss_weight: 0.0005
   trajectory_memory_loss_weight: 0.00005
   derived_category_loss_weight: 0.00001

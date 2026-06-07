@@ -50,6 +50,23 @@ def test_tokengt_optional_trajectory_memory_head_cpu():
     assert out["node_embeddings"].shape == (3, 16, cfg.d_model)
 
 
+def test_tokengt_optional_lm_head_cpu():
+    cfg = ModelConfig(
+        d_model=32,
+        num_heads=4,
+        num_layers=2,
+        max_nodes=16,
+        max_edges=32,
+        use_lm_head=True,
+        lm_vocab_size=1024,
+    )
+    model = ToricTokenGT(cfg)
+    batch, _ = synthetic_batch(cfg, batch_size=2, device="cpu")
+    out = model(batch)
+
+    assert out["lm_logits"].shape == (2, 16, 1024)
+
+
 def test_tokengt_can_emit_memory_trace_and_derived_certificates_cpu():
     cfg = ModelConfig(
         d_model=32,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 from torch import nn
@@ -21,6 +22,9 @@ class GraphBatch:
     edge_index: torch.Tensor
     node_mask: torch.Tensor
     edge_mask: torch.Tensor
+    lm_input_ids: Optional[torch.Tensor] = None
+    lm_target_ids: Optional[torch.Tensor] = None
+    lm_mask: Optional[torch.Tensor] = None
 
 
 @dataclass
@@ -99,4 +103,3 @@ def attention_mask_from_token_mask(token_mask: torch.Tensor) -> torch.Tensor:
     """Build [batch, 1, query, key] boolean attention mask."""
 
     return token_mask[:, None, :, None] & token_mask[:, None, None, :]
-

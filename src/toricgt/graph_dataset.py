@@ -316,7 +316,34 @@ def record_to_graph_json(record: dict[str, object], cfg: ModelConfig) -> str:
     )
 
 
-def graph_json_to_item(graph_json: str, cfg: ModelConfig) -> GraphTrainingItem:
+def _lm_tensors_from_tokens(
+    tokens: np.ndarray | None,
+    cfg: ModelConfig,
+) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+    if tokens is None:
+        return None, None, None
+    token_ids = np.asarray(tokens, dtype=np.int64).reshape(-1)
+    if token_ids.size < 2:
+        return None, None, None
+    length = min(int(cfg.max_nodes), int(token_ids.size) - 1)
+    if length <= 0:
+        return None, None, None
+    vocab_size = max(1, int(getattr(cfg, "lm_vocab_size", 1024)))
+    input_ids = torch.zeros(cfg.max_nodes, dtype=torch.long)
+    target_ids = torch.zeros(cfg.max_nodes, dtype=torch.long)
+    lm_mask = torch.zeros(cfg.max_nodes, dtype=torch.bool)
+    input_ids[:length] = torch.from_numpy(np.clip(token_ids[:length], 0, vocab_size - 1)).long()
+    target_ids[:length] = torch.from_numpy(np.clip(token_ids[1 : length + 1], 0, vocab_size - 1)).long()
+    lm_mask[:length] = True
+    return input_ids, target_ids, lm_mask
+
+
+def graph_json_to_item(
+    graph_json: str,
+    cfg: ModelConfig,
+    *,
+    lm_tokens: np.ndarray | None = None,
+) -> GraphTrainingItem:
     payload = json.loads(ensure_branch_merge_graph_json(graph_json or "{}"))
     raw_nodes = list(payload.get("nodes") or [])
     raw_edges = list(payload.get("edges") or [])
@@ -361,12 +388,16 @@ def graph_json_to_item(graph_json: str, cfg: ModelConfig) -> GraphTrainingItem:
     target = torch.zeros(cfg.max_nodes, cfg.output_dim, dtype=torch.float32)
     copy_dim = min(cfg.output_dim, cfg.node_feature_dim)
     target[:, :copy_dim] = node_features[:, :copy_dim]
+    lm_input_ids, lm_target_ids, lm_mask = _lm_tensors_from_tokens(lm_tokens, cfg)
     graph = GraphBatch(
         node_features=node_features,
         edge_features=edge_features,
         edge_index=edge_index,
         node_mask=node_mask,
         edge_mask=edge_mask,
+        lm_input_ids=lm_input_ids,
+        lm_target_ids=lm_target_ids,
+        lm_mask=lm_mask,
     )
     metadata = {
         "dataset": payload.get("dataset", ""),
@@ -380,12 +411,44 @@ def graph_json_to_item(graph_json: str, cfg: ModelConfig) -> GraphTrainingItem:
 def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, torch.Tensor]:
     if not items:
         raise ValueError("cannot collate an empty graph batch")
+    any_lm = any(item.graph.lm_target_ids is not None and item.graph.lm_mask is not None for item in items)
+    lm_input_ids = None
+    lm_target_ids = None
+    lm_mask = None
+    if any_lm:
+        lm_input_ids = torch.stack(
+            [
+                item.graph.lm_input_ids
+                if item.graph.lm_input_ids is not None
+                else torch.zeros_like(items[0].graph.node_mask, dtype=torch.long)
+                for item in items
+            ]
+        )
+        lm_target_ids = torch.stack(
+            [
+                item.graph.lm_target_ids
+                if item.graph.lm_target_ids is not None
+                else torch.zeros_like(items[0].graph.node_mask, dtype=torch.long)
+                for item in items
+            ]
+        )
+        lm_mask = torch.stack(
+            [
+                item.graph.lm_mask
+                if item.graph.lm_mask is not None
+                else torch.zeros_like(items[0].graph.node_mask, dtype=torch.bool)
+                for item in items
+            ]
+        )
     graph = GraphBatch(
         node_features=torch.stack([item.graph.node_features for item in items]),
         edge_features=torch.stack([item.graph.edge_features for item in items]),
         edge_index=torch.stack([item.graph.edge_index for item in items]),
         node_mask=torch.stack([item.graph.node_mask for item in items]),
         edge_mask=torch.stack([item.graph.edge_mask for item in items]),
+        lm_input_ids=lm_input_ids,
+        lm_target_ids=lm_target_ids,
+        lm_mask=lm_mask,
     )
     target = torch.stack([item.target for item in items])
     return graph, target
@@ -482,7 +545,7 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
                 "text": decode_sp1024_tokens(token_slice, tokenizer=tokenizer),
             }
             if self._keep_record(record):
-                yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg)
+                yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg, lm_tokens=token_slice)
 
     def _iter_path(self, path: Path):
         if path.suffix == ".jsonl":

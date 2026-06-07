@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch.nn import functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -146,6 +147,10 @@ def synthetic_batch(cfg: ModelConfig, batch_size: int, device: str) -> tuple[Gra
     return GraphBatch(node, edge, edge_index, node_mask, edge_mask), target
 
 
+def _optional_to_device(tensor: torch.Tensor | None, device: str) -> torch.Tensor | None:
+    return tensor.to(device) if tensor is not None else None
+
+
 def move_batch(batch: GraphBatch, target: torch.Tensor, device: str) -> tuple[GraphBatch, torch.Tensor]:
     return (
         GraphBatch(
@@ -154,6 +159,9 @@ def move_batch(batch: GraphBatch, target: torch.Tensor, device: str) -> tuple[Gr
             edge_index=batch.edge_index.to(device),
             node_mask=batch.node_mask.to(device),
             edge_mask=batch.edge_mask.to(device),
+            lm_input_ids=_optional_to_device(batch.lm_input_ids, device),
+            lm_target_ids=_optional_to_device(batch.lm_target_ids, device),
+            lm_mask=_optional_to_device(batch.lm_mask, device),
         ),
         target.to(device),
     )
@@ -173,6 +181,27 @@ def next_loader_batch(
     return batch, target, data_iter
 
 
+def fineweb_lm_metrics(out: dict[str, torch.Tensor], batch: GraphBatch) -> dict[str, torch.Tensor] | None:
+    logits = out.get("lm_logits")
+    if logits is None or batch.lm_target_ids is None or batch.lm_mask is None:
+        return None
+    mask = batch.lm_mask.to(device=logits.device, dtype=torch.bool)
+    if batch.node_mask is not None:
+        mask = mask & batch.node_mask.to(device=logits.device, dtype=torch.bool)
+    if not bool(mask.any().detach().cpu()):
+        return None
+    targets = batch.lm_target_ids.to(device=logits.device, dtype=torch.long).clamp(0, logits.shape[-1] - 1)
+    selected_logits = logits.float()[mask]
+    selected_targets = targets[mask]
+    loss = F.cross_entropy(selected_logits, selected_targets)
+    tokens = mask.sum().to(dtype=loss.dtype)
+    return {
+        "loss": loss,
+        "bpb": loss / math.log(2.0),
+        "tokens": tokens,
+    }
+
+
 @torch.no_grad()
 def evaluate_loader(
     model: ToricTokenGT,
@@ -180,10 +209,12 @@ def evaluate_loader(
     device: str,
     precision: str,
     max_batches: int,
-) -> float:
+) -> dict[str, float]:
     model.eval()
     total = 0.0
     count = 0
+    lm_nll_total = 0.0
+    lm_tokens_total = 0.0
     data_iter = iter(loader)
     for _ in range(max_batches):
         try:
@@ -194,10 +225,25 @@ def evaluate_loader(
         with autocast_context(device, precision):
             out = model(batch)
             loss = masked_mse(out["node"], target, batch.node_mask)
+            lm = fineweb_lm_metrics(out, batch)
         total += float(loss.detach())
         count += 1
+        if lm is not None:
+            tokens = float(lm["tokens"].detach().cpu())
+            lm_nll_total += float(lm["loss"].detach().cpu()) * tokens
+            lm_tokens_total += tokens
     model.train()
-    return total / max(count, 1)
+    metrics = {"masked_mse": total / max(count, 1)}
+    if lm_tokens_total > 0:
+        lm_loss = lm_nll_total / lm_tokens_total
+        metrics.update(
+            {
+                "fineweb_lm_loss": lm_loss,
+                "fineweb_lm_bpb": lm_loss / math.log(2.0),
+                "fineweb_lm_tokens": lm_tokens_total,
+            }
+        )
+    return metrics
 
 
 def _artifact_probe_due(step: int, start_step: int, artifact_probe_every: int, artifact_probe_at_start: bool) -> bool:
@@ -302,6 +348,9 @@ def main() -> None:
     )
     parser.add_argument("--fineweb-tokens-per-graph", type=int, default=1024)
     parser.add_argument("--fineweb-stride-tokens", type=int, default=1024)
+    parser.add_argument("--use-lm-head", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lm-vocab-size", type=int, default=1024)
+    parser.add_argument("--fineweb-lm-loss-weight", type=float, default=0.0)
     parser.add_argument("--d-model", type=int, default=192)
     parser.add_argument("--num-heads", type=int, default=6)
     parser.add_argument("--num-layers", type=int, default=6)
@@ -377,6 +426,8 @@ def main() -> None:
         trajectory_memory_derived_weight=args.trajectory_memory_derived_weight,
         output_derived_category_certificates=args.output_derived_category_certificates,
         derived_category_max_vertices=args.derived_category_max_vertices,
+        use_lm_head=args.use_lm_head,
+        lm_vocab_size=args.lm_vocab_size,
     )
     train_cfg = TrainConfig(
         device=args.device,
@@ -511,6 +562,9 @@ def main() -> None:
                 "fineweb_tokenizer_path": args.fineweb_tokenizer_path,
                 "fineweb_tokens_per_graph": args.fineweb_tokens_per_graph,
                 "fineweb_stride_tokens": args.fineweb_stride_tokens,
+                "use_lm_head": args.use_lm_head,
+                "lm_vocab_size": args.lm_vocab_size,
+                "fineweb_lm_loss_weight": args.fineweb_lm_loss_weight,
                 "target_artifact_bytes": args.target_artifact_bytes,
                 "artifact_probe_every": args.artifact_probe_every,
                 "artifact_probe_at_start": args.artifact_probe_at_start,
@@ -552,6 +606,8 @@ def main() -> None:
         trajectory_memory_recall1_value = 0.0
         trajectory_memory_entropy_value = 0.0
         trajectory_memory_dag_similarity_value = 0.0
+        fineweb_lm_nll_value = 0.0
+        fineweb_lm_tokens_value = 0.0
         derived_category_loss_value = 0.0
         got_metric_sums: dict[str, float] = {}
         trajectory_metric_sums: dict[str, float] = {}
@@ -592,6 +648,9 @@ def main() -> None:
                 out = model(batch)
                 supervised_loss = masked_mse(out["node"], target, batch.node_mask)
                 raw_loss = supervised_loss
+                fineweb_lm = fineweb_lm_metrics(out, batch)
+                if fineweb_lm is not None and args.fineweb_lm_loss_weight > 0:
+                    raw_loss = raw_loss + args.fineweb_lm_loss_weight * fineweb_lm["loss"]
                 distill_loss = None
                 if teacher_out is not None and args.expert_curriculum_distill_weight > 0:
                     distill_loss = masked_mse(out["node"], teacher_out["node"].detach(), batch.node_mask)
@@ -659,6 +718,10 @@ def main() -> None:
                 teacher_loss_value += float(teacher_supervised_loss.detach())
             if gflownet_loss is not None:
                 gflownet_loss_value += float(gflownet_loss.detach())
+            if fineweb_lm is not None:
+                lm_tokens = float(fineweb_lm["tokens"].detach().cpu())
+                fineweb_lm_nll_value += float(fineweb_lm["loss"].detach().cpu()) * lm_tokens
+                fineweb_lm_tokens_value += lm_tokens
             if got_metrics is not None:
                 got_dag_loss_value += float(got_metrics["got_dag_loss"].detach())
                 for key, value in got_metrics.items():
@@ -697,6 +760,8 @@ def main() -> None:
         mean_trajectory_memory_recall1 = trajectory_memory_recall1_value / max(train_cfg.grad_accum_steps, 1)
         mean_trajectory_memory_entropy = trajectory_memory_entropy_value / max(train_cfg.grad_accum_steps, 1)
         mean_trajectory_memory_dag_similarity = trajectory_memory_dag_similarity_value / max(train_cfg.grad_accum_steps, 1)
+        mean_fineweb_lm_loss = fineweb_lm_nll_value / fineweb_lm_tokens_value if fineweb_lm_tokens_value > 0 else 0.0
+        mean_fineweb_lm_bpb = mean_fineweb_lm_loss / math.log(2.0) if fineweb_lm_tokens_value > 0 else 0.0
         mean_derived_category_loss = derived_category_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_distill_loss = distill_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_teacher_loss = teacher_loss_value / max(train_cfg.grad_accum_steps, 1)
@@ -722,6 +787,7 @@ def main() -> None:
                 "train/trajectory_memory_recall1": mean_trajectory_memory_recall1,
                 "train/trajectory_memory_entropy": mean_trajectory_memory_entropy,
                 "train/trajectory_memory_dag_similarity": mean_trajectory_memory_dag_similarity,
+                "train/fineweb_lm_loss_weight": args.fineweb_lm_loss_weight,
                 "train/derived_category_loss": mean_derived_category_loss,
                 "train/derived_category_loss_weight": args.derived_category_loss_weight,
                 "train/derived_category_max_vertices": args.derived_category_max_vertices,
@@ -738,6 +804,17 @@ def main() -> None:
                 "data/fineweb_stride_tokens": float(args.fineweb_stride_tokens),
                 "artifact/target_size_limit_bytes": args.target_artifact_bytes,
             }
+            if fineweb_lm_tokens_value > 0:
+                metrics.update(
+                    {
+                        "fineweb/train_loss": mean_fineweb_lm_loss,
+                        "fineweb/train_bpb": mean_fineweb_lm_bpb,
+                        "fineweb/train_tokens": fineweb_lm_tokens_value,
+                        "train/fineweb_lm_loss": mean_fineweb_lm_loss,
+                        "train/fineweb_lm_bpb": mean_fineweb_lm_bpb,
+                        "train/fineweb_lm_tokens": fineweb_lm_tokens_value,
+                    }
+                )
             metrics.update(artifact_metrics)
             for key, value in got_metric_sums.items():
                 metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
@@ -847,12 +924,28 @@ def main() -> None:
         if val_loader is not None and args.eval_every > 0 and (step + 1) % args.eval_every == 0:
             if assignment is not None:
                 model.set_active_soft_moe_experts(None)
-            val_loss = evaluate_loader(model, val_loader, args.device, train_cfg.precision, args.eval_batches)
+            val_metrics = evaluate_loader(model, val_loader, args.device, train_cfg.precision, args.eval_batches)
             if assignment is not None:
                 model.set_active_soft_moe_experts([assignment.active_expert])
-            pbar.write(f"validation step={step + 1} masked_mse={val_loss:.6f}")
+            val_loss = float(val_metrics["masked_mse"])
+            message = f"validation step={step + 1} masked_mse={val_loss:.6f}"
+            if "fineweb_lm_bpb" in val_metrics:
+                message += f" fineweb_bpb={val_metrics['fineweb_lm_bpb']:.6f}"
+            pbar.write(message)
             if run is not None:
-                run.log(organize_wandb_payload({"val/masked_mse": val_loss, "trainer/step": step + 1, "train/step": step + 1}))
+                payload = {"val/masked_mse": val_loss, "trainer/step": step + 1, "train/step": step + 1}
+                if "fineweb_lm_bpb" in val_metrics:
+                    payload.update(
+                        {
+                            "fineweb/val_loss": float(val_metrics["fineweb_lm_loss"]),
+                            "fineweb/val_bpb": float(val_metrics["fineweb_lm_bpb"]),
+                            "fineweb/val_tokens": float(val_metrics["fineweb_lm_tokens"]),
+                            "val/fineweb_lm_loss": float(val_metrics["fineweb_lm_loss"]),
+                            "val/fineweb_lm_bpb": float(val_metrics["fineweb_lm_bpb"]),
+                            "val/fineweb_lm_tokens": float(val_metrics["fineweb_lm_tokens"]),
+                        }
+                    )
+                run.log(organize_wandb_payload(payload))
         if args.checkpoint_every > 0 and (step + 1) % args.checkpoint_every == 0:
             save_checkpoint(
                 ckpt_dir,

@@ -36,6 +36,27 @@ def test_primary_aliases_promote_oai_and_training_scorecard() -> None:
     assert "oai_competition/bpb" not in organized
 
 
+def test_fineweb_lm_bpb_aliases_are_primary_and_grouped() -> None:
+    payload = {
+        "trainer/step": 40,
+        "fineweb/train_bpb": 1.31,
+        "fineweb/train_loss": 0.908,
+        "fineweb/val_bpb": 1.27,
+        "fineweb/val_loss": 0.881,
+        "train/fineweb_lm_tokens": 4096.0,
+    }
+
+    organized = organize_wandb_payload(payload)
+
+    assert organized["00_primary/train_bpb"] == 1.31
+    assert organized["00_primary/validation_bpb"] == 1.27
+    assert organized["00_primary/train_loss"] == 0.908
+    assert organized["00_primary/validation_loss"] == 0.881
+    assert organized["02_train/bpb"] == 1.31
+    assert organized["01_oai/val_bpb"] == 1.27
+    assert organized["02_train/fineweb_lm_tokens"] == 4096.0
+
+
 def test_category_aliases_route_advanced_losses_once() -> None:
     payload = {
         "trainer/step": 10,

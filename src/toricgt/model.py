@@ -48,6 +48,7 @@ class ToricTokenGT(nn.Module):
         self.norm = nn.LayerNorm(config.d_model)
         self.node_head = nn.Linear(config.d_model, config.output_dim)
         self.edge_head = nn.Linear(config.d_model, config.output_dim)
+        self.lm_head = nn.Linear(config.d_model, config.lm_vocab_size) if config.use_lm_head else None
         self.graph_head = nn.Sequential(
             nn.Linear(config.d_model, config.d_model),
             nn.GELU(),
@@ -126,6 +127,8 @@ class ToricTokenGT(nn.Module):
             "edge_index": batch.edge_index,
             "edge_mask": batch.edge_mask,
         }
+        if self.lm_head is not None:
+            outputs["lm_logits"] = self.lm_head(node_x)
         if self.gflownet_policy is not None:
             forward_logits, backward_logits = self.gflownet_policy(pooled)
             outputs["gflownet_forward_logits"] = forward_logits

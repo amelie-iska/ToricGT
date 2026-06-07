@@ -127,7 +127,43 @@ def test_fineweb_bin_tokens_stream_as_branch_merge_graph(tmp_path):
 
     assert batch.node_mask.any()
     assert batch.edge_mask.any()
+    assert batch.lm_input_ids is not None
+    assert batch.lm_target_ids is not None
+    assert batch.lm_mask is not None
+    assert int(batch.lm_mask.sum().item()) == 30
+    assert int(batch.lm_input_ids[0, 0].item()) == 1
+    assert int(batch.lm_target_ids[0, 0].item()) == 2
     assert torch.isfinite(loss)
+
+
+def test_fineweb_lm_targets_drive_tokengt_lm_head(tmp_path):
+    token_path = tmp_path / "fineweb_train_000000.bin"
+    write_fake_challenge_bin(token_path, list(range(1, 33)))
+    cfg = ModelConfig(
+        d_model=32,
+        num_heads=4,
+        num_layers=2,
+        max_nodes=16,
+        max_edges=64,
+        attention="tropical_ring",
+        ring_block_size=8,
+        use_lm_head=True,
+        lm_vocab_size=1024,
+    )
+    dataset = CuratedGraphIterableDataset(
+        [token_path],
+        cfg,
+        fineweb_tokenizer_path=tmp_path / "missing.model",
+        fineweb_tokens_per_graph=16,
+        fineweb_stride_tokens=8,
+    )
+    item = next(iter(dataset))
+    batch, _ = collate_graph_items([item, item])
+    model = ToricTokenGT(cfg)
+    out = model(batch)
+
+    assert out["lm_logits"].shape == (2, cfg.max_nodes, cfg.lm_vocab_size)
+    assert batch.lm_mask.any()
 
 
 def test_interleaved_paths_emit_jsonl_and_fineweb_bin(tmp_path):

@@ -52,6 +52,8 @@ class ModelConfig:
     trajectory_memory_derived_weight: float = 0.20
     output_derived_category_certificates: bool = False
     derived_category_max_vertices: int = 8
+    use_lm_head: bool = False
+    lm_vocab_size: int = 1024
 
 
 @dataclass(frozen=True)
