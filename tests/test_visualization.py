@@ -8,6 +8,7 @@ from toricgt.visualization import (
     reasoning_trajectory,
     write_interactive_reasoning_plot,
 )
+from toricgt.got_trajectory import default_branch_merge_edges_np, got_dag_summary_np
 
 
 def test_reasoning_trajectory_visualizations(tmp_path):
@@ -16,6 +17,12 @@ def test_reasoning_trajectory_visualizations(tmp_path):
     assert energy.shape == (24,)
     assert np.isfinite(path).all()
     assert np.isfinite(energy).all()
+    edges = default_branch_merge_edges_np(path.shape[0])
+    summary = got_dag_summary_np(path.shape[0], edges)
+    assert summary["branch_count"] > 0
+    assert summary["merge_count"] > 0
+    assert np.sign(path[1, 1] - path[0, 1]) != np.sign(path[2, 1] - path[0, 1])
+    assert abs(path[3, 1] - path[0, 1]) < max(abs(path[1, 1] - path[0, 1]), abs(path[2, 1] - path[0, 1]))
 
     outputs = [
         tmp_path / "trajectory.png",

@@ -49,6 +49,7 @@ from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_p
 
 from evaluate_reasoning_simplex import blue_colormap, load_model
 from toricgt.complexity import random_order_complexity_metrics
+from toricgt.got_trajectory import default_branch_merge_edges_np
 from toricgt.random_order_lm import DenseRandomOrderToricLM, byte_encode, random_order_batch
 from toricgt.reasoning_geometry import (
     TETRAHEDRON_VERTICES,
@@ -981,6 +982,96 @@ def _triangle_long_edge_mask(
     return mask
 
 
+def _got_edge_role_styles(edges: np.ndarray, n: int) -> list[tuple[str, str]]:
+    out_degree = np.zeros((n,), dtype=np.int64)
+    in_degree = np.zeros((n,), dtype=np.int64)
+    for src, dst in edges:
+        src_i = int(src)
+        dst_i = int(dst)
+        if 0 <= src_i < n and 0 <= dst_i < n and src_i != dst_i:
+            out_degree[src_i] += 1
+            in_degree[dst_i] += 1
+    styles: list[tuple[str, str]] = []
+    for src, dst in edges:
+        src_i = int(src)
+        dst_i = int(dst)
+        if out_degree[src_i] > 1 and in_degree[dst_i] > 1:
+            styles.append(("branch/merge edge", "#ffd166"))
+        elif out_degree[src_i] > 1:
+            styles.append(("branch fan-out", "#ff4fd8"))
+        elif in_degree[dst_i] > 1:
+            styles.append(("merge fan-in", "#8cff6a"))
+        else:
+            styles.append(("DAG continuation", "#6df6ff"))
+    return styles
+
+
+def _plot_branch_merge_dag_edges(
+    ax: Any,
+    points: np.ndarray,
+    *,
+    linewidth: float = 1.1,
+    alpha: float = 0.55,
+    max_edges: int = 240,
+) -> None:
+    if points.ndim != 2 or points.shape[0] < 2:
+        return
+    edges = default_branch_merge_edges_np(points.shape[0])
+    if edges.shape[0] > max_edges:
+        edges = edges[np.linspace(0, edges.shape[0] - 1, max_edges).astype(int)]
+    for (src, dst), (_, color) in zip(edges, _got_edge_role_styles(edges, points.shape[0]), strict=False):
+        src_i = int(src)
+        dst_i = int(dst)
+        if not (0 <= src_i < points.shape[0] and 0 <= dst_i < points.shape[0]):
+            continue
+        p = points[src_i]
+        q = points[dst_i]
+        ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color=color, linewidth=linewidth, alpha=alpha)
+
+
+def _branch_merge_edge_traces(
+    points: np.ndarray,
+    *,
+    name_prefix: str,
+    width: float = 4.0,
+    opacity: float = 0.5,
+    max_edges: int = 320,
+) -> list[dict[str, Any]]:
+    if points.ndim != 2 or points.shape[0] < 2:
+        return []
+    edges = default_branch_merge_edges_np(points.shape[0])
+    if edges.shape[0] > max_edges:
+        edges = edges[np.linspace(0, edges.shape[0] - 1, max_edges).astype(int)]
+    grouped: dict[tuple[str, str], dict[str, list[float | None]]] = {}
+    for (src, dst), style in zip(edges, _got_edge_role_styles(edges, points.shape[0]), strict=False):
+        src_i = int(src)
+        dst_i = int(dst)
+        if not (0 <= src_i < points.shape[0] and 0 <= dst_i < points.shape[0]):
+            continue
+        bucket = grouped.setdefault(style, {"x": [], "y": [], "z": []})
+        p = points[src_i]
+        q = points[dst_i]
+        bucket["x"].extend([float(p[0]), float(q[0]), None])
+        bucket["y"].extend([float(p[1]), float(q[1]), None])
+        bucket["z"].extend([float(p[2]), float(q[2]), None])
+    traces: list[dict[str, Any]] = []
+    for (role, color), coords in grouped.items():
+        traces.append(
+            {
+                "type": "scatter3d",
+                "mode": "lines",
+                "x": coords["x"],
+                "y": coords["y"],
+                "z": coords["z"],
+                "line": {"color": color, "width": width},
+                "opacity": opacity,
+                "name": f"{name_prefix} {role}",
+                "hoverinfo": "name",
+            }
+        )
+    return traces
+
+
 def plot_trajectory_3d(record_meta: dict[str, Any], branches: list[dict[str, Any]], output_path: Path) -> None:
     fig = plt.figure(figsize=(10, 8), facecolor="#030712")
     ax = fig.add_subplot(111, projection="3d")
@@ -996,7 +1087,12 @@ def plot_trajectory_3d(record_meta: dict[str, Any], branches: list[dict[str, Any
         plotted = _focus_project(path[idx, :3], focus_center, focus_scale)
         norm = 0.5 if abs(hi - lo) < 1e-8 else (float(branch["bpb"]) - lo) / (hi - lo)
         color = cmap(1.0 - norm)
-        ax.plot(plotted[:, 0], plotted[:, 1], plotted[:, 2], color=color, linewidth=1.4, alpha=0.78)
+        _plot_branch_merge_dag_edges(
+            ax,
+            plotted,
+            linewidth=1.35 if int(branch["branch_index"]) == best_index else 0.9,
+            alpha=0.78 if int(branch["branch_index"]) == best_index else 0.34,
+        )
         ax.scatter(plotted[0, 0], plotted[0, 1], plotted[0, 2], s=28, color="#6df6ff", edgecolor="white", linewidth=0.4)
         marker = "*" if int(branch["branch_index"]) == best_index else "o"
         size = 115 if marker == "*" else 44
@@ -1121,17 +1217,13 @@ def write_interactive_trajectory(record_meta: dict[str, Any], branches: list[dic
         plotted = _focus_project(raw_plotted, focus_center, focus_scale)
         norm = 0.5 if abs(hi - lo) < 1e-8 else (float(branch["bpb"]) - lo) / (hi - lo)
         color = f"hsl({int(200 - 160 * norm)}, 95%, 58%)"
-        traces.append(
-            {
-                "type": "scatter3d",
-                "mode": "lines",
-                "x": plotted[:, 0].tolist(),
-                "y": plotted[:, 1].tolist(),
-                "z": plotted[:, 2].tolist(),
-                "line": {"color": color, "width": 4},
-                "name": f"branch {branch['branch_index']} BPB={branch['bpb']:.3f}",
-                "hoverinfo": "name",
-            }
+        traces.extend(
+            _branch_merge_edge_traces(
+                plotted,
+                name_prefix=f"branch {branch['branch_index']} BPB={branch['bpb']:.3f}",
+                width=5.0 if branch is best else 2.4,
+                opacity=0.88 if branch is best else 0.32,
+            )
         )
         terminal = plotted[-1]
         traces.append(
@@ -1171,7 +1263,7 @@ def write_interactive_trajectory(record_meta: dict[str, Any], branches: list[dic
     payload = {
         "title": f"R{record_meta['record_index']} {record_meta.get('dataset', '')} / {record_meta.get('task_family', '')}",
         "subtitle": (
-            "focused coordinates: asinh((PC-median)/robust-scale) | lines: random-order/GFlowNet branches | "
+            "focused coordinates: asinh((PC-median)/robust-scale) | diamond-DAG edges: random-order/GFlowNet GoT branches | "
             "window-colored local VR complexes: best branch | gold diamonds: chamber crossings | magenta open circles: low tropical margins"
         ),
         "traces": traces,
@@ -1290,7 +1382,8 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
         step = max(1, path.shape[0] // 160)
         focused_path = _focus_project(path[::step, :2], focus_center, focus_scale)
         energy_path = energy[::step][: focused_path.shape[0]]
-        ax.plot(focused_path[:, 0], focused_path[:, 1], energy_path, color="#6df6ff", alpha=0.35, linewidth=0.7)
+        energy_points = np.column_stack([focused_path[:, 0], focused_path[:, 1], energy_path])
+        _plot_branch_merge_dag_edges(ax, energy_points, linewidth=0.7, alpha=0.35)
     ax.set_xlabel("focused PC1", color="white")
     ax.set_ylabel("focused PC2", color="white")
     ax.set_zlabel("local NLL energy", color="white")
@@ -1299,7 +1392,7 @@ def plot_energy_landscape(record_meta: dict[str, Any], branches: list[dict[str, 
         0.02,
         0.02,
         0.98,
-        "asinh-focused PCA; local-NLL surface with branch overlays",
+        "asinh-focused PCA; local-NLL surface with branch/merge DAG overlays",
         transform=ax.transAxes,
         color="#e8fbff",
         fontsize=8,
@@ -1320,9 +1413,9 @@ def write_interactive_energy_landscape(
 
     The static landscape and this companion HTML both lift model-computed local
     NLL values into the z-axis over the first two hidden-state PCA coordinates.
-    The mesh is built from sampled reasoning states, while each branch path is
-    drawn on top of the surface so low-energy basins and high-energy ridges can
-    be inspected by rotating the plot.
+    The mesh is built from sampled reasoning states, while each branch/merge
+    DAG is drawn on top of the surface so low-energy basins and high-energy
+    ridges can be inspected by rotating the plot.
     """
 
     xs: list[float] = []
@@ -1381,7 +1474,7 @@ def write_interactive_energy_landscape(
 
     # Triangulation can fail if many PCA samples are repeated or nearly
     # collinear.  Fall back to a point cloud in that case, but keep the same
-    # interactive branch overlays.
+    # interactive branch/merge DAG overlays.
     mesh_trace: dict[str, Any] | None = None
     try:
         tri = mtri.Triangulation(xs, ys)
@@ -1509,24 +1602,33 @@ def write_interactive_energy_landscape(
         norm = 0.5 if abs(denom) < 1e-8 else (float(item["bpb"]) - bpb_lo) / denom
         color = branch_palette[rank % len(branch_palette)]
         width = 8 if item["is_best"] else max(2, int(5 - 2 * norm))
-        traces.append(
-            {
-                "type": "scatter3d",
-                "mode": "lines+markers" if item["is_best"] else "lines",
-                "x": item["x"],
-                "y": item["y"],
-                "z": item["z"],
-                "line": {"color": color, "width": width},
-                "marker": {"size": 3.5, "color": color},
-                "opacity": 0.96 if item["is_best"] else 0.36,
-                "name": f"{'best ' if item['is_best'] else ''}B{item['branch_index']} BPB={item['bpb']:.3f}",
-                "hovertext": [
-                    f"B{item['branch_index']} step {int(step)}<br>BPB={item['bpb']:.4f}<br>answer BPB={item['answer_bpb']:.4f}"
-                    for step in item["steps"]
-                ],
-                "hoverinfo": "text",
-            }
+        points = np.column_stack([np.asarray(item["x"], dtype=float), np.asarray(item["y"], dtype=float), np.asarray(item["z"], dtype=float)])
+        traces.extend(
+            _branch_merge_edge_traces(
+                points,
+                name_prefix=f"{'best ' if item['is_best'] else ''}B{item['branch_index']} BPB={item['bpb']:.3f}",
+                width=float(width),
+                opacity=0.96 if item["is_best"] else 0.36,
+            )
         )
+        if item["is_best"]:
+            traces.append(
+                {
+                    "type": "scatter3d",
+                    "mode": "markers",
+                    "x": item["x"],
+                    "y": item["y"],
+                    "z": item["z"],
+                    "marker": {"size": 3.5, "color": color},
+                    "opacity": 0.82,
+                    "name": f"best B{item['branch_index']} reasoning vertices",
+                    "hovertext": [
+                        f"B{item['branch_index']} step {int(step)}<br>BPB={item['bpb']:.4f}<br>answer BPB={item['answer_bpb']:.4f}"
+                        for step in item["steps"]
+                    ],
+                    "hoverinfo": "text",
+                }
+            )
         if item["x"]:
             traces.append(
                 {
@@ -2191,25 +2293,18 @@ def write_interactive_projected_simplicial_toric_geometry(
         )
     )
 
-    branch_palette = ["#38f2ff", "#ff4fd8", "#ffd166", "#8cff6a", "#ad7cff", "#ff7a45", "#7bdff2", "#f15bb5"]
     for rank, branch in enumerate(ranked[:8]):
         branch_path = np.asarray(branch["projected_path"], dtype=float)
         bidx = subsample_indices(branch_path.shape[0], min(220, int(branch.get("max_plot_points", 180))))
         sampled = _focus_project(branch_path[bidx, :3], focus_center, focus_scale)
-        color = branch_palette[rank % len(branch_palette)]
         is_best = branch is best
-        traces.append(
-            {
-                "type": "scatter3d",
-                "mode": "lines",
-                "x": sampled[:, 0].tolist(),
-                "y": sampled[:, 1].tolist(),
-                "z": sampled[:, 2].tolist(),
-                "line": {"color": color, "width": 7 if is_best else 2},
-                "opacity": 0.94 if is_best else 0.28,
-                "name": f"{'best ' if is_best else ''}B{branch['branch_index']} BPB={float(branch['bpb']):.3f}",
-                "hoverinfo": "name",
-            }
+        traces.extend(
+            _branch_merge_edge_traces(
+                sampled,
+                name_prefix=f"{'best ' if is_best else ''}B{branch['branch_index']} BPB={float(branch['bpb']):.3f}",
+                width=7.0 if is_best else 2.0,
+                opacity=0.94 if is_best else 0.28,
+            )
         )
 
     traces.extend(
@@ -2403,8 +2498,7 @@ def plot_toric_phase_simplicial_trajectory(
             alpha=0.72,
         )
 
-    line_color = "#50f5ff"
-    ax.plot(plotted[:, 0], plotted[:, 1], plotted[:, 2], color=line_color, linewidth=1.7, alpha=0.86)
+    _plot_branch_merge_dag_edges(ax, plotted, linewidth=1.05, alpha=0.78)
     size = 18.0 + 44.0 * (plotted_margin - np.nanmin(plotted_margin)) / max(
         1e-8,
         float(np.nanmax(plotted_margin) - np.nanmin(plotted_margin)),
@@ -2440,7 +2534,7 @@ def plot_toric_phase_simplicial_trajectory(
     ax.text2D(
         0.02,
         0.025,
-        "cyan line: phase-wound reasoning path | faint edges: local VR 1-skeleton | magenta arrows: soft analogy maps between windows | marker size: GraphCG chart margin",
+        "colored DAG edges: branch/merge reasoning connectivity on the phase leaf | faint edges: local VR 1-skeleton | magenta arrows: soft analogy maps between windows | marker size: GraphCG chart margin",
         transform=ax.transAxes,
         color="#e8fbff",
         fontsize=8.5,
@@ -2510,25 +2604,18 @@ def write_interactive_toric_phase_simplicial_trajectory(
         }
     )
 
-    branch_colors = ["#38f2ff", "#ff4fd8", "#ffd166", "#8cff6a", "#ad7cff", "#ff7a45", "#7bdff2", "#f15bb5"]
     for rank, branch in enumerate(ranked[:8]):
         path = np.asarray(branch["toric_torus_path"], dtype=float)
         branch_idx = subsample_indices(path.shape[0], min(180, int(branch.get("max_plot_points", 180))))
         sampled = path[branch_idx]
-        color = branch_colors[rank % len(branch_colors)]
         is_best = branch is best
-        traces.append(
-            {
-                "type": "scatter3d",
-                "mode": "lines",
-                "x": sampled[:, 0].tolist(),
-                "y": sampled[:, 1].tolist(),
-                "z": sampled[:, 2].tolist(),
-                "line": {"color": color, "width": 7 if is_best else 2},
-                "opacity": 0.92 if is_best else 0.28,
-                "name": f"{'best ' if is_best else ''}B{branch['branch_index']} BPB={float(branch['bpb']):.3f}",
-                "hoverinfo": "name",
-            }
+        traces.extend(
+            _branch_merge_edge_traces(
+                sampled,
+                name_prefix=f"{'best ' if is_best else ''}B{branch['branch_index']} BPB={float(branch['bpb']):.3f}",
+                width=7.0 if is_best else 2.0,
+                opacity=0.92 if is_best else 0.28,
+            )
         )
 
     diffs = plotted[:, None, :] - plotted[None, :, :]
@@ -2698,8 +2785,9 @@ def write_interactive_toric_phase_simplicial_trajectory(
             f"{html.escape(str(record_meta.get('dataset', '')))} / {html.escape(str(record_meta.get('task_family', '')))}"
         ),
         "subtitle": (
-            "Commutative torus shadow of the noncommutative phase memory; branch paths follow projected irrational "
-            "phase leaves. Local VR edges are adjustable; magenta arrows are analogical window transports."
+            "Commutative torus shadow of the noncommutative phase memory; reasoning vertices lie on projected "
+            "phase leaves while colored edges show branch/merge GoT connectivity. Local VR edges are adjustable; "
+            "magenta arrows are analogical window transports."
         ),
         "traces": traces,
     }

@@ -56,15 +56,17 @@ def reasoning_trajectory(seed: int = 17, steps: int = 96) -> tuple[np.ndarray, n
     """Create deterministic embedding-space graph-of-thought vertex states.
 
     The vertex coordinates are driven by irrational rotations and a dissipative
-    velocity update.  Plotting helpers connect these states with a branching
-    and merging DAG rather than a single polyline.
+    velocity update, but every three-step cell is placed as a visible diamond:
+    a central source, two separated alternatives, and a central merge.  The
+    returned array is indexed by reasoning-step id; it is not intended to imply
+    that the graph-of-thought is a single chain.
     """
 
     rng = np.random.default_rng(seed)
     theta = (np.sqrt(5.0) - 1.0) / 2.0
     beta = np.sqrt(2.0)
     gamma = np.sqrt(3.0)
-    path = np.zeros((steps, 3), dtype=np.float64)
+    centerline = np.zeros((steps, 3), dtype=np.float64)
     velocity = rng.normal(scale=0.04, size=3)
     for t in range(1, steps):
         phase = np.array(
@@ -74,9 +76,23 @@ def reasoning_trajectory(seed: int = 17, steps: int = 96) -> tuple[np.ndarray, n
                 np.sin(2 * np.pi * gamma * t + theta * t * t),
             ]
         )
-        force = 0.08 * phase - 0.025 * path[t - 1]
+        force = 0.08 * phase - 0.025 * centerline[t - 1]
         velocity = 0.93 * velocity + force
-        path[t] = path[t - 1] + velocity
+        centerline[t] = centerline[t - 1] + velocity
+    path = centerline.copy()
+    for t in range(steps):
+        phase = np.array(
+            [
+                np.cos(2 * np.pi * theta * (t + 1)),
+                np.sin(2 * np.pi * beta * (t + 1)),
+                np.cos(2 * np.pi * gamma * (t + 1)),
+            ]
+        )
+        branch_scale = 0.46 + 0.08 * np.sin(0.37 * t + seed)
+        if t % 3 == 1:
+            path[t] += branch_scale * np.array([0.08, 1.0, 0.32]) + 0.035 * phase
+        elif t % 3 == 2:
+            path[t] += branch_scale * np.array([-0.08, -1.0, -0.32]) - 0.035 * phase
     minima = np.array([[1.1, -0.7, 0.35], [-0.8, 0.85, -0.45], [0.25, 0.2, 0.95]])
     distances = np.stack([np.sum((path - minimum) ** 2, axis=1) for minimum in minima], axis=1)
     energy = -np.log(np.exp(-3.0 * distances).sum(axis=1) + 1e-8) / 3.0
@@ -103,6 +119,40 @@ def _edge_role_colors(edges: np.ndarray, n: int) -> list[str]:
     return colors
 
 
+def _plot_branch_merge_edges_3d(
+    ax,
+    points: np.ndarray,
+    *,
+    edges: np.ndarray | None = None,
+    linewidth: float = 1.25,
+    alpha: float = 0.66,
+    arrows: bool = False,
+) -> None:
+    if edges is None:
+        edges = default_branch_merge_edges_np(len(points))
+    edge_colors = _edge_role_colors(edges, len(points))
+    for (src, dst), color in zip(edges, edge_colors, strict=False):
+        if not (0 <= src < len(points) and 0 <= dst < len(points)):
+            continue
+        p = points[int(src)]
+        q = points[int(dst)]
+        ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color=color, linewidth=linewidth, alpha=alpha)
+        if arrows:
+            delta = q - p
+            ax.quiver(
+                p[0],
+                p[1],
+                p[2],
+                0.72 * delta[0],
+                0.72 * delta[1],
+                0.72 * delta[2],
+                color=color,
+                linewidth=max(0.35, 0.42 * linewidth),
+                arrow_length_ratio=0.18,
+                alpha=min(0.92, alpha + 0.08),
+            )
+
+
 def plot_reasoning_trajectory_3d(
     path: np.ndarray,
     energy: np.ndarray,
@@ -115,26 +165,7 @@ def plot_reasoning_trajectory_3d(
     ax.set_facecolor("#05070d")
     if edges is None:
         edges = default_branch_merge_edges_np(len(path))
-    edge_colors = _edge_role_colors(edges, len(path))
-    for (src, dst), color in zip(edges, edge_colors, strict=False):
-        if not (0 <= src < len(path) and 0 <= dst < len(path)):
-            continue
-        p = path[int(src)]
-        q = path[int(dst)]
-        ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color=color, linewidth=1.25, alpha=0.66)
-        delta = q - p
-        ax.quiver(
-            p[0],
-            p[1],
-            p[2],
-            0.72 * delta[0],
-            0.72 * delta[1],
-            0.72 * delta[2],
-            color=color,
-            linewidth=0.55,
-            arrow_length_ratio=0.18,
-            alpha=0.55,
-        )
+    _plot_branch_merge_edges_3d(ax, path, edges=edges, linewidth=1.25, alpha=0.66, arrows=True)
     scatter = ax.scatter(path[:, 0], path[:, 1], path[:, 2], c=energy, cmap="plasma", s=18)
     best = int(np.argmin(energy))
     ax.scatter(path[best, 0], path[best, 1], path[best, 2], s=110, color="#8cff6a", edgecolor="white")
@@ -201,7 +232,8 @@ def plot_energy_landscape(path: np.ndarray, energy: np.ndarray, output: str | Pa
         - np.exp(-((path[:, 0] - minima[2, 0]) ** 2 + (path[:, 1] - minima[2, 1]) ** 2) * 4.5)
         + 0.035
     )
-    ax.plot(path[:, 0], path[:, 1], path_z, color="#50f5ff", linewidth=1.8)
+    landscape_points = np.column_stack([path[:, 0], path[:, 1], path_z])
+    _plot_branch_merge_edges_3d(ax, landscape_points, linewidth=1.45, alpha=0.70, arrows=False)
     ax.scatter(path[:, 0], path[:, 1], path_z, c=energy, cmap="viridis_r", s=22, edgecolor="none")
     best = int(np.argmin(energy))
     ax.scatter(path[best, 0], path[best, 1], path_z[best] + 0.04, s=120, color="#8cff6a", edgecolor="white")
