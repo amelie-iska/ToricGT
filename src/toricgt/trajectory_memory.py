@@ -20,6 +20,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from .got_trajectory import got_dag_metrics, got_dag_summary_np
+
 
 @dataclass(frozen=True)
 class TrajectoryMemoryConfig:
@@ -32,6 +34,7 @@ class TrajectoryMemoryConfig:
     topology_weight: float = 0.20
     graphcg_weight: float = 0.30
     toric_weight: float = 0.20
+    dag_weight: float = 0.20
 
 
 @dataclass
@@ -45,6 +48,7 @@ class TrajectoryMemoryRecord:
     helper_k: float = 0.0
     topology: dict[str, float] | None = None
     toric: dict[str, float] | None = None
+    trajectory_graph: dict[str, Any] | None = None
 
 
 def _safe_normalize_np(x: np.ndarray) -> np.ndarray:
@@ -57,6 +61,7 @@ def summarize_trajectory_np(
     *,
     positions: np.ndarray | None = None,
     losses: np.ndarray | None = None,
+    edges: np.ndarray | None = None,
     theta: float = 0.6180339887498948,
     beta: float = 1.4142135623730951,
     max_points: int = 96,
@@ -78,6 +83,14 @@ def summarize_trajectory_np(
             positions = np.asarray(positions)[idx]
         if losses is not None:
             losses = np.asarray(losses)[idx]
+        if edges is not None:
+            edge_array = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
+            old_to_new = {int(old): int(new) for new, old in enumerate(idx.tolist())}
+            remapped: list[tuple[int, int]] = []
+            for src, dst in edge_array:
+                if int(src) in old_to_new and int(dst) in old_to_new:
+                    remapped.append((old_to_new[int(src)], old_to_new[int(dst)]))
+            edges = np.asarray(remapped, dtype=np.int64).reshape(-1, 2) if remapped else None
     centered = points - points.mean(axis=0, keepdims=True)
     unit = _safe_normalize_np(centered)
     pooled = unit.mean(axis=0)
@@ -119,7 +132,20 @@ def summarize_trajectory_np(
         ],
         dtype=np.float32,
     )
-    key = np.concatenate([pooled, endpoint, scalars], axis=0)
+    dag = got_dag_summary_np(unit.shape[0], edges=edges)
+    dag_scalars = np.asarray(
+        [
+            float(dag.get("branch_count", 0.0)),
+            float(dag.get("merge_count", 0.0)),
+            float(dag.get("edge_count", 0.0)),
+            float(dag.get("back_edge_fraction", 0.0)),
+            float(dag.get("simplex_edge_density", 0.0)),
+            float(dag.get("max_out_degree", 0.0)),
+            float(dag.get("max_in_degree", 0.0)),
+        ],
+        dtype=np.float32,
+    )
+    key = np.concatenate([pooled, endpoint, scalars, dag_scalars], axis=0)
     return {
         "key": key.astype(float).tolist(),
         "quality": quality,
@@ -129,12 +155,26 @@ def summarize_trajectory_np(
             "curvature": float(scalars[2]),
             "edge_density": float(scalars[3]),
             "radius": float(scalars[4]),
+            "got_dag_branch_count": float(dag_scalars[0]),
+            "got_dag_merge_count": float(dag_scalars[1]),
+            "got_dag_edge_count": float(dag_scalars[2]),
+            "got_dag_back_edge_fraction": float(dag_scalars[3]),
+            "got_dag_simplex_edge_density": float(dag_scalars[4]),
+            "got_dag_max_out_degree": float(dag_scalars[5]),
+            "got_dag_max_in_degree": float(dag_scalars[6]),
         },
         "toric": {
             "phase_u_sin": float(phase_u[0]),
             "phase_u_cos": float(phase_u[1]),
             "phase_v_sin": float(phase_v[0]),
             "phase_v_cos": float(phase_v[1]),
+        },
+        "trajectory_graph": {
+            "kind": "branch_merge_dag",
+            "edges": np.asarray(edges, dtype=np.int64).reshape(-1, 2).astype(int).tolist()
+            if edges is not None
+            else [],
+            **dag,
         },
     }
 
@@ -233,10 +273,21 @@ class TrajectoryRetrievalHead(nn.Module):
         hidden: torch.Tensor,
         target_positions: torch.Tensor | None,
         graphcg_basis: torch.Tensor | None,
+        trajectory_node_mask: torch.Tensor | None,
+        trajectory_edge_index: torch.Tensor | None,
+        trajectory_edge_mask: torch.Tensor | None,
     ) -> dict[str, torch.Tensor]:
         h = hidden.float()
-        pooled = h.mean(dim=1)
-        endpoint = h[:, -1, :] - h[:, 0, :] if h.shape[1] > 1 else torch.zeros_like(pooled)
+        if trajectory_node_mask is None:
+            node_mask = torch.ones(h.shape[:2], device=h.device, dtype=torch.bool)
+        else:
+            node_mask = trajectory_node_mask.to(device=h.device, dtype=torch.bool)
+        denom = node_mask.sum(dim=1, keepdim=True).clamp_min(1).to(h.dtype)
+        pooled = (h * node_mask.unsqueeze(-1).to(h.dtype)).sum(dim=1) / denom
+        last_index = node_mask.long().sum(dim=1).clamp_min(1) - 1
+        first = h[:, 0, :]
+        last = h[torch.arange(h.shape[0], device=h.device), last_index, :]
+        endpoint = last - first if h.shape[1] > 1 else torch.zeros_like(pooled)
         summary = pooled + 0.25 * endpoint
         if h.shape[1] > 1:
             velocity = h[:, 1:, :] - h[:, :-1, :]
@@ -267,8 +318,35 @@ class TrajectoryRetrievalHead(nn.Module):
             ],
             dim=-1,
         )
-        topology = torch.stack([speed_mean, speed_std], dim=-1)
-        return {"summary": summary, "chart": chart_probs, "toric": toric, "topology": topology}
+        dag = got_dag_metrics(
+            h,
+            node_mask=node_mask,
+            edge_index=trajectory_edge_index,
+            edge_mask=trajectory_edge_mask,
+        )
+        topology = torch.stack(
+            [
+                speed_mean,
+                speed_std,
+                dag["got_dag_branch_count_batch"],
+                dag["got_dag_merge_count_batch"],
+                dag["got_dag_simplex_edge_density_batch"],
+                dag["got_dag_triangle_density_batch"],
+            ],
+            dim=-1,
+        )
+        dag_feature = torch.stack(
+            [
+                dag["got_dag_branch_count_batch"],
+                dag["got_dag_merge_count_batch"],
+                dag["got_dag_back_edge_fraction_batch"],
+                dag["got_dag_branch_diversity_batch"],
+                dag["got_dag_merge_scatter_batch"],
+                dag["got_dag_balance_residual_batch"],
+            ],
+            dim=-1,
+        )
+        return {"summary": summary, "chart": chart_probs, "toric": toric, "topology": topology, "dag": dag_feature}
 
     def forward(
         self,
@@ -277,6 +355,9 @@ class TrajectoryRetrievalHead(nn.Module):
         per_token_nll: torch.Tensor,
         *,
         graphcg_basis: torch.Tensor | None = None,
+        trajectory_node_mask: torch.Tensor | None = None,
+        trajectory_edge_index: torch.Tensor | None = None,
+        trajectory_edge_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         batch = hidden.shape[0]
         zero = hidden.new_zeros(())
@@ -290,8 +371,18 @@ class TrajectoryRetrievalHead(nn.Module):
                 "trajectory_memory_entropy": zero,
                 "trajectory_memory_teacher_diag_prob": zero,
                 "trajectory_memory_score_gap": zero,
+                "trajectory_memory_dag_similarity": zero,
+                "trajectory_memory_dag_branch_count": zero,
+                "trajectory_memory_dag_merge_count": zero,
             }
-        features = self._summary_features(hidden, target_positions, graphcg_basis)
+        features = self._summary_features(
+            hidden,
+            target_positions,
+            graphcg_basis,
+            trajectory_node_mask,
+            trajectory_edge_index,
+            trajectory_edge_mask,
+        )
         query = F.normalize(self.query(features["summary"].to(hidden.dtype)), dim=-1)
         key = F.normalize(self.key(features["summary"].to(hidden.dtype)), dim=-1)
         logits = torch.matmul(query, key.transpose(0, 1)) / max(float(self.config.retrieval_temperature), 1e-4)
@@ -307,10 +398,13 @@ class TrajectoryRetrievalHead(nn.Module):
         topo = features["topology"].float()
         topo_dist = torch.cdist(topo, topo, p=2)
         topo_sim = -topo_dist / (topo_dist.detach().mean() + 1e-6)
+        dag_feature = F.normalize(features["dag"].float(), dim=-1)
+        dag_sim = dag_feature @ dag_feature.transpose(0, 1)
         teacher = (
             float(self.config.graphcg_weight) * chart_sim
             + float(self.config.toric_weight) * toric_sim
             + float(self.config.topology_weight) * topo_sim
+            + float(self.config.dag_weight) * dag_sim
             + quality_z[None, :]
         )
         teacher = teacher.masked_fill(diag, -1e4) / max(float(self.config.teacher_temperature), 1e-4)
@@ -335,4 +429,7 @@ class TrajectoryRetrievalHead(nn.Module):
             "trajectory_memory_entropy": entropy.detach(),
             "trajectory_memory_teacher_diag_prob": teacher_probs.diagonal().mean().detach(),
             "trajectory_memory_score_gap": gap.detach(),
+            "trajectory_memory_dag_similarity": dag_sim.masked_fill(diag, 0.0).mean().detach(),
+            "trajectory_memory_dag_branch_count": features["dag"][:, 0].mean().detach(),
+            "trajectory_memory_dag_merge_count": features["dag"][:, 1].mean().detach(),
         }

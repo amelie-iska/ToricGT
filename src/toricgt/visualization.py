@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 
+from .got_trajectory import default_branch_merge_edges_np
+
 
 def plot_unit_circle_braid(points: np.ndarray, output: str | Path) -> None:
     fig, ax = plt.subplots(figsize=(5, 5))
@@ -51,12 +53,11 @@ def plot_graph(edge_index: np.ndarray, node_values: np.ndarray, output: str | Pa
 
 
 def reasoning_trajectory(seed: int = 17, steps: int = 96) -> tuple[np.ndarray, np.ndarray]:
-    """Create a deterministic embedding-space graph-of-thought trajectory.
+    """Create deterministic embedding-space graph-of-thought vertex states.
 
-    The synthetic path is driven by irrational rotations and a dissipative
-    velocity update.  It is a visualization proxy for prefix-visible GFlowNet
-    hidden states: local minima in the energy curve correspond to more stable
-    reasoning endpoints.
+    The vertex coordinates are driven by irrational rotations and a dissipative
+    velocity update.  Plotting helpers connect these states with a branching
+    and merging DAG rather than a single polyline.
     """
 
     rng = np.random.default_rng(seed)
@@ -82,15 +83,62 @@ def reasoning_trajectory(seed: int = 17, steps: int = 96) -> tuple[np.ndarray, n
     return path, energy
 
 
-def plot_reasoning_trajectory_3d(path: np.ndarray, energy: np.ndarray, output: str | Path) -> None:
+def _edge_role_colors(edges: np.ndarray, n: int) -> list[str]:
+    out_degree = np.zeros((n,), dtype=np.int64)
+    in_degree = np.zeros((n,), dtype=np.int64)
+    for src, dst in edges:
+        if 0 <= src < n and 0 <= dst < n and src != dst:
+            out_degree[src] += 1
+            in_degree[dst] += 1
+    colors: list[str] = []
+    for src, dst in edges:
+        if out_degree[src] > 1 and in_degree[dst] > 1:
+            colors.append("#ffd166")
+        elif out_degree[src] > 1:
+            colors.append("#ff4fd8")
+        elif in_degree[dst] > 1:
+            colors.append("#8cff6a")
+        else:
+            colors.append("#50f5ff")
+    return colors
+
+
+def plot_reasoning_trajectory_3d(
+    path: np.ndarray,
+    energy: np.ndarray,
+    output: str | Path,
+    *,
+    edges: np.ndarray | None = None,
+) -> None:
     fig = plt.figure(figsize=(8, 6), facecolor="#05070d")
     ax = fig.add_subplot(111, projection="3d")
     ax.set_facecolor("#05070d")
+    if edges is None:
+        edges = default_branch_merge_edges_np(len(path))
+    edge_colors = _edge_role_colors(edges, len(path))
+    for (src, dst), color in zip(edges, edge_colors, strict=False):
+        if not (0 <= src < len(path) and 0 <= dst < len(path)):
+            continue
+        p = path[int(src)]
+        q = path[int(dst)]
+        ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color=color, linewidth=1.25, alpha=0.66)
+        delta = q - p
+        ax.quiver(
+            p[0],
+            p[1],
+            p[2],
+            0.72 * delta[0],
+            0.72 * delta[1],
+            0.72 * delta[2],
+            color=color,
+            linewidth=0.55,
+            arrow_length_ratio=0.18,
+            alpha=0.55,
+        )
     scatter = ax.scatter(path[:, 0], path[:, 1], path[:, 2], c=energy, cmap="plasma", s=18)
-    ax.plot(path[:, 0], path[:, 1], path[:, 2], color="#50f5ff", linewidth=1.5, alpha=0.8)
     best = int(np.argmin(energy))
     ax.scatter(path[best, 0], path[best, 1], path[best, 2], s=110, color="#8cff6a", edgecolor="white")
-    ax.set_title("Embedding-Space Graph-of-Thought Trajectory", color="white")
+    ax.set_title("Embedding-Space Graph-of-Thought Branch/Merge DAG", color="white")
     ax.set_xlabel("toric phase axis", color="white")
     ax.set_ylabel("tropical face axis", color="white")
     ax.set_zlabel("GFlowNet action axis", color="white")
@@ -176,12 +224,25 @@ def plot_energy_landscape(path: np.ndarray, energy: np.ndarray, output: str | Pa
     plt.close(fig)
 
 
-def write_interactive_reasoning_plot(path: np.ndarray, energy: np.ndarray, output: str | Path) -> None:
+def write_interactive_reasoning_plot(
+    path: np.ndarray,
+    energy: np.ndarray,
+    output: str | Path,
+    *,
+    edges: np.ndarray | None = None,
+) -> None:
     """Write a dependency-free interactive 3D HTML plot."""
 
+    if edges is None:
+        edges = default_branch_merge_edges_np(len(path))
     rows = [
         {"x": float(p[0]), "y": float(p[1]), "z": float(p[2]), "energy": float(e), "step": int(i)}
         for i, (p, e) in enumerate(zip(path, energy, strict=True))
+    ]
+    edge_rows = [
+        {"src": int(src), "dst": int(dst), "role": role}
+        for (src, dst), role in zip(edges, _edge_role_colors(edges, len(path)), strict=False)
+        if 0 <= int(src) < len(path) and 0 <= int(dst) < len(path)
     ]
     html = f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>ToricGT Reasoning Trajectory</title>
@@ -189,21 +250,32 @@ def write_interactive_reasoning_plot(path: np.ndarray, energy: np.ndarray, outpu
 <style>body{{margin:0;background:#05070d;color:white;font-family:system-ui}}#plot{{width:100vw;height:100vh}}</style>
 </head><body><div id="plot"></div><script>
 const rows = {rows!r};
-const trace = {{
+const edges = {edge_rows!r};
+const nodeTrace = {{
   x: rows.map(r => r.x), y: rows.map(r => r.y), z: rows.map(r => r.z),
-  mode: 'lines+markers', type: 'scatter3d',
+  mode: 'markers', type: 'scatter3d', name: 'reasoning vertices',
   marker: {{size: 4, color: rows.map(r => r.energy), colorscale: 'Plasma', colorbar: {{title:'energy'}}}},
-  line: {{color: '#50f5ff', width: 5}},
   text: rows.map(r => `step ${{r.step}}<br>energy ${{r.energy.toFixed(4)}}`)
 }};
-Plotly.newPlot('plot', [trace], {{
+const edgeTraces = edges.map((e, idx) => {{
+  const a = rows[e.src], b = rows[e.dst];
+  return {{
+    x: [a.x, b.x], y: [a.y, b.y], z: [a.z, b.z],
+    mode: 'lines', type: 'scatter3d', showlegend: idx < 8,
+    name: e.role === '#ff4fd8' ? 'branch edge' : (e.role === '#8cff6a' ? 'merge edge' : 'DAG edge'),
+    line: {{color: e.role, width: 5}},
+    hoverinfo: 'text',
+    text: [`${{e.src}} -> ${{e.dst}}`, `${{e.src}} -> ${{e.dst}}`]
+  }};
+}});
+Plotly.newPlot('plot', [...edgeTraces, nodeTrace], {{
   paper_bgcolor:'#05070d', plot_bgcolor:'#05070d',
   scene: {{
     xaxis: {{title:'toric phase', color:'white', gridcolor:'#17323a'}},
     yaxis: {{title:'tropical face', color:'white', gridcolor:'#17323a'}},
     zaxis: {{title:'GFlowNet action', color:'white', gridcolor:'#17323a'}}
   }},
-  title: {{text:'Embedding-Space Graph-of-Thought Reasoning Trajectory', font:{{color:'white'}}}}
+  title: {{text:'Embedding-Space Graph-of-Thought Branch/Merge DAG', font:{{color:'white'}}}}
 }}, {{responsive:true}});
 </script></body></html>"""
     Path(output).parent.mkdir(parents=True, exist_ok=True)

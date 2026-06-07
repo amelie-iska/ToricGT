@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
-import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -14,6 +15,7 @@ import torch
 from torch.utils.data import IterableDataset
 
 from .config import ModelConfig
+from .got_trajectory import graph_json_has_branch_merge
 from .graph_tokenizer import GraphBatch
 
 
@@ -21,6 +23,22 @@ from .graph_tokenizer import GraphBatch
 class GraphTrainingItem:
     graph: GraphBatch
     target: torch.Tensor
+
+
+TEXT_COLUMNS = (
+    "graph_json",
+    "text",
+    "content",
+    "document",
+    "prompt",
+    "question",
+    "problem",
+    "reasoning",
+    "solution",
+    "answer",
+    "completion",
+    "messages",
+)
 
 
 def stable_partition_id(
@@ -57,6 +75,159 @@ def _text_features(text: str, type_name: str, dim: int) -> list[float]:
     for idx in range(max(0, dim - len(vals))):
         vals.append(_hash_unit(f"{type_name}:{text[:64]}", idx + 10))
     return vals[:dim]
+
+
+def _split_reasoning_spans(text: str, *, max_spans: int) -> list[str]:
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not text:
+        return ["empty document"]
+    pieces = re.split(r"(?<=[.!?])\s+|\n+", text)
+    spans: list[str] = []
+    for piece in pieces:
+        piece = piece.strip()
+        if not piece:
+            continue
+        words = piece.split()
+        if len(words) <= 28:
+            spans.append(piece)
+        else:
+            for start in range(0, len(words), 28):
+                spans.append(" ".join(words[start : start + 28]))
+        if len(spans) >= max_spans:
+            break
+    return spans[:max_spans] or [text[:512]]
+
+
+def text_to_graph_json(
+    text: str,
+    *,
+    dataset: str = "",
+    task_family: str = "",
+    record_id: str = "",
+    max_spans: int = 64,
+) -> str:
+    """Convert raw text into a branch-and-merge graph-of-thought record.
+
+    The root branches into alternative early spans.  Each four-span window forms
+    a diamond ``source -> {branch_a, branch_b} -> merge`` cell.  This keeps
+    full-dataset text rows compatible with TokenGT while preserving the
+    graph-of-thought assumption that reasoning trajectories split and rejoin.
+    """
+
+    spans = _split_reasoning_spans(text, max_spans=max(2, max_spans))
+    nodes: list[dict[str, str]] = [
+        {
+            "id": "root",
+            "type": "reasoning_root",
+            "text": f"{dataset or 'dataset'} {task_family or 'reasoning'} {record_id}".strip() or "document root",
+        }
+    ]
+    for idx, span in enumerate(spans):
+        nodes.append({"id": f"step_{idx:03d}", "type": "reasoning_step", "text": span})
+    merge_nodes: list[dict[str, str]] = []
+    edges: list[dict[str, str]] = []
+    if spans:
+        edges.append({"source": "root", "target": "step_000", "type": "starts_branch"})
+    if len(spans) > 1:
+        edges.append({"source": "root", "target": "step_001", "type": "starts_alternative_branch"})
+    for idx in range(max(0, len(spans) - 1)):
+        edges.append({"source": f"step_{idx:03d}", "target": f"step_{idx + 1:03d}", "type": "context_order"})
+    merge_idx = 0
+    for idx in range(0, max(0, len(spans) - 2), 3):
+        left = f"step_{idx + 1:03d}"
+        right = f"step_{idx + 2:03d}"
+        merge_target = f"step_{min(idx + 3, len(spans) - 1):03d}"
+        branch_source = f"step_{idx:03d}"
+        edges.append({"source": branch_source, "target": left, "type": "branch_left"})
+        edges.append({"source": branch_source, "target": right, "type": "branch_right"})
+        if merge_target not in {left, right}:
+            edges.append({"source": left, "target": merge_target, "type": "merge_candidate"})
+            edges.append({"source": right, "target": merge_target, "type": "merge_candidate"})
+        else:
+            join_id = f"merge_{merge_idx:03d}"
+            merge_idx += 1
+            merge_nodes.append({"id": join_id, "type": "reasoning_merge", "text": "merge local alternatives"})
+            edges.append({"source": left, "target": join_id, "type": "merge_candidate"})
+            edges.append({"source": right, "target": join_id, "type": "merge_candidate"})
+    nodes.extend(merge_nodes)
+    payload = {
+        "task_family": task_family or "text_branch_merge_got",
+        "dataset": dataset,
+        "record_id": record_id,
+        "trajectory_kind": "branch_merge_dag",
+        "nodes": nodes,
+        "edges": edges,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def ensure_branch_merge_graph_json(graph_json: str) -> str:
+    """Add conservative branch/merge edges to older linear graph records."""
+
+    payload = json.loads(graph_json or "{}")
+    if graph_json_has_branch_merge(payload):
+        return graph_json
+    nodes = list(payload.get("nodes") or [])
+    if len(nodes) < 4:
+        return graph_json
+    edges = list(payload.get("edges") or [])
+    node_ids = [str(node.get("id", idx)) for idx, node in enumerate(nodes)]
+    existing = {(str(edge.get("source")), str(edge.get("target")), str(edge.get("type") or "")) for edge in edges}
+    for idx in range(0, len(node_ids) - 3, 3):
+        source = node_ids[idx]
+        left = node_ids[idx + 1]
+        right = node_ids[idx + 2]
+        join = node_ids[idx + 3]
+        candidates = [
+            (source, left, "branch_left"),
+            (source, right, "branch_right"),
+            (left, join, "merge_candidate"),
+            (right, join, "merge_candidate"),
+        ]
+        for src, dst, typ in candidates:
+            if (src, dst, typ) not in existing:
+                edges.append({"source": src, "target": dst, "type": typ})
+                existing.add((src, dst, typ))
+    payload["edges"] = edges
+    payload["trajectory_kind"] = "branch_merge_dag"
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _stringify_text_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return "\n".join(_stringify_text_value(item) for item in value)
+    if isinstance(value, dict):
+        if "text" in value:
+            return _stringify_text_value(value.get("text"))
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def record_to_graph_json(record: dict[str, object], cfg: ModelConfig) -> str:
+    graph_json = record.get("graph_json")
+    if graph_json:
+        try:
+            return ensure_branch_merge_graph_json(str(graph_json))
+        except Exception:
+            return str(graph_json)
+    text_parts: list[str] = []
+    for column in TEXT_COLUMNS:
+        if column == "graph_json" or column not in record:
+            continue
+        value = _stringify_text_value(record.get(column)).strip()
+        if value:
+            text_parts.append(value)
+    if not text_parts:
+        text_parts.append(json.dumps(record, ensure_ascii=False, sort_keys=True))
+    return text_to_graph_json(
+        "\n".join(text_parts),
+        dataset=str(record.get("dataset") or record.get("source") or ""),
+        task_family=str(record.get("task_family") or record.get("family") or ""),
+        record_id=str(record.get("record_id") or record.get("content_hash") or record.get("id") or ""),
+        max_spans=max(2, cfg.max_nodes - 1),
+    )
 
 
 def graph_json_to_item(graph_json: str, cfg: ModelConfig) -> GraphTrainingItem:
@@ -171,17 +342,20 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
                             continue
                         record = json.loads(line)
                         if self._keep_record(record):
-                            yield graph_json_to_item(str(record.get("graph_json") or "{}"), self.cfg)
+                            yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg)
             else:
                 parquet_file = pq.ParquetFile(path)
                 available = set(parquet_file.schema_arrow.names)
-                columns = ["graph_json"]
+                columns = [column for column in TEXT_COLUMNS if column in available]
+                if "graph_json" not in columns and not columns:
+                    columns = list(parquet_file.schema_arrow.names)
                 if self.subset_id is not None:
                     columns.extend(column for column in self.subset_columns if column in available)
+                columns = sorted(set(columns))
                 for batch in parquet_file.iter_batches(batch_size=self.parquet_batch_size, columns=columns):
                     batch_dict = batch.to_pydict()
-                    graph_values = batch_dict["graph_json"]
-                    for row_idx, graph_json in enumerate(graph_values):
+                    row_count = len(next(iter(batch_dict.values()))) if batch_dict else 0
+                    for row_idx in range(row_count):
                         record = {column: batch_dict[column][row_idx] for column in batch_dict}
                         if self._keep_record(record):
-                            yield graph_json_to_item(graph_json, self.cfg)
+                            yield graph_json_to_item(record_to_graph_json(record, self.cfg), self.cfg)

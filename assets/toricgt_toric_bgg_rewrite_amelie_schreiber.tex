@@ -1028,17 +1028,21 @@ The DG behavior loss is
 These terms are useful because they make the behavior constraint compositional: a sequence of reasoning moves should remain a valid complex, not merely keep each individual activation near a classifier boundary.
 
 \paragraph{Graph-of-thought, memory, and analogy.}
-A graph-of-thought trajectory is a directed graph of reasoning vertices
+A graph-of-thought trajectory is a directed acyclic graph of reasoning vertices
 \begin{equation}
-  q_0\to q_1\to\cdots\to q_T,
+  G_\tau=(V_\tau,E_\tau),\qquad E_\tau\subset V_\tau\times V_\tau,
 \end{equation}
-where each $q_t$ carries a hidden state, a behavior alcove, a finite complex $\Delta_t$, and a certificate signature $\Sigma_{\mathrm{TBGG}}(q_t)$.  The corridor objective is
+not a single linear chain.  Each vertex $q\in V_\tau$ carries a hidden state, a behavior alcove, a finite complex $\Delta_q$, and a certificate signature $\Sigma_{\mathrm{TBGG}}(q)$.  Branching is measured by vertices with $\operatorname{outdeg}(q)>1$, merging by vertices with $\operatorname{indeg}(q)>1$, and the canonical local cell is a diamond
+\begin{equation}
+  a\longrightarrow\{b,c\}\longrightarrow d,
+\end{equation}
+where $b$ and $c$ are alternative continuations and $d$ is a join state.  A line $q_0\to\cdots\to q_T$ is therefore only a chain-of-thought ablation inside the larger graph-of-thought family.  The corridor objective is
 \begin{equation}
 \begin{aligned}
   \mathcal L_{\mathrm{BMP}}
   ={}&
   \mathcal L_{\mathrm{LM/BPB}}
-  +\lambda_{\mathrm{corr}}\sum_{t}\dist(S_{\pi,C_t}(\xi_t),K_{\pi,C_t})^2
+  +\lambda_{\mathrm{corr}}\sum_{q\in V_\tau}\dist(S_{\pi,C_q}(\xi_q),K_{\pi,C_q})^2
   +\lambda_{\mathrm{wall}}\operatorname{BH}_\theta\\
   &+\lambda_{\mathrm{alg}}
   \bigl(\mathcal L_{I_A}^{\mathrm{beh}}
@@ -1055,11 +1059,18 @@ The GFlowNet terminal reward is multiplied by a corridor factor
 \begin{equation}
   R_{\mathrm{corr}}(\tau)=
   R_{\mathrm{task}}(\tau)
-  \exp\left(-\gamma\sum_t\dist(S_{\pi,C_t}(\xi_t),K_{\pi,C_t})^2
-  -\gamma_{\mathrm{alg}}\sum_t
+  \exp\left(-\gamma\sum_{q\in V_\tau}\dist(S_{\pi,C_q}(\xi_q),K_{\pi,C_q})^2
+  -\gamma_{\mathrm{alg}}\sum_{q\in V_\tau}
   \bigl(\mathcal L_{\mathrm{SR}}^{\mathrm{beh}}+\mathcal L_{I_A}^{\mathrm{beh}}\bigr)\right).
 \end{equation}
-Thus the search policy prefers answers reached by helpful, algebraically coherent reasoning paths.
+Thus the search policy prefers answers reached by helpful, algebraically coherent branch/merge reasoning DAGs.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\textwidth]{fig_graph_of_thought_branch_merge_dag.pdf}
+  \caption{Graph-of-thought trajectory as a directed branch/merge DAG.  Each vertex represents a reasoning-step simplicial complex with hidden state, behavior alcove, toric/tropical chamber, and certificate signature.  Branch fan-out explores alternatives; merge fan-in reconciles or selects them.}
+  \label{fig:got-branch-merge-dag}
+\end{figure}
 
 The memory index is a graph $M=(V_M,E_M)$ whose vertices store $(h,\xi,C,A,\Delta,\Sigma_{\mathrm{TBGG}},q)$: hidden state, GraphCG coordinate, chamber, exponent table, complex, certificate signature, and verifier or BPB-derived quality.  Retrieval score becomes
 \begin{equation}
@@ -1649,10 +1660,10 @@ where $C$ is correctness, $N$ is novelty, $E_{\mathrm{eq}}$ is equivariance erro
 
 \section{Anticipative reasoning-trajectory memory}
 
-Long-context tropical ring attention makes it practical to place retrieved reasoning traces in the context window, but the model still needs to learn which traces are worth consulting.  ToricGT therefore uses a small anticipative memory layer.  It stores completed graph-of-thought trajectories and trains a retrieval head that predicts helpful trajectories before the expensive search roll-out begins.
+Long-context tropical ring attention makes it practical to place retrieved reasoning traces in the context window, but the model still needs to learn which traces are worth consulting.  ToricGT therefore uses a small anticipative memory layer.  It stores completed graph-of-thought DAGs and trains a retrieval head that predicts helpful branch/merge trajectories before the expensive search roll-out begins.
 
 \begin{definition}[Trajectory-memory record]
-For a completed trajectory $\tau=(h_1,\ldots,h_T)$ with hidden states $h_t\in\R^d$, define a memory record
+For a completed graph-of-thought DAG $\tau=(G_\tau,H_\tau)$, with $G_\tau=(V_\tau,E_\tau)$ and hidden states $H_\tau=\{h_q:q\in V_\tau\}$, define a memory record
 \begin{equation}
   \mathcal M_i=(k_i,v_i,\mu_i,q_i),
 \end{equation}
@@ -1662,11 +1673,11 @@ where $k_i$ is a compact key, $v_i$ is a value payload such as a serialized grap
 The implemented key is
 \begin{equation}
   k(\tau)=\operatorname{norm}\big[
-  \bar h,\; h_T-h_1,\; \bar v,\;\sigma_v,\;\kappa,\;\rho_{\mathrm{VR}},\;
-  \phi_\theta,\;\phi_\beta,\;q(\tau)
+  \bar h,\; h_{\mathrm{sink}}-h_{\mathrm{root}},\; \bar v,\;\sigma_v,\;\kappa,\;\rho_{\mathrm{VR}},\;
+  \phi_\theta,\;\phi_\beta,\;d_{\mathrm{DAG}}(\tau),\;q(\tau)
   \big],
 \end{equation}
-where $\bar h$ is the mean hidden state, $h_T-h_1$ is endpoint displacement, $\bar v$ and $\sigma_v$ summarize hidden-step speed, $\kappa$ is a curvature proxy, $\rho_{\mathrm{VR}}$ is a Vietoris--Rips radius/density summary, and $\phi_\theta,\phi_\beta$ are noncommutative-toric phase-shadow moments.
+where $\bar h$ is the mean hidden state, $h_{\mathrm{sink}}-h_{\mathrm{root}}$ is endpoint displacement, $\bar v$ and $\sigma_v$ summarize hidden-step speed, $\kappa$ is a curvature proxy, $\rho_{\mathrm{VR}}$ is a Vietoris--Rips radius/density summary, $\phi_\theta,\phi_\beta$ are noncommutative-toric phase-shadow moments, and $d_{\mathrm{DAG}}$ records branch count, merge count, back-edge fraction, branch diversity, merge scatter, and branch/merge balance.
 
 \begin{definition}[Anticipative retrieval head]
 Given a current state summary $s$ and a memory key $k_i$, the retrieval head scores
@@ -1678,9 +1689,11 @@ During training, an in-batch teacher score is
   \widetilde r(s,i)=
   \lambda_G\ip{g_s}{g_i}
   +\lambda_\Theta\ip{\phi_s}{\phi_i}
-  -\lambda_T d_{\mathrm{top}}(s,i)+q_i,
+  -\lambda_T d_{\mathrm{top}}(s,i)
+  +\lambda_D\ip{d_{\mathrm{DAG},s}}{d_{\mathrm{DAG},i}}
+  +q_i,
 \end{equation}
-where $g$ is the GraphCG chart coordinate, $\phi$ is the toric phase summary, and $d_{\mathrm{top}}$ is a local-topology distance.
+where $g$ is the GraphCG chart coordinate, $\phi$ is the toric phase summary, $d_{\mathrm{top}}$ is a local-topology distance, and the DAG term prevents the memory system from identifying a collapsed chain with a genuine branch/merge proof merely because their endpoint embeddings are close.
 \end{definition}
 
 The auxiliary objective is
@@ -1700,7 +1713,7 @@ If every retrieved memory item is generated from completed training trajectories
 At scoring step $t$, the predictive distribution may depend on fixed model parameters, public metadata, the strict prefix, and any auxiliary state that is a function only of already scored data.  Completed training trajectories and fixed libraries are independent of the unscored validation suffix.  Score-before-update online memories are, by induction, functions only of previously scored bytes.  Therefore a retrieval function over such items cannot depend on $b_t$ or $b_{>t}$ before the loss term for $b_t$ is recorded.  The prequential log score remains valid.
 \end{proof}
 
-In the current implementation, \texttt{TrajectoryMemoryIndex} stores CPU JSONL memory records and cosine-searches compact keys.  \texttt{TrajectoryRetrievalHead} trains the in-batch score and logs recall, entropy, score gap, cross-entropy, distillation, and quality-regression metrics to W\&B.  A conservative configuration instantiates the head with zero weight during BPB-first recovery, then activates a small loss only after validation likelihood is stable.
+In the current implementation, \texttt{TrajectoryMemoryIndex} stores CPU JSONL memory records and cosine-searches compact keys.  \texttt{TrajectoryRetrievalHead} trains the in-batch score and logs recall, entropy, score gap, cross-entropy, distillation, quality-regression, DAG similarity, branch count, and merge count metrics to W\&B.  A conservative configuration instantiates the head with zero weight during BPB-first recovery, then activates a small loss only after validation likelihood is stable.
 
 \section{Interleaving PolarQuant with ToricGT ring attention}
 
@@ -2534,11 +2547,11 @@ is pseudo-periodic and equidistributed on the visualization torus in the finite-
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.92\textwidth]{fig_toric_phase_simplicial_trajectory.pdf}
-  \caption{Irrational toric phase projection of a reasoning trajectory.  The torus path visualizes pseudo-periodic phase coverage; local Vietoris--Rips edges reveal step-level simplicial structure; magenta arrows indicate soft analogical maps between consecutive windows.}
+  \caption{Irrational toric phase projection of a branch/merge reasoning DAG.  Vertices lie on a nonrepeating toric phase scaffold; local Vietoris--Rips edges reveal step-level simplicial structure; colored directed edges distinguish branch fan-out, merge fan-in, and analogical transport.}
   \label{fig:toric-phase-simplicial}
 \end{figure}
 
-Periodic analyses render these quantities directly.  For selected reasoning records the script writes directed filtration curves for edge density, triangle density, asymmetry, cycle flux, DEC conservation residuals, and mass residuals; heatmaps of normalized distances, mutual reachability, the antisymmetric toric skew matrix, and directed adjacencies; window-by-radius simplex hierarchy plots with DEC kinetic and wedge/interior panels; exact $\mathbb F_2$ persistence-module morphism heatmaps for $H_0$ and $H_1$; and toric phase/simplicial trajectory plots.  Thus the noncommutative topology is both a training pressure and an auditable explanation object.
+Periodic analyses render these quantities directly.  For selected reasoning records the script writes branch counts, merge counts, branch diversity, merge scatter, back-edge fraction, induced edge/triangle simplex densities, directed filtration curves for edge density, triangle density, asymmetry, cycle flux, DEC conservation residuals, and mass residuals; heatmaps of normalized distances, mutual reachability, the antisymmetric toric skew matrix, and directed adjacencies; window-by-radius simplex hierarchy plots with DEC kinetic and wedge/interior panels; exact $\mathbb F_2$ persistence-module morphism heatmaps for $H_0$ and $H_1$; and toric phase/simplicial DAG plots.  Thus the noncommutative topology is both a training pressure and an auditable explanation object.
 
 \begin{proposition}[Dense recurrent blocks are the byte-efficient default]
 Under a strict serialized-byte cap, replacing a dense feed-forward block of size $O(dd_{\mathrm{ff}})$ by $E$ full experts costs $O(Edd_{\mathrm{ff}})$ stored scalars, whereas applying the same dense block recurrently $r$ times costs no additional stored scalars.  Therefore the Parameter-Golf default should be dense recurrent ToricGT blocks, with Soft-MoE retained as a measured ablation or low-rank adapter variant.

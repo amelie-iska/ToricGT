@@ -39,6 +39,16 @@ class ModelConfig:
     use_gflownet_head: bool = True
     gflownet_num_actions: int = 12
     gflownet_hidden_dim: int = 512
+    use_trajectory_memory_head: bool = False
+    trajectory_memory_projection_dim: int = 128
+    trajectory_memory_teacher_temperature: float = 0.20
+    trajectory_memory_retrieval_temperature: float = 0.20
+    trajectory_memory_distill_weight: float = 0.25
+    trajectory_memory_quality_weight: float = 0.10
+    trajectory_memory_topology_weight: float = 0.20
+    trajectory_memory_graphcg_weight: float = 0.30
+    trajectory_memory_toric_weight: float = 0.20
+    trajectory_memory_dag_weight: float = 0.20
 
 
 @dataclass(frozen=True)

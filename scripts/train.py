@@ -19,6 +19,7 @@ from toricgt.cli_config import apply_yaml_defaults, parse_config_path
 from toricgt.config import ModelConfig, TrainConfig
 from toricgt.expert_curriculum import CyclicExpertCurriculum, ExpertCurriculumAssignment
 from toricgt.gflownet import TrajectoryBatch, trajectory_balance_loss
+from toricgt.got_trajectory import got_dag_metrics
 from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items
 from toricgt.graph_tokenizer import GraphBatch
 from toricgt.metrics import masked_mse
@@ -119,6 +120,11 @@ def auxiliary_gflownet_loss(
     return trajectory_balance_loss(model.gflownet_policy, trajectories)
 
 
+def per_node_prediction_mse(out_node: torch.Tensor, target: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
+    err = (out_node.float() - target.float()).pow(2).mean(dim=-1)
+    return torch.where(node_mask, err, torch.zeros_like(err))
+
+
 def synthetic_batch(cfg: ModelConfig, batch_size: int, device: str) -> tuple[GraphBatch, torch.Tensor]:
     n = min(16, cfg.max_nodes)
     e = min(48, cfg.max_edges)
@@ -215,6 +221,13 @@ def main() -> None:
     parser.add_argument("--log-interval", type=int, default=20)
     parser.add_argument("--gflownet-loss-weight", type=float, default=0.0)
     parser.add_argument("--gflownet-space", choices=["embedding", "token"], default="embedding")
+    parser.add_argument("--got-dag-loss-weight", type=float, default=0.0)
+    parser.add_argument("--trajectory-memory-loss-weight", type=float, default=0.0)
+    parser.add_argument("--trajectory-memory-projection-dim", type=int, default=128)
+    parser.add_argument("--trajectory-memory-dag-weight", type=float, default=0.20)
+    parser.add_argument("--full-dataset-run", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--fineweb-mix-ratio", type=float, default=0.0)
+    parser.add_argument("--target-artifact-bytes", type=int, default=16_000_000)
     parser.add_argument("--val-data-path", action="append", default=[], help="Validation Parquet/JSONL path. Can be repeated.")
     parser.add_argument("--eval-every", type=int, default=0, help="Run validation every N optimizer steps; disabled when 0.")
     parser.add_argument("--eval-batches", type=int, default=8)
@@ -244,6 +257,9 @@ def main() -> None:
         soft_moe_num_experts=args.soft_moe_experts,
         soft_moe_slots_per_expert=args.soft_moe_slots,
         soft_moe_start_layer=0 if args.soft_moe_all_layers else None,
+        use_trajectory_memory_head=args.trajectory_memory_loss_weight > 0,
+        trajectory_memory_projection_dim=args.trajectory_memory_projection_dim,
+        trajectory_memory_dag_weight=args.trajectory_memory_dag_weight,
     )
     train_cfg = TrainConfig(
         device=args.device,
@@ -338,6 +354,12 @@ def main() -> None:
                 **model_cfg.__dict__,
                 **train_cfg.__dict__,
                 "expert_curriculum": curriculum_config or {"enabled": False},
+                "got_dag_loss_weight": args.got_dag_loss_weight,
+                "trajectory_memory_loss_weight": args.trajectory_memory_loss_weight,
+                "trajectory_memory_dag_weight": args.trajectory_memory_dag_weight,
+                "full_dataset_run": args.full_dataset_run,
+                "fineweb_mix_ratio": args.fineweb_mix_ratio,
+                "target_artifact_bytes": args.target_artifact_bytes,
             },
         )
         configure_wandb_metrics(wandb, step_metric="train/step")
@@ -368,6 +390,13 @@ def main() -> None:
         raw_loss_value = 0.0
         supervised_loss_value = 0.0
         gflownet_loss_value = 0.0
+        got_dag_loss_value = 0.0
+        trajectory_memory_loss_value = 0.0
+        trajectory_memory_recall1_value = 0.0
+        trajectory_memory_entropy_value = 0.0
+        trajectory_memory_dag_similarity_value = 0.0
+        got_metric_sums: dict[str, float] = {}
+        trajectory_metric_sums: dict[str, float] = {}
         distill_loss_value = 0.0
         teacher_loss_value = 0.0
         graph_tokens_value = 0
@@ -419,6 +448,30 @@ def main() -> None:
                         args.gflownet_space,
                     )
                     raw_loss = raw_loss + args.gflownet_loss_weight * gflownet_loss
+                got_metrics = None
+                if args.got_dag_loss_weight > 0 or args.trajectory_memory_loss_weight > 0:
+                    got_metrics = got_dag_metrics(
+                        out["node_embeddings"],
+                        node_mask=batch.node_mask,
+                        edge_index=batch.edge_index,
+                        edge_mask=batch.edge_mask,
+                    )
+                    if args.got_dag_loss_weight > 0:
+                        raw_loss = raw_loss + args.got_dag_loss_weight * got_metrics["got_dag_loss"]
+                trajectory_memory_metrics = None
+                if model.trajectory_memory_head is not None and args.trajectory_memory_loss_weight > 0:
+                    positions = torch.arange(out["node_embeddings"].shape[1], device=args.device).unsqueeze(0)
+                    positions = positions.expand(out["node_embeddings"].shape[0], -1)
+                    per_node_mse = per_node_prediction_mse(out["node"], target, batch.node_mask)
+                    trajectory_memory_metrics = model.trajectory_memory_head(
+                        out["node_embeddings"],
+                        positions,
+                        per_node_mse,
+                        trajectory_node_mask=batch.node_mask,
+                        trajectory_edge_index=batch.edge_index,
+                        trajectory_edge_mask=batch.edge_mask,
+                    )
+                    raw_loss = raw_loss + args.trajectory_memory_loss_weight * trajectory_memory_metrics["trajectory_memory_loss"]
                 loss = raw_loss / train_cfg.grad_accum_steps
             raw_loss_value += float(raw_loss.detach())
             supervised_loss_value += float(supervised_loss.detach())
@@ -428,6 +481,23 @@ def main() -> None:
                 teacher_loss_value += float(teacher_supervised_loss.detach())
             if gflownet_loss is not None:
                 gflownet_loss_value += float(gflownet_loss.detach())
+            if got_metrics is not None:
+                got_dag_loss_value += float(got_metrics["got_dag_loss"].detach())
+                for key, value in got_metrics.items():
+                    if key.endswith("_batch"):
+                        continue
+                    if torch.is_tensor(value) and value.ndim == 0:
+                        got_metric_sums[key] = got_metric_sums.get(key, 0.0) + float(value.detach())
+            if trajectory_memory_metrics is not None:
+                trajectory_memory_loss_value += float(trajectory_memory_metrics["trajectory_memory_loss"].detach())
+                trajectory_memory_recall1_value += float(trajectory_memory_metrics["trajectory_memory_recall1"].detach())
+                trajectory_memory_entropy_value += float(trajectory_memory_metrics["trajectory_memory_entropy"].detach())
+                trajectory_memory_dag_similarity_value += float(
+                    trajectory_memory_metrics["trajectory_memory_dag_similarity"].detach()
+                )
+                for key, value in trajectory_memory_metrics.items():
+                    if torch.is_tensor(value) and value.ndim == 0:
+                        trajectory_metric_sums[key] = trajectory_metric_sums.get(key, 0.0) + float(value.detach())
             graph_tokens_value += int(out["token_mask"].sum().detach().cpu())
             scaler.scale(loss).backward()
 
@@ -439,6 +509,11 @@ def main() -> None:
         mean_loss = raw_loss_value / train_cfg.grad_accum_steps
         mean_supervised_loss = supervised_loss_value / train_cfg.grad_accum_steps
         mean_gflownet_loss = gflownet_loss_value / max(train_cfg.grad_accum_steps, 1)
+        mean_got_dag_loss = got_dag_loss_value / max(train_cfg.grad_accum_steps, 1)
+        mean_trajectory_memory_loss = trajectory_memory_loss_value / max(train_cfg.grad_accum_steps, 1)
+        mean_trajectory_memory_recall1 = trajectory_memory_recall1_value / max(train_cfg.grad_accum_steps, 1)
+        mean_trajectory_memory_entropy = trajectory_memory_entropy_value / max(train_cfg.grad_accum_steps, 1)
+        mean_trajectory_memory_dag_similarity = trajectory_memory_dag_similarity_value / max(train_cfg.grad_accum_steps, 1)
         mean_distill_loss = distill_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_teacher_loss = teacher_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_graph_tokens = graph_tokens_value / max(train_cfg.grad_accum_steps, 1)
@@ -449,13 +524,27 @@ def main() -> None:
                 "train/supervised_loss": mean_supervised_loss,
                 "train/gflownet_loss": mean_gflownet_loss,
                 "train/gflownet_loss_weight": args.gflownet_loss_weight,
+                "train/got_dag_loss": mean_got_dag_loss,
+                "train/got_dag_loss_weight": args.got_dag_loss_weight,
+                "train/trajectory_memory_loss": mean_trajectory_memory_loss,
+                "train/trajectory_memory_loss_weight": args.trajectory_memory_loss_weight,
+                "train/trajectory_memory_recall1": mean_trajectory_memory_recall1,
+                "train/trajectory_memory_entropy": mean_trajectory_memory_entropy,
+                "train/trajectory_memory_dag_similarity": mean_trajectory_memory_dag_similarity,
                 "train/expert_distill_loss": mean_distill_loss,
                 "train/expert_teacher_supervised_loss": mean_teacher_loss,
                 "train/graph_tokens_per_microbatch": mean_graph_tokens,
                 "train/lr": lr,
                 "train/grad_norm": float(grad_norm.detach().cpu() if torch.is_tensor(grad_norm) else grad_norm),
                 "train/step": step,
+                "data/full_curated_train_split_active": float(bool(args.full_dataset_run)),
+                "data/fineweb_mix_ratio": args.fineweb_mix_ratio,
+                "artifact/target_size_limit_bytes": args.target_artifact_bytes,
             }
+            for key, value in got_metric_sums.items():
+                metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
+            for key, value in trajectory_metric_sums.items():
+                metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
             if assignment is not None:
                 metrics.update(
                     {

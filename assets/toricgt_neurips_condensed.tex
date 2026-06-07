@@ -233,21 +233,21 @@ For a byte chunk $b=(b_1,\ldots,b_T)$, sample a content-independent order $\pi\i
 \begin{equation}
   q_\theta(b\mid \pi)=\prod_{k=1}^Tq_\theta(b_{\pi_k}\mid b_{\pi_{<k}},\pi_{\le k}).
 \end{equation}
-BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  A byte-safe GFlowNet policy samples latent graph-of-thought action embeddings from the prefix-visible hidden state, and validation can average multiple action samples.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.  Curated \texttt{graph\_json} records are projected into compact node/edge byte traces so graph structure is visible to this adapter.
+BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  A byte-safe GFlowNet policy samples latent graph-of-thought action embeddings from the prefix-visible hidden state, and validation can average multiple action samples.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.  Curated \texttt{graph\_json} records are projected into compact node/edge byte traces so graph structure is visible to this adapter.  Graph-of-thought trajectories are modeled as branch/merge DAGs \(G_\tau=(V_\tau,E_\tau)\), not as single lines: vertices with \(\operatorname{outdeg}>1\) explore alternatives, vertices with \(\operatorname{indeg}>1\) join or reconcile them, and the local diamond \(a\to\{b,c\}\to d\) is the basic cell.
 
 The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.  The local mirror of \texttt{AmelieSchreiber/toricgt-curated-splits} is used in the competition-safe split: train shards feed supervised BPB optimization, validation shards feed score-first validation, and test shards are reserved for held-out GFlowNet test-time scaling.  The byte loader packs multiple source rows into one chunk; after warmup the training iterator switches to larger technical records, and a 2048-byte packed-context config can resume from a 1024-byte checkpoint by resizing only the learned position table.  This exploits the tropical-ring upper layers for longer composite reasoning trajectories while preserving the strict prequential scoring contract.
 
-The next inference-scaling layer is anticipative trajectory memory.  Completed graph-of-thought paths are stored as compact keys
+The next inference-scaling layer is anticipative trajectory memory.  Completed graph-of-thought DAGs are stored as compact keys
 \begin{equation}
-  k(\tau)=\operatorname{norm}\big[\bar h,\;h_T-h_1,\;v(\tau),\;\kappa(\tau),\;\rho_{\mathrm{VR}}(\tau),\;\phi_\theta(\tau),\;\phi_\beta(\tau),\;q(\tau)\big],
+  k(\tau)=\operatorname{norm}\big[\bar h,\;h_{\mathrm{sink}}-h_{\mathrm{root}},\;v(\tau),\;\kappa(\tau),\;\rho_{\mathrm{VR}}(\tau),\;\phi_\theta(\tau),\;\phi_\beta(\tau),\;d_{\mathrm{DAG}}(\tau),\;q(\tau)\big],
 \end{equation}
-where \(v,\kappa\) summarize speed and curvature, \(\rho_{\mathrm{VR}}\) is a local simplicial density/radius statistic, \(\phi_\theta,\phi_\beta\) are noncommutative toric phase-shadow moments, and \(q\) is a trajectory-quality proxy.  A small retrieval head predicts which memory item helps the current state:
+where \(v,\kappa\) summarize speed and curvature, \(\rho_{\mathrm{VR}}\) is a local simplicial density/radius statistic, \(\phi_\theta,\phi_\beta\) are noncommutative toric phase-shadow moments, \(d_{\mathrm{DAG}}\) records branch count, merge count, branch diversity, merge scatter, and back-edge fraction, and \(q\) is a trajectory-quality proxy.  A small retrieval head predicts which memory item helps the current state:
 \begin{equation}
   r_\psi(s,i)=\frac{\ip{Q_\psi(s)}{K_\psi(k_i)}}{\tau_r}.
 \end{equation}
 During training, an in-batch teacher favors low-NLL trajectories with aligned GraphCG charts, toric phases, and local topology,
 \begin{equation}
-  \tilde r(s,i)=\lambda_G\ip{g_s}{g_i}+\lambda_\Theta\ip{\phi_s}{\phi_i}-\lambda_T d_{\mathrm{top}}(s,i)+q_i,
+  \tilde r(s,i)=\lambda_G\ip{g_s}{g_i}+\lambda_\Theta\ip{\phi_s}{\phi_i}-\lambda_T d_{\mathrm{top}}(s,i)+\lambda_D\ip{d_{\mathrm{DAG},s}}{d_{\mathrm{DAG},i}}+q_i,
 \end{equation}
 and optimizes cross-entropy, KL distillation, and quality regression.  The current implementation enables this head for checkpoint compatibility but gates its loss to zero during BPB-first recovery; later GFlowNet/GraphCG/topology phases activate it at small weight.  Because retrieved helpers are completed training trajectories or legal score-before-update state, the mechanism remains compatible with prequential scoring.
 
@@ -346,8 +346,15 @@ Nonface mass blocks unwanted coactivations, toric-binomial residuals preserve th
 
 \begin{figure}[t]
   \centering
+  \includegraphics[width=0.86\linewidth]{fig_graph_of_thought_branch_merge_dag.pdf}
+  \caption{Graph-of-thought trajectory as a branch/merge DAG.  Reasoning vertices carry local simplicial complexes and hidden-state certificates; branch fan-out explores alternatives and merge fan-in reconciles them.}
+  \label{fig:got-branch-merge-condensed}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
   \includegraphics[width=0.86\linewidth]{fig_toric_phase_simplicial_trajectory.pdf}
-  \caption{Irrational toric phase projection of a reasoning trajectory.  The torus path shows pseudo-periodic phase coverage; faint local edges are Vietoris--Rips 1-simplices; magenta arrows represent window-to-window analogical maps.}
+  \caption{Irrational toric phase projection of a branch/merge reasoning DAG.  Vertices lie on a pseudo-periodic phase scaffold; colored directed edges distinguish branch fan-out, merge fan-in, and analogical transport.}
   \label{fig:toric-phase-simplicial-condensed}
 \end{figure}
 

@@ -70,8 +70,79 @@ def arrow(ax, start, end, color=None, lw=1.5, rad=0.0):
 
 def save(fig, name):
     OUT.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT / name, bbox_inches="tight", format="pdf", facecolor=fig.get_facecolor())
+    output = OUT / name
+    fig.savefig(output, bbox_inches="tight", format="pdf", facecolor=fig.get_facecolor())
+    fig.savefig(output.with_suffix(".png"), bbox_inches="tight", dpi=220, facecolor=fig.get_facecolor())
     plt.close(fig)
+
+
+def branch_merge_edges(num_nodes: int, *, cell_stride: int = 3) -> np.ndarray:
+    edges = []
+    for start in range(0, max(1, num_nodes - 1), max(1, cell_stride)):
+        a = start
+        b = min(start + 1, num_nodes - 1)
+        c = min(start + 2, num_nodes - 1)
+        d = min(start + 3, num_nodes - 1)
+        if a < b:
+            edges.append((a, b))
+        if a < c and c != b:
+            edges.append((a, c))
+        if b < d and d != b:
+            edges.append((b, d))
+        if c < d and d != c:
+            edges.append((c, d))
+        if d + 1 < num_nodes:
+            edges.append((d, d + 1))
+    return np.asarray(sorted(set(edges)), dtype=np.int64).reshape(-1, 2)
+
+
+def graph_of_thought_branch_merge_dag():
+    fig = plt.figure(figsize=(11.6, 6.6), facecolor="#05070d")
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_facecolor("#05070d")
+    rng = np.random.default_rng(17)
+    levels = np.repeat(np.arange(5), [1, 2, 3, 2, 1])
+    offsets = np.concatenate([np.array([0.0]), np.array([-0.45, 0.45]), np.array([-0.62, 0.0, 0.62]), np.array([-0.38, 0.38]), np.array([0.0])])
+    z = 0.28 * np.sin(1.7 * levels + offsets) + rng.normal(scale=0.035, size=len(levels))
+    points = np.stack([levels / levels.max(), offsets, z], axis=-1)
+    edges = np.asarray(
+        [
+            (0, 1),
+            (0, 2),
+            (1, 3),
+            (1, 4),
+            (2, 4),
+            (2, 5),
+            (3, 6),
+            (4, 6),
+            (4, 7),
+            (5, 7),
+            (6, 8),
+            (7, 8),
+        ],
+        dtype=np.int64,
+    )
+    energy = 0.8 - 0.11 * levels + 0.08 * np.abs(offsets)
+    out_degree = np.bincount(edges[:, 0], minlength=len(points))
+    in_degree = np.bincount(edges[:, 1], minlength=len(points))
+    for src, dst in edges:
+        p, q = points[src], points[dst]
+        color = "#ff4fd8" if out_degree[src] > 1 else "#8cff6a" if in_degree[dst] > 1 else "#50f5ff"
+        ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color=color, linewidth=1.8, alpha=0.82)
+        delta = q - p
+        ax.quiver(p[0], p[1], p[2], 0.70 * delta[0], 0.70 * delta[1], 0.70 * delta[2], color=color, linewidth=0.9, arrow_length_ratio=0.18)
+    sc = ax.scatter(points[:, 0], points[:, 1], points[:, 2], c=energy, cmap="magma", s=96, edgecolor="#e9fbff", linewidth=0.7)
+    for idx, p in enumerate(points):
+        ax.text(p[0], p[1], p[2] + 0.035, f"$v_{{{idx}}}$", color="#e9fbff", fontsize=8)
+    ax.set_title("Graph-of-thought trajectory as a directed branch/merge DAG", color="white", fontsize=13)
+    ax.text2D(0.03, 0.05, "vertices = reasoning-step simplicial complexes; magenta = branch fan-out; green = merge fan-in", transform=ax.transAxes, color="#e9fbff", fontsize=9)
+    ax.set_axis_off()
+    ax.view_init(elev=23, azim=-58)
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.66, pad=0.02)
+    cbar.set_label("local energy / negative reward", color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.get_yticklabels(), color="white")
+    save(fig, "fig_graph_of_thought_branch_merge_dag.pdf")
 
 
 def tropical_active_faces():
@@ -288,7 +359,7 @@ def toric_phase_simplicial_trajectory():
     ax.set_facecolor("#05070d")
     theta = (np.sqrt(5) - 1) / 2
     beta = np.sqrt(2)
-    steps = 180
+    steps = 96
     k = np.arange(steps)
     u = 2 * np.pi * theta * k
     v = 2 * np.pi * beta * k
@@ -304,26 +375,32 @@ def toric_phase_simplicial_trajectory():
     ax.plot_surface(xx, yy, zz, color="#0b2a36", alpha=0.16, linewidth=0)
     ax.plot_wireframe(xx, yy, zz, rstride=4, cstride=8, color="#1ad7e8", alpha=0.09, linewidth=0.35)
     points = np.stack([x, y, z], axis=-1)
-    for start in range(0, steps - 24, 24):
-        window = points[start:start+24]
+    for start in range(0, steps - 18, 18):
+        window = points[start:start+18]
         dist = np.linalg.norm(window[:, None, :] - window[None, :, :], axis=-1)
-        threshold = np.quantile(dist[dist > 1e-8], 0.16)
+        threshold = np.quantile(dist[dist > 1e-8], 0.10)
         for i in range(window.shape[0]):
             for j in range(i + 1, window.shape[0]):
                 if dist[i, j] <= threshold:
                     p, q = window[i], window[j]
                     ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color="#6df6ff", alpha=0.12, linewidth=0.5)
-        if start + 48 < steps:
+        if start + 36 < steps:
             c0 = window.mean(axis=0)
-            c1 = points[start+24:start+48].mean(axis=0)
+            c1 = points[start+18:start+36].mean(axis=0)
             delta = c1 - c0
             ax.quiver(c0[0], c0[1], c0[2], delta[0], delta[1], delta[2], color="#ff4fd8", linewidth=0.9, arrow_length_ratio=0.22)
-    ax.plot(x, y, z, color="#50f5ff", linewidth=1.6, alpha=0.9)
+    dag_edges = branch_merge_edges(steps, cell_stride=12)
+    out_degree = np.bincount(dag_edges[:, 0], minlength=steps)
+    in_degree = np.bincount(dag_edges[:, 1], minlength=steps)
+    for src, dst in dag_edges:
+        p, q = points[int(src)], points[int(dst)]
+        color = "#ff4fd8" if out_degree[int(src)] > 1 else "#8cff6a" if in_degree[int(dst)] > 1 else "#50f5ff"
+        ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color=color, linewidth=1.0, alpha=0.52)
     sc = ax.scatter(x, y, z, c=energy, cmap="magma", s=18, edgecolor="#06111f", linewidth=0.2)
     ax.scatter(x[0], y[0], z[0], s=80, color="#6df6ff", edgecolor="white")
     ax.scatter(x[-1], y[-1], z[-1], s=110, marker="*", color="#ffd166", edgecolor="white")
-    ax.set_title("Irrational toric phase winding with local simplicial reasoning structure", color="white", fontsize=12)
-    ax.text2D(0.02, 0.02, "cyan path = projected rotation-algebra phase; faint edges = local VR 1-skeleton; magenta arrows = analogical maps", transform=ax.transAxes, color="#e9fbff", fontsize=8.5)
+    ax.set_title("Irrational toric phase winding with branch/merge reasoning DAG", color="white", fontsize=12)
+    ax.text2D(0.02, 0.02, "magenta = branch fan-out; green = merge fan-in; faint edges = local VR 1-skeleton; yellow arrows = analogical maps", transform=ax.transAxes, color="#e9fbff", fontsize=8.5)
     ax.set_axis_off()
     ax.view_init(elev=27, azim=40)
     cbar = fig.colorbar(sc, ax=ax, shrink=0.68, pad=0.02)
@@ -411,6 +488,7 @@ def main():
     polar_ring_cache()
     soft_moe_toricgt()
     parameter_golf_protocol()
+    graph_of_thought_branch_merge_dag()
     graphcg_topology_analogy_map()
     toric_phase_simplicial_trajectory()
     dec_conservative_reasoning()

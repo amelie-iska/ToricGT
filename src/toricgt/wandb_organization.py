@@ -226,7 +226,7 @@ def _category_alias(key: str) -> str | None:
             return f"05_gflownet/train/{rest}"
         if "graphcg" in lower:
             return f"06_graphcg/train/{rest}"
-        if any(token in lower for token in ("analogy", "topology", "hdbscan", "simplex", "trajectory")):
+        if any(token in lower for token in ("analogy", "topology", "hdbscan", "simplex", "trajectory", "got_dag", "branch", "merge")):
             return f"07_topology_geometry/train/{rest}"
         if any(token in lower for token in ("toric", "tropical", "bgg", "category_o", "koszul", "slepian", "pollak")):
             return f"08_toric_tropical_bgg/train/{rest}"
@@ -246,7 +246,7 @@ def _category_alias(key: str) -> str | None:
             for token in ("toric", "tropical", "bgg", "category_o", "koszul", "slepian", "pollak", "cca")
         ):
             return f"08_toric_tropical_bgg/advanced/{rest}"
-        if any(token in lower for token in ("topology", "hdbscan", "simplex", "trajectory", "analogy")):
+        if any(token in lower for token in ("topology", "hdbscan", "simplex", "trajectory", "analogy", "got_dag", "branch", "merge")):
             return f"07_topology_geometry/advanced/{rest}"
         if any(token in lower for token in ("nonfinite", "clamp", "runtime", "aux")):
             return f"12_optimization/advanced/{rest}"
@@ -368,6 +368,10 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     )
     _add_first(out, payload, "00_primary/slepian_pollak_loss", ("train/slepian_pollak_loss",))
     _add_first(out, payload, "00_primary/trajectory_memory_loss", ("train/trajectory_memory_loss",))
+    _add_first(out, payload, "00_primary/got_dag_loss", ("train/got_dag_loss",))
+    _add_first(out, payload, "00_primary/got_dag_branch_count", ("train/got_dag_branch_count",))
+    _add_first(out, payload, "00_primary/got_dag_merge_count", ("train/got_dag_merge_count",))
+    _add_first(out, payload, "00_primary/trajectory_memory_dag_similarity", ("train/trajectory_memory_dag_similarity",))
     _add_first(out, payload, "00_primary/complexity_prediction_target_ncd", ("complexity/val/prediction_target_ncd_lzma_mean",))
     _add_first(out, payload, "00_primary/vram_allocated_gb", ("system/vram_allocated_gb",))
     _add_first(out, payload, "00_primary/artifact_within_limit", ("artifact/within_limit", "artifact/under_size_limit"))

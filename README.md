@@ -982,6 +982,16 @@ unstable/outlier relation arrows contribute little. W&B reports
 `train/analogy_hdbscan_persistent_edge_density`,
 `train/analogy_hdbscan_outlier_score`, and
 `train/analogy_hdbscan_core_radius`.
+Graph-of-thought trajectories are now treated as directed branch/merge DAGs,
+not as single paths. The canonical local cell is a diamond
+`source -> {branch_a, branch_b} -> join`; training reports
+`train/got_dag_loss`, `train/got_dag_branch_count`,
+`train/got_dag_merge_count`, branch diversity, merge scatter, back-edge
+fraction, and induced simplex densities. Older linear `graph_json` records are
+upgraded conservatively, and raw text/FineWeb rows are converted into
+branch-and-merge reasoning DAGs for TokenGT training. The implementation
+contract is recorded in
+[planning/GRAPH-OF-THOUGHT-DAG.md](/home/iska/Documents/amelie/bio/ToricGT/planning/GRAPH-OF-THOUGHT-DAG.md).
 Following `assets/1508.01166v2.pdf` (Mohamed, Hirani, and Samtaney's DEC
 Navier-Stokes discretization), the step-local topology pass also audits
 conservative reasoning flow over the same directed simplicial windows. The
@@ -1054,20 +1064,23 @@ without increasing deploy bytes. W&B reports `train/toric_geometry_loss`,
 `train/toric_braid_loss`, and `train/toric_leaf_residual`.
 
 The `oai` branch now includes an optional anticipative reasoning-trajectory
-memory head. Completed graph-of-thought trajectories are summarized by pooled
+memory head. Completed graph-of-thought DAGs are summarized by pooled
 hidden states, endpoint displacement, local speed/curvature, Vietoris-Rips
-density, toric phase moments, and trajectory quality. A compact JSONL index
+density, toric phase moments, branch/merge counts, DAG edge density,
+branch diversity, merge scatter, and trajectory quality. A compact JSONL index
 (`TrajectoryMemoryIndex`) supports cosine search over those keys, while the
 training head (`TrajectoryRetrievalHead`) learns in-batch retrieval targets
 using GraphCG chart similarity, toric phase similarity, topology similarity,
-and low local NLL. The compact OAI BPB-collapse path keeps memory out of the fragile
+DAG-structure similarity, and low local NLL. The compact OAI BPB-collapse path keeps memory out of the fragile
 competition loss until the run is finite and useful enough to protect. The
 full `advanced_reasoning_memory_graphcg.yaml` curriculum enables the head,
 uses `trajectory_memory_loss_weight: 0.00002` during stabilized structural
 warmup, and raises it to `0.00005` in the `graphcg_memory_analogy_full`
 phase under OAI BPB guardrails. W&B reports `train/trajectory_memory_loss`,
 `train/trajectory_memory_recall1`, `train/trajectory_memory_entropy`,
-`train/trajectory_memory_score_gap`, and the CE/distillation/quality
+`train/trajectory_memory_score_gap`, `train/trajectory_memory_dag_similarity`,
+`train/trajectory_memory_dag_branch_count`,
+`train/trajectory_memory_dag_merge_count`, and the CE/distillation/quality
 sub-losses. The detailed staged plan is in
 [planning/TRAJECTORY-MEMORY-RETRIEVAL.md](/home/iska/Documents/amelie/bio/ToricGT/planning/TRAJECTORY-MEMORY-RETRIEVAL.md).
 adds `*_toric_shadow_audit.png`, showing occupied fan cells, active-face

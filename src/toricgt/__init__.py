@@ -3,6 +3,7 @@
 from .random_order_lm import DenseRandomOrderToricLM, RandomOrderLMConfig
 from .soft_moe import GraphTokenSoftMoE, PrefixCausalSoftMoE
 from .combinatorial_toric_metrics import CombinatorialToricConfig, combinatorial_toric_cca_topology_loss
+from .got_trajectory import GoTDAGConfig, default_branch_merge_edges, got_dag_metrics, got_dag_summary_np
 from .symbolic_multigraded_resolution import (
     SymbolicResolutionMetrics,
     cyclic_flag_face_rows,
@@ -27,6 +28,7 @@ __all__ = [
     "CombinatorialToricConfig",
     "DenseRandomOrderToricLM",
     "GraphTokenSoftMoE",
+    "GoTDAGConfig",
     "LowRankToricGeometryProbe",
     "PrefixCausalSoftMoE",
     "RandomOrderLMConfig",
@@ -50,6 +52,9 @@ __all__ = [
     "cyclic_taylor_fitting_summary_rows",
     "cyclic_taylor_multidegree_counts",
     "cyclic_taylor_rank_rows",
+    "default_branch_merge_edges",
+    "got_dag_metrics",
+    "got_dag_summary_np",
     "reasoning_step_topology_loss",
 ]
 

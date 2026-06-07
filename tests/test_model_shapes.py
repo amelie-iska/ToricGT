@@ -25,5 +25,24 @@ def test_model_shapes_cpu():
     assert out["node"].shape == (2, 16, cfg.output_dim)
     assert out["edge"].shape == (2, 48, cfg.output_dim)
     assert out["graph"].shape == (2, cfg.output_dim)
+    assert out["node_embeddings"].shape == (2, 16, cfg.d_model)
+    assert out["edge_embeddings"].shape == (2, 48, cfg.d_model)
     assert out["gflownet_forward_logits"].shape == (2, cfg.gflownet_num_actions)
     assert out["gflownet_backward_logits"].shape == (2, cfg.gflownet_num_actions)
+
+
+def test_tokengt_optional_trajectory_memory_head_cpu():
+    cfg = ModelConfig(
+        d_model=32,
+        num_heads=4,
+        num_layers=2,
+        max_nodes=16,
+        max_edges=32,
+        use_trajectory_memory_head=True,
+        trajectory_memory_projection_dim=16,
+    )
+    model = ToricTokenGT(cfg)
+    batch, _ = synthetic_batch(cfg, batch_size=3, device="cpu")
+    out = model(batch)
+    assert model.trajectory_memory_head is not None
+    assert out["node_embeddings"].shape == (3, 16, cfg.d_model)

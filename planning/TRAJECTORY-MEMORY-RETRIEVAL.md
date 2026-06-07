@@ -18,23 +18,27 @@ decision explicitly includes it.
 For a completed reasoning trajectory
 
 \[
-\tau=(h_1,\ldots,h_T), \qquad h_t\in\mathbb R^d,
+\tau=(G_\tau,H_\tau),\qquad
+G_\tau=(V_\tau,E_\tau),\qquad
+H_\tau=\{h_v\in\mathbb R^d:v\in V_\tau\},
 \]
 
 the memory key is a normalized summary
 
 \[
 k(\tau)=\operatorname{norm}\big[
-\bar h,\; h_T-h_1,\; \operatorname{speed}(\tau),\;
+\bar h,\; h_{\mathrm{sink}}-h_{\mathrm{root}},\; \operatorname{speed}(\tau),\;
 \operatorname{curvature}(\tau),\; \rho_{\mathrm{VR}}(\tau),\;
-\phi_\theta(\tau),\;\phi_\beta(\tau),\;q(\tau)
+\phi_\theta(\tau),\;\phi_\beta(\tau),\;d_{\mathrm{DAG}}(\tau),\;q(\tau)
 \big],
 \]
 
-where \(\bar h\) is the mean hidden state, \(h_T-h_1\) is the net reasoning
+where \(\bar h\) is the mean hidden state, \(h_{\mathrm{sink}}-h_{\mathrm{root}}\) is the net reasoning
 displacement, \(\rho_{\mathrm{VR}}\) is a local Vietoris-Rips radius/density
 summary, \(\phi_\theta,\phi_\beta\) are noncommutative toric phase-shadow
-summaries, and \(q(\tau)\) is a quality proxy such as negative local NLL or
+summaries, \(d_{\mathrm{DAG}}\) records branch count, merge count, back-edge
+fraction, branch diversity, merge scatter, and branch/merge balance, and
+\(q(\tau)\) is a quality proxy such as negative local NLL or
 verifier reward.
 
 The memory value stores the source metadata, optional text or graph projection,
@@ -56,11 +60,14 @@ The in-batch teacher used during training is
 \lambda_G\langle g_s,g_i\rangle
 +\lambda_\Theta\langle \phi_s,\phi_i\rangle
 -\lambda_T d_{\mathrm{top}}(s,i)
++\lambda_D\langle d_{\mathrm{DAG},s},d_{\mathrm{DAG},i}\rangle
 +q_i,
 \]
 
 where \(g\) are GraphCG chart coordinates, \(\phi\) are toric phase summaries,
-and \(d_{\mathrm{top}}\) compares local topology summaries.  The loss is
+and \(d_{\mathrm{top}}\) compares local topology summaries. The DAG term
+prevents retrieval from treating a linear chain and a branch/merge proof as the
+same object merely because their endpoints are close. The loss is
 
 \[
 \mathcal L_{\mathrm{mem}} =
@@ -90,11 +97,20 @@ policy is:
 
 - `src/toricgt/trajectory_memory.py` implements CPU summaries, JSONL index
   save/load/search, and `TrajectoryRetrievalHead`.
+- `src/toricgt/got_trajectory.py` defines the branch/merge DAG contract,
+  default diamond-DAG template for sequence-only states, training metrics, and
+  summary scalars.
 - `DenseRandomOrderToricLM` can instantiate the head with
   `use_trajectory_memory_head=true`.
+- `ToricTokenGT` exposes node embeddings and optional trajectory-memory head
+  support so graph-token training can pass explicit reasoning edges into the
+  memory objective.
 - `scripts/train_parameter_golf_random_order.py` logs
   `train/trajectory_memory_*` metrics and supports phase-controlled
   `trajectory_memory_loss_weight`.
+- `scripts/train.py` supports `--got-dag-loss-weight` and
+  `--trajectory-memory-loss-weight`; graph batches pass node embeddings,
+  node masks, and directed edges into the DAG and memory metrics.
 - `config/train.parameter_golf_random_order_dense_valmix35_from1000.yaml`
   enables the head but keeps the loss at zero during BPB-first recovery.  The
   loss turns on only in later GFlowNet/GraphCG/topology phases.

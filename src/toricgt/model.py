@@ -9,6 +9,7 @@ from .config import ModelConfig
 from .gflownet import EmbeddingPolicy
 from .graph_tokenizer import GraphBatch, GraphTokenizer, attention_mask_from_token_mask
 from .tropical_attention import TransformerBlock
+from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryRetrievalHead
 
 
 class ToricTokenGT(nn.Module):
@@ -60,6 +61,24 @@ class ToricTokenGT(nn.Module):
             if config.use_gflownet_head
             else None
         )
+        self.trajectory_memory_head = (
+            TrajectoryRetrievalHead(
+                config.d_model,
+                TrajectoryMemoryConfig(
+                    projection_dim=config.trajectory_memory_projection_dim,
+                    teacher_temperature=config.trajectory_memory_teacher_temperature,
+                    retrieval_temperature=config.trajectory_memory_retrieval_temperature,
+                    distill_weight=config.trajectory_memory_distill_weight,
+                    quality_weight=config.trajectory_memory_quality_weight,
+                    topology_weight=config.trajectory_memory_topology_weight,
+                    graphcg_weight=config.trajectory_memory_graphcg_weight,
+                    toric_weight=config.trajectory_memory_toric_weight,
+                    dag_weight=config.trajectory_memory_dag_weight,
+                ),
+            )
+            if config.use_trajectory_memory_head
+            else None
+        )
 
     def _layer_attention_mode(self, layer_idx: int) -> str:
         if self.config.attention != "hybrid":
@@ -91,7 +110,12 @@ class ToricTokenGT(nn.Module):
             "edge": self.edge_head(edge_x),
             "graph": self.graph_head(pooled),
             "token_embeddings": x,
+            "node_embeddings": node_x,
+            "edge_embeddings": edge_x,
             "token_mask": tok.token_mask,
+            "node_mask": batch.node_mask,
+            "edge_index": batch.edge_index,
+            "edge_mask": batch.edge_mask,
         }
         if self.gflownet_policy is not None:
             forward_logits, backward_logits = self.gflownet_policy(pooled)

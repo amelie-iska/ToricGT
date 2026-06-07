@@ -31,6 +31,11 @@ changes.
 - GraphCG/analogy geometry: auto-sized hidden lattice basis, scale-normalized
   nested simplex-tree maps, directed flag-complex topology, and analogical
   functor diagnostics.
+- Graph-of-thought topology: reasoning trajectories are directed branch/merge
+  DAGs, not single lines. The default local cell is
+  `source -> {branch_a, branch_b} -> join`, and training/analysis logs branch
+  counts, merge counts, branch diversity, merge scatter, back-edge fraction,
+  and induced simplex densities.
 - Toric geometry signal: training-only low-rank, fake-quantized probes for
   Newton active faces, moment maps, Cartier-style bends, toric binomials,
   affine-Coxeter reflections, braid consistency, and noncommutative
@@ -219,10 +224,11 @@ should improve reasoning geometry without replacing the BPB objective.
 
 The step-local topology path applies the same persistent-homology analogue to
 actual reasoning states in the GraphCG chart. For sampled graph-of-thought
-windows `h_s, ..., h_{s+w}`, vertices are hidden states, radius levels form
-nested flag complexes, and directed edges combine distance, temporal
-orientation, and antisymmetric toric skew. Consecutive windows are connected by
-soft transports that push forward adjacency and directed adjacency, yielding
+windows, vertices are hidden states in a branch/merge DAG, radius levels form
+nested flag complexes, and directed edges combine explicit GoT edges,
+distance, temporal orientation, and antisymmetric toric skew. Consecutive DAG
+windows are connected by soft transports that push forward adjacency and
+directed adjacency, yielding
 metrics `train/analogy_step_analogical_map_loss`,
 `train/analogy_step_directed_map_loss`, and
 `train/analogy_step_transport_entropy`. The trainer also logs Betti-0, cycle
@@ -260,13 +266,15 @@ The periodic analysis defaults are controlled by
 ## Anticipative Trajectory Memory
 
 The current `oai` branch includes a training-ready trajectory-memory layer for
-later graph-heavy phases. Completed graph-of-thought paths are summarized into
+later graph-heavy phases. Completed graph-of-thought DAGs are summarized into
 compact keys containing pooled hidden state, endpoint displacement,
-speed/curvature, local Vietoris-Rips density, toric phase moments, and a
-quality proxy. `TrajectoryMemoryIndex` stores those keys in JSONL and performs
-cosine retrieval. `TrajectoryRetrievalHead` learns an in-batch retrieval score
-whose teacher favors trajectories with aligned GraphCG charts, coherent toric
-phase shadows, similar local topology, and lower local NLL.
+speed/curvature, local Vietoris-Rips density, toric phase moments, branch and
+merge counts, branch diversity, merge scatter, and a quality proxy.
+`TrajectoryMemoryIndex` stores those keys in JSONL and performs cosine
+retrieval. `TrajectoryRetrievalHead` learns an in-batch retrieval score whose
+teacher favors trajectories with aligned GraphCG charts, coherent toric phase
+shadows, similar local topology, compatible branch/merge structure, and lower
+local NLL.
 
 The compact OAI BPB-collapse trainer keeps memory out of the fragile first-stage
 competition loss until the run is finite and useful enough to protect. The full
@@ -279,7 +287,10 @@ W&B logs
 `train/trajectory_memory_loss`, `train/trajectory_memory_ce`,
 `train/trajectory_memory_distill_loss`, `train/trajectory_memory_quality_loss`,
 `train/trajectory_memory_recall1`, `train/trajectory_memory_entropy`, and
-`train/trajectory_memory_score_gap`. The staged implementation plan is recorded
+`train/trajectory_memory_score_gap`, plus DAG-specific
+`train/trajectory_memory_dag_similarity`,
+`train/trajectory_memory_dag_branch_count`, and
+`train/trajectory_memory_dag_merge_count`. The staged implementation plan is recorded
 in `planning/TRAJECTORY-MEMORY-RETRIEVAL.md`.
 
 The same window hierarchy now includes DEC-style conservative flow diagnostics
