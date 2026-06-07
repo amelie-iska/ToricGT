@@ -415,29 +415,30 @@ class TrajectoryRetrievalHead(nn.Module):
 
         quality = -per_token_nll.detach().float().mean(dim=1)
         quality_z = (quality - quality.mean()) / (quality.std(unbiased=False) + 1e-6)
-        chart = F.normalize(features["chart"].float(), dim=-1)
-        chart_sim = chart @ chart.transpose(0, 1)
-        toric = F.normalize(features["toric"].float(), dim=-1)
-        toric_sim = toric @ toric.transpose(0, 1)
-        topo = features["topology"].float()
-        topo_dist = torch.cdist(topo, topo, p=2)
-        topo_sim = -topo_dist / (topo_dist.detach().mean() + 1e-6)
-        dag_feature = F.normalize(features["dag"].float(), dim=-1)
-        dag_sim = dag_feature @ dag_feature.transpose(0, 1)
-        derived_feature = F.normalize(features["derived"].float(), dim=-1)
-        derived_sim = derived_feature @ derived_feature.transpose(0, 1)
-        teacher = (
-            float(self.config.graphcg_weight) * chart_sim
-            + float(self.config.toric_weight) * toric_sim
-            + float(self.config.topology_weight) * topo_sim
-            + float(self.config.dag_weight) * dag_sim
-            + float(self.config.derived_weight) * derived_sim
-            + quality_z[None, :]
-        )
-        teacher = teacher.masked_fill(diag, -1e4) / max(float(self.config.teacher_temperature), 1e-4)
-        labels = teacher.argmax(dim=-1)
+        with torch.no_grad():
+            chart = F.normalize(features["chart"].float(), dim=-1)
+            chart_sim = chart @ chart.transpose(0, 1)
+            toric = F.normalize(features["toric"].float(), dim=-1)
+            toric_sim = toric @ toric.transpose(0, 1)
+            topo = features["topology"].float()
+            topo_dist = torch.cdist(topo, topo, p=2)
+            topo_sim = -topo_dist / (topo_dist.mean() + 1e-6)
+            dag_feature = F.normalize(features["dag"].float(), dim=-1)
+            dag_sim = dag_feature @ dag_feature.transpose(0, 1)
+            derived_feature = F.normalize(features["derived"].float(), dim=-1)
+            derived_sim = derived_feature @ derived_feature.transpose(0, 1)
+            teacher = (
+                float(self.config.graphcg_weight) * chart_sim
+                + float(self.config.toric_weight) * toric_sim
+                + float(self.config.topology_weight) * topo_sim
+                + float(self.config.dag_weight) * dag_sim
+                + float(self.config.derived_weight) * derived_sim
+                + quality_z[None, :]
+            )
+            teacher = teacher.masked_fill(diag, -1e4) / max(float(self.config.teacher_temperature), 1e-4)
+            labels = teacher.argmax(dim=-1)
+            teacher_probs = torch.softmax(teacher, dim=-1)
         ce = F.cross_entropy(logits, labels)
-        teacher_probs = torch.softmax(teacher, dim=-1)
         distill = F.kl_div(torch.log_softmax(logits, dim=-1), teacher_probs, reduction="batchmean")
         quality_pred = self.quality_head(features["summary"].to(hidden.dtype)).squeeze(-1).float()
         quality_loss = F.mse_loss(quality_pred, quality_z)

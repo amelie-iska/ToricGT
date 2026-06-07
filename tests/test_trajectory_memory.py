@@ -71,6 +71,28 @@ def test_trajectory_retrieval_head_metrics_are_finite():
     assert out["trajectory_memory_derived_regularity"].isfinite()
 
 
+def test_trajectory_retrieval_teacher_does_not_backprop_nan_gradients():
+    head = TrajectoryRetrievalHead(16)
+    hidden = torch.ones(2, 6, 16, requires_grad=True)
+    positions = torch.arange(6).repeat(2, 1)
+    nll = torch.ones(2, 6)
+    edge_index = torch.tensor([[[0, 1], [0, 2], [1, 3], [2, 3]]] * 2)
+    edge_mask = torch.ones(2, edge_index.shape[1], dtype=torch.bool)
+
+    out = head(
+        hidden,
+        positions,
+        nll,
+        trajectory_edge_index=edge_index,
+        trajectory_edge_mask=edge_mask,
+    )
+    out["trajectory_memory_loss"].backward()
+
+    assert out["trajectory_memory_loss"].isfinite()
+    assert hidden.grad is not None
+    assert torch.isfinite(hidden.grad).all()
+
+
 def test_random_order_lm_trajectory_memory_loss_path_is_finite():
     cfg = RandomOrderLMConfig(
         vocab_size=48,
