@@ -48,7 +48,7 @@ training:
   checkpoint_dir: checkpoints/toricgt_full_tokengt_got_fineweb_derived
   checkpoint_every: 250
   gc_every: 10
-  max_cpu_rss_gb: 48.0
+  max_cpu_rss_gb: 58.0
   device: cuda
   batch_size: 1
   grad_accum_steps: 64
