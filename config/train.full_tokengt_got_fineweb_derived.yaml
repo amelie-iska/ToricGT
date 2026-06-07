@@ -51,8 +51,8 @@ training:
   gc_every: 10
   max_cpu_rss_gb: 48.0
   device: cuda
-  batch_size: 2
-  grad_accum_steps: 32
+  batch_size: 8
+  grad_accum_steps: 8
   precision: bf16
   seed: 17
   lr: 0.00015

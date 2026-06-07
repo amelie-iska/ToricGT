@@ -2,7 +2,7 @@
 
 Author: Amelie Schreiber
 
-ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with tropical ring attention, default 4-expert Soft-MoE feed-forward blocks, finite noncommutative-torus features, and embedding-space GFlowNet fine-tuning.
+ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with tropical ring attention, default 4-expert Soft-MoE feed-forward blocks, finite noncommutative-torus features, Slepian/Pollak prolate concentration probes, combinatorial commutative-algebra certificates, and embedding-space GFlowNet fine-tuning.
 
 ![ToricGT architecture and training paradigm](assets/toricgt_architecture_and_training_diagram.png)
 
@@ -16,13 +16,93 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 
 *Note: consider PH disambiguation along decision boundaries or of words with multiple meaning*
 
+## Model Overview
+
+The animation above is not just decoration.  It is the visual intuition for the
+model's core geometry: a reasoning trajectory moves through an ambient
+toric/tropical embedding space, wraps around finite noncommutative-torus phase
+coordinates, branches and merges as a graph-of-thought, and is periodically
+pulled back into well-behaved chambers by algebraic and topological
+certificates.
+
+The Slepian/Pollak or prolate-spheroidal part of ToricGT is similar to the GIF
+because both describe concentrated waves moving on a constrained phase space.
+In the classical continuous setting, prolate spheroidal wave functions solve a
+time-band concentration problem:
+
+```math
+\int_{-T}^{T}\frac{\sin W(t-s)}{\pi(t-s)}\psi_n(s)\,ds
+=\lambda_n\psi_n(t).
+```
+
+In the discrete model, ToricGT uses finite DPSS/Slepian-style concentration
+probes on projected toric phase leaves.  If hidden states trace a phase curve
+`z_t=(exp(2*pi*i*theta_t), exp(2*pi*i*beta_t))`, the Slepian loss asks useful
+reasoning energy to remain concentrated in a stable band, chamber, or corridor:
+
+```math
+\mathcal L_{\mathrm{Slepian}}
+=
+1-\frac{\sum_{k\in B}|\widehat z_k|^2}
+        {\sum_{k}|\widehat z_k|^2+\epsilon}.
+```
+
+That matters for compression and reasoning because a small model must reuse
+stable coordinates.  Prolate concentration discourages noisy wandering in phase
+space; tropical attention selects active faces; GraphCG disentangles concept
+axes; and the graph-of-thought GFlowNet searches over branching reasoning
+trajectories that have good likelihood, memory support, and algebraic
+certificates.
+
+The main advanced loss families are deliberately small auxiliary terms around
+the likelihood/BPB objective:
+
+```math
+\mathcal L
+=
+\mathcal L_{\mathrm{LM}}
++\lambda_{\mathrm{GFN}}\mathcal L_{\mathrm{TB}}
++\lambda_{\mathrm{DAG}}\mathcal L_{\mathrm{GoT}}
++\lambda_{\mathrm{mem}}\mathcal L_{\mathrm{memory}}
++\lambda_{\mathrm{GraphCG}}\mathcal L_{\mathrm{disentangle}}
++\lambda_{\mathrm{toric}}\mathcal L_{\mathrm{toric}}
++\lambda_{\mathrm{trop}}\mathcal L_{\mathrm{tropical}}
++\lambda_{\mathrm{top}}\mathcal L_{\mathrm{PH}}
++\lambda_{\mathrm{CCA}}\mathcal L_{\mathrm{res}}
++\lambda_{\mathrm{der}}\mathcal L_{\mathrm{derived}}.
+```
+
+- `BPB / LM`: the primary objective is byte-level negative log likelihood,
+  `BPB = loss / log(2)` when the scored units are bytes.
+- `GFlowNet trajectory balance`: for a sampled graph-of-thought trajectory
+  `tau`, `L_TB = (log Z + sum log P_F - log R(tau) - sum log P_B)^2`.
+- `GraphCG disentanglement`: learned basis vectors should align with reusable
+  concept axes while minimizing cross-axis leakage and superposition.
+- `Toric/tropical`: active-face, binomial, chamber, braid/Coxeter, and phase
+  residuals make hidden trajectories reusable across toric charts.
+- `Slepian/Pollak`: DPSS/prolate concentration keeps phase trajectories
+  band-limited inside useful reasoning corridors.
+- `Topology / persistence`: filtered complexes built from hidden trajectories
+  track connected components, cycles, directed asymmetry, persistence morphisms,
+  and simplex-density changes.
+- `CCA / resolutions`: Stanley-Reisner ideals, toric ideals, Koszul/BGG
+  complexes, Fitting ideals, Buchsbaum-Eisenbud rank tests, and multigraded
+  Betti tables audit whether a reasoning step behaves like a coherent finite
+  complex.
+- `Derived comparison`: chain maps and mapping cones compare reasoning
+  complexes up to quasi-isomorphism, so memory retrieval and analogy can match
+  algebraic structure rather than only endpoint embeddings.
+
+The Parameter-Golf rule is conservative: the 16 MB artifact should keep only
+what improves the restricted FineWeb validation BPB or can be distilled into
+the compact byte model.  Larger certificates, exact resolutions, diagrams, and
+derived-category objects are training and analysis tools unless ablations show
+that exporting a compact probe improves the competition score.
+
 Current validated status:
 
-- Branch: active work is on `oai-advanced` in both this repo and the nested
-  `amelie-iska/parameter-golf` repo. The branch was created from the `oai`
-  recovery work and pushed so the BPB-transfer controller, sampled PolarQuant
-  code path, and current documentation are versioned without committing local
-  credentials or checkpoints.
+- Branch: active work is on `oai-toricgt` in this repo. Credentials, local
+  `keys.txt`, W&B tokens, and checkpoints are intentionally not committed.
 - CPU tests: focused Parameter-Golf structural-token/model/recovery tests pass:
   `PYTHONPATH=src python -m pytest tests/test_seq4096_4k_recovery_gate.py tests/test_seq4096_analysis.py tests/test_seq4096_bigram_bias.py tests/test_parameter_golf_advanced_tokens.py tests/test_parameter_golf_export.py -q`
   (`36 passed`, with only existing SWIG deprecation warnings).
@@ -48,18 +128,16 @@ Current validated status:
   size-constrained exports; the counted 4K and 20K artifacts remain below the
   16,000,000 byte Parameter-Golf limit.
 - Current active advanced run:
-  `toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z`, W&B
-  <https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z>.
-  It starts from step 0 with PolarQuant enabled by default and ramped, plus
-  medium-conservative GraphCG, toric/tropical, Slepian/Pollak, Koszul/BGG,
-  analogical, and exact combinatorial CCA/DG/Taylor topology metrics active
-  from the start.  The live 10K gate targets `<1.09` BPB and allows the run to
-  continue if it is below `1.17` by step 10K.
-- Latest checked live readout for the active advanced run: finite through step
-  1020, with step 1000 validation/OpenAI BPB `1.3562`, train BPB in the
-  `1.33-1.42` range around steps 840-1020, no observed nonfinite update skips,
-  and scheduled analysis artifacts under
-  `outputs/post_resume_analysis/toricgt_advdg_stable_step0_polar_seq4096_20260605T221159Z/step-00000750`.
+  `toricgt_oai_toricgt_finewebval_b8ga8_20260607T143904Z`, W&B
+  <https://wandb.ai/amelie-iska-math/toricgt/runs/ml223ywe>.  It starts from
+  step 0 on the full graph-structured dataset plus restricted FineWeb OAI
+  Parameter-Golf validation, with tropical-ring attention, graph-of-thought
+  DAG/memory losses, embedding-space GFlowNets, derived-category/CCA examples,
+  and medium-conservative advanced metrics active.  It was restarted after the
+  previous run used only about 3.6 GB of RTX 4090 VRAM; the live config now uses
+  `batch_size=8` and `grad_accum_steps=8`, preserving an effective batch of 64
+  examples per optimizer step while raising CUDA memory use to roughly 14 GB in
+  the launch smoke test.
 - The step-0 NaN failure mode from
   `toricgt_advdg_step0_polar_seq4096_20260605T214439Z` is treated as an
   optimizer/gradient guard problem, not a reason to remove CCA/DG/topology.
