@@ -24,16 +24,16 @@ data:
   fineweb_mix_ratio: 0.65
   target_artifact_bytes: 16000000
   artifact_probe_every: 1000
-  artifact_probe_at_start: false
+  artifact_probe_at_start: true
   artifact_probe_bits: 6
   artifact_probe_quantization_mode: row
   artifact_probe_compression: lzma
 
 model:
   attention: tropical_ring
-  d_model: 192
-  num_heads: 6
-  num_layers: 6
+  d_model: 320
+  num_heads: 4
+  num_layers: 7
   max_nodes: 384
   max_edges: 1536
   no_soft_moe: false
@@ -42,7 +42,7 @@ model:
   soft_moe_slots: 2
   use_lm_head: true
   lm_vocab_size: 1024
-  activation_checkpointing: false
+  activation_checkpointing: true
 
 training:
   steps: 100000
@@ -51,8 +51,8 @@ training:
   gc_every: 10
   max_cpu_rss_gb: 48.0
   device: cuda
-  batch_size: 8
-  grad_accum_steps: 8
+  batch_size: 16
+  grad_accum_steps: 4
   precision: bf16
   seed: 17
   lr: 0.00015
