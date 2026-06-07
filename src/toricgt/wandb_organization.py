@@ -174,6 +174,12 @@ def _category_alias(key: str) -> str | None:
             return "01_oai/best_val_bpb"
         if rest == "target_bpb":
             return "01_oai/target_bpb"
+        if rest == "restricted_fineweb_bpb":
+            return "03_validation/oai_parameter_golf_restricted_fineweb_bpb"
+        if rest == "restricted_fineweb_loss":
+            return "03_validation/oai_parameter_golf_restricted_fineweb_loss"
+        if rest == "restricted_fineweb_tokens":
+            return "03_validation/oai_parameter_golf_restricted_fineweb_tokens"
         return f"01_oai/openai_parameter_golf/{rest}"
     if key.startswith("competition/"):
         return f"01_oai/competition/{key.split('/', 1)[1]}"
@@ -195,6 +201,12 @@ def _category_alias(key: str) -> str | None:
             return "02_train/loss"
         if rest == "val_loss":
             return "03_validation/loss"
+        if rest == "restricted_val_bpb":
+            return "03_validation/oai_parameter_golf_restricted_fineweb_bpb"
+        if rest == "restricted_val_loss":
+            return "03_validation/oai_parameter_golf_restricted_fineweb_loss"
+        if rest == "restricted_val_tokens":
+            return "03_validation/oai_parameter_golf_restricted_fineweb_tokens"
         return f"01_oai/fineweb/{rest}"
     if key.startswith("fineweb_calibration/"):
         return f"01_oai/fineweb_calibration/{key.split('/', 1)[1]}"
@@ -358,6 +370,16 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     )
     _add_first(out, payload, "00_primary/train_bpb", ("train/bpb", "fineweb/train_bpb", "bpb/train"))
     _add_first(out, payload, "00_primary/validation_bpb", ("val/bpb", "fineweb/val_bpb", "bpb/val"))
+    _add_first(
+        out,
+        payload,
+        "00_primary/oai_parameter_golf_restricted_fineweb_bpb",
+        (
+            "03_validation/oai_parameter_golf_restricted_fineweb_bpb",
+            "openai_parameter_golf/restricted_fineweb_bpb",
+            "fineweb/restricted_val_bpb",
+        ),
+    )
     _add_first(out, payload, "00_primary/train_loss", ("train/loss", "fineweb/train_loss"))
     _add_first(out, payload, "00_primary/validation_loss", ("val/loss", "fineweb/val_loss"))
     _add_first(out, payload, "00_primary/int8_roundtrip_bpb", ("final/int8_zlib_roundtrip_bpb",))
@@ -466,6 +488,9 @@ def organize_wandb_payload(payload: Mapping[str, Any], *, include_raw: bool | st
 
     out = primary_metric_aliases(payload)
     for key, value in payload.items():
+        if key != STEP_METRIC and str(key).startswith(tuple(prefix + "/" for prefix in VISIBLE_METRIC_PREFIXES)):
+            out.setdefault(_clean_name(str(key)), value)
+            continue
         alias = _category_alias(str(key))
         if alias:
             out.setdefault(_clean_name(alias), value)

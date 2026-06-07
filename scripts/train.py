@@ -30,7 +30,7 @@ from toricgt.derived_category_metrics import (
 from toricgt.expert_curriculum import CyclicExpertCurriculum, ExpertCurriculumAssignment
 from toricgt.gflownet import TrajectoryBatch, trajectory_balance_loss
 from toricgt.got_trajectory import got_dag_metrics
-from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items
+from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items, expand_dataset_paths
 from toricgt.graph_tokenizer import GraphBatch
 from toricgt.metrics import masked_mse
 from toricgt.model import ToricTokenGT
@@ -250,6 +250,17 @@ def next_loader_batch(
         batch, target = next(data_iter)
     batch, target = move_batch(batch, target, device)
     return batch, target, data_iter
+
+
+def restricted_fineweb_paths(paths: list[str] | tuple[str, ...]) -> list[str]:
+    """Return FineWeb challenge token shards from a mixed train/val path list."""
+
+    out: list[str] = []
+    for path in expand_dataset_paths(paths):
+        path_str = str(path)
+        if path.suffix == ".bin" and "fineweb" in path_str.lower():
+            out.append(path_str)
+    return sorted(set(out))
 
 
 def fineweb_lm_metrics(out: dict[str, torch.Tensor], batch: GraphBatch) -> dict[str, torch.Tensor] | None:
@@ -598,6 +609,7 @@ def main() -> None:
                 subset_loaders.append(subset_loader)
                 subset_iters.append(None)
     val_loader = None
+    restricted_fineweb_val_loader = None
     if args.val_data_path:
         val_dataset = CuratedGraphIterableDataset(
             args.val_data_path,
@@ -610,6 +622,24 @@ def main() -> None:
             fineweb_mix_ratio=args.fineweb_mix_ratio,
         )
         val_loader = DataLoader(val_dataset, batch_size=train_cfg.batch_size, collate_fn=collate_graph_items, num_workers=0)
+        fineweb_val_paths = restricted_fineweb_paths(tuple(args.val_data_path))
+        if fineweb_val_paths:
+            restricted_fineweb_val_dataset = CuratedGraphIterableDataset(
+                fineweb_val_paths,
+                model_cfg,
+                parquet_batch_size=args.parquet_batch_size,
+                interleave_paths=False,
+                fineweb_tokenizer_path=args.fineweb_tokenizer_path,
+                fineweb_tokens_per_graph=args.fineweb_tokens_per_graph,
+                fineweb_stride_tokens=args.fineweb_stride_tokens,
+                fineweb_mix_ratio=1.0,
+            )
+            restricted_fineweb_val_loader = DataLoader(
+                restricted_fineweb_val_dataset,
+                batch_size=train_cfg.batch_size,
+                collate_fn=collate_graph_items,
+                num_workers=0,
+            )
 
     run = None
     if train_cfg.use_wandb:
@@ -1013,16 +1043,40 @@ def main() -> None:
                     handle,
                     indent=2,
                 )
-        if val_loader is not None and args.eval_every > 0 and (step + 1) % args.eval_every == 0:
+        if (
+            (val_loader is not None or restricted_fineweb_val_loader is not None)
+            and args.eval_every > 0
+            and (step + 1) % args.eval_every == 0
+        ):
             if assignment is not None:
                 model.set_active_soft_moe_experts(None)
-            val_metrics = evaluate_loader(model, val_loader, args.device, train_cfg.precision, args.eval_batches)
+            val_metrics = (
+                evaluate_loader(model, val_loader, args.device, train_cfg.precision, args.eval_batches)
+                if val_loader is not None
+                else {}
+            )
+            restricted_fineweb_metrics = (
+                evaluate_loader(
+                    model,
+                    restricted_fineweb_val_loader,
+                    args.device,
+                    train_cfg.precision,
+                    args.eval_batches,
+                )
+                if restricted_fineweb_val_loader is not None
+                else {}
+            )
             if assignment is not None:
                 model.set_active_soft_moe_experts([assignment.active_expert])
-            val_loss = float(val_metrics["masked_mse"])
+            val_loss = float(val_metrics.get("masked_mse", 0.0))
             message = f"validation step={step + 1} masked_mse={val_loss:.6f}"
             if "fineweb_lm_bpb" in val_metrics:
                 message += f" fineweb_bpb={val_metrics['fineweb_lm_bpb']:.6f}"
+            if "fineweb_lm_bpb" in restricted_fineweb_metrics:
+                message += (
+                    " restricted_fineweb_bpb="
+                    f"{restricted_fineweb_metrics['fineweb_lm_bpb']:.6f}"
+                )
             pbar.write(message)
             if run is not None:
                 payload = {"val/masked_mse": val_loss, "trainer/step": step + 1, "train/step": step + 1}
@@ -1035,6 +1089,23 @@ def main() -> None:
                             "val/fineweb_lm_loss": float(val_metrics["fineweb_lm_loss"]),
                             "val/fineweb_lm_bpb": float(val_metrics["fineweb_lm_bpb"]),
                             "val/fineweb_lm_tokens": float(val_metrics["fineweb_lm_tokens"]),
+                        }
+                    )
+                if "fineweb_lm_bpb" in restricted_fineweb_metrics:
+                    restricted_loss = float(restricted_fineweb_metrics["fineweb_lm_loss"])
+                    restricted_bpb = float(restricted_fineweb_metrics["fineweb_lm_bpb"])
+                    restricted_tokens = float(restricted_fineweb_metrics["fineweb_lm_tokens"])
+                    payload.update(
+                        {
+                            "openai_parameter_golf/restricted_fineweb_loss": restricted_loss,
+                            "openai_parameter_golf/restricted_fineweb_bpb": restricted_bpb,
+                            "openai_parameter_golf/restricted_fineweb_tokens": restricted_tokens,
+                            "fineweb/restricted_val_loss": restricted_loss,
+                            "fineweb/restricted_val_bpb": restricted_bpb,
+                            "fineweb/restricted_val_tokens": restricted_tokens,
+                            "03_validation/oai_parameter_golf_restricted_fineweb_loss": restricted_loss,
+                            "03_validation/oai_parameter_golf_restricted_fineweb_bpb": restricted_bpb,
+                            "03_validation/oai_parameter_golf_restricted_fineweb_tokens": restricted_tokens,
                         }
                     )
                 run.log(organize_wandb_payload(payload))

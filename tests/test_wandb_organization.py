@@ -57,6 +57,33 @@ def test_fineweb_lm_bpb_aliases_are_primary_and_grouped() -> None:
     assert organized["02_train/fineweb_lm_tokens"] == 4096.0
 
 
+def test_restricted_fineweb_oai_bpb_is_validation_metric() -> None:
+    payload = {
+        "trainer/step": 500,
+        "openai_parameter_golf/restricted_fineweb_bpb": 1.2085,
+        "openai_parameter_golf/restricted_fineweb_loss": 0.8376,
+        "openai_parameter_golf/restricted_fineweb_tokens": 32768.0,
+    }
+
+    organized = organize_wandb_payload(payload)
+
+    assert organized["00_primary/oai_parameter_golf_restricted_fineweb_bpb"] == 1.2085
+    assert organized["03_validation/oai_parameter_golf_restricted_fineweb_bpb"] == 1.2085
+    assert organized["03_validation/oai_parameter_golf_restricted_fineweb_loss"] == 0.8376
+    assert organized["03_validation/oai_parameter_golf_restricted_fineweb_tokens"] == 32768.0
+
+
+def test_visible_metric_prefixes_pass_through() -> None:
+    payload = {
+        "trainer/step": 500,
+        "03_validation/oai_parameter_golf_restricted_fineweb_bpb": 1.19,
+    }
+
+    organized = organize_wandb_payload(payload)
+
+    assert organized["03_validation/oai_parameter_golf_restricted_fineweb_bpb"] == 1.19
+
+
 def test_category_aliases_route_advanced_losses_once() -> None:
     payload = {
         "trainer/step": 10,
