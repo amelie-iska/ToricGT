@@ -26,7 +26,7 @@ if ! ls data/curated_hf_shards/validation/*.parquet >/dev/null 2>&1; then
   exit 1
 fi
 
-COMMAND="PYTHONPATH=src TORICGT_WANDB_RAW_MODE=off $PYTHON_BIN scripts/train.py --config $CONFIG --checkpoint-dir checkpoints/$RUN_ID"
+COMMAND="PYTHONPATH=src TORICGT_WANDB_RAW_MODE=off WANDB_NAME=$RUN_ID $PYTHON_BIN scripts/train.py --config $CONFIG --checkpoint-dir checkpoints/$RUN_ID"
 printf '%s\n' "$COMMAND" > "$LOG_DIR/command.sh"
 chmod +x "$LOG_DIR/command.sh"
 
