@@ -18,8 +18,16 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 
 *Note: consider PH disambiguation along decision boundaries or of words with multiple meanings*
 
+**TokenGT base model**
+
 ```bash
 tmux new-session -d -s toricgt_oai_toricgt_full_clone 'cd /home/iska/Documents/amelie/bio/ToricGT && RUN_NAME=toricgt_oai_toricgt_finewebval_metricfix_max16mb_d320l7_b16ga4_clone_$(date -u +%Y%m%dT%H%M%SZ) && WANDB_PROJECT=toricgt WANDB_RUN_NAME=$RUN_NAME PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/train.py --config config/train.full_tokengt_got_fineweb_derived.yaml --checkpoint-dir checkpoints/$RUN_NAME 2>&1 | tee logs/full_tokengt_got_fineweb_derived/$RUN_NAME/train.log'
+```
+
+**OpenAI competition baseline model**
+
+```bash
+tmux new-session -d -s toricgt_oai_byte_tokengt_hybrid 'cd /home/iska/Documents/amelie/bio/ToricGT && RUN_NAME=toricgt_oai_byte_tokengt_hybrid_$(date -u +%Y%m%dT%H%M%SZ) && mkdir -p logs/parameter_golf_random_order_hybrid_tokengt/$RUN_NAME checkpoints/$RUN_NAME && WANDB_PROJECT=toricgt-parameter-golf WANDB_RUN_NAME=$RUN_NAME PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/train_parameter_golf_random_order.py --config config/train.parameter_golf_random_order_hybrid_tokengt.yaml --checkpoint-dir checkpoints/$RUN_NAME 2>&1 | tee logs/parameter_golf_random_order_hybrid_tokengt/$RUN_NAME/train.log'
 ```
 
 ## Model Overview
