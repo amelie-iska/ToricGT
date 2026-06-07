@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import random
@@ -96,6 +97,38 @@ def scheduled_lr(
 def set_optimizer_lr(optimizer: AdamW, lr: float) -> None:
     for group in optimizer.param_groups:
         group["lr"] = lr
+
+
+def proc_memory_metrics() -> dict[str, float]:
+    """Return current Linux process memory counters in GiB when available."""
+
+    status_path = Path("/proc/self/status")
+    if not status_path.exists():
+        return {}
+    wanted = {"VmRSS": "cpu_rss_gb", "VmHWM": "cpu_peak_rss_gb", "VmSwap": "cpu_swap_gb"}
+    out: dict[str, float] = {}
+    try:
+        for line in status_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if ":" not in line:
+                continue
+            key, rest = line.split(":", 1)
+            if key not in wanted:
+                continue
+            parts = rest.strip().split()
+            if not parts:
+                continue
+            out[wanted[key]] = float(parts[0]) / (1024.0 * 1024.0)
+    except OSError:
+        return {}
+    return out
+
+
+def maybe_collect_memory(global_step: int, gc_every: int, *, cuda: bool) -> None:
+    if gc_every <= 0 or global_step % gc_every != 0:
+        return
+    gc.collect()
+    if cuda and torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def auxiliary_gflownet_loss(
@@ -363,6 +396,8 @@ def main() -> None:
     parser.add_argument("--precision", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--checkpoint-every", type=int, default=0)
+    parser.add_argument("--gc-every", type=int, default=0, help="Run Python/CUDA cache cleanup every N optimizer steps; disabled when 0.")
+    parser.add_argument("--max-cpu-rss-gb", type=float, default=0.0, help="Save an emergency checkpoint and stop before CPU RSS exceeds this GiB threshold; disabled when 0.")
     parser.add_argument("--log-interval", type=int, default=20)
     parser.add_argument("--gflownet-loss-weight", type=float, default=0.0)
     parser.add_argument("--gflownet-space", choices=["embedding", "token"], default="embedding")
@@ -483,7 +518,7 @@ def main() -> None:
     data_iter = None
     loader = None
     subset_loaders: list[DataLoader] = []
-    subset_iters: list[object] = []
+    subset_iters: list[object | None] = []
     if args.data_path:
         if curriculum is None:
             dataset = CuratedGraphIterableDataset(
@@ -518,7 +553,7 @@ def main() -> None:
                     num_workers=0,
                 )
                 subset_loaders.append(subset_loader)
-                subset_iters.append(iter(subset_loader))
+                subset_iters.append(None)
     val_loader = None
     if args.val_data_path:
         val_dataset = CuratedGraphIterableDataset(
@@ -565,6 +600,8 @@ def main() -> None:
                 "use_lm_head": args.use_lm_head,
                 "lm_vocab_size": args.lm_vocab_size,
                 "fineweb_lm_loss_weight": args.fineweb_lm_loss_weight,
+                "gc_every": args.gc_every,
+                "max_cpu_rss_gb": args.max_cpu_rss_gb,
                 "target_artifact_bytes": args.target_artifact_bytes,
                 "artifact_probe_every": args.artifact_probe_every,
                 "artifact_probe_at_start": args.artifact_probe_at_start,
@@ -583,8 +620,14 @@ def main() -> None:
     ckpt_dir = Path(args.checkpoint_dir)
     final_step = start_step + args.steps
     pbar = tqdm(range(start_step, final_step), desc="train")
+    active_subset_id: int | None = None
     for step in pbar:
         assignment: ExpertCurriculumAssignment | None = curriculum.assignment(step) if curriculum is not None else None
+        if assignment is not None and assignment.subset_id != active_subset_id:
+            if active_subset_id is not None and 0 <= active_subset_id < len(subset_iters):
+                subset_iters[active_subset_id] = None
+            active_subset_id = assignment.subset_id
+            gc.collect()
         if assignment is not None:
             model.set_active_soft_moe_experts([assignment.active_expert])
         else:
@@ -623,6 +666,8 @@ def main() -> None:
                 batch, target = synthetic_batch(model_cfg, train_cfg.batch_size, args.device)
             elif assignment is not None:
                 subset_id = assignment.subset_id
+                if subset_iters[subset_id] is None:
+                    subset_iters[subset_id] = iter(subset_loaders[subset_id])
                 batch, target, subset_iters[subset_id] = next_loader_batch(
                     subset_loaders[subset_id],
                     subset_iters[subset_id],
@@ -804,6 +849,8 @@ def main() -> None:
                 "data/fineweb_stride_tokens": float(args.fineweb_stride_tokens),
                 "artifact/target_size_limit_bytes": args.target_artifact_bytes,
             }
+            for mem_key, mem_value in proc_memory_metrics().items():
+                metrics[f"system/{mem_key}"] = mem_value
             if fineweb_lm_tokens_value > 0:
                 metrics.update(
                     {
@@ -957,6 +1004,35 @@ def main() -> None:
                 step + 1,
                 {"expert_curriculum": curriculum_config} if curriculum_config is not None else None,
             )
+        memory_now = proc_memory_metrics()
+        if args.max_cpu_rss_gb > 0 and memory_now.get("cpu_rss_gb", 0.0) >= args.max_cpu_rss_gb:
+            emergency_name = f"toricgt_emergency_step_{step + 1:08d}.pt"
+            save_checkpoint(
+                ckpt_dir,
+                emergency_name,
+                model,
+                optimizer,
+                model_cfg,
+                train_cfg,
+                step + 1,
+                {"expert_curriculum": curriculum_config, "cpu_memory_guard": memory_now}
+                if curriculum_config is not None
+                else {"cpu_memory_guard": memory_now},
+            )
+            if run is not None:
+                run.log(
+                    organize_wandb_payload(
+                        {
+                            "trainer/step": step + 1,
+                            "train/step": step + 1,
+                            "system/cpu_rss_guard_triggered": 1.0,
+                            "system/cpu_rss_guard_threshold_gb": float(args.max_cpu_rss_gb),
+                            **{f"system/{k}": v for k, v in memory_now.items()},
+                        }
+                    )
+                )
+            return
+        maybe_collect_memory(step + 1, args.gc_every, cuda=args.device.startswith("cuda"))
 
     model.set_active_soft_moe_experts(None)
     save_checkpoint(

@@ -583,7 +583,6 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
 
     def _iter_fineweb_bin_path(self, path: Path):
         tokens = load_competition_token_memmap(path)
-        tokenizer = _load_sentencepiece_tokenizer(self.fineweb_tokenizer_path)
         chunk = self.fineweb_tokens_per_graph
         stride = self.fineweb_stride_tokens
         if int(tokens.shape[0]) < chunk:
@@ -600,7 +599,7 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
                 "task_family": "fineweb_language_modeling_graph",
                 "record_id": record_id,
                 "content_hash": hashlib.blake2b(token_slice.tobytes(), digest_size=12).hexdigest(),
-                "text": decode_sp1024_tokens(token_slice, tokenizer=tokenizer),
+                "token_count": int(token_slice.size),
             }
             if self._keep_record(record):
                 yield graph_json_to_item(
