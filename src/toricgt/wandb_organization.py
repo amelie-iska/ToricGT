@@ -282,8 +282,14 @@ def _category_alias(key: str) -> str | None:
         return f"12_optimization/optim/{key.split('/', 1)[1]}"
     if key.startswith("artifact/"):
         rest = key.split("/", 1)[1]
-        if rest == "under_size_limit":
+        if rest in {"under_size_limit", "within_limit"}:
             return "11_artifact_size/within_limit"
+        if rest in {"quantized_total_bytes", "compressed_total_bytes", "probe_total_bytes"}:
+            return f"11_artifact_size/{rest}"
+        if rest == "size_margin_bytes":
+            return "11_artifact_size/size_margin_bytes"
+        if rest == "size_limit_bytes":
+            return "11_artifact_size/size_limit_bytes"
         if rest == "int8_zlib_total_bytes":
             return "11_artifact_size/int8_zlib_total_bytes"
         if rest == "int8_zlib_model_bytes":
@@ -397,6 +403,7 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/complexity_prediction_target_ncd", ("complexity/val/prediction_target_ncd_lzma_mean",))
     _add_first(out, payload, "00_primary/vram_allocated_gb", ("system/vram_allocated_gb",))
     _add_first(out, payload, "00_primary/artifact_within_limit", ("artifact/within_limit", "artifact/under_size_limit"))
+    _add_first(out, payload, "00_primary/artifact_probe_failed", ("artifact/probe_failed",))
     _add_first(
         out,
         payload,
@@ -414,6 +421,15 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     bytes_value = _first_numeric(payload, ("artifact/initial_bytes", "artifact/final_bytes", "artifact/raw_total_bytes"))
     if bytes_value is not None:
         out["00_primary/artifact_mb"] = bytes_value / 1_000_000.0
+    quantized_bytes_value = _first_numeric(
+        payload,
+        ("artifact/quantized_total_bytes", "artifact/compressed_total_bytes", "artifact/probe_total_bytes"),
+    )
+    if quantized_bytes_value is not None:
+        out["00_primary/artifact_quantized_mb"] = quantized_bytes_value / 1_000_000.0
+    artifact_margin = _first_numeric(payload, ("artifact/size_margin_bytes",))
+    if artifact_margin is not None:
+        out["00_primary/artifact_margin_mb"] = artifact_margin / 1_000_000.0
     int8_bytes_value = _first_numeric(payload, ("artifact/int8_zlib_total_bytes",))
     if int8_bytes_value is not None:
         out["00_primary/artifact_int8_zlib_mb"] = int8_bytes_value / 1_000_000.0

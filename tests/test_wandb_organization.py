@@ -168,6 +168,27 @@ def test_artifact_roundtrip_metrics_are_primary() -> None:
     assert organized["11_artifact_size/int8_roundtrip_bpb"] == 1.2906
 
 
+def test_live_artifact_probe_metrics_are_primary_and_grouped() -> None:
+    organized = organize_wandb_payload(
+        {
+            "trainer/step": 1,
+            "artifact/quantized_total_bytes": 12_345_678,
+            "artifact/size_margin_bytes": 3_654_322,
+            "artifact/within_limit": 1.0,
+            "artifact/probe_failed": 0.0,
+            "artifact/deployment_parameters": 5_000_000,
+        }
+    )
+
+    assert organized["00_primary/artifact_quantized_mb"] == 12.345678
+    assert organized["00_primary/artifact_margin_mb"] == 3.654322
+    assert organized["00_primary/artifact_within_limit"] == 1.0
+    assert organized["00_primary/artifact_probe_failed"] == 0.0
+    assert organized["11_artifact_size/quantized_total_bytes"] == 12_345_678
+    assert organized["11_artifact_size/size_margin_bytes"] == 3_654_322
+    assert organized["11_artifact_size/artifact/deployment_parameters"] == 5_000_000
+
+
 def test_analysis_control_exact_cca_routes_to_analysis_category() -> None:
     organized = organize_wandb_payload(
         {

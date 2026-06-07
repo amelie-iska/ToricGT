@@ -8,6 +8,7 @@ import json
 import math
 import random
 from contextlib import nullcontext
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,7 @@ from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_ite
 from toricgt.graph_tokenizer import GraphBatch
 from toricgt.metrics import masked_mse
 from toricgt.model import ToricTokenGT
+from toricgt.parameter_golf_export import write_artifact
 from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload
 
 
@@ -198,6 +200,87 @@ def evaluate_loader(
     return total / max(count, 1)
 
 
+def _artifact_probe_due(step: int, start_step: int, artifact_probe_every: int, artifact_probe_at_start: bool) -> bool:
+    if artifact_probe_every <= 0:
+        return False
+    if artifact_probe_at_start and step == start_step:
+        return True
+    return (step + 1) % artifact_probe_every == 0
+
+
+def _artifact_probe_mode_code(mode: str) -> float:
+    return 1.0 if mode == "row" else 0.0
+
+
+def _artifact_probe_compression_code(compression: str) -> float:
+    return {"deflated": 0.0, "bzip2": 1.0, "lzma": 2.0}.get(compression, -1.0)
+
+
+def run_artifact_probe(
+    model: ToricTokenGT,
+    model_cfg: ModelConfig,
+    ckpt_dir: Path,
+    step: int,
+    args: argparse.Namespace,
+) -> dict[str, float]:
+    """Write a compressed Parameter-Golf probe artifact and return W&B metrics."""
+
+    probe_root = Path(args.artifact_probe_dir) if args.artifact_probe_dir else ckpt_dir / "artifact_probes"
+    output = probe_root / (
+        f"step_{step:08d}_b{args.artifact_probe_bits}_"
+        f"{args.artifact_probe_quantization_mode}_{args.artifact_probe_compression}.zip"
+    )
+    try:
+        report = write_artifact(
+            model,
+            output,
+            config={
+                **model_cfg.__dict__,
+                "artifact_probe_bits": args.artifact_probe_bits,
+                "artifact_probe_quantization_mode": args.artifact_probe_quantization_mode,
+                "artifact_probe_compression": args.artifact_probe_compression,
+            },
+            bits=args.artifact_probe_bits,
+            quantization_mode=args.artifact_probe_quantization_mode,
+            compression=args.artifact_probe_compression,
+        )
+    except Exception as exc:
+        failure_dir = probe_root
+        failure_dir.mkdir(parents=True, exist_ok=True)
+        failure_path = failure_dir / f"step_{step:08d}_probe_failure.json"
+        failure_path.write_text(
+            json.dumps({"step": int(step), "error": str(exc)}, indent=2),
+            encoding="utf-8",
+        )
+        return {
+            "artifact/probe_step": float(step),
+            "artifact/probe_failed": 1.0,
+            "artifact/within_limit": 0.0,
+            "artifact/under_size_limit": 0.0,
+        }
+
+    report_path = output.with_suffix(output.suffix + ".json")
+    report_path.write_text(json.dumps(asdict(report), indent=2), encoding="utf-8")
+    margin = float(report.bytes_limit - report.bytes_total)
+    return {
+        "artifact/probe_step": float(step),
+        "artifact/probe_failed": 0.0,
+        "artifact/quantized_total_bytes": float(report.bytes_total),
+        "artifact/compressed_total_bytes": float(report.bytes_total),
+        "artifact/within_limit": float(report.within_limit),
+        "artifact/under_size_limit": float(report.within_limit),
+        "artifact/size_margin_bytes": margin,
+        "artifact/size_limit_bytes": float(report.bytes_limit),
+        "artifact/total_parameters": float(report.parameters),
+        "artifact/deployment_parameters": float(report.deployment_parameters),
+        "artifact/tensor_count": float(report.tensors),
+        "artifact/excluded_tensors": float(report.excluded_tensors),
+        "artifact/probe_bits": float(args.artifact_probe_bits),
+        "artifact/probe_quantization_mode_code": _artifact_probe_mode_code(args.artifact_probe_quantization_mode),
+        "artifact/probe_compression_code": _artifact_probe_compression_code(args.artifact_probe_compression),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=None, help="YAML file whose keys become CLI defaults.")
@@ -253,6 +336,12 @@ def main() -> None:
     parser.add_argument("--full-dataset-run", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--fineweb-mix-ratio", type=float, default=0.0)
     parser.add_argument("--target-artifact-bytes", type=int, default=16_000_000)
+    parser.add_argument("--artifact-probe-every", type=int, default=0)
+    parser.add_argument("--artifact-probe-at-start", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--artifact-probe-dir", default="")
+    parser.add_argument("--artifact-probe-bits", type=int, choices=[4, 6, 8], default=6)
+    parser.add_argument("--artifact-probe-quantization-mode", choices=["tensor", "row"], default="row")
+    parser.add_argument("--artifact-probe-compression", choices=["deflated", "bzip2", "lzma"], default="lzma")
     parser.add_argument("--val-data-path", action="append", default=[], help="Validation Parquet/JSONL path. Can be repeated.")
     parser.add_argument("--eval-every", type=int, default=0, help="Run validation every N optimizer steps; disabled when 0.")
     parser.add_argument("--eval-batches", type=int, default=8)
@@ -423,9 +512,14 @@ def main() -> None:
                 "fineweb_tokens_per_graph": args.fineweb_tokens_per_graph,
                 "fineweb_stride_tokens": args.fineweb_stride_tokens,
                 "target_artifact_bytes": args.target_artifact_bytes,
+                "artifact_probe_every": args.artifact_probe_every,
+                "artifact_probe_at_start": args.artifact_probe_at_start,
+                "artifact_probe_bits": args.artifact_probe_bits,
+                "artifact_probe_quantization_mode": args.artifact_probe_quantization_mode,
+                "artifact_probe_compression": args.artifact_probe_compression,
             },
         )
-        configure_wandb_metrics(wandb, step_metric="train/step")
+        configure_wandb_metrics(wandb)
         run.summary["parameter_count"] = model.parameter_count()
         if curriculum_config is not None:
             run.summary["expert_curriculum_order"] = str(curriculum_config["expert_orders"])
@@ -607,9 +701,16 @@ def main() -> None:
         mean_distill_loss = distill_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_teacher_loss = teacher_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_graph_tokens = graph_tokens_value / max(train_cfg.grad_accum_steps, 1)
+        global_step = step + 1
         pbar.set_postfix(loss=f"{mean_loss:.4f}", params=model.parameter_count())
-        if run is not None and step % train_cfg.log_interval == 0:
+        artifact_metrics: dict[str, float] = {}
+        if _artifact_probe_due(step, start_step, args.artifact_probe_every, args.artifact_probe_at_start):
+            artifact_metrics = run_artifact_probe(model, model_cfg, ckpt_dir, global_step, args)
+            artifact_metrics["trainer/step"] = global_step
+            artifact_metrics["train/step"] = global_step
+        if run is not None and (step == start_step or global_step % train_cfg.log_interval == 0):
             metrics = {
+                "trainer/step": global_step,
                 "train/loss": mean_loss,
                 "train/supervised_loss": mean_supervised_loss,
                 "train/gflownet_loss": mean_gflownet_loss,
@@ -629,7 +730,7 @@ def main() -> None:
                 "train/graph_tokens_per_microbatch": mean_graph_tokens,
                 "train/lr": lr,
                 "train/grad_norm": float(grad_norm.detach().cpu() if torch.is_tensor(grad_norm) else grad_norm),
-                "train/step": step,
+                "train/step": global_step,
                 "data/full_curated_train_split_active": float(bool(args.full_dataset_run)),
                 "data/fineweb_mix_ratio": args.fineweb_mix_ratio,
                 "data/interleave_data_paths": float(bool(args.interleave_data_paths)),
@@ -637,6 +738,7 @@ def main() -> None:
                 "data/fineweb_stride_tokens": float(args.fineweb_stride_tokens),
                 "artifact/target_size_limit_bytes": args.target_artifact_bytes,
             }
+            metrics.update(artifact_metrics)
             for key, value in got_metric_sums.items():
                 metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
             for key, value in trajectory_metric_sums.items():
@@ -670,6 +772,8 @@ def main() -> None:
                     }
                 )
             run.log(organize_wandb_payload(metrics))
+        elif run is not None and artifact_metrics:
+            run.log(organize_wandb_payload(artifact_metrics))
         if (
             args.write_derived_category_examples
             and last_batch_for_examples is not None
@@ -748,7 +852,7 @@ def main() -> None:
                 model.set_active_soft_moe_experts([assignment.active_expert])
             pbar.write(f"validation step={step + 1} masked_mse={val_loss:.6f}")
             if run is not None:
-                run.log(organize_wandb_payload({"val/masked_mse": val_loss, "train/step": step + 1}))
+                run.log(organize_wandb_payload({"val/masked_mse": val_loss, "trainer/step": step + 1, "train/step": step + 1}))
         if args.checkpoint_every > 0 and (step + 1) % args.checkpoint_every == 0:
             save_checkpoint(
                 ckpt_dir,

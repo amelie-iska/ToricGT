@@ -23,6 +23,11 @@ data:
   full_dataset_run: true
   fineweb_mix_ratio: 0.65
   target_artifact_bytes: 16000000
+  artifact_probe_every: 1000
+  artifact_probe_at_start: true
+  artifact_probe_bits: 6
+  artifact_probe_quantization_mode: row
+  artifact_probe_compression: lzma
 
 model:
   attention: tropical_ring
