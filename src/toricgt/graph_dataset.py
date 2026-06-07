@@ -127,6 +127,112 @@ def decode_sp1024_tokens(tokens: np.ndarray, tokenizer=None) -> str:
     return " ".join(f"<sp{token}>" for token in ids)
 
 
+def sentencepiece_target_byte_lengths(
+    input_ids: np.ndarray,
+    target_ids: np.ndarray,
+    tokenizer=None,
+) -> np.ndarray:
+    """Return challenge-compatible byte counts for SP1024 next-token targets."""
+
+    prev = np.asarray(input_ids, dtype=np.int64).reshape(-1)
+    tgt = np.asarray(target_ids, dtype=np.int64).reshape(-1)
+    if tokenizer is None:
+        decoded = decode_sp1024_tokens(tgt, tokenizer)
+        mean_bytes = max(1, len(decoded.encode("utf-8", errors="replace"))) / max(1, int(tgt.size))
+        return np.full((int(tgt.size),), float(mean_bytes), dtype=np.float32)
+
+    out = np.zeros((int(tgt.size),), dtype=np.float32)
+    for idx, token in enumerate(tgt.tolist()):
+        token_id = int(token)
+        prev_id = int(prev[idx]) if idx < int(prev.size) else -1
+        try:
+            if tokenizer.is_control(token_id) or tokenizer.is_unknown(token_id) or tokenizer.is_unused(token_id):
+                out[idx] = 0.0
+                continue
+            if tokenizer.is_byte(token_id):
+                out[idx] = 1.0
+                continue
+            piece = str(tokenizer.id_to_piece(token_id))
+            has_leading_space = piece.startswith("▁")
+            if has_leading_space:
+                piece = piece[1:]
+            byte_count = len(piece.encode("utf-8"))
+            previous_is_boundary = True
+            if prev_id >= 0:
+                previous_is_boundary = bool(
+                    tokenizer.is_control(prev_id) or tokenizer.is_unknown(prev_id) or tokenizer.is_unused(prev_id)
+                )
+            if has_leading_space and not previous_is_boundary:
+                byte_count += 1
+            out[idx] = float(byte_count)
+        except Exception:
+            out[idx] = 0.0
+    return out
+
+
+def deterministic_random_ranks(node_ids: list[str], record_id: str) -> dict[str, int]:
+    keyed = []
+    for node_id in node_ids:
+        digest = hashlib.blake2b(f"{record_id}:{node_id}".encode("utf-8", errors="replace"), digest_size=8).digest()
+        keyed.append((int.from_bytes(digest, "big"), node_id))
+    return {node_id: rank for rank, (_key, node_id) in enumerate(sorted(keyed))}
+
+
+def graph_causal_ranks(
+    nodes: list[dict[str, object]],
+    edges: list[dict[str, object]],
+    *,
+    record_id: str,
+    force_linear: bool = False,
+) -> tuple[torch.Tensor, str]:
+    """Compute node reveal ranks for causal TokenGT attention.
+
+    FineWeb chains use their natural order.  Directed acyclic graphs use a
+    topological rank.  Cyclic or noncausal graphs get deterministic random
+    reveal ranks so training remains autoregressive without inventing a false
+    causal direction.
+    """
+
+    node_ids = [str(node.get("id", idx)) for idx, node in enumerate(nodes)]
+    if not node_ids:
+        return torch.zeros(0, dtype=torch.long), "empty"
+    if force_linear:
+        return torch.arange(len(node_ids), dtype=torch.long), "linear_causal"
+
+    node_set = set(node_ids)
+    incoming: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    outgoing: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    edge_count = 0
+    for edge in edges:
+        src = str(edge.get("source"))
+        dst = str(edge.get("target"))
+        if src not in node_set or dst not in node_set or src == dst:
+            continue
+        outgoing[src].add(dst)
+        incoming[dst].add(src)
+        edge_count += 1
+    if edge_count <= 0:
+        ranks = deterministic_random_ranks(node_ids, record_id)
+        return torch.tensor([ranks[node_id] for node_id in node_ids], dtype=torch.long), "random_no_edges"
+
+    ready = sorted(node_id for node_id in node_ids if not incoming[node_id])
+    topo: list[str] = []
+    incoming_work = {node_id: set(values) for node_id, values in incoming.items()}
+    while ready:
+        node_id = ready.pop(0)
+        topo.append(node_id)
+        for dst in sorted(outgoing[node_id]):
+            incoming_work[dst].discard(node_id)
+            if not incoming_work[dst] and dst not in topo and dst not in ready:
+                ready.append(dst)
+        ready.sort()
+    if len(topo) != len(node_ids):
+        ranks = deterministic_random_ranks(node_ids, record_id)
+        return torch.tensor([ranks[node_id] for node_id in node_ids], dtype=torch.long), "random_cycle"
+    ranks = {node_id: rank for rank, node_id in enumerate(topo)}
+    return torch.tensor([ranks[node_id] for node_id in node_ids], dtype=torch.long), "topological_dag"
+
+
 def stable_partition_id(
     values: Iterable[object],
     num_subsets: int,
@@ -384,10 +490,8 @@ def _lm_tensors_from_tokens(
     target_slice = np.clip(token_ids[1 : length + 1], 0, vocab_size - 1)
     target_ids[:length] = torch.from_numpy(target_slice).long()
     lm_mask[:length] = True
-    if tokenizer is not None:
-        decoded = decode_sp1024_tokens(target_slice, tokenizer)
-        total_bytes = max(1, len(decoded.encode("utf-8", errors="replace")))
-        target_byte_lengths[:length] = float(total_bytes) / float(length)
+    byte_lengths = sentencepiece_target_byte_lengths(token_ids[:length], target_slice, tokenizer)
+    target_byte_lengths[:length] = torch.from_numpy(byte_lengths).to(dtype=torch.float32)
     return input_ids, target_ids, lm_mask, target_byte_lengths
 
 
@@ -408,6 +512,16 @@ def graph_json_to_item(
     raw_nodes = list(payload.get("nodes") or [])
     raw_edges = list(payload.get("edges") or [])
     nodes = raw_nodes[: cfg.max_nodes]
+    record_id = str(payload.get("record_id") or raw_payload.get("record_id") or "")
+    node_causal_rank, causal_rank_kind = graph_causal_ranks(
+        nodes,
+        raw_edges,
+        record_id=record_id,
+        force_linear=is_fineweb_lm_graph,
+    )
+    padded_node_causal_rank = torch.arange(cfg.max_nodes, dtype=torch.long)
+    if node_causal_rank.numel() > 0:
+        padded_node_causal_rank[: node_causal_rank.numel()] = node_causal_rank[: cfg.max_nodes]
     node_ids = {str(node.get("id", idx)): idx for idx, node in enumerate(nodes)}
     node_count = max(1, len(nodes))
 
@@ -459,12 +573,14 @@ def graph_json_to_item(
         lm_target_ids=lm_target_ids,
         lm_mask=lm_mask,
         lm_target_byte_lengths=lm_target_byte_lengths,
+        node_causal_rank=padded_node_causal_rank,
     )
     metadata = {
         "dataset": payload.get("dataset", ""),
         "task_family": payload.get("task_family", ""),
-        "record_id": payload.get("record_id", ""),
+        "record_id": record_id,
         "trajectory_kind": payload.get("trajectory_kind", ""),
+        "causal_rank_kind": causal_rank_kind,
     }
     return GraphTrainingItem(graph=graph, target=target, metadata=metadata)
 
@@ -510,6 +626,14 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
                 for item in items
             ]
         )
+    node_causal_rank = torch.stack(
+        [
+            item.graph.node_causal_rank
+            if item.graph.node_causal_rank is not None
+            else torch.arange(items[0].graph.node_mask.numel(), dtype=torch.long)
+            for item in items
+        ]
+    )
     graph = GraphBatch(
         node_features=torch.stack([item.graph.node_features for item in items]),
         edge_features=torch.stack([item.graph.edge_features for item in items]),
@@ -520,6 +644,7 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
         lm_target_ids=lm_target_ids,
         lm_mask=lm_mask,
         lm_target_byte_lengths=lm_target_byte_lengths,
+        node_causal_rank=node_causal_rank,
     )
     target = torch.stack([item.target for item in items])
     return graph, target

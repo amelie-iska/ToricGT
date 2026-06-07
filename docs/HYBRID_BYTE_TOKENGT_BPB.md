@@ -32,6 +32,36 @@ edges. When a source graph is cyclic or has no trusted causal interpretation,
 `tokengt_graph_noncausal_policy: undirected_regularizer` disables direction and
 cycle terms and keeps only undirected structural matching.
 
+## Native TokenGT Route
+
+The native TokenGT trainer also has a score-valid FineWeb route.  It is not a
+full bidirectional graph encoder for the LM objective.  When
+`use_causal_graph_attention: true` and `use_lm_token_embeddings: true`, every
+graph batch carries `node_causal_rank`:
+
+```text
+FineWeb chain       -> rank(i) = i
+directed acyclic GoT -> rank(i) = topological_rank(i)
+cyclic/noncausal GoT -> rank(i) = deterministic_random_rank(sample_id, node_id)
+```
+
+Edge-token ranks are the maximum rank of their endpoints.  The TokenGT
+attention mask is then:
+
+```text
+can_attend(query, key) =
+    valid(query) and valid(key) and causal_rank(key) <= causal_rank(query)
+```
+
+This gives left-to-right autoregression on FineWeb, topological
+autoregression on DAG-like reasoning graphs, and random-order autoregression
+on cyclic or non-causal graphs without inventing a false direction.  Only this
+causal-token route is allowed to emit the OAI-style restricted FineWeb aliases
+`03_validation/oai_parameter_golf_restricted_fineweb_bpb`,
+`oai_competition/bpb`, `competition/oai_bpb`, and `bpb/oai_competition`.
+Non-causal or legacy TokenGT runs must keep their graph-node BPB estimates
+under `tokengt/*` proxy namespaces.
+
 ## Differentiable Objective
 
 The training loss remains:

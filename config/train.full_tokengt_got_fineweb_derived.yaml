@@ -4,9 +4,10 @@ metadata:
   artifact_size_target_bytes: 16000000
 
 notes:
-  graph_structure: "Rows are converted to branch/merge graph-of-thought DAGs before TokenGT tokenization."
+  graph_structure: "Rows are converted to branch/merge graph-of-thought DAGs before TokenGT tokenization; FineWeb receives linear causal ranks, DAGs receive topological ranks, and cyclic/noncausal graphs receive deterministic random reveal ranks."
   advanced_losses: "Medium-conservative from step 0: DAG, trajectory memory, GFlowNet, and derived-category chain-map losses."
   exact_audits: "Derived-category examples include chain complexes plus Stanley-Reisner/Taylor resolution certificates."
+  causal_tokengt_bpb: "Route (1): learned SP1024 node embeddings plus causal graph attention allow TokenGT checkpoints to report an OAI-style byte-normalized BPB gate."
 
 data:
   data_path:
@@ -42,6 +43,10 @@ model:
   soft_moe_slots: 2
   use_lm_head: true
   lm_vocab_size: 1024
+  use_lm_token_embeddings: true
+  use_causal_graph_attention: true
+  use_lm_bigram_bias: true
+  lm_bigram_bias_scale: 0.15
   activation_checkpointing: true
 
 training:

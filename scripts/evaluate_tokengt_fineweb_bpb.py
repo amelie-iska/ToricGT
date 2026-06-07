@@ -3,10 +3,10 @@
 
 This is the TokenGT checkpoint-family analogue of the OAI Parameter-Golf
 FineWeb check.  It scores next-token SP1024 targets that are attached to
-FineWeb graph vertices by ``CuratedGraphIterableDataset``.  The metric is not a
-byte-level random-order LM BPB; it is graph-node SP1024 bits/token exposed by
-TokenGT's optional LM head, with an optional sample-decoded byte-normalized
-estimate for comparison.
+FineWeb graph vertices by ``CuratedGraphIterableDataset``.  With causal graph
+attention and learned LM token embeddings enabled, the byte-normalized metric
+uses the same SentencePiece byte accounting as the OAI compact evaluator.
+Without those flags it remains a graph-node proxy diagnostic.
 """
 
 from __future__ import annotations
@@ -102,6 +102,7 @@ def move_batch(batch: GraphBatch, device: str) -> GraphBatch:
         lm_target_byte_lengths=batch.lm_target_byte_lengths.to(device)
         if batch.lm_target_byte_lengths is not None
         else None,
+        node_causal_rank=batch.node_causal_rank.to(device) if batch.node_causal_rank is not None else None,
     )
 
 
@@ -197,19 +198,32 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     estimated_bpb = (total_nll / math.log(2.0)) / total_estimated_bytes if total_estimated_bytes > 0 else None
     mean_bytes_per_token = total_estimated_bytes / total_tokens if total_estimated_bytes > 0 else None
     step = int(payload.get("step", 0) or 0)
+    causal_tokengt_bpb_available = bool(cfg.use_causal_graph_attention and cfg.use_lm_token_embeddings)
     summary: dict[str, Any] = {
         "checkpoint": str(checkpoint_path),
         "step": step,
         "source": "tokengt_graph_node_sp1024_lm",
         "metric_namespace": "fineweb",
-        "note": "TokenGT graph-node SP1024 next-token bits/token on the OAI FineWeb shard; estimated BPB divides by sample decoded UTF-8 bytes/token and is not official byte-level random-order LM BPB.",
-        "oai_competition/available": 0.0,
-        "oai_competition/bpb_available": 0.0,
+        "note": (
+            "Causal TokenGT SP1024 next-token BPB with OAI SentencePiece byte accounting."
+            if causal_tokengt_bpb_available
+            else "TokenGT graph-node SP1024 next-token bits/token; byte-normalized BPB is a proxy unless causal graph attention and learned LM token embeddings are enabled."
+        ),
+        "oai_competition/available": 1.0 if causal_tokengt_bpb_available else 0.0,
+        "oai_competition/bpb_available": 1.0 if causal_tokengt_bpb_available else 0.0,
+        "oai_competition/bpb": float(estimated_bpb) if estimated_bpb is not None and causal_tokengt_bpb_available else None,
+        "oai_competition/loss": float(loss_value) if causal_tokengt_bpb_available else None,
         "oai_competition/source_sp1024_graph_nodes": 1.0,
-        "oai_competition/official_byte_level_bpb_available": 0.0,
-        "oai_competition/eval_scope": "tokengt_graph_node_sp1024_sampled",
+        "oai_competition/official_byte_level_bpb_available": 1.0 if causal_tokengt_bpb_available else 0.0,
+        "oai_competition/eval_scope": (
+            "causal_tokengt_graph_node_sp1024"
+            if causal_tokengt_bpb_available
+            else "tokengt_graph_node_sp1024_proxy"
+        ),
         "oai_competition/eval_batches": float(batches),
         "oai_competition/eval_tokens": float(total_tokens),
+        "tokengt/causal_graph_attention": 1.0 if cfg.use_causal_graph_attention else 0.0,
+        "tokengt/learned_lm_token_embeddings": 1.0 if cfg.use_lm_token_embeddings else 0.0,
         "tokengt/fineweb_graph_node_sp1024_loss": float(loss_value),
         "tokengt/fineweb_graph_node_sp1024_bpt": float(bits_per_token),
         "tokengt/fineweb_graph_node_sp1024_tokens": float(total_tokens),
@@ -237,6 +251,11 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 "03_validation/tokengt_fineweb_graph_node_sp1024_mean_target_bytes_per_token": float(
                     mean_bytes_per_token
                 ),
+                "03_validation/oai_parameter_golf_restricted_fineweb_causal_tokengt_bpb": (
+                    float(estimated_bpb) if causal_tokengt_bpb_available else None
+                ),
+                "competition/oai_bpb": float(estimated_bpb) if causal_tokengt_bpb_available else None,
+                "bpb/oai_competition": float(estimated_bpb) if causal_tokengt_bpb_available else None,
             }
         )
     return summary
@@ -254,6 +273,7 @@ def write_report(summary: dict[str, Any], output_json: Path) -> None:
                 f"- Source: `{summary.get('source', 'n/a')}`",
                 f"- Bits/token: `{summary.get('tokengt/fineweb_graph_node_sp1024_bpt', 'n/a')}`",
                 f"- Estimated BPB: `{summary.get('tokengt/fineweb_graph_node_sp1024_estimated_bpb', 'n/a')}`",
+                f"- Causal TokenGT OAI BPB: `{summary.get('03_validation/oai_parameter_golf_restricted_fineweb_causal_tokengt_bpb', 'n/a')}`",
                 f"- Loss: `{summary.get('tokengt/fineweb_graph_node_sp1024_loss', 'n/a')}`",
                 f"- Eval tokens: `{summary.get('tokengt/fineweb_graph_node_sp1024_tokens', 'n/a')}`",
                 f"- Estimated bytes: `{summary.get('tokengt/fineweb_graph_node_sp1024_estimated_bytes', 'n/a')}`",

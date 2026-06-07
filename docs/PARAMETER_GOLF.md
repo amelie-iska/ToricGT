@@ -673,6 +673,12 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
 - The training script does not read validation rows during optimization.
 - Evaluation derives fresh content-independent random orders for each batch.
 - GFlowNet actions are sampled from prefix-visible hidden states only.
+- Native TokenGT FineWeb scoring is valid only in the causal-token route:
+  FineWeb chains use left-to-right ranks, DAG-like graph-of-thought examples
+  use topological ranks, and cyclic or non-causal graphs use deterministic
+  random-order reveal ranks.  Full bidirectional graph attention is allowed for
+  non-scored graph-to-graph representation learning, but it must not be used
+  for a BPB alias.
 - Score-first bias adaptation updates only after a token loss is recorded.
 - Auxiliary multi-token heads are training-only and stripped from exports.
 - The artifact audit runs before training and fails if the compressed export is

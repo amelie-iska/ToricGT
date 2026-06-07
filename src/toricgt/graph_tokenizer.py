@@ -26,6 +26,7 @@ class GraphBatch:
     lm_target_ids: Optional[torch.Tensor] = None
     lm_mask: Optional[torch.Tensor] = None
     lm_target_byte_lengths: Optional[torch.Tensor] = None
+    node_causal_rank: Optional[torch.Tensor] = None
 
 
 @dataclass
@@ -35,6 +36,7 @@ class TokenBatch:
     token_type: torch.Tensor
     node_positions: torch.Tensor
     edge_positions: torch.Tensor
+    causal_rank: Optional[torch.Tensor] = None
 
 
 class GraphTokenizer(nn.Module):
@@ -106,10 +108,35 @@ class GraphTokenizer(nn.Module):
         token_type = torch.cat([torch.zeros_like(node_ids), torch.ones_like(edge_ids)], dim=1)
         node_positions = torch.arange(n_nodes, device=device)
         edge_positions = torch.arange(n_nodes, n_nodes + n_edges, device=device)
-        return TokenBatch(tokens, token_mask, token_type, node_positions, edge_positions)
+        causal_rank = None
+        if batch.node_causal_rank is not None:
+            node_rank = batch.node_causal_rank[:, :n_nodes].to(device=device, dtype=torch.long)
+            node_rank = node_rank.masked_fill(~batch.node_mask[:, :n_nodes].to(device=device, dtype=torch.bool), 2**30)
+            if n_edges > 0:
+                src_rank = torch.gather(node_rank, 1, endpoints[..., 0])
+                dst_rank = torch.gather(node_rank, 1, endpoints[..., 1])
+                edge_rank = torch.maximum(src_rank, dst_rank).masked_fill(~edge_mask.to(device=device, dtype=torch.bool), 2**30)
+            else:
+                edge_rank = torch.empty((bsz, 0), device=device, dtype=torch.long)
+            causal_rank = torch.cat([node_rank, edge_rank], dim=1)
+        return TokenBatch(tokens, token_mask, token_type, node_positions, edge_positions, causal_rank)
 
 
-def attention_mask_from_token_mask(token_mask: torch.Tensor) -> torch.Tensor:
-    """Build [batch, 1, query, key] boolean attention mask."""
+def attention_mask_from_token_mask(
+    token_mask: torch.Tensor,
+    causal_rank: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Build [batch, 1, query, key] boolean attention mask.
 
-    return token_mask[:, None, :, None] & token_mask[:, None, None, :]
+    When ``causal_rank`` is supplied, each query can only attend to keys whose
+    reveal/topological rank is no larger than the query rank.  This gives a
+    TokenGT analogue of autoregressive decoding for FineWeb chains, DAGs, and
+    deterministic random-order graph reveals.
+    """
+
+    mask = token_mask[:, None, :, None] & token_mask[:, None, None, :]
+    if causal_rank is not None:
+        query_rank = causal_rank[:, None, :, None]
+        key_rank = causal_rank[:, None, None, :]
+        mask = mask & (key_rank <= query_rank)
+    return mask

@@ -2159,18 +2159,35 @@ Then the reported proxy is
   \frac{\sum_i-\log_2 p_i(z_i)}
        {\operatorname{bytes}(D(z_{1:m}))}.
 \end{equation}
-This conversion is valid as a diagnostic normalization for the graph-node
-head, and it is often more interpretable than raw SP1024 bits/token.  It is
-still marked as estimated because the model being scored is not emitting a
-byte-level next-symbol distribution over the same prequential process.  Thus
-dashboards must display all three concepts under different names:
+This conversion is valid as a diagnostic normalization for a bidirectional or
+otherwise non-score-valid graph-node head, and it is often more interpretable
+than raw SP1024 bits/token.  It is still marked as estimated unless the
+TokenGT path is made genuinely autoregressive.  The native causal TokenGT
+route does this by attaching a learned SP1024 input-token embedding to each
+node, carrying a reveal-rank tensor through the graph batch, and replacing
+bidirectional graph attention by the mask
+\begin{equation}
+  M_{ij}=1\quad\Longleftrightarrow\quad
+  i,j\text{ are valid tokens and } r(j)\le r(i).
+\end{equation}
+FineWeb chains use $r(i)=i$, directed acyclic reasoning graphs use a
+topological rank, and cyclic or noncausal graphs use a deterministic
+content-independent random reveal rank.  Edge-token rank is the maximum of
+its endpoint ranks.  Under these hypotheses the SP1024 graph-node loss is a
+score-before-update next-token loss, and the byte denominator is the sum of
+SentencePiece target byte increments, so the restricted FineWeb metric can be
+reported as an OAI-style BPB for this route.  Without these hypotheses it
+remains a proxy.  Thus dashboards must display all relevant concepts under
+different names:
 \[
 \operatorname{BPB}_{\mathrm{OAI,official}},\qquad
 \operatorname{BPT}_{\mathrm{SP1024,TokenGT}},\qquad
+\operatorname{BPB}_{\mathrm{SP1024,causal\ TokenGT}},\qquad
 \widehat{\operatorname{BPB}}_{\mathrm{SP1024}\to\mathrm{byte}}.
 \]
-Only the first should decide Parameter-Golf success; the latter two guide
-TokenGT training and ablations.
+Only score-valid byte or causal-token metrics should decide Parameter-Golf
+success; bidirectional graph proxies guide TokenGT representation training
+and ablations.
 
 \paragraph{Byte-scored TokenGT hybrid objective.}
 The clean way to use TokenGT structure in the contest-facing branch is not to
@@ -2253,6 +2270,15 @@ from a base seed $s$, a public sample id, a pass id $r$, and the length $T$.  Th
   q_\theta(b\mid \pi)=\prod_{k=1}^T q_\theta\left(b_{\pi_k}\mid b_{\pi_1},\ldots,b_{\pi_{k-1}},\pi_1,\ldots,\pi_k\right).
 \end{equation}
 The row scored at step $k$ contains the previous revealed byte, the current target position $\pi_k$, fixed toric phase features of $\pi_k$, and causal access only to rows $<k$.  It does not contain $b_{\pi_k}$.
+
+The same rule is used when TokenGT receives graph inputs rather than byte rows.
+If the graph already has a trusted causal orientation and is acyclic, the reveal
+rank is a topological order.  If the graph is a FineWeb token chain, the reveal
+rank is the usual left-to-right order.  If the graph is cyclic, undirected, or
+otherwise noncausal, ToricGT samples a deterministic random reveal order from
+the record id and node ids.  This is the graph-token analogue of random-order
+autoregressive decoding: it avoids future-node leakage without pretending that
+an undirected cycle has a natural causal direction.
 
 \begin{lemma}[Content-independent random order is score-valid]
 If $\pi$ is sampled independently of the unscored byte values and the model row for step $k$ is a measurable function only of $(b_{\pi_1},\ldots,b_{\pi_{k-1}},\pi_1,\ldots,\pi_k)$ and fixed parameters, then every loss term
@@ -3467,9 +3493,11 @@ family.  The differentiable train-time term is intentionally small, while
 periodic sidecars write exact finite certificates for review.  These losses
 can shape graph-of-thought hidden trajectories, memory retrieval, analogy, and
 GFlowNet rewards, but they do not by themselves authorize an official
-Parameter-Golf BPB claim.  Official byte BPB, TokenGT SP1024 bits/token, and
-SP1024-to-byte estimated BPB are therefore reported simultaneously and kept in
-separate namespaces.
+Parameter-Golf BPB claim.  Official byte BPB, causal TokenGT SP1024-to-byte
+BPB, bidirectional TokenGT SP1024 bits/token, and noncausal SP1024-to-byte
+estimated BPB are therefore reported simultaneously and kept in separate
+namespaces.  The OAI-style aliases are emitted only when the causal-token
+contract is active.
 
 \paragraph{Pseudocode.}
 The implementation is deliberately audit-first.

@@ -234,6 +234,7 @@ def move_batch(batch: GraphBatch, target: torch.Tensor, device: str) -> tuple[Gr
             lm_target_ids=_optional_to_device(batch.lm_target_ids, device),
             lm_mask=_optional_to_device(batch.lm_mask, device),
             lm_target_byte_lengths=_optional_to_device(batch.lm_target_byte_lengths, device),
+            node_causal_rank=_optional_to_device(batch.node_causal_rank, device),
         ),
         target.to(device),
     )
@@ -457,6 +458,10 @@ def main() -> None:
     parser.add_argument("--fineweb-tokens-per-graph", type=int, default=1024)
     parser.add_argument("--fineweb-stride-tokens", type=int, default=1024)
     parser.add_argument("--use-lm-head", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--use-lm-token-embeddings", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--use-causal-graph-attention", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--use-lm-bigram-bias", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--lm-bigram-bias-scale", type=float, default=0.0)
     parser.add_argument("--activation-checkpointing", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--lm-vocab-size", type=int, default=1024)
     parser.add_argument("--fineweb-lm-loss-weight", type=float, default=0.0)
@@ -539,6 +544,10 @@ def main() -> None:
         derived_category_max_vertices=args.derived_category_max_vertices,
         use_lm_head=args.use_lm_head,
         lm_vocab_size=args.lm_vocab_size,
+        use_lm_token_embeddings=args.use_lm_token_embeddings,
+        use_causal_graph_attention=args.use_causal_graph_attention,
+        use_lm_bigram_bias=args.use_lm_bigram_bias,
+        lm_bigram_bias_scale=args.lm_bigram_bias_scale,
         activation_checkpointing=args.activation_checkpointing,
     )
     train_cfg = TrainConfig(
@@ -960,6 +969,9 @@ def main() -> None:
                 "data/interleave_data_paths": float(bool(args.interleave_data_paths)),
                 "data/fineweb_tokens_per_graph": float(args.fineweb_tokens_per_graph),
                 "data/fineweb_stride_tokens": float(args.fineweb_stride_tokens),
+                "tokengt/causal_graph_attention": float(bool(model_cfg.use_causal_graph_attention)),
+                "tokengt/learned_lm_token_embeddings": float(bool(model_cfg.use_lm_token_embeddings)),
+                "tokengt/lm_bigram_bias": float(bool(model_cfg.use_lm_bigram_bias)),
                 "artifact/target_size_limit_bytes": args.target_artifact_bytes,
             }
             for mem_key, mem_value in proc_memory_metrics().items():
@@ -982,6 +994,14 @@ def main() -> None:
                             "tokengt/train_graph_node_sp1024_mean_target_bytes_per_token": mean_fineweb_lm_bytes_per_token,
                         }
                     )
+                    if model_cfg.use_causal_graph_attention and model_cfg.use_lm_token_embeddings:
+                        metrics.update(
+                            {
+                                "tokengt/train_graph_node_sp1024_causal_bpb": mean_fineweb_lm_estimated_bpb,
+                                "train/bpb": mean_fineweb_lm_estimated_bpb,
+                                "fineweb/train_bpb": mean_fineweb_lm_estimated_bpb,
+                            }
+                        )
             metrics.update(artifact_metrics)
             for key, value in got_metric_sums.items():
                 metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
@@ -1160,13 +1180,20 @@ def main() -> None:
                     restricted_loss = float(restricted_fineweb_metrics["fineweb_lm_loss"])
                     restricted_bpt = float(restricted_fineweb_metrics["fineweb_lm_bits_per_token"])
                     restricted_tokens = float(restricted_fineweb_metrics["fineweb_lm_tokens"])
+                    causal_tokengt_bpb_available = bool(
+                        model_cfg.use_causal_graph_attention and model_cfg.use_lm_token_embeddings
+                    )
                     payload.update(
                         {
                             "tokengt/restricted_fineweb_graph_node_sp1024_loss": restricted_loss,
                             "tokengt/restricted_fineweb_graph_node_sp1024_bpt": restricted_bpt,
                             "tokengt/restricted_fineweb_graph_node_sp1024_tokens": restricted_tokens,
-                            "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_available": 0.0,
-                            "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_note_code": 1.0,
+                            "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_available": float(
+                                causal_tokengt_bpb_available
+                            ),
+                            "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_note_code": (
+                                0.0 if causal_tokengt_bpb_available else 1.0
+                            ),
                         }
                     )
                     if "fineweb_lm_estimated_bpb" in restricted_fineweb_metrics:
@@ -1183,6 +1210,19 @@ def main() -> None:
                                 ),
                             }
                         )
+                        if causal_tokengt_bpb_available:
+                            restricted_bpb = float(restricted_fineweb_metrics["fineweb_lm_estimated_bpb"])
+                            payload.update(
+                                {
+                                    "tokengt/restricted_fineweb_graph_node_sp1024_causal_bpb": restricted_bpb,
+                                    "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb": restricted_bpb,
+                                    "03_validation/oai_parameter_golf_restricted_fineweb_causal_tokengt_bpb": restricted_bpb,
+                                    "03_validation/oai_parameter_golf_restricted_fineweb_bpb": restricted_bpb,
+                                    "oai_competition/bpb": restricted_bpb,
+                                    "competition/oai_bpb": restricted_bpb,
+                                    "bpb/oai_competition": restricted_bpb,
+                                }
+                            )
                 run.log(organize_wandb_payload(payload))
         if args.checkpoint_every > 0 and (step + 1) % args.checkpoint_every == 0:
             save_checkpoint(

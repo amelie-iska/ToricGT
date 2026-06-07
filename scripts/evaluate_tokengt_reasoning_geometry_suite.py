@@ -151,6 +151,13 @@ def move_batch(batch: GraphBatch, target: torch.Tensor, device: str) -> tuple[Gr
             edge_index=batch.edge_index.to(device),
             node_mask=batch.node_mask.to(device),
             edge_mask=batch.edge_mask.to(device),
+            lm_input_ids=batch.lm_input_ids.to(device) if batch.lm_input_ids is not None else None,
+            lm_target_ids=batch.lm_target_ids.to(device) if batch.lm_target_ids is not None else None,
+            lm_mask=batch.lm_mask.to(device) if batch.lm_mask is not None else None,
+            lm_target_byte_lengths=batch.lm_target_byte_lengths.to(device)
+            if batch.lm_target_byte_lengths is not None
+            else None,
+            node_causal_rank=batch.node_causal_rank.to(device) if batch.node_causal_rank is not None else None,
         ),
         target.to(device),
     )

@@ -54,6 +54,10 @@ class ModelConfig:
     derived_category_max_vertices: int = 8
     use_lm_head: bool = False
     lm_vocab_size: int = 1024
+    use_lm_token_embeddings: bool = False
+    use_causal_graph_attention: bool = False
+    use_lm_bigram_bias: bool = False
+    lm_bigram_bias_scale: float = 0.0
     activation_checkpointing: bool = False
 
 

@@ -50,6 +50,16 @@ class ToricTokenGT(nn.Module):
         self.node_head = nn.Linear(config.d_model, config.output_dim)
         self.edge_head = nn.Linear(config.d_model, config.output_dim)
         self.lm_head = nn.Linear(config.d_model, config.lm_vocab_size) if config.use_lm_head else None
+        self.lm_token_emb = (
+            nn.Embedding(config.lm_vocab_size, config.d_model)
+            if config.use_lm_head and config.use_lm_token_embeddings
+            else None
+        )
+        self.lm_bigram_bias = (
+            nn.Embedding(config.lm_vocab_size, config.lm_vocab_size)
+            if config.use_lm_head and config.use_lm_bigram_bias
+            else None
+        )
         self.graph_head = nn.Sequential(
             nn.Linear(config.d_model, config.d_model),
             nn.GELU(),
@@ -107,7 +117,15 @@ class ToricTokenGT(nn.Module):
     ) -> dict[str, torch.Tensor | object]:
         tok = self.tokenizer(batch)
         x = tok.tokens
-        mask = attention_mask_from_token_mask(tok.token_mask)
+        if self.lm_token_emb is not None and batch.lm_input_ids is not None:
+            input_ids = batch.lm_input_ids.to(device=x.device, dtype=torch.long).clamp(0, self.config.lm_vocab_size - 1)
+            lm_input = self.lm_token_emb(input_ids)
+            if batch.lm_mask is not None:
+                lm_input = lm_input * batch.lm_mask.to(device=x.device, dtype=lm_input.dtype).unsqueeze(-1)
+            x = x.clone()
+            x[:, tok.node_positions, :] = x[:, tok.node_positions, :] + lm_input
+        causal_rank = tok.causal_rank if self.config.use_causal_graph_attention else None
+        mask = attention_mask_from_token_mask(tok.token_mask, causal_rank=causal_rank)
         for block in self.blocks:
             if self.training and self.config.activation_checkpointing:
                 x = checkpoint(
@@ -136,7 +154,14 @@ class ToricTokenGT(nn.Module):
             "edge_mask": batch.edge_mask,
         }
         if self.lm_head is not None:
-            outputs["lm_logits"] = self.lm_head(node_x)
+            lm_logits = self.lm_head(node_x)
+            if self.lm_bigram_bias is not None and batch.lm_input_ids is not None:
+                input_ids = batch.lm_input_ids.to(device=lm_logits.device, dtype=torch.long).clamp(
+                    0,
+                    self.config.lm_vocab_size - 1,
+                )
+                lm_logits = lm_logits + self.config.lm_bigram_bias_scale * self.lm_bigram_bias(input_ids)
+            outputs["lm_logits"] = lm_logits
         if self.gflownet_policy is not None:
             forward_logits, backward_logits = self.gflownet_policy(pooled)
             outputs["gflownet_forward_logits"] = forward_logits

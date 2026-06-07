@@ -24,6 +24,16 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 tmux new-session -d -s toricgt_oai_toricgt_full_clone 'cd /home/iska/Documents/amelie/bio/ToricGT && RUN_NAME=toricgt_oai_toricgt_finewebval_metricfix_max16mb_d320l7_b16ga4_clone_$(date -u +%Y%m%dT%H%M%SZ) && WANDB_PROJECT=toricgt WANDB_RUN_NAME=$RUN_NAME PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/train.py --config config/train.full_tokengt_got_fineweb_derived.yaml --checkpoint-dir checkpoints/$RUN_NAME 2>&1 | tee logs/full_tokengt_got_fineweb_derived/$RUN_NAME/train.log'
 ```
 
+The native TokenGT FineWeb route is now autoregressive when
+`use_causal_graph_attention` and `use_lm_token_embeddings` are enabled.  FineWeb
+token chains receive their ordinary left-to-right reveal ranks; directed
+acyclic reasoning graphs receive topological ranks; and cyclic, undirected, or
+otherwise non-causal graphs receive deterministic content-independent random
+reveal ranks.  Attention masks then allow a query graph token to see only graph
+tokens whose reveal rank is no larger than its own.  This prevents the old
+failure mode where the graph LM head predicted next SP1024 tokens while the
+TokenGT encoder still had full bidirectional access to future nodes.
+
 **OpenAI competition baseline model**
 
 ```bash
@@ -1063,14 +1073,17 @@ loads the GPT-style checkpoint directly and future live reviews write
 sampled CPU probe for checkpoint/alias sanity; the trainer's full validation
 BPB is still the authoritative OpenAI Parameter-Golf gate.
 
-TokenGT graph checkpoints expose a different FineWeb readout through their
-optional graph-node SP1024 LM head. That path logs
-`tokengt/*_graph_node_sp1024_bpt` and
-`tokengt/*_graph_node_sp1024_estimated_bpb`, where the estimate divides
-SP1024 bits/token by the decoded UTF-8 bytes/token on the sampled shard. Those
-two metrics are useful for transfer diagnostics, but they are not aliases for
-`oai_competition/bpb` or
-`03_validation/oai_parameter_golf_restricted_fineweb_bpb`.
+TokenGT graph checkpoints expose a FineWeb SP1024 readout through their
+optional graph-node LM head.  In legacy or ablation configs this remains a
+diagnostic proxy: `tokengt/*_graph_node_sp1024_bpt` is SP1024 bits/token, and
+`tokengt/*_graph_node_sp1024_estimated_bpb` divides by the scored target
+UTF-8 byte count.  In the route-(1) causal config, however, the same head is
+fed learned SP1024 input-token embeddings and scored under rank-causal graph
+attention, so the restricted FineWeb validation metric is also logged as
+`03_validation/oai_parameter_golf_restricted_fineweb_bpb`,
+`oai_competition/bpb`, `competition/oai_bpb`, and `bpb/oai_competition`.
+Those aliases are only emitted when the causal-token path is active; otherwise
+the dashboard keeps the graph proxy names separate.
 
 The default config stores 7 dense blocks at width 384 and applies them twice,
 for 14 effective block applications. Random target orders are derived from a
