@@ -3,6 +3,14 @@
 from .random_order_lm import DenseRandomOrderToricLM, RandomOrderLMConfig
 from .soft_moe import GraphTokenSoftMoE, PrefixCausalSoftMoE
 from .combinatorial_toric_metrics import CombinatorialToricConfig, combinatorial_toric_cca_topology_loss
+from .derived_category_metrics import (
+    DerivedCategoryConfig,
+    analogical_derived_category_loss,
+    chain_complex_from_edges_np,
+    derived_category_feature_summary,
+    derived_category_objects_from_batch,
+    projective_resolution_certificate,
+)
 from .got_trajectory import GoTDAGConfig, default_branch_merge_edges, got_dag_metrics, got_dag_summary_np
 from .symbolic_multigraded_resolution import (
     SymbolicResolutionMetrics,
@@ -26,6 +34,7 @@ from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryMemoryIndex, Tr
 __all__ = [
     "__version__",
     "CombinatorialToricConfig",
+    "DerivedCategoryConfig",
     "DenseRandomOrderToricLM",
     "GraphTokenSoftMoE",
     "GoTDAGConfig",
@@ -39,6 +48,8 @@ __all__ = [
     "TrajectoryMemoryRecord",
     "TrajectoryRetrievalHead",
     "ToricGeometryConfig",
+    "analogical_derived_category_loss",
+    "chain_complex_from_edges_np",
     "combinatorial_toric_cca_topology_loss",
     "cyclic_flag_face_rows",
     "cyclic_stanley_reisner_betti_rows",
@@ -53,8 +64,11 @@ __all__ = [
     "cyclic_taylor_multidegree_counts",
     "cyclic_taylor_rank_rows",
     "default_branch_merge_edges",
+    "derived_category_feature_summary",
+    "derived_category_objects_from_batch",
     "got_dag_metrics",
     "got_dag_summary_np",
+    "projective_resolution_certificate",
     "reasoning_step_topology_loss",
 ]
 

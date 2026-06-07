@@ -226,6 +226,11 @@ def _category_alias(key: str) -> str | None:
             return f"05_gflownet/train/{rest}"
         if "graphcg" in lower:
             return f"06_graphcg/train/{rest}"
+        if any(
+            token in lower
+            for token in ("derived_category", "mapping_cone", "chain_map", "projective_resolution", "betti_transport", "boundary_2")
+        ):
+            return f"08_toric_tropical_bgg/train/{rest}"
         if any(token in lower for token in ("analogy", "topology", "hdbscan", "simplex", "trajectory", "got_dag", "branch", "merge")):
             return f"07_topology_geometry/train/{rest}"
         if any(token in lower for token in ("toric", "tropical", "bgg", "category_o", "koszul", "slepian", "pollak")):
@@ -243,7 +248,20 @@ def _category_alias(key: str) -> str | None:
             return f"06_graphcg/advanced/{rest}"
         if any(
             token in lower
-            for token in ("toric", "tropical", "bgg", "category_o", "koszul", "slepian", "pollak", "cca")
+            for token in (
+                "toric",
+                "tropical",
+                "bgg",
+                "category_o",
+                "koszul",
+                "slepian",
+                "pollak",
+                "cca",
+                "derived_category",
+                "mapping_cone",
+                "chain_map",
+                "projective_resolution",
+            )
         ):
             return f"08_toric_tropical_bgg/advanced/{rest}"
         if any(token in lower for token in ("topology", "hdbscan", "simplex", "trajectory", "analogy", "got_dag", "branch", "merge")):
@@ -372,6 +390,10 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/got_dag_branch_count", ("train/got_dag_branch_count",))
     _add_first(out, payload, "00_primary/got_dag_merge_count", ("train/got_dag_merge_count",))
     _add_first(out, payload, "00_primary/trajectory_memory_dag_similarity", ("train/trajectory_memory_dag_similarity",))
+    _add_first(out, payload, "00_primary/derived_category_loss", ("train/derived_category_loss",))
+    _add_first(out, payload, "00_primary/derived_category_chain_map_residual", ("train/derived_category_chain_map_residual",))
+    _add_first(out, payload, "00_primary/derived_category_mapping_cone_residual", ("train/derived_category_mapping_cone_residual",))
+    _add_first(out, payload, "00_primary/trajectory_memory_derived_similarity", ("train/trajectory_memory_derived_similarity",))
     _add_first(out, payload, "00_primary/complexity_prediction_target_ncd", ("complexity/val/prediction_target_ncd_lzma_mean",))
     _add_first(out, payload, "00_primary/vram_allocated_gb", ("system/vram_allocated_gb",))
     _add_first(out, payload, "00_primary/artifact_within_limit", ("artifact/within_limit", "artifact/under_size_limit"))

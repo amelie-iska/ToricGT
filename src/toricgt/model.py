@@ -6,6 +6,7 @@ import torch
 from torch import nn
 
 from .config import ModelConfig
+from .derived_category_metrics import derived_category_objects_from_batch
 from .gflownet import EmbeddingPolicy
 from .graph_tokenizer import GraphBatch, GraphTokenizer, attention_mask_from_token_mask
 from .tropical_attention import TransformerBlock
@@ -74,6 +75,7 @@ class ToricTokenGT(nn.Module):
                     graphcg_weight=config.trajectory_memory_graphcg_weight,
                     toric_weight=config.trajectory_memory_toric_weight,
                     dag_weight=config.trajectory_memory_dag_weight,
+                    derived_weight=config.trajectory_memory_derived_weight,
                 ),
             )
             if config.use_trajectory_memory_head
@@ -93,7 +95,7 @@ class ToricTokenGT(nn.Module):
             start = self.config.num_layers // 2
         return layer_idx >= start
 
-    def forward(self, batch: GraphBatch) -> dict[str, torch.Tensor]:
+    def forward(self, batch: GraphBatch, *, include_derived_category: bool | None = None) -> dict[str, torch.Tensor | object]:
         tok = self.tokenizer(batch)
         x = tok.tokens
         mask = attention_mask_from_token_mask(tok.token_mask)
@@ -122,6 +124,14 @@ class ToricTokenGT(nn.Module):
             outputs["gflownet_forward_logits"] = forward_logits
             outputs["gflownet_backward_logits"] = backward_logits
             outputs["gflownet_log_z"] = self.gflownet_policy.log_z
+        emit_derived = self.config.output_derived_category_certificates if include_derived_category is None else bool(include_derived_category)
+        if emit_derived:
+            outputs["derived_category"] = derived_category_objects_from_batch(
+                batch.edge_index,
+                node_mask=batch.node_mask,
+                edge_mask=batch.edge_mask,
+                max_vertices=self.config.derived_category_max_vertices,
+            )
         return outputs
 
     def parameter_count(self) -> int:

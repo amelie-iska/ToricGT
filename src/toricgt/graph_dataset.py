@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import glob
 import json
 import math
 import re
@@ -39,6 +40,24 @@ TEXT_COLUMNS = (
     "completion",
     "messages",
 )
+
+
+def expand_dataset_paths(paths: Iterable[str | Path]) -> list[Path]:
+    """Expand explicit files, directories, and shell-style parquet/jsonl globs."""
+
+    expanded: list[Path] = []
+    for raw_path in paths:
+        raw = str(raw_path)
+        if any(token in raw for token in ("*", "?", "[")):
+            expanded.extend(Path(match) for match in sorted(glob.glob(raw)))
+            continue
+        path = Path(raw_path)
+        if path.is_dir():
+            expanded.extend(sorted(path.glob("*.parquet")))
+            expanded.extend(sorted(path.glob("*.jsonl")))
+        else:
+            expanded.append(path)
+    return expanded
 
 
 def stable_partition_id(
@@ -317,7 +336,7 @@ class CuratedGraphIterableDataset(IterableDataset[GraphTrainingItem]):
             raise ValueError("num_subsets must be positive")
         if subset_id is not None and not (0 <= subset_id < num_subsets):
             raise ValueError("subset_id must be in [0, num_subsets)")
-        self.paths = [Path(path) for path in paths]
+        self.paths = expand_dataset_paths(paths)
         self.cfg = cfg
         self.parquet_batch_size = parquet_batch_size
         self.subset_id = subset_id

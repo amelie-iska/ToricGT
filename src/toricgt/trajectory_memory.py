@@ -20,6 +20,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from .derived_category_metrics import chain_complex_from_edges_np, derived_category_feature_summary
 from .got_trajectory import got_dag_metrics, got_dag_summary_np
 
 
@@ -35,6 +36,7 @@ class TrajectoryMemoryConfig:
     graphcg_weight: float = 0.30
     toric_weight: float = 0.20
     dag_weight: float = 0.20
+    derived_weight: float = 0.20
 
 
 @dataclass
@@ -49,6 +51,7 @@ class TrajectoryMemoryRecord:
     topology: dict[str, float] | None = None
     toric: dict[str, float] | None = None
     trajectory_graph: dict[str, Any] | None = None
+    derived_category: dict[str, Any] | None = None
 
 
 def _safe_normalize_np(x: np.ndarray) -> np.ndarray:
@@ -133,6 +136,7 @@ def summarize_trajectory_np(
         dtype=np.float32,
     )
     dag = got_dag_summary_np(unit.shape[0], edges=edges)
+    chain = chain_complex_from_edges_np(unit.shape[0], edges=edges, max_vertices=min(max_points, 8))
     dag_scalars = np.asarray(
         [
             float(dag.get("branch_count", 0.0)),
@@ -175,6 +179,10 @@ def summarize_trajectory_np(
             if edges is not None
             else [],
             **dag,
+        },
+        "derived_category": {
+            "kind": "got_trajectory_chain_complex_summary",
+            "chain_complex": chain,
         },
     }
 
@@ -346,7 +354,20 @@ class TrajectoryRetrievalHead(nn.Module):
             ],
             dim=-1,
         )
-        return {"summary": summary, "chart": chart_probs, "toric": toric, "topology": topology, "dag": dag_feature}
+        derived_feature = derived_category_feature_summary(
+            h,
+            node_mask=node_mask,
+            edge_index=trajectory_edge_index,
+            edge_mask=trajectory_edge_mask,
+        )
+        return {
+            "summary": summary,
+            "chart": chart_probs,
+            "toric": toric,
+            "topology": topology,
+            "dag": dag_feature,
+            "derived": derived_feature,
+        }
 
     def forward(
         self,
@@ -374,6 +395,9 @@ class TrajectoryRetrievalHead(nn.Module):
                 "trajectory_memory_dag_similarity": zero,
                 "trajectory_memory_dag_branch_count": zero,
                 "trajectory_memory_dag_merge_count": zero,
+                "trajectory_memory_derived_similarity": zero,
+                "trajectory_memory_derived_projective_dimension": zero,
+                "trajectory_memory_derived_regularity": zero,
             }
         features = self._summary_features(
             hidden,
@@ -400,11 +424,14 @@ class TrajectoryRetrievalHead(nn.Module):
         topo_sim = -topo_dist / (topo_dist.detach().mean() + 1e-6)
         dag_feature = F.normalize(features["dag"].float(), dim=-1)
         dag_sim = dag_feature @ dag_feature.transpose(0, 1)
+        derived_feature = F.normalize(features["derived"].float(), dim=-1)
+        derived_sim = derived_feature @ derived_feature.transpose(0, 1)
         teacher = (
             float(self.config.graphcg_weight) * chart_sim
             + float(self.config.toric_weight) * toric_sim
             + float(self.config.topology_weight) * topo_sim
             + float(self.config.dag_weight) * dag_sim
+            + float(self.config.derived_weight) * derived_sim
             + quality_z[None, :]
         )
         teacher = teacher.masked_fill(diag, -1e4) / max(float(self.config.teacher_temperature), 1e-4)
@@ -432,4 +459,7 @@ class TrajectoryRetrievalHead(nn.Module):
             "trajectory_memory_dag_similarity": dag_sim.masked_fill(diag, 0.0).mean().detach(),
             "trajectory_memory_dag_branch_count": features["dag"][:, 0].mean().detach(),
             "trajectory_memory_dag_merge_count": features["dag"][:, 1].mean().detach(),
+            "trajectory_memory_derived_similarity": derived_sim.masked_fill(diag, 0.0).mean().detach(),
+            "trajectory_memory_derived_projective_dimension": features["derived"][:, 7].mean().detach(),
+            "trajectory_memory_derived_regularity": features["derived"][:, 8].mean().detach(),
         }

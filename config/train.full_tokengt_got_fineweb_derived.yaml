@@ -1,0 +1,73 @@
+metadata:
+  purpose: "Full graph-structured TokenGT training with branch/merge GoT, memory, GFlowNets, and derived-category CCA/topology losses."
+  oai_bpb_gate: "Run OAI Parameter-Golf validation BPB sidecar checks against amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024."
+  artifact_size_target_bytes: 16000000
+
+notes:
+  graph_structure: "Rows are converted to branch/merge graph-of-thought DAGs before TokenGT tokenization."
+  advanced_losses: "Medium-conservative from step 0: DAG, trajectory memory, GFlowNet, and derived-category chain-map losses."
+  exact_audits: "Derived-category examples include chain complexes plus Stanley-Reisner/Taylor resolution certificates."
+
+data:
+  data_path:
+    - data/curated_hf_shards/train/*.parquet
+  val_data_path:
+    - data/curated_hf_shards/validation/*.parquet
+  parquet_batch_size: 512
+  full_dataset_run: true
+  fineweb_mix_ratio: 0.65
+  target_artifact_bytes: 16000000
+
+model:
+  attention: tropical_ring
+  d_model: 192
+  num_heads: 6
+  num_layers: 6
+  max_nodes: 384
+  max_edges: 1536
+  no_soft_moe: false
+  soft_moe_all_layers: false
+  soft_moe_experts: 4
+  soft_moe_slots: 2
+
+training:
+  steps: 100000
+  checkpoint_dir: checkpoints/toricgt_full_tokengt_got_fineweb_derived
+  checkpoint_every: 1000
+  device: cuda
+  batch_size: 2
+  grad_accum_steps: 32
+  precision: bf16
+  seed: 17
+  lr: 0.00025
+  weight_decay: 0.05
+  lr_schedule: cosine
+  warmup_steps: 2000
+  min_lr_ratio: 0.08
+  log_interval: 20
+  eval_every: 1000
+  eval_batches: 20
+  wandb: true
+  trajectory_memory_projection_dim: 128
+  trajectory_memory_dag_weight: 0.20
+  trajectory_memory_derived_weight: 0.20
+  derived_category_max_vertices: 8
+  output_derived_category_certificates: false
+  write_derived_category_examples: true
+  derived_category_example_every: 1000
+  derived_category_example_max_vertices: 6
+  derived_category_example_samples: 1
+
+curriculum:
+  gflownet_loss_weight: 0.01
+  gflownet_space: embedding
+  got_dag_loss_weight: 0.0005
+  trajectory_memory_loss_weight: 0.00005
+  derived_category_loss_weight: 0.00001
+  expert_cyclic_curriculum: true
+  expert_curriculum_subsets: 4
+  expert_curriculum_phase_steps: 500
+  expert_curriculum_start_step: 0
+  expert_curriculum_order: braid
+  expert_curriculum_salt: 17
+  expert_curriculum_distill_weight: 0.02

@@ -78,6 +78,25 @@ def test_graph_of_thought_dag_metrics_are_primary_and_grouped() -> None:
     assert organized["07_topology_geometry/train/trajectory_memory_dag_similarity"] == 0.44
 
 
+def test_derived_category_metrics_are_primary_and_grouped() -> None:
+    payload = {
+        "trainer/step": 48,
+        "train/derived_category_loss": 0.006,
+        "train/derived_category_chain_map_residual": 0.12,
+        "train/derived_category_mapping_cone_residual": 0.15,
+        "train/trajectory_memory_derived_similarity": 0.61,
+    }
+
+    organized = organize_wandb_payload(payload)
+
+    assert organized["00_primary/derived_category_loss"] == 0.006
+    assert organized["00_primary/derived_category_chain_map_residual"] == 0.12
+    assert organized["00_primary/derived_category_mapping_cone_residual"] == 0.15
+    assert organized["00_primary/trajectory_memory_derived_similarity"] == 0.61
+    assert organized["08_toric_tropical_bgg/train/derived_category_loss"] == 0.006
+    assert organized["08_toric_tropical_bgg/train/derived_category_chain_map_residual"] == 0.12
+
+
 def test_symbolic_cca_resolution_metrics_are_primary_and_grouped() -> None:
     payload = {
         "trainer/step": 16,

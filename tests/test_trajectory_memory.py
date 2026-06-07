@@ -26,6 +26,7 @@ def test_trajectory_memory_index_roundtrip_and_search(tmp_path):
             topology=summary["topology"],
             toric=summary["toric"],
             trajectory_graph=summary["trajectory_graph"],
+            derived_category=summary["derived_category"],
         )
     )
     path = tmp_path / "memory.jsonl"
@@ -37,6 +38,7 @@ def test_trajectory_memory_index_roundtrip_and_search(tmp_path):
     assert results[0][1] > 0.99
     assert loaded.records[0].topology["got_dag_branch_count"] > 0.0
     assert loaded.records[0].topology["got_dag_merge_count"] > 0.0
+    assert loaded.records[0].derived_category["chain_complex"]["betti"]["beta_1"] >= 0
 
 
 def test_trajectory_retrieval_head_metrics_are_finite():
@@ -64,6 +66,9 @@ def test_trajectory_retrieval_head_metrics_are_finite():
     assert out["trajectory_memory_dag_similarity"].isfinite()
     assert out["trajectory_memory_dag_branch_count"] > 0.0
     assert out["trajectory_memory_dag_merge_count"] > 0.0
+    assert out["trajectory_memory_derived_similarity"].isfinite()
+    assert out["trajectory_memory_derived_projective_dimension"].isfinite()
+    assert out["trajectory_memory_derived_regularity"].isfinite()
 
 
 def test_random_order_lm_trajectory_memory_loss_path_is_finite():

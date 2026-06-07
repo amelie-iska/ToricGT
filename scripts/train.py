@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import random
 from contextlib import nullcontext
@@ -17,6 +18,11 @@ from tqdm.auto import tqdm
 
 from toricgt.cli_config import apply_yaml_defaults, parse_config_path
 from toricgt.config import ModelConfig, TrainConfig
+from toricgt.derived_category_metrics import (
+    DerivedCategoryConfig,
+    analogical_derived_category_loss,
+    derived_category_objects_from_batch,
+)
 from toricgt.expert_curriculum import CyclicExpertCurriculum, ExpertCurriculumAssignment
 from toricgt.gflownet import TrajectoryBatch, trajectory_balance_loss
 from toricgt.got_trajectory import got_dag_metrics
@@ -225,6 +231,14 @@ def main() -> None:
     parser.add_argument("--trajectory-memory-loss-weight", type=float, default=0.0)
     parser.add_argument("--trajectory-memory-projection-dim", type=int, default=128)
     parser.add_argument("--trajectory-memory-dag-weight", type=float, default=0.20)
+    parser.add_argument("--trajectory-memory-derived-weight", type=float, default=0.20)
+    parser.add_argument("--derived-category-loss-weight", type=float, default=0.0)
+    parser.add_argument("--derived-category-max-vertices", type=int, default=8)
+    parser.add_argument("--output-derived-category-certificates", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--write-derived-category-examples", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--derived-category-example-every", type=int, default=1000)
+    parser.add_argument("--derived-category-example-max-vertices", type=int, default=6)
+    parser.add_argument("--derived-category-example-samples", type=int, default=1)
     parser.add_argument("--full-dataset-run", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--fineweb-mix-ratio", type=float, default=0.0)
     parser.add_argument("--target-artifact-bytes", type=int, default=16_000_000)
@@ -260,6 +274,9 @@ def main() -> None:
         use_trajectory_memory_head=args.trajectory_memory_loss_weight > 0,
         trajectory_memory_projection_dim=args.trajectory_memory_projection_dim,
         trajectory_memory_dag_weight=args.trajectory_memory_dag_weight,
+        trajectory_memory_derived_weight=args.trajectory_memory_derived_weight,
+        output_derived_category_certificates=args.output_derived_category_certificates,
+        derived_category_max_vertices=args.derived_category_max_vertices,
     )
     train_cfg = TrainConfig(
         device=args.device,
@@ -357,6 +374,13 @@ def main() -> None:
                 "got_dag_loss_weight": args.got_dag_loss_weight,
                 "trajectory_memory_loss_weight": args.trajectory_memory_loss_weight,
                 "trajectory_memory_dag_weight": args.trajectory_memory_dag_weight,
+                "trajectory_memory_derived_weight": args.trajectory_memory_derived_weight,
+                "derived_category_loss_weight": args.derived_category_loss_weight,
+                "derived_category_max_vertices": args.derived_category_max_vertices,
+                "output_derived_category_certificates": args.output_derived_category_certificates,
+                "write_derived_category_examples": args.write_derived_category_examples,
+                "derived_category_example_max_vertices": args.derived_category_example_max_vertices,
+                "derived_category_example_samples": args.derived_category_example_samples,
                 "full_dataset_run": args.full_dataset_run,
                 "fineweb_mix_ratio": args.fineweb_mix_ratio,
                 "target_artifact_bytes": args.target_artifact_bytes,
@@ -395,11 +419,14 @@ def main() -> None:
         trajectory_memory_recall1_value = 0.0
         trajectory_memory_entropy_value = 0.0
         trajectory_memory_dag_similarity_value = 0.0
+        derived_category_loss_value = 0.0
         got_metric_sums: dict[str, float] = {}
         trajectory_metric_sums: dict[str, float] = {}
+        derived_metric_sums: dict[str, float] = {}
         distill_loss_value = 0.0
         teacher_loss_value = 0.0
         graph_tokens_value = 0
+        last_batch_for_examples: GraphBatch | None = None
         for accum_idx in range(train_cfg.grad_accum_steps):
             if data_iter is None and not subset_loaders:
                 batch, target = synthetic_batch(model_cfg, train_cfg.batch_size, args.device)
@@ -458,6 +485,16 @@ def main() -> None:
                     )
                     if args.got_dag_loss_weight > 0:
                         raw_loss = raw_loss + args.got_dag_loss_weight * got_metrics["got_dag_loss"]
+                derived_category_metrics = None
+                if args.derived_category_loss_weight > 0:
+                    derived_category_metrics = analogical_derived_category_loss(
+                        out["node_embeddings"],
+                        node_mask=batch.node_mask,
+                        edge_index=batch.edge_index,
+                        edge_mask=batch.edge_mask,
+                        config=DerivedCategoryConfig(max_vertices=args.derived_category_max_vertices),
+                    )
+                    raw_loss = raw_loss + args.derived_category_loss_weight * derived_category_metrics["derived_category_loss"]
                 trajectory_memory_metrics = None
                 if model.trajectory_memory_head is not None and args.trajectory_memory_loss_weight > 0:
                     positions = torch.arange(out["node_embeddings"].shape[1], device=args.device).unsqueeze(0)
@@ -473,6 +510,7 @@ def main() -> None:
                     )
                     raw_loss = raw_loss + args.trajectory_memory_loss_weight * trajectory_memory_metrics["trajectory_memory_loss"]
                 loss = raw_loss / train_cfg.grad_accum_steps
+            last_batch_for_examples = batch
             raw_loss_value += float(raw_loss.detach())
             supervised_loss_value += float(supervised_loss.detach())
             if distill_loss is not None:
@@ -488,6 +526,11 @@ def main() -> None:
                         continue
                     if torch.is_tensor(value) and value.ndim == 0:
                         got_metric_sums[key] = got_metric_sums.get(key, 0.0) + float(value.detach())
+            if derived_category_metrics is not None:
+                derived_category_loss_value += float(derived_category_metrics["derived_category_loss"].detach())
+                for key, value in derived_category_metrics.items():
+                    if torch.is_tensor(value) and value.ndim == 0:
+                        derived_metric_sums[key] = derived_metric_sums.get(key, 0.0) + float(value.detach())
             if trajectory_memory_metrics is not None:
                 trajectory_memory_loss_value += float(trajectory_memory_metrics["trajectory_memory_loss"].detach())
                 trajectory_memory_recall1_value += float(trajectory_memory_metrics["trajectory_memory_recall1"].detach())
@@ -514,6 +557,7 @@ def main() -> None:
         mean_trajectory_memory_recall1 = trajectory_memory_recall1_value / max(train_cfg.grad_accum_steps, 1)
         mean_trajectory_memory_entropy = trajectory_memory_entropy_value / max(train_cfg.grad_accum_steps, 1)
         mean_trajectory_memory_dag_similarity = trajectory_memory_dag_similarity_value / max(train_cfg.grad_accum_steps, 1)
+        mean_derived_category_loss = derived_category_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_distill_loss = distill_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_teacher_loss = teacher_loss_value / max(train_cfg.grad_accum_steps, 1)
         mean_graph_tokens = graph_tokens_value / max(train_cfg.grad_accum_steps, 1)
@@ -531,6 +575,9 @@ def main() -> None:
                 "train/trajectory_memory_recall1": mean_trajectory_memory_recall1,
                 "train/trajectory_memory_entropy": mean_trajectory_memory_entropy,
                 "train/trajectory_memory_dag_similarity": mean_trajectory_memory_dag_similarity,
+                "train/derived_category_loss": mean_derived_category_loss,
+                "train/derived_category_loss_weight": args.derived_category_loss_weight,
+                "train/derived_category_max_vertices": args.derived_category_max_vertices,
                 "train/expert_distill_loss": mean_distill_loss,
                 "train/expert_teacher_supervised_loss": mean_teacher_loss,
                 "train/graph_tokens_per_microbatch": mean_graph_tokens,
@@ -544,6 +591,8 @@ def main() -> None:
             for key, value in got_metric_sums.items():
                 metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
             for key, value in trajectory_metric_sums.items():
+                metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
+            for key, value in derived_metric_sums.items():
                 metrics[f"train/{key}"] = value / max(train_cfg.grad_accum_steps, 1)
             if assignment is not None:
                 metrics.update(
@@ -572,6 +621,31 @@ def main() -> None:
                     }
                 )
             run.log(organize_wandb_payload(metrics))
+        if (
+            args.write_derived_category_examples
+            and last_batch_for_examples is not None
+            and args.derived_category_example_every > 0
+            and (step + 1) % args.derived_category_example_every == 0
+        ):
+            example_dir = ckpt_dir / "derived_category_examples"
+            example_dir.mkdir(parents=True, exist_ok=True)
+            example_samples = max(1, min(int(args.derived_category_example_samples), last_batch_for_examples.edge_index.shape[0]))
+            objects = derived_category_objects_from_batch(
+                last_batch_for_examples.edge_index[:example_samples],
+                node_mask=last_batch_for_examples.node_mask[:example_samples],
+                edge_mask=last_batch_for_examples.edge_mask[:example_samples],
+                max_vertices=args.derived_category_example_max_vertices,
+            )
+            with (example_dir / f"step_{step + 1:08d}.json").open("w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "step": int(step + 1),
+                        "derived_category_loss_weight": float(args.derived_category_loss_weight),
+                        "objects": objects,
+                    },
+                    handle,
+                    indent=2,
+                )
         if val_loader is not None and args.eval_every > 0 and (step + 1) % args.eval_every == 0:
             if assignment is not None:
                 model.set_active_soft_moe_experts(None)

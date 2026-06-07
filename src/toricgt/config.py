@@ -49,6 +49,9 @@ class ModelConfig:
     trajectory_memory_graphcg_weight: float = 0.30
     trajectory_memory_toric_weight: float = 0.20
     trajectory_memory_dag_weight: float = 0.20
+    trajectory_memory_derived_weight: float = 0.20
+    output_derived_category_certificates: bool = False
+    derived_category_max_vertices: int = 8
 
 
 @dataclass(frozen=True)

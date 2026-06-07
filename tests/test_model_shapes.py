@@ -46,3 +46,23 @@ def test_tokengt_optional_trajectory_memory_head_cpu():
     out = model(batch)
     assert model.trajectory_memory_head is not None
     assert out["node_embeddings"].shape == (3, 16, cfg.d_model)
+
+
+def test_tokengt_can_emit_derived_category_certificates_cpu():
+    cfg = ModelConfig(
+        d_model=32,
+        num_heads=4,
+        num_layers=2,
+        max_nodes=16,
+        max_edges=32,
+        output_derived_category_certificates=False,
+        derived_category_max_vertices=8,
+    )
+    model = ToricTokenGT(cfg)
+    batch, _ = synthetic_batch(cfg, batch_size=2, device="cpu")
+    out = model(batch, include_derived_category=True)
+
+    assert "derived_category" in out
+    assert len(out["derived_category"]) == 2
+    assert out["derived_category"][0]["chain_complex"]["kind"] == "got_simplicial_chain_complex"
+    assert out["derived_category"][0]["projective_resolution"]["ambient_category"] == "D^b(grmod-S)"
