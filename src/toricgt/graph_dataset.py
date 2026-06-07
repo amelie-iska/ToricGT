@@ -250,7 +250,13 @@ def fineweb_tokens_to_graph_json(
     record_id: str = "",
     max_nodes: int = 256,
 ) -> str:
-    """Represent a FineWeb SP1024 slice as a token-position branch/merge DAG."""
+    """Represent a FineWeb SP1024 slice as a left-to-right token chain.
+
+    FineWeb is the OAI Parameter-Golf language-modeling stream, so its
+    structural graph should preserve next-token order. Branch/merge graph
+    structure is reserved for curated reasoning, memory, and graph-of-thought
+    records where multiple reasoning alternatives are actually present.
+    """
 
     token_ids = [int(token) for token in np.asarray(tokens, dtype=np.int64).reshape(-1).tolist()]
     node_count = min(max(1, int(max_nodes)), max(1, len(token_ids) - 1))
@@ -262,39 +268,21 @@ def fineweb_tokens_to_graph_json(
         }
         for idx in range(node_count)
     ]
-    edges: list[dict[str, str]] = []
-    source_idx = 0
-    idx = 1
-    while idx < node_count:
-        left = idx
-        if idx + 1 >= node_count:
-            edges.append(
-                {
-                    "source": f"tok_{source_idx:04d}",
-                    "target": f"tok_{left:04d}",
-                    "type": "tail_continuation",
-                }
-            )
-            break
-        right = idx + 1
-        edges.append({"source": f"tok_{source_idx:04d}", "target": f"tok_{left:04d}", "type": "branch_left"})
-        edges.append({"source": f"tok_{source_idx:04d}", "target": f"tok_{right:04d}", "type": "branch_right"})
-        if idx + 2 < node_count:
-            merge = idx + 2
-            edges.append({"source": f"tok_{left:04d}", "target": f"tok_{merge:04d}", "type": "merge_candidate"})
-            edges.append({"source": f"tok_{right:04d}", "target": f"tok_{merge:04d}", "type": "merge_candidate"})
-            source_idx = merge
-            idx += 3
-        else:
-            edges.append({"source": f"tok_{left:04d}", "target": f"tok_{right:04d}", "type": "merge_candidate"})
-            source_idx = right
-            idx += 2
+    edges = [
+        {
+            "source": f"tok_{idx:04d}",
+            "target": f"tok_{idx + 1:04d}",
+            "type": "next_token",
+        }
+        for idx in range(max(0, node_count - 1))
+    ]
     payload = {
         "task_family": "fineweb_language_modeling_graph",
         "dataset": dataset,
         "record_id": record_id,
-        "trajectory_kind": "branch_merge_dag",
+        "trajectory_kind": "sequential_token_chain",
         "node_basis": "sp1024_token_positions",
+        "sequence_order": "left_to_right_next_token",
         "nodes": nodes,
         "edges": edges,
     }
@@ -402,7 +390,13 @@ def graph_json_to_item(
     *,
     lm_tokens: np.ndarray | None = None,
 ) -> GraphTrainingItem:
-    payload = json.loads(ensure_branch_merge_graph_json(graph_json or "{}"))
+    raw_payload = json.loads(graph_json or "{}")
+    is_fineweb_lm_graph = (
+        str(raw_payload.get("dataset") or "") == "fineweb10B_sp1024"
+        or str(raw_payload.get("task_family") or "") == "fineweb_language_modeling_graph"
+        or str(raw_payload.get("trajectory_kind") or "") == "sequential_token_chain"
+    )
+    payload = raw_payload if is_fineweb_lm_graph else json.loads(ensure_branch_merge_graph_json(graph_json or "{}"))
     raw_nodes = list(payload.get("nodes") or [])
     raw_edges = list(payload.get("edges") or [])
     nodes = raw_nodes[: cfg.max_nodes]

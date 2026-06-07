@@ -42,6 +42,7 @@ model:
   soft_moe_slots: 2
   use_lm_head: true
   lm_vocab_size: 1024
+  activation_checkpointing: false
 
 training:
   steps: 100000

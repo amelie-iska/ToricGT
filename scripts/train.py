@@ -382,6 +382,7 @@ def main() -> None:
     parser.add_argument("--fineweb-tokens-per-graph", type=int, default=1024)
     parser.add_argument("--fineweb-stride-tokens", type=int, default=1024)
     parser.add_argument("--use-lm-head", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--activation-checkpointing", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--lm-vocab-size", type=int, default=1024)
     parser.add_argument("--fineweb-lm-loss-weight", type=float, default=0.0)
     parser.add_argument("--d-model", type=int, default=192)
@@ -463,6 +464,7 @@ def main() -> None:
         derived_category_max_vertices=args.derived_category_max_vertices,
         use_lm_head=args.use_lm_head,
         lm_vocab_size=args.lm_vocab_size,
+        activation_checkpointing=args.activation_checkpointing,
     )
     train_cfg = TrainConfig(
         device=args.device,
@@ -600,6 +602,7 @@ def main() -> None:
                 "use_lm_head": args.use_lm_head,
                 "lm_vocab_size": args.lm_vocab_size,
                 "fineweb_lm_loss_weight": args.fineweb_lm_loss_weight,
+                "activation_checkpointing": args.activation_checkpointing,
                 "gc_every": args.gc_every,
                 "max_cpu_rss_gb": args.max_cpu_rss_gb,
                 "target_artifact_bytes": args.target_artifact_bytes,

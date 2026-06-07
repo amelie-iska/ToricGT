@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 from .config import ModelConfig
 from .derived_category_metrics import derived_category_objects_from_batch
@@ -108,7 +109,14 @@ class ToricTokenGT(nn.Module):
         x = tok.tokens
         mask = attention_mask_from_token_mask(tok.token_mask)
         for block in self.blocks:
-            x = block(x, mask=mask, token_mask=tok.token_mask)
+            if self.training and self.config.activation_checkpointing:
+                x = checkpoint(
+                    lambda block_x, block=block: block(block_x, mask=mask, token_mask=tok.token_mask),
+                    x,
+                    use_reentrant=False,
+                )
+            else:
+                x = block(x, mask=mask, token_mask=tok.token_mask)
         x = self.norm(x)
 
         node_x = x[:, tok.node_positions, :]

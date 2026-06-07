@@ -9,6 +9,7 @@ from toricgt.got_trajectory import graph_json_has_branch_merge, got_dag_summary_
 from toricgt.graph_dataset import (
     CuratedGraphIterableDataset,
     collate_graph_items,
+    fineweb_tokens_to_graph_json,
     graph_json_to_item,
     interleave_dataset_paths,
     load_competition_token_memmap,
@@ -97,11 +98,17 @@ def write_fake_challenge_bin(path, tokens):
         np.asarray(tokens, dtype="<u2").tofile(handle)
 
 
-def test_fineweb_bin_tokens_stream_as_branch_merge_graph(tmp_path):
+def test_fineweb_bin_tokens_stream_as_sequential_graph(tmp_path):
     token_path = tmp_path / "fineweb_train_000000.bin"
     write_fake_challenge_bin(token_path, list(range(1, 33)))
     tokens = load_competition_token_memmap(token_path)
     assert int(tokens.shape[0]) == 32
+    graph_payload = json.loads(fineweb_tokens_to_graph_json(tokens[:16], max_nodes=16))
+
+    assert graph_payload["trajectory_kind"] == "sequential_token_chain"
+    assert len(graph_payload["nodes"]) == 15
+    assert len(graph_payload["edges"]) == 14
+    assert {edge["type"] for edge in graph_payload["edges"]} == {"next_token"}
 
     cfg = ModelConfig(
         d_model=32,
@@ -130,6 +137,7 @@ def test_fineweb_bin_tokens_stream_as_branch_merge_graph(tmp_path):
     assert batch.lm_input_ids is not None
     assert batch.lm_target_ids is not None
     assert batch.lm_mask is not None
+    assert int(batch.edge_mask.sum().item()) == 28
     assert int(batch.lm_mask.sum().item()) == 30
     assert int(batch.node_mask.sum().item()) >= 30
     assert int(batch.lm_input_ids[0, 0].item()) == 1

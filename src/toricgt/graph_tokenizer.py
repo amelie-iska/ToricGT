@@ -76,6 +76,15 @@ class GraphTokenizer(nn.Module):
             raise ValueError("batch exceeds configured max_nodes/max_edges")
 
         device = batch.node_features.device
+        if batch.edge_mask.numel() > 0:
+            active_edges = int(batch.edge_mask.long().sum(dim=1).max().detach().cpu().item())
+            active_edges = max(1, min(active_edges, n_edges))
+        else:
+            active_edges = 0
+        edge_features = batch.edge_features[:, :active_edges, :]
+        edge_index = batch.edge_index[:, :active_edges, :]
+        edge_mask = batch.edge_mask[:, :active_edges]
+        n_edges = active_edges
         node_ids = torch.arange(n_nodes, device=device).expand(bsz, n_nodes)
         edge_ids = torch.arange(n_edges, device=device).expand(bsz, n_edges)
 
@@ -84,15 +93,15 @@ class GraphTokenizer(nn.Module):
         toric = self.toric_proj(self.torus_freq[:n_nodes].to(device)).unsqueeze(0)
         node_tok = node_tok + toric
 
-        endpoints = batch.edge_index.clamp(min=0, max=max(n_nodes - 1, 0))
+        endpoints = edge_index.clamp(min=0, max=max(n_nodes - 1, 0))
         src = self.node_id(endpoints[..., 0])
         dst = self.node_id(endpoints[..., 1])
-        edge_tok = self.edge_proj(batch.edge_features)
+        edge_tok = self.edge_proj(edge_features)
         edge_tok = edge_tok + self.type_emb(torch.ones_like(edge_ids)) + self.edge_id(edge_ids)
         edge_tok = edge_tok + self.endpoint_proj(torch.cat([src, dst], dim=-1))
 
         tokens = torch.cat([node_tok, edge_tok], dim=1)
-        token_mask = torch.cat([batch.node_mask, batch.edge_mask], dim=1)
+        token_mask = torch.cat([batch.node_mask, edge_mask], dim=1)
         token_type = torch.cat([torch.zeros_like(node_ids), torch.ones_like(edge_ids)], dim=1)
         node_positions = torch.arange(n_nodes, device=device)
         edge_positions = torch.arange(n_nodes, n_nodes + n_edges, device=device)

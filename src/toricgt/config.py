@@ -54,6 +54,7 @@ class ModelConfig:
     derived_category_max_vertices: int = 8
     use_lm_head: bool = False
     lm_vocab_size: int = 1024
+    activation_checkpointing: bool = False
 
 
 @dataclass(frozen=True)
