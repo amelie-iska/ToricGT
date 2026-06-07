@@ -40,7 +40,10 @@ COMMAND=(env PYTHONPATH=src "$PYTHON_BIN" scripts/watch_training_analysis.py
   --skip-simplex-geometry
   --derived-category-example-dir "$CHECKPOINT_DIR/derived_category_examples"
   --derived-category-max-files 8
-  --derived-category-max-objects 24)
+  --derived-category-max-objects 24
+  --memory-trace-example-dir "$CHECKPOINT_DIR/memory_trace_examples"
+  --memory-trace-max-files 8
+  --memory-trace-max-queries 96)
 
 if [[ -n "$RUN_PATH" ]]; then
   COMMAND+=(--run-path "$RUN_PATH")

@@ -90,6 +90,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--derived-category-max-files", type=int, default=8)
     parser.add_argument("--derived-category-max-objects", type=int, default=24)
     parser.add_argument("--skip-derived-category-analysis", action="store_true")
+    parser.add_argument(
+        "--memory-trace-example-dir",
+        default="",
+        help="Directory containing trainer-emitted memory_trace_examples JSON. Defaults to <checkpoint-dir>/memory_trace_examples.",
+    )
+    parser.add_argument("--memory-trace-max-files", type=int, default=8)
+    parser.add_argument("--memory-trace-max-queries", type=int, default=96)
+    parser.add_argument("--skip-memory-trace-analysis", action="store_true")
     parser.add_argument("--seed", type=int, default=10017)
     parser.add_argument("--target-bpb", type=float, default=float(os.environ.get("BPB_TARGET", "1.2")))
     parser.add_argument("--gate-step", type=int, default=int(os.environ.get("BPB_GATE_STEP", "4000")))
@@ -240,11 +248,13 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     geometry_dir = base / "geometry"
     oai_dir = base / "oai_competition"
     derived_dir = base / "derived_category"
+    memory_dir = base / "memory_trace"
     category = load_json(metrics_dir / "category_summary.json")
     geometry = load_json(geometry_dir / "reasoning_geometry_summary.json")
     simplex = load_json(simplex_dir / "reasoning_simplex_summary.json")
     oai = load_json(oai_dir / "summary.json")
     derived = load_json(derived_dir / "summary.json")
+    memory = load_json(memory_dir / "summary.json")
     checkpoint_meta = load_json(metrics_dir / "checkpoint_meta.json")
     proposal = load_json(base / "training_adjustment_proposal.json")
     lines = [
@@ -323,6 +333,23 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
                 f"- Mean symbolic regularity: `{derived.get('mean_symbolic_regularity', 'n/a')}`",
                 f"- Max Fitting maximal-minor count log10: `{derived.get('max_fitting_minor_count_log10', 'n/a')}`",
                 f"- Report: `{derived_dir / 'REPORT.md'}`",
+            ]
+        )
+    if memory:
+        lines.extend(
+            [
+                "",
+                "## Analogical Memory Trace Examples",
+                f"- Output directory: `{memory_dir}`",
+                f"- Queries analyzed: `{memory.get('query_count', 'n/a')}`",
+                f"- Candidates analyzed: `{memory.get('candidate_count', 'n/a')}`",
+                f"- Rank-1 teacher-argmax agreement: `{memory.get('rank1_teacher_argmax_rate', 'n/a')}`",
+                f"- Mean retrieval entropy: `{memory.get('mean_retrieval_entropy', 'n/a')}`",
+                f"- Mean rank-1 model retrieval probability: `{memory.get('mean_rank1_retrieval_probability', 'n/a')}`",
+                f"- Mean rank-1 teacher probability: `{memory.get('mean_rank1_teacher_probability', 'n/a')}`",
+                f"- Mean branch / merge counts: `{memory.get('mean_dag_branch_count', 'n/a')}` / `{memory.get('mean_dag_merge_count', 'n/a')}`",
+                f"- Mean rank-1 derived-category similarity: `{memory.get('mean_rank1_derived_category_similarity', 'n/a')}`",
+                f"- Report: `{memory_dir / 'REPORT.md'}`",
             ]
         )
     if proposal:
@@ -566,6 +593,24 @@ def main() -> None:
             ],
             cwd=repo,
             log_path=base / "logs" / "derived_category.log",
+        )
+    if not args.skip_memory_trace_analysis:
+        memory_example_dir = Path(args.memory_trace_example_dir) if args.memory_trace_example_dir else checkpoint_dir / "memory_trace_examples"
+        run_optional_command(
+            [
+                sys.executable,
+                "scripts/analyze_memory_trace_examples.py",
+                "--example-dir",
+                str(memory_example_dir),
+                "--output-dir",
+                str(base / "memory_trace"),
+                "--max-files",
+                str(args.memory_trace_max_files),
+                "--max-queries",
+                str(args.memory_trace_max_queries),
+            ],
+            cwd=repo,
+            log_path=base / "logs" / "memory_trace.log",
         )
     proposal_command = [
         sys.executable,
