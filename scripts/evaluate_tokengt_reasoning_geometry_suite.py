@@ -33,10 +33,14 @@ from torch.utils.data import DataLoader
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+import evaluate_seq4096_reasoning_geometry_suite as rich_geometry  # noqa: E402
 from toricgt.cli_config import flatten_cli_config, load_yaml_config  # noqa: E402
 from toricgt.config import ModelConfig  # noqa: E402
 from toricgt.derived_category_metrics import (  # noqa: E402
@@ -108,8 +112,8 @@ PLOT_FAMILY_REGISTRY = [
         "family": "trajectory_3d",
         "introduced": "previous",
         "dimension": "3D",
-        "static_pattern": "trajectories/record_*_trajectory_3d.png",
-        "interactive_pattern": "trajectories/record_*_trajectory_3d.html",
+        "static_pattern": "trajectories/*_trajectory_3d.png",
+        "interactive_pattern": "trajectories/*_trajectory_3d.html",
         "interactive_required": True,
         "description": "Raw node-embedding reasoning trajectory with branch/merge graph edges and energy color.",
     },
@@ -117,8 +121,8 @@ PLOT_FAMILY_REGISTRY = [
         "family": "energy_landscape",
         "introduced": "previous",
         "dimension": "3D surface",
-        "static_pattern": "trajectories/record_*_energy_landscape.png",
-        "interactive_pattern": "trajectories/record_*_energy_landscape.html",
+        "static_pattern": "trajectories/*_energy_landscape.png",
+        "interactive_pattern": "trajectories/*_energy_landscape.html",
         "interactive_required": True,
         "description": "Smooth projected energy/fitness surface with trajectory overlay and toric/tropical chamber-wall proxies.",
     },
@@ -144,10 +148,190 @@ PLOT_FAMILY_REGISTRY = [
         "family": "topology_heatmaps",
         "introduced": "previous",
         "dimension": "2D",
-        "static_pattern": "topology/record_*_topology_heatmaps.png",
+        "static_pattern": "topology/*_topology_heatmaps.png",
         "interactive_pattern": "",
         "interactive_required": False,
         "description": "Distance, directed adjacency, and persistent reachability heatmaps.",
+    },
+    {
+        "family": "phase_energy",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "trajectories/*_phase_energy.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Toric phase-energy projection for the selected graph/inference trajectory.",
+    },
+    {
+        "family": "toric_phase_simplicial_trajectory",
+        "introduced": "r97_rich_baseline",
+        "dimension": "3D",
+        "static_pattern": "trajectories/*_toric_phase_simplicial_trajectory.png",
+        "interactive_pattern": "trajectories/*_toric_phase_simplicial_trajectory.html",
+        "interactive_required": True,
+        "description": "Toric phase trajectory with local simplicial structure and analogical transport overlay.",
+    },
+    {
+        "family": "projected_simplicial_toric_geometry",
+        "introduced": "r97_rich_baseline",
+        "dimension": "3D/4D",
+        "static_pattern": "",
+        "interactive_pattern": "trajectories/*_projected_simplicial_toric_geometry.html",
+        "interactive_required": True,
+        "description": "Projected hidden-space simplicial toric geometry HTML companion.",
+    },
+    {
+        "family": "toric_phase_winding_collection",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "trajectories/*_toric_phase_winding_collection.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Flat irrational toric phase winding and recurrence audit.",
+    },
+    {
+        "family": "directed_filtration",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "topology/*_directed_filtration.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Directed nested simplicial filtration curves across radii.",
+    },
+    {
+        "family": "noncommutative_heatmaps",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "topology/*_noncommutative_heatmaps.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Skew, directed adjacency, and noncommutative flow heatmaps.",
+    },
+    {
+        "family": "step_radius_hierarchy",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "topology/*_step_radius_hierarchy.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Step-by-radius hierarchy for topology, DEC, and transport diagnostics.",
+    },
+    {
+        "family": "exact_persistence_morphisms",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "topology/*_exact_persistence_morphisms.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Exact persistence-module and simplicial morphism audits.",
+    },
+    {
+        "family": "commutative_algebra_audit",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "topology/*_commutative_algebra_audit.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Koszul/BGG/Fitting/Buchsbaum-Eisenbud commutative-algebra audit.",
+    },
+    {
+        "family": "toric_shadow_audit",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "topology/*_toric_shadow_audit.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Empirical toric fan, chamber, margin, and bend diagnostics.",
+    },
+    {
+        "family": "toric_slepian_audit",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "topology/*_toric_slepian_audit.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Slepian/Pollak prolate concentration and leakage audit.",
+    },
+    {
+        "family": "graphcg_basis_disentanglement",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "graphcg/*_graphcg_basis_disentanglement.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "GraphCG basis disentanglement and Gram-matrix audit.",
+    },
+    {
+        "family": "analogical_transport_map",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "analogical/*_analogical_transport_map.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Analogical transport parallelogram residual map.",
+    },
+    {
+        "family": "tropical_chamber_audit",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D",
+        "static_pattern": "tropical/*_tropical_chamber_audit.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Tropical active-face/chamber path and energy plateau audit.",
+    },
+    {
+        "family": "rich_triangles",
+        "introduced": "r97_rich_baseline",
+        "dimension": "2D simplex",
+        "static_pattern": "triangles/*.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "R97-style BPB, compression, topology, toric, CCA, and control triangle plots.",
+    },
+    {
+        "family": "rich_tetrahedra",
+        "introduced": "r97_rich_baseline",
+        "dimension": "3D",
+        "static_pattern": "tetrahedra/*.png",
+        "interactive_pattern": "tetrahedra/*.html",
+        "interactive_required": True,
+        "description": "R97-style tetrahedra with interactive HTML companions.",
+    },
+    {
+        "family": "symbolic_resolution_artifacts",
+        "introduced": "r97_rich_baseline",
+        "dimension": "symbolic data",
+        "static_pattern": "topology/*_symbolic_resolution_certificate*",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Exact multigraded symbolic-resolution certificate JSON/CSV files.",
+    },
+    {
+        "family": "legacy_reasoning_geometry_records",
+        "introduced": "r97_rich_baseline",
+        "dimension": "table",
+        "static_pattern": "reasoning_geometry_records.*",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "R97-compatible public record table for rich geometry diagnostics.",
+    },
+    {
+        "family": "selected_records",
+        "introduced": "r97_rich_baseline",
+        "dimension": "metadata",
+        "static_pattern": "selected_records.json",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Selected record manifest matching the older output layout.",
+    },
+    {
+        "family": "fineweb_curve_diagnostic_payload",
+        "introduced": "r97_rich_baseline",
+        "dimension": "metadata",
+        "static_pattern": "fineweb_curve_diagnostic_payload.json",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "FineWeb/BPB curve diagnostic payload stubbed from TokenGT geometry-sidecar metrics.",
     },
     {
         "family": "graph_energy_topology_triangle",
@@ -221,6 +405,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--derived-category-max-vertices", type=int, default=8)
     parser.add_argument("--topology-max-points", type=int, default=32)
     parser.add_argument("--topology-max-windows", type=int, default=4)
+    parser.add_argument(
+        "--rich-legacy-geometry",
+        dest="rich_legacy_geometry",
+        action="store_true",
+        default=True,
+        help="Generate the R97-style rich geometry bundle in addition to TokenGT-native plots.",
+    )
+    parser.add_argument(
+        "--no-rich-legacy-geometry",
+        dest="rich_legacy_geometry",
+        action="store_false",
+        help="Skip R97-style rich geometry outputs for a faster narrow pass.",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--precision", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--seed", type=int, default=17)
@@ -654,7 +851,109 @@ def extract_resolution_metrics(obj: dict[str, Any]) -> dict[str, float]:
     }
 
 
-def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def token_gt_rich_geometry_record(
+    *,
+    record_id: int,
+    hidden: np.ndarray,
+    mean_node_nll: float,
+    graph_mse: float,
+    topology_cfg: ReasoningTopologyConfig,
+    checkpoint_step: int,
+    nll_source: str,
+) -> dict[str, Any]:
+    bpb_proxy = float(mean_node_nll / math.log(2.0)) if math.isfinite(float(mean_node_nll)) else float("nan")
+    log_context = {
+        "latest_train_bpb": bpb_proxy,
+        "latest_val_bpb": bpb_proxy,
+        "best_val_bpb": bpb_proxy,
+        "latest_bpb": bpb_proxy,
+        "bpb_quality": float(max(0.0, min(1.0, 1.0 / (1.0 + max(0.0, bpb_proxy - 1.2))))),
+        "loss_quality": float(1.0 / (1.0 + max(0.0, float(graph_mse)))),
+    }
+    item = {
+        "id": f"record_{record_id:03d}_tokengt_node_embedding_trajectory",
+        "family": "tokengt_graph_embedding",
+        "description": (
+            "TokenGT inference/checkpoint node embeddings interpreted through the R97 rich geometry sidecar; "
+            f"NLL source={nll_source}, checkpoint_step={checkpoint_step}."
+        ),
+        "points": np.asarray(hidden, dtype=np.float32),
+    }
+    return rich_geometry.analyze_record(item, log_context=log_context, topology_config=topology_cfg)
+
+
+def write_rich_legacy_geometry_outputs(records: list[dict[str, Any]], out_dir: Path, *, checkpoint: str) -> list[str]:
+    if not records:
+        return []
+    out_dir = out_dir.resolve()
+
+    def rel(path: str | Path) -> str:
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = (out_dir / candidate).resolve()
+        try:
+            return str(candidate.relative_to(out_dir))
+        except ValueError:
+            return str(candidate)
+
+    annotated = rich_geometry.annotate_scores(records)
+    files: list[str] = []
+    for record in annotated:
+        files.extend(rich_geometry.plot_record_artifacts(record, out_dir))
+
+    triangle_dir = out_dir / "triangles"
+    tetra_dir = out_dir / "tetrahedra"
+    for name, spec in rich_geometry.TRIANGLE_SPECS.items():
+        path = triangle_dir / f"{name}.png"
+        rich_geometry.plot_triangle(annotated, spec, path)
+        files.append(str(path))
+    for name, spec in rich_geometry.TETRAHEDRON_SPECS.items():
+        path = tetra_dir / f"{name}.png"
+        rich_geometry.plot_tetrahedron(annotated, spec, path)
+        files.append(str(path))
+        html_path = path.with_suffix(".html")
+        if html_path.exists():
+            files.append(str(html_path))
+
+    public_records = [rich_geometry.record_public(record) for record in annotated]
+    rich_geometry.write_json(out_dir / "reasoning_geometry_records.json", public_records)
+    rich_geometry.write_records_csv(out_dir / "reasoning_geometry_records.csv", annotated)
+    rich_geometry.write_json(
+        out_dir / "selected_records.json",
+        [{"record_id": record["record_id"], "family": record.get("family", "")} for record in annotated],
+    )
+    fineweb_payload = {
+        "source": "tokengt_geometry_sidecar_proxy",
+        "checkpoint": checkpoint,
+        "records": len(annotated),
+        "mean_energy": finite_mean([float(record.get("energy_mean", 0.0)) for record in annotated]),
+        "mean_graphcg_disentanglement": finite_mean(
+            [float(record.get("graphcg_disentanglement_score", 0.0)) for record in annotated]
+        ),
+        "mean_analogical_map_score": finite_mean(
+            [float(record.get("analogical_map_score", 0.0)) for record in annotated]
+        ),
+        "mean_slepian_concentration": finite_mean(
+            [float(record.get("slepian_concentration", 0.0)) for record in annotated]
+        ),
+        "mean_toric_cca_topology_loss": finite_mean(
+            [float(record.get("toric_cca_topology_loss", 0.0)) for record in annotated]
+        ),
+    }
+    rich_geometry.write_json(out_dir / "fineweb_curve_diagnostic_payload.json", fineweb_payload)
+    files.extend(
+        str(path)
+        for path in (
+            out_dir / "reasoning_geometry_records.json",
+            out_dir / "reasoning_geometry_records.csv",
+            out_dir / "selected_records.json",
+            out_dir / "fineweb_curve_diagnostic_payload.json",
+        )
+    )
+    return sorted(rel(path) for path in files)
+
+
+def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     flat = load_flat_config(args.config)
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     cfg = model_config_from_checkpoint(payload, flat)
@@ -681,6 +980,7 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
     topo_dir = out_dir / "topology"
     records: list[dict[str, Any]] = []
     objects: list[dict[str, Any]] = []
+    rich_records: list[dict[str, Any]] = []
     topology_cfg = ReasoningTopologyConfig(
         max_points=max(4, int(args.topology_max_points)),
         max_windows=max(1, int(args.topology_max_windows)),
@@ -802,6 +1102,18 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                     **topology_metrics,
                 }
                 records.append(record)
+                if bool(getattr(args, "rich_legacy_geometry", True)):
+                    rich_records.append(
+                        token_gt_rich_geometry_record(
+                            record_id=record_id,
+                            hidden=hidden,
+                            mean_node_nll=mean_node_nll,
+                            graph_mse=graph_mse,
+                            topology_cfg=topology_cfg,
+                            checkpoint_step=int(payload.get("step", 0) or 0),
+                            nll_source=nll_source,
+                        )
+                    )
                 obj = dict(batch_objects[sample_index])
                 obj["record_index"] = int(record_id)
                 objects.append(obj)
@@ -832,7 +1144,7 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 break
     if not records:
         raise RuntimeError("no TokenGT graph records were evaluated")
-    return records, objects
+    return records, objects, rich_records
 
 
 def enrich_scores(records: list[dict[str, Any]]) -> None:
@@ -872,10 +1184,12 @@ def relative_matches(out_dir: Path, pattern: str) -> list[str]:
 def build_plot_family_manifest(out_dir: Path) -> dict[str, Any]:
     families = []
     for spec in PLOT_FAMILY_REGISTRY:
-        static_outputs = relative_matches(out_dir, str(spec.get("static_pattern", "")))
-        interactive_outputs = relative_matches(out_dir, str(spec.get("interactive_pattern", "")))
+        static_pattern = str(spec.get("static_pattern", ""))
+        interactive_pattern = str(spec.get("interactive_pattern", ""))
+        static_outputs = relative_matches(out_dir, static_pattern)
+        interactive_outputs = relative_matches(out_dir, interactive_pattern)
         interactive_required = bool(spec.get("interactive_required", False))
-        if not static_outputs:
+        if static_pattern and not static_outputs:
             status = "missing_static"
         elif interactive_required and not interactive_outputs:
             status = "missing_interactive"
@@ -1054,11 +1368,16 @@ def main() -> None:
     torch.manual_seed(int(args.seed))
     np.random.seed(int(args.seed))
     out_dir = Path(args.output_dir)
-    records, objects = evaluate_records(args)
+    records, objects, rich_records = evaluate_records(args)
     enrich_scores(records)
     write_csv(out_dir / "tokengt_geometry_records.csv", records)
     (out_dir / "tokengt_geometry_records.json").write_text(json.dumps(records, indent=2, sort_keys=True), encoding="utf-8")
     (out_dir / "derived_category_objects.json").write_text(json.dumps(objects, indent=2, sort_keys=True), encoding="utf-8")
+    rich_legacy_outputs = (
+        write_rich_legacy_geometry_outputs(rich_records, out_dir, checkpoint=str(args.checkpoint))
+        if bool(getattr(args, "rich_legacy_geometry", True))
+        else []
+    )
     for name, spec in TRIANGLE_SPECS.items():
         plot_triangle(records, spec, out_dir / f"{name}_triangle.png")
     plot_manifest = write_plot_family_manifest(out_dir)
@@ -1084,6 +1403,9 @@ def main() -> None:
     )
     summary["plot_family_manifest"] = plot_manifest
     summary["plot_family_manifest_outputs"] = ["plot_family_manifest.json", "plot_family_manifest.md"]
+    summary["rich_legacy_geometry_enabled"] = bool(getattr(args, "rich_legacy_geometry", True))
+    summary["rich_legacy_geometry_record_count"] = len(rich_records)
+    summary["rich_legacy_geometry_outputs"] = rich_legacy_outputs
     (out_dir / "reasoning_geometry_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     step = int(records[0].get("checkpoint_step", 0) or 0)
     log_to_wandb(args.wandb_run_path, summary, step=step)

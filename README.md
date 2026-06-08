@@ -49,6 +49,31 @@ These features remain score-valid: they depend only on public positions,
 reveal/topological/random ranks, graph structure, and already revealed input
 tokens.
 
+**Inference geometry CLI**
+
+TokenGT checkpoints can now be run with an optional geometry sidecar that emits
+the same plot-family union used by periodic checkpoint analyses.  The default
+command writes TokenGT-native trajectory plots, the R97-style rich geometry
+bundle, interactive HTML for every 3D/4D family, symbolic CCA/resolution
+certificates, triangle/tetrahedron diagnostics, and an `inference_output.json`
+manifest:
+
+```bash
+PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/infer_tokengt_with_geometry.py \
+  --checkpoint checkpoints/<run>/toricgt_step_00001500.pt \
+  --config config/train.full_tokengt_got_fineweb_derived.yaml \
+  --output-dir outputs/tokengt_inference/<run>/step-00001500 \
+  --records 1 \
+  --batch-size 1 \
+  --device cuda \
+  --precision bf16
+```
+
+For a lightweight model run without figures, add `--no-emit-geometry`.  For
+only the newer TokenGT-native plots without the R97 compatibility bundle, add
+`--no-rich-legacy-geometry`.  To direct the figure bundle elsewhere, use
+`--geometry-output-dir <path>`.
+
 **OpenAI competition baseline model**
 
 ```bash
