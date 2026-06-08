@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import glob
 import json
 import math
 import sys
@@ -26,6 +27,7 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,11 +61,16 @@ from toricgt.reasoning_geometry import (  # noqa: E402
 from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step_filtration_stats_np  # noqa: E402
 from toricgt.visualization import (  # noqa: E402
     plot_energy_landscape,
+    plot_pca_nll_4d,
     plot_reasoning_trajectory_3d,
     write_interactive_energy_landscape,
+    write_interactive_pca_nll_4d,
     write_interactive_reasoning_plot,
 )
 from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload  # noqa: E402
+
+
+DEFAULT_FINEWEB_TOKEN_GLOB = "amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024/fineweb_val_*.bin"
 
 
 TRIANGLE_SPECS = {
@@ -126,6 +133,26 @@ def load_flat_config(path: str | Path) -> dict[str, Any]:
         return flatten_cli_config(load_yaml_config(path))
     except Exception:
         return {}
+
+
+def expand_glob_path(path: str | Path) -> list[str]:
+    path_str = str(path)
+    matches = sorted(glob.glob(path_str))
+    return matches or [path_str]
+
+
+def geometry_data_paths(args: argparse.Namespace, flat: dict[str, Any]) -> list[str]:
+    requested = args.data_glob or config_get(flat, "val_data_path", ["data/curated_hf_shards/validation/*.parquet"])
+    if isinstance(requested, str):
+        requested = [requested]
+    requested_paths = [str(path) for path in requested]
+    if any(path.endswith(".bin") or ".bin" in path for path in requested_paths):
+        return [path for item in requested_paths for path in expand_glob_path(item)]
+    token_glob = str(config_get(flat, "val_token_glob", DEFAULT_FINEWEB_TOKEN_GLOB))
+    token_paths = expand_glob_path(token_glob)
+    if token_paths and any(path.endswith(".bin") for path in token_paths):
+        return token_paths
+    return [path for item in requested_paths for path in expand_glob_path(item)]
 
 
 def model_config_from_checkpoint(payload: dict[str, Any], flat_config: dict[str, Any]) -> ModelConfig:
@@ -199,6 +226,34 @@ def valid_edges(edge_index: torch.Tensor, edge_mask: torch.Tensor, n: int) -> np
 def per_node_mse(out_node: torch.Tensor, target: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
     err = (out_node.float() - target.float()).pow(2).mean(dim=-1)
     return torch.where(node_mask, err, torch.zeros_like(err))
+
+
+def per_node_lm_nll(outputs: dict[str, torch.Tensor], batch: GraphBatch) -> tuple[torch.Tensor | None, str]:
+    logits = outputs.get("lm_logits")
+    targets = batch.lm_target_ids
+    if logits is None or targets is None:
+        return None, "graph_reconstruction_mse_fallback"
+    vocab = int(logits.shape[-1])
+    node_count = min(int(logits.shape[1]), int(targets.shape[1]), int(batch.node_mask.shape[1]))
+    if node_count <= 0 or vocab <= 1:
+        return None, "graph_reconstruction_mse_fallback"
+    logits = logits[:, :node_count, :].float()
+    targets = targets[:, :node_count].to(device=logits.device, dtype=torch.long)
+    node_mask = batch.node_mask[:, :node_count].to(device=logits.device, dtype=torch.bool)
+    if batch.lm_mask is not None:
+        lm_mask = batch.lm_mask[:, :node_count].to(device=logits.device, dtype=torch.bool)
+        valid = node_mask & lm_mask
+    else:
+        valid = node_mask
+    valid = valid & (targets >= 0) & (targets < vocab)
+    safe_targets = torch.where(valid, targets, torch.zeros_like(targets))
+    flat_nll = F.cross_entropy(logits.reshape(-1, vocab), safe_targets.reshape(-1), reduction="none")
+    nll = flat_nll.reshape(logits.shape[0], node_count)
+    nll = torch.where(valid, nll, torch.zeros_like(nll))
+    if node_count < batch.node_mask.shape[1]:
+        pad = nll.new_zeros((nll.shape[0], int(batch.node_mask.shape[1]) - node_count))
+        nll = torch.cat([nll, pad], dim=1)
+    return nll, "lm_token_nll"
 
 
 def topology_summary(stats: dict[str, Any]) -> dict[str, float]:
@@ -335,9 +390,7 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
         device = "cpu"
     model.to(device)
     model.eval()
-    paths = args.data_glob or config_get(flat, "val_data_path", ["data/curated_hf_shards/validation/*.parquet"])
-    if isinstance(paths, str):
-        paths = [paths]
+    paths = geometry_data_paths(args, flat)
     dataset = CuratedGraphIterableDataset(
         paths,
         cfg,
@@ -371,6 +424,9 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 out = model(batch)
                 loss = masked_mse(out["node"], target, batch.node_mask)
             node_energy = per_node_mse(out["node"], target, batch.node_mask)
+            node_nll, nll_source = per_node_lm_nll(out, batch)
+            if node_nll is None:
+                node_nll = node_energy
             got = got_dag_metrics(
                 out["node_embeddings"],
                 node_mask=batch.node_mask,
@@ -392,6 +448,7 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
             )
             hidden_cpu = out["node_embeddings"].detach().float().cpu()
             energy_cpu = node_energy.detach().float().cpu()
+            nll_cpu = node_nll.detach().float().cpu()
             for sample_index in range(hidden_cpu.shape[0]):
                 if len(records) >= int(args.records):
                     break
@@ -403,12 +460,17 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 energy = energy_cpu[sample_index, :n].numpy()
                 if not np.isfinite(energy).all():
                     energy = np.nan_to_num(energy, nan=float(np.nanmean(energy)) if np.isfinite(np.nanmean(energy)) else 0.0)
+                nll = nll_cpu[sample_index, :n].numpy()
+                if not np.isfinite(nll).all():
+                    nll = np.nan_to_num(nll, nan=float(np.nanmean(nll)) if np.isfinite(np.nanmean(nll)) else 0.0)
                 edges = valid_edges(batch.edge_index[sample_index], batch.edge_mask[sample_index], n)
                 record_id = len(records)
                 topology = directed_step_filtration_stats_np(hidden, config=topology_cfg)
                 topology_metrics = topology_summary(topology)
                 mst = prim_mst_stats(projected.tolist())
                 graph_mse = float(energy[energy >= 0].mean()) if energy.size else float(loss.detach().cpu())
+                mean_node_nll = float(nll.mean()) if nll.size else graph_mse
+                max_node_nll = float(nll.max()) if nll.size else graph_mse
                 path_speed = np.linalg.norm(np.diff(projected, axis=0), axis=1) if projected.shape[0] > 1 else np.zeros((1,))
                 path_smoothness = float(1.0 / (1.0 + np.std(path_speed)))
                 resolution_metrics = extract_resolution_metrics(batch_objects[sample_index])
@@ -417,6 +479,9 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                     "checkpoint_step": int(payload.get("step", 0) or 0),
                     "graph_reconstruction_mse": graph_mse,
                     "global_masked_mse": float(loss.detach().cpu()),
+                    "mean_node_nll": mean_node_nll,
+                    "max_node_nll": max_node_nll,
+                    "node_nll_source": nll_source,
                     "node_count": float(n),
                     "edge_count": float(edges.shape[0]),
                     "mst_efficiency": float(mst.get("mst_efficiency", 0.0)),
@@ -449,8 +514,10 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 prefix = f"record_{record_id:03d}"
                 plot_reasoning_trajectory_3d(projected, energy, traj_dir / f"{prefix}_trajectory_3d.png", edges=edges)
                 plot_energy_landscape(projected, energy, traj_dir / f"{prefix}_energy_landscape.png", edges=edges)
+                plot_pca_nll_4d(projected, nll, traj_dir / f"{prefix}_pca_nll_4d.png", edges=edges)
                 write_interactive_energy_landscape(projected, energy, traj_dir / f"{prefix}_energy_landscape.html", edges=edges)
                 write_interactive_reasoning_plot(projected, energy, traj_dir / f"{prefix}_trajectory_3d.html", edges=edges)
+                write_interactive_pca_nll_4d(projected, nll, traj_dir / f"{prefix}_pca_nll_4d.html", edges=edges)
                 plot_topology_heatmap(topology, topo_dir / f"{prefix}_topology_heatmaps.png")
             if len(records) >= int(args.records):
                 break
@@ -496,9 +563,12 @@ def summarize(records: list[dict[str, Any]], args: argparse.Namespace) -> dict[s
         "checkpoint_family": "tokengt_graph",
         "records": len(records),
         "oai_competition_bpb_available": 0.0,
-        "oai_competition_bpb_note": "TokenGT graph checkpoints do not expose byte-level language-model logits; use graph reconstruction and topology metrics here, and evaluate OAI BPB on random-order/compact Seq4096 LM checkpoints.",
+        "oai_competition_bpb_note": "TokenGT geometry reports graph reconstruction, topology, and per-node SP1024 LM NLL when FineWeb graph targets are available; byte-normalized BPB is reported by evaluate_tokengt_fineweb_bpb.py.",
         "mean_graph_reconstruction_mse": mean("graph_reconstruction_mse"),
         "best_graph_reconstruction_mse": min(float(record["graph_reconstruction_mse"]) for record in records),
+        "mean_node_nll": mean("mean_node_nll"),
+        "max_node_nll": max(float(record.get("max_node_nll", 0.0)) for record in records),
+        "node_nll_source": records[0].get("node_nll_source", "unknown"),
         "mean_mst_efficiency": mean("mst_efficiency"),
         "mean_path_smoothness": mean("path_smoothness"),
         "mean_got_dag_branch_count": mean("got_dag_branch_count"),
@@ -544,6 +614,8 @@ def log_to_wandb(run_path: str, summary: dict[str, Any], step: int) -> None:
             "analysis_control/checkpoint_step": step,
             "analysis_control/tokengt_geometry/mean_graph_reconstruction_mse": summary["mean_graph_reconstruction_mse"],
             "analysis_control/tokengt_geometry/best_graph_reconstruction_mse": summary["best_graph_reconstruction_mse"],
+            "analysis_control/tokengt_geometry/mean_node_nll": summary["mean_node_nll"],
+            "analysis_control/tokengt_geometry/max_node_nll": summary["max_node_nll"],
             "analysis_control/tokengt_geometry/mean_mst_efficiency": summary["mean_mst_efficiency"],
             "analysis_control/tokengt_geometry/mean_path_smoothness": summary["mean_path_smoothness"],
             "analysis_control/tokengt_geometry/mean_got_dag_branch_count": summary["mean_got_dag_branch_count"],
@@ -582,6 +654,12 @@ def main() -> None:
     )
     summary["interactive_energy_landscape_outputs"] = sorted(
         str(path.relative_to(out_dir)) for path in (out_dir / "trajectories").glob("*_energy_landscape.html")
+    )
+    summary["pca_nll_4d_png_outputs"] = sorted(
+        str(path.relative_to(out_dir)) for path in (out_dir / "trajectories").glob("*_pca_nll_4d.png")
+    )
+    summary["interactive_pca_nll_4d_outputs"] = sorted(
+        str(path.relative_to(out_dir)) for path in (out_dir / "trajectories").glob("*_pca_nll_4d.html")
     )
     (out_dir / "reasoning_geometry_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     step = int(records[0].get("checkpoint_step", 0) or 0)

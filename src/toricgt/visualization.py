@@ -187,6 +187,58 @@ def plot_reasoning_trajectory_3d(
     plt.close(fig)
 
 
+def plot_pca_nll_4d(
+    path: np.ndarray,
+    nll: np.ndarray,
+    output: str | Path,
+    *,
+    edges: np.ndarray | None = None,
+) -> None:
+    """Plot a 4D diagnostic: 3 PCA axes plus per-node NLL as color."""
+
+    path = np.asarray(path, dtype=np.float64)
+    nll = np.asarray(nll, dtype=np.float64)
+    if path.ndim != 2 or path.shape[0] == 0 or path.shape[1] < 3:
+        return
+    if nll.shape[0] < path.shape[0]:
+        return
+    if edges is None:
+        edges = default_branch_merge_edges_np(len(path))
+    finite_nll = np.nan_to_num(nll[: path.shape[0]], nan=float(np.nanmean(nll)) if np.isfinite(np.nanmean(nll)) else 0.0)
+    fig = plt.figure(figsize=(8.6, 6.8), facecolor="#05070d")
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_facecolor("#05070d")
+    _plot_branch_merge_edges_3d(ax, path, edges=edges, linewidth=1.18, alpha=0.62, arrows=True)
+    scatter = ax.scatter(
+        path[:, 0],
+        path[:, 1],
+        path[:, 2],
+        c=finite_nll,
+        cmap="magma",
+        s=28,
+        edgecolor="#07111f",
+        linewidth=0.35,
+    )
+    best = int(np.nanargmin(finite_nll)) if finite_nll.size else 0
+    ax.scatter(path[best, 0], path[best, 1], path[best, 2], s=125, color="#8cff6a", edgecolor="white")
+    ax.set_title("4D PCA Reasoning Trajectory: 3D Geometry Colored by NLL", color="white")
+    ax.set_xlabel("PCA component 1", color="white")
+    ax.set_ylabel("PCA component 2", color="white")
+    ax.set_zlabel("PCA component 3", color="white")
+    ax.tick_params(colors="white")
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        axis.pane.set_facecolor((0.02, 0.03, 0.06, 1.0))
+        axis.pane.set_edgecolor((0.2, 0.8, 0.9, 0.35))
+    ax.view_init(elev=24, azim=-54)
+    cbar = fig.colorbar(scatter, ax=ax, shrink=0.75, pad=0.08)
+    cbar.set_label("per-node NLL (nats)", color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.get_yticklabels(), color="white")
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=185, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def plot_ramachandran_style_reasoning(path: np.ndarray, energy: np.ndarray, output: str | Path) -> None:
     velocity = np.diff(path, axis=0, prepend=path[:1])
     phi = np.arctan2(velocity[:, 1], velocity[:, 0])
@@ -498,6 +550,102 @@ Plotly.newPlot('plot', [...edgeTraces, nodeTrace], {{
     zaxis: {{title:'GFlowNet action', color:'white', gridcolor:'#17323a'}}
   }},
   title: {{text:'Embedding-Space Graph-of-Thought Branch/Merge DAG', font:{{color:'white'}}}}
+}}, {{responsive:true}});
+</script></body></html>"""
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    Path(output).write_text(html, encoding="utf-8")
+
+
+def write_interactive_pca_nll_4d(
+    path: np.ndarray,
+    nll: np.ndarray,
+    output: str | Path,
+    *,
+    edges: np.ndarray | None = None,
+) -> None:
+    """Write a rotatable 4D diagnostic: PCA x/y/z with NLL as marker color."""
+
+    path = np.asarray(path, dtype=np.float64)
+    nll = np.asarray(nll, dtype=np.float64)
+    if path.ndim != 2 or path.shape[0] == 0 or path.shape[1] < 3:
+        return
+    if nll.shape[0] < path.shape[0]:
+        return
+    if edges is None:
+        edges = default_branch_merge_edges_np(len(path))
+    finite_nll = np.nan_to_num(nll[: path.shape[0]], nan=float(np.nanmean(nll)) if np.isfinite(np.nanmean(nll)) else 0.0)
+    rows = [
+        {
+            "x": float(p[0]),
+            "y": float(p[1]),
+            "z": float(p[2]),
+            "nll": float(value),
+            "step": int(i),
+        }
+        for i, (p, value) in enumerate(zip(path, finite_nll, strict=True))
+    ]
+    edge_rows = [
+        {"src": int(src), "dst": int(dst), "role": role}
+        for (src, dst), role in zip(edges, _edge_role_colors(edges, len(path)), strict=False)
+        if 0 <= int(src) < len(path) and 0 <= int(dst) < len(path)
+    ]
+    best = int(np.nanargmin(finite_nll)) if finite_nll.size else 0
+    payload = {"rows": rows, "edges": edge_rows, "best": best}
+    html = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>ToricGT 4D PCA NLL Plot</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+body{{margin:0;background:#05070d;color:white;font-family:system-ui}}
+#plot{{width:100vw;height:100vh}}
+.note{{position:absolute;z-index:5;left:18px;top:12px;max-width:820px;color:#e8fbff}}
+.note h1{{font-size:20px;line-height:1.15;margin:0 0 5px 0}}
+.note p{{font-size:12px;line-height:1.35;margin:0;opacity:.88}}
+</style></head><body>
+<div class="note">
+  <h1>4D TokenGT PCA/NLL Reasoning Trajectory</h1>
+  <p>The spatial axes are the first three PCA coordinates of node embeddings. Marker color is per-node language-model NLL, so hot regions identify graph-of-thought vertices where the model is least certain.</p>
+</div>
+<div id="plot"></div><script>
+const payload = {json.dumps(payload)};
+const rows = payload.rows;
+const edgeTraces = payload.edges.map((e, idx) => {{
+  const a = rows[e.src], b = rows[e.dst];
+  return {{
+    type:'scatter3d', mode:'lines', showlegend:idx < 8,
+    name:e.role === '#ff4fd8' ? 'branch edge' : (e.role === '#8cff6a' ? 'merge edge' : (e.role === '#ffd166' ? 'branch+merge edge' : 'DAG edge')),
+    x:[a.x,b.x], y:[a.y,b.y], z:[a.z,b.z],
+    line:{{color:e.role, width:5}},
+    text:[`${{e.src}} -> ${{e.dst}}`, `${{e.src}} -> ${{e.dst}}`],
+    hoverinfo:'text'
+  }};
+}});
+const nodeTrace = {{
+  type:'scatter3d', mode:'markers', name:'reasoning vertices colored by NLL',
+  x:rows.map(r => r.x), y:rows.map(r => r.y), z:rows.map(r => r.z),
+  marker:{{size:5.0, color:rows.map(r => r.nll), colorscale:'Magma',
+           colorbar:{{title:'NLL (nats)'}}, line:{{color:'#06111f', width:0.6}}}},
+  text:rows.map(r => `node ${{r.step}}<br>NLL ${{r.nll.toFixed(5)}}<br>PCA (${{r.x.toFixed(3)}}, ${{r.y.toFixed(3)}}, ${{r.z.toFixed(3)}})`),
+  hoverinfo:'text'
+}};
+const best = rows[payload.best] || rows[0];
+const bestTrace = {{
+  type:'scatter3d', mode:'markers', name:'lowest-NLL vertex',
+  x:[best.x], y:[best.y], z:[best.z],
+  marker:{{size:11, color:'#8cff6a', line:{{color:'white', width:1.4}}}},
+  text:[`lowest-NLL node ${{best.step}}<br>NLL ${{best.nll.toFixed(5)}}`],
+  hoverinfo:'text'
+}};
+Plotly.newPlot('plot', [...edgeTraces, nodeTrace, bestTrace], {{
+  paper_bgcolor:'#05070d', plot_bgcolor:'#05070d',
+  legend:{{font:{{color:'white'}}, bgcolor:'rgba(5,7,13,.55)'}},
+  scene:{{
+    bgcolor:'#05070d',
+    xaxis:{{title:'PCA component 1', color:'white', gridcolor:'#17323a'}},
+    yaxis:{{title:'PCA component 2', color:'white', gridcolor:'#17323a'}},
+    zaxis:{{title:'PCA component 3', color:'white', gridcolor:'#17323a'}},
+    camera:{{eye:{{x:1.55,y:-1.70,z:1.22}}}}
+  }},
+  margin:{{l:0,r:0,b:0,t:0}}
 }}, {{responsive:true}});
 </script></body></html>"""
     Path(output).parent.mkdir(parents=True, exist_ok=True)
