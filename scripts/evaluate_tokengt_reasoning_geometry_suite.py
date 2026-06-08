@@ -103,6 +103,109 @@ TRIANGLE_SPECS = {
 }
 
 
+PLOT_FAMILY_REGISTRY = [
+    {
+        "family": "trajectory_3d",
+        "introduced": "previous",
+        "dimension": "3D",
+        "static_pattern": "trajectories/record_*_trajectory_3d.png",
+        "interactive_pattern": "trajectories/record_*_trajectory_3d.html",
+        "interactive_required": True,
+        "description": "Raw node-embedding reasoning trajectory with branch/merge graph edges and energy color.",
+    },
+    {
+        "family": "energy_landscape",
+        "introduced": "previous",
+        "dimension": "3D surface",
+        "static_pattern": "trajectories/record_*_energy_landscape.png",
+        "interactive_pattern": "trajectories/record_*_energy_landscape.html",
+        "interactive_required": True,
+        "description": "Smooth projected energy/fitness surface with trajectory overlay and toric/tropical chamber-wall proxies.",
+    },
+    {
+        "family": "pca_nll_4d",
+        "introduced": "previous",
+        "dimension": "4D",
+        "static_pattern": "trajectories/record_*_pca_nll_4d.png",
+        "interactive_pattern": "trajectories/record_*_pca_nll_4d.html",
+        "interactive_required": True,
+        "description": "3D PCA coordinates of node embeddings with per-node NLL as the fourth plotted coordinate.",
+    },
+    {
+        "family": "complex_pca_nll_3d",
+        "introduced": "current",
+        "dimension": "3D/4D complex",
+        "static_pattern": "trajectories/record_*_complex_pca_nll_3d.png",
+        "interactive_pattern": "trajectories/record_*_complex_pca_nll_3d.html",
+        "interactive_required": True,
+        "description": "Reasoning-step filtered simplicial complexes as trajectory vertices, colored by mean NLL and sized by simplicial mass, with local-complex thought bubbles.",
+    },
+    {
+        "family": "topology_heatmaps",
+        "introduced": "previous",
+        "dimension": "2D",
+        "static_pattern": "topology/record_*_topology_heatmaps.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Distance, directed adjacency, and persistent reachability heatmaps.",
+    },
+    {
+        "family": "graph_energy_topology_triangle",
+        "introduced": "previous",
+        "dimension": "2D simplex",
+        "static_pattern": "graph_energy_topology_triangle.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Triangle diagnostic for graph energy, DAG topology, and MST efficiency.",
+    },
+    {
+        "family": "derived_memory_geometry_triangle",
+        "introduced": "previous",
+        "dimension": "2D simplex",
+        "static_pattern": "derived_memory_geometry_triangle.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Triangle diagnostic for derived-category regularity, topology stability, and merge tightness.",
+    },
+    {
+        "family": "noncommutative_flow_triangle",
+        "introduced": "previous",
+        "dimension": "2D simplex",
+        "static_pattern": "noncommutative_flow_triangle.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Triangle diagnostic for directed flux, asymmetry, and branch diversity.",
+    },
+    {
+        "family": "branch_merge_non_linear_triangle",
+        "introduced": "previous",
+        "dimension": "2D simplex",
+        "static_pattern": "branch_merge_non_linear_triangle.png",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Triangle diagnostic for branch/merge structure versus linear-chain collapse.",
+    },
+    {
+        "family": "tokengt_geometry_records",
+        "introduced": "previous",
+        "dimension": "table",
+        "static_pattern": "tokengt_geometry_records.*",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Per-record CSV/JSON metrics backing the geometry plots.",
+    },
+    {
+        "family": "derived_category_objects",
+        "introduced": "previous",
+        "dimension": "symbolic data",
+        "static_pattern": "derived_category_objects.json",
+        "interactive_pattern": "",
+        "interactive_required": False,
+        "description": "Derived-category, projective-resolution, and symbolic CCA objects used by the diagnostics.",
+    },
+]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
@@ -760,6 +863,90 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def relative_matches(out_dir: Path, pattern: str) -> list[str]:
+    if not pattern:
+        return []
+    return sorted(str(path.relative_to(out_dir)) for path in out_dir.glob(pattern) if path.is_file())
+
+
+def build_plot_family_manifest(out_dir: Path) -> dict[str, Any]:
+    families = []
+    for spec in PLOT_FAMILY_REGISTRY:
+        static_outputs = relative_matches(out_dir, str(spec.get("static_pattern", "")))
+        interactive_outputs = relative_matches(out_dir, str(spec.get("interactive_pattern", "")))
+        interactive_required = bool(spec.get("interactive_required", False))
+        if not static_outputs:
+            status = "missing_static"
+        elif interactive_required and not interactive_outputs:
+            status = "missing_interactive"
+        else:
+            status = "ok"
+        families.append(
+            {
+                "family": spec["family"],
+                "introduced": spec["introduced"],
+                "dimension": spec["dimension"],
+                "interactive_required": interactive_required,
+                "status": status,
+                "static_count": len(static_outputs),
+                "interactive_count": len(interactive_outputs),
+                "static_outputs": static_outputs,
+                "interactive_outputs": interactive_outputs,
+                "description": spec["description"],
+            }
+        )
+    required_3d4d = [item for item in families if item["interactive_required"]]
+    return {
+        "schema": "toricgt.geometry_plot_family_manifest.v1",
+        "families": families,
+        "previous_families": sorted(item["family"] for item in families if item["introduced"] == "previous"),
+        "current_new_families": sorted(item["family"] for item in families if item["introduced"] == "current"),
+        "union_families": sorted(item["family"] for item in families),
+        "interactive_3d4d_complete": all(item["status"] == "ok" for item in required_3d4d),
+        "missing_required_interactive": [
+            item["family"] for item in required_3d4d if item["status"] == "missing_interactive"
+        ],
+        "missing_static": [item["family"] for item in families if item["status"] == "missing_static"],
+    }
+
+
+def write_plot_family_manifest(out_dir: Path) -> dict[str, Any]:
+    manifest = build_plot_family_manifest(out_dir)
+    (out_dir / "plot_family_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    lines = [
+        "# Geometry Plot Family Manifest",
+        "",
+        "This manifest records the union of previous and current geometry-analysis outputs. "
+        "All 3D/4D families are expected to have an interactive HTML companion.",
+        "",
+        f"- Previous families: {', '.join(manifest['previous_families'])}",
+        f"- Current new families: {', '.join(manifest['current_new_families'])}",
+        f"- 3D/4D interactive complete: {manifest['interactive_3d4d_complete']}",
+        "",
+        "| family | introduced | dimension | static | interactive | status | description |",
+        "| --- | --- | --- | ---: | ---: | --- | --- |",
+    ]
+    for item in manifest["families"]:
+        description = str(item["description"]).replace("|", "/")
+        row = dict(item)
+        row["description"] = description
+        lines.append(
+            "| {family} | {introduced} | {dimension} | {static_count} | {interactive_count} | {status} | {description} |".format(
+                **row,
+            )
+        )
+    lines.append("")
+    lines.append("## Required Interactive 3D/4D Families")
+    for item in manifest["families"]:
+        if item["interactive_required"]:
+            lines.append(f"- `{item['family']}`: `{item['status']}`")
+    (out_dir / "plot_family_manifest.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return manifest
+
+
 def summarize(records: list[dict[str, Any]], args: argparse.Namespace) -> dict[str, Any]:
     def mean(key: str) -> float:
         return finite_mean([float(record.get(key, 0.0)) for record in records])
@@ -874,6 +1061,7 @@ def main() -> None:
     (out_dir / "derived_category_objects.json").write_text(json.dumps(objects, indent=2, sort_keys=True), encoding="utf-8")
     for name, spec in TRIANGLE_SPECS.items():
         plot_triangle(records, spec, out_dir / f"{name}_triangle.png")
+    plot_manifest = write_plot_family_manifest(out_dir)
     summary = summarize(records, args)
     summary["outputs"] = sorted(path.name for path in out_dir.glob("*") if path.is_file())
     summary["trajectory_html_outputs"] = sorted(
@@ -894,6 +1082,8 @@ def main() -> None:
     summary["interactive_reasoning_step_complex_outputs"] = sorted(
         str(path.relative_to(out_dir)) for path in (out_dir / "trajectories").glob("*_complex_pca_nll_3d.html")
     )
+    summary["plot_family_manifest"] = plot_manifest
+    summary["plot_family_manifest_outputs"] = ["plot_family_manifest.json", "plot_family_manifest.md"]
     (out_dir / "reasoning_geometry_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     step = int(records[0].get("checkpoint_step", 0) or 0)
     log_to_wandb(args.wandb_run_path, summary, step=step)
