@@ -60,6 +60,7 @@ from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step
 from toricgt.visualization import (  # noqa: E402
     plot_energy_landscape,
     plot_reasoning_trajectory_3d,
+    write_interactive_energy_landscape,
     write_interactive_reasoning_plot,
 )
 from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload  # noqa: E402
@@ -448,6 +449,7 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 prefix = f"record_{record_id:03d}"
                 plot_reasoning_trajectory_3d(projected, energy, traj_dir / f"{prefix}_trajectory_3d.png", edges=edges)
                 plot_energy_landscape(projected, energy, traj_dir / f"{prefix}_energy_landscape.png", edges=edges)
+                write_interactive_energy_landscape(projected, energy, traj_dir / f"{prefix}_energy_landscape.html", edges=edges)
                 write_interactive_reasoning_plot(projected, energy, traj_dir / f"{prefix}_trajectory_3d.html", edges=edges)
                 plot_topology_heatmap(topology, topo_dir / f"{prefix}_topology_heatmaps.png")
             if len(records) >= int(args.records):
@@ -574,6 +576,12 @@ def main() -> None:
         plot_triangle(records, spec, out_dir / f"{name}_triangle.png")
     summary = summarize(records, args)
     summary["outputs"] = sorted(path.name for path in out_dir.glob("*") if path.is_file())
+    summary["trajectory_html_outputs"] = sorted(
+        str(path.relative_to(out_dir)) for path in (out_dir / "trajectories").glob("*_trajectory_3d.html")
+    )
+    summary["interactive_energy_landscape_outputs"] = sorted(
+        str(path.relative_to(out_dir)) for path in (out_dir / "trajectories").glob("*_energy_landscape.html")
+    )
     (out_dir / "reasoning_geometry_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     step = int(records[0].get("checkpoint_step", 0) or 0)
     log_to_wandb(args.wandb_run_path, summary, step=step)

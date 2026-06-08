@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -260,6 +261,189 @@ def plot_energy_landscape(
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=180, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
+
+
+def _energy_landscape_grid(path: np.ndarray, resolution: int = 120) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    x = np.linspace(path[:, 0].min() - 0.3, path[:, 0].max() + 0.3, resolution)
+    y = np.linspace(path[:, 1].min() - 0.3, path[:, 1].max() + 0.3, resolution)
+    xx, yy = np.meshgrid(x, y)
+    minima = np.array([[1.1, -0.7], [-0.8, 0.85], [0.25, 0.2]], dtype=np.float64)
+    landscape = np.zeros_like(xx) + 0.15 * (xx**2 + yy**2)
+    for idx, minimum in enumerate(minima):
+        landscape -= np.exp(-((xx - minimum[0]) ** 2 + (yy - minimum[1]) ** 2) * (2.5 + idx))
+    return x, y, landscape, minima
+
+
+def _energy_landscape_value(points: np.ndarray, minima: np.ndarray) -> np.ndarray:
+    values = 0.15 * (points[:, 0] ** 2 + points[:, 1] ** 2)
+    for idx, minimum in enumerate(minima):
+        values -= np.exp(-((points[:, 0] - minimum[0]) ** 2 + (points[:, 1] - minimum[1]) ** 2) * (2.5 + idx))
+    return values
+
+
+def _bisector_segment(m0: np.ndarray, m1: np.ndarray, xlim: tuple[float, float], ylim: tuple[float, float]) -> np.ndarray:
+    """Return clipped points on the projected equal-basin wall between two minima."""
+
+    midpoint = 0.5 * (m0 + m1)
+    direction = np.array([-(m1 - m0)[1], (m1 - m0)[0]], dtype=np.float64)
+    norm = float(np.linalg.norm(direction))
+    if norm < 1e-8:
+        return np.zeros((0, 2), dtype=np.float64)
+    direction /= norm
+    span = 2.4 * max(xlim[1] - xlim[0], ylim[1] - ylim[0])
+    ts = np.linspace(-span, span, 220)
+    segment = midpoint[None, :] + ts[:, None] * direction[None, :]
+    keep = (
+        (segment[:, 0] >= xlim[0])
+        & (segment[:, 0] <= xlim[1])
+        & (segment[:, 1] >= ylim[0])
+        & (segment[:, 1] <= ylim[1])
+    )
+    return segment[keep]
+
+
+def write_interactive_energy_landscape(
+    path: np.ndarray,
+    energy: np.ndarray,
+    output: str | Path,
+    *,
+    edges: np.ndarray | None = None,
+) -> None:
+    """Write a rotatable HTML energy-landscape view for TokenGT trajectories.
+
+    The surface is intentionally a smooth surrogate over the first two projected
+    embedding axes; discontinuous toric/tropical chamber data is shown as
+    overlays because PCA projection and interpolation otherwise hide most hard
+    walls.
+    """
+
+    path = np.asarray(path, dtype=np.float64)
+    energy = np.asarray(energy, dtype=np.float64)
+    if path.ndim != 2 or path.shape[0] == 0 or path.shape[1] < 2:
+        return
+    if energy.shape[0] < path.shape[0]:
+        return
+    if edges is None:
+        edges = default_branch_merge_edges_np(len(path))
+
+    x, y, landscape, minima = _energy_landscape_grid(path, resolution=100)
+    path_xy = path[:, :2]
+    path_z = _energy_landscape_value(path_xy, minima) + 0.045
+    finite_energy = np.nan_to_num(energy[: path.shape[0]], nan=float(np.nanmean(energy)) if np.isfinite(np.nanmean(energy)) else 0.0)
+    rows = [
+        {
+            "x": float(p[0]),
+            "y": float(p[1]),
+            "z": float(z),
+            "energy": float(e),
+            "step": int(i),
+        }
+        for i, (p, z, e) in enumerate(zip(path_xy, path_z, finite_energy, strict=True))
+    ]
+    edge_rows = [
+        {"src": int(src), "dst": int(dst), "role": role}
+        for (src, dst), role in zip(edges, _edge_role_colors(edges, len(path)), strict=False)
+        if 0 <= int(src) < len(path) and 0 <= int(dst) < len(path)
+    ]
+
+    xlim = (float(x.min()), float(x.max()))
+    ylim = (float(y.min()), float(y.max()))
+    wall_rows: list[dict[str, object]] = []
+    for wall_idx, (i, j) in enumerate(((0, 1), (0, 2), (1, 2))):
+        segment = _bisector_segment(minima[i], minima[j], xlim, ylim)
+        if segment.shape[0] < 2:
+            continue
+        wall_z = _energy_landscape_value(segment, minima) + 0.095
+        wall_rows.append(
+            {
+                "name": f"projected chamber wall {i}-{j}",
+                "x": segment[:, 0].tolist(),
+                "y": segment[:, 1].tolist(),
+                "z": wall_z.tolist(),
+                "color": ["#67e8f9", "#f0abfc", "#fde68a"][wall_idx],
+            }
+        )
+
+    best = int(np.nanargmin(finite_energy)) if finite_energy.size else 0
+    payload = {
+        "x": x.tolist(),
+        "y": y.tolist(),
+        "z": landscape.tolist(),
+        "rows": rows,
+        "edges": edge_rows,
+        "walls": wall_rows,
+        "best": best,
+    }
+    html = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>ToricGT Energy Landscape</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+body{{margin:0;background:#05070d;color:white;font-family:system-ui}}
+#plot{{width:100vw;height:100vh}}
+.note{{position:absolute;z-index:5;left:18px;top:12px;max-width:980px;color:#e8fbff}}
+.note h1{{font-size:20px;line-height:1.15;margin:0 0 5px 0}}
+.note p{{font-size:12px;line-height:1.35;margin:0;opacity:.88}}
+</style></head><body>
+<div class="note">
+  <h1>Interactive TokenGT Energy/Fitness Landscape</h1>
+  <p>The surface is a smooth low-dimensional surrogate over projected embedding coordinates. Cyan/magenta/gold traces mark projected toric/tropical chamber-wall proxies; hard fan boundaries can be compressed or hidden by PCA, smoothing, and the learned continuous embeddings.</p>
+</div>
+<div id="plot"></div><script>
+const payload = {json.dumps(payload)};
+const surface = {{
+  type:'surface', name:'smooth surrogate energy surface',
+  x: payload.x, y: payload.y, z: payload.z,
+  colorscale:'Magma', opacity:0.80, showscale:true,
+  colorbar:{{title:'surrogate landscape energy'}}
+}};
+const wallTraces = payload.walls.map(w => ({{
+  type:'scatter3d', mode:'lines', name:w.name,
+  x:w.x, y:w.y, z:w.z,
+  line:{{color:w.color, width:8}},
+  hoverinfo:'name'
+}}));
+const edgeTraces = payload.edges.map((e, idx) => {{
+  const a = payload.rows[e.src], b = payload.rows[e.dst];
+  return {{
+    type:'scatter3d', mode:'lines', showlegend:idx < 8,
+    name:e.role === '#ff4fd8' ? 'branch edge' : (e.role === '#8cff6a' ? 'merge edge' : 'DAG edge'),
+    x:[a.x,b.x], y:[a.y,b.y], z:[a.z,b.z],
+    line:{{color:e.role, width:5}},
+    text:[`${{e.src}} -> ${{e.dst}}`, `${{e.src}} -> ${{e.dst}}`],
+    hoverinfo:'text'
+  }};
+}});
+const nodeTrace = {{
+  type:'scatter3d', mode:'markers', name:'reasoning vertices',
+  x:payload.rows.map(r => r.x), y:payload.rows.map(r => r.y), z:payload.rows.map(r => r.z),
+  marker:{{size:4.2, color:payload.rows.map(r => r.energy), colorscale:'Viridis', reversescale:true,
+           colorbar:{{title:'model node energy'}}, line:{{color:'#06111f', width:0.6}}}},
+  text:payload.rows.map(r => `step ${{r.step}}<br>model energy ${{r.energy.toFixed(5)}}<br>surface z ${{r.z.toFixed(5)}}`),
+  hoverinfo:'text'
+}};
+const best = payload.rows[payload.best] || payload.rows[0];
+const bestTrace = {{
+  type:'scatter3d', mode:'markers', name:'lowest model-energy vertex',
+  x:[best.x], y:[best.y], z:[best.z + 0.08],
+  marker:{{size:10, color:'#8cff6a', line:{{color:'white', width:1.4}}}},
+  text:[`best step ${{best.step}}<br>model energy ${{best.energy.toFixed(5)}}`],
+  hoverinfo:'text'
+}};
+Plotly.newPlot('plot', [surface, ...wallTraces, ...edgeTraces, nodeTrace, bestTrace], {{
+  paper_bgcolor:'#05070d', plot_bgcolor:'#05070d',
+  legend:{{font:{{color:'white'}}, bgcolor:'rgba(5,7,13,.55)'}},
+  scene:{{
+    bgcolor:'#05070d',
+    xaxis:{{title:'embedding projection 1', color:'white', gridcolor:'#17323a'}},
+    yaxis:{{title:'embedding projection 2', color:'white', gridcolor:'#17323a'}},
+    zaxis:{{title:'landscape energy', color:'white', gridcolor:'#17323a'}},
+    camera:{{eye:{{x:1.55,y:-1.75,z:1.18}}}}
+  }},
+  margin:{{l:0,r:0,b:0,t:0}}
+}}, {{responsive:true}});
+</script></body></html>"""
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    Path(output).write_text(html, encoding="utf-8")
 
 
 def write_interactive_reasoning_plot(
