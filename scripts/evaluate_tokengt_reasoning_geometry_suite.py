@@ -541,6 +541,7 @@ def log_to_wandb(run_path: str, summary: dict[str, Any], step: int) -> None:
         configure_wandb_metrics(wandb)
         payload = {
             "trainer/step": step,
+            "analysis_control/checkpoint_step": step,
             "analysis_control/tokengt_geometry/mean_graph_reconstruction_mse": summary["mean_graph_reconstruction_mse"],
             "analysis_control/tokengt_geometry/best_graph_reconstruction_mse": summary["best_graph_reconstruction_mse"],
             "analysis_control/tokengt_geometry/mean_mst_efficiency": summary["mean_mst_efficiency"],
@@ -557,7 +558,7 @@ def log_to_wandb(run_path: str, summary: dict[str, Any], step: int) -> None:
             "analysis_control/tokengt_geometry/mean_topology_directed_cycle_flux": summary["mean_topology_directed_cycle_flux"],
             "analysis_control/tokengt_geometry/oai_competition_bpb_available": summary["oai_competition_bpb_available"],
         }
-        run.log(organize_wandb_payload(payload), step=step)
+        run.log(organize_wandb_payload(payload))
     finally:
         run.finish()
 

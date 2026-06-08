@@ -314,7 +314,8 @@ def log_to_wandb(run_path: str, summary: dict[str, Any]) -> None:
     run = wandb.init(entity=entity, project=project, id=run_id, resume="allow")
     try:
         configure_wandb_metrics(wandb)
-        run.log(organize_wandb_payload(summary), step=int(summary.get("step", 0) or 0))
+        summary.setdefault("analysis_control/checkpoint_step", int(summary.get("step", 0) or 0))
+        run.log(organize_wandb_payload(summary))
     finally:
         run.finish()
 
