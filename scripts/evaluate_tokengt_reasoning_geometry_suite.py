@@ -62,9 +62,11 @@ from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step
 from toricgt.visualization import (  # noqa: E402
     plot_energy_landscape,
     plot_pca_nll_4d,
+    plot_reasoning_step_complex_pca_3d,
     plot_reasoning_trajectory_3d,
     write_interactive_energy_landscape,
     write_interactive_pca_nll_4d,
+    write_interactive_reasoning_step_complex_pca_3d,
     write_interactive_reasoning_plot,
 )
 from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload  # noqa: E402
@@ -221,6 +223,176 @@ def valid_edges(edge_index: torch.Tensor, edge_mask: torch.Tensor, n: int) -> np
     edges = raw[mask].reshape(-1, 2)
     keep = (edges[:, 0] >= 0) & (edges[:, 1] >= 0) & (edges[:, 0] < n) & (edges[:, 1] < n) & (edges[:, 0] != edges[:, 1])
     return edges[keep].astype(np.int64)
+
+
+def connected_components_count(node_count: int, edges: list[tuple[int, int]]) -> int:
+    if node_count <= 0:
+        return 0
+    parent = list(range(node_count))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        root_a = find(a)
+        root_b = find(b)
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    for src, dst in edges:
+        if 0 <= src < node_count and 0 <= dst < node_count and src != dst:
+            union(src, dst)
+    return len({find(idx) for idx in range(node_count)})
+
+
+def reasoning_step_complexes(
+    hidden: np.ndarray,
+    nll: np.ndarray,
+    edges: np.ndarray,
+    *,
+    max_vertices: int = 11,
+    radius_quantile: float = 0.42,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[dict[str, Any]]]:
+    """Build one local filtered simplicial complex per reasoning step.
+
+    Each anchor vertex contributes a small metric-neighborhood complex.  Edges
+    are included when they are present in the trajectory graph or appear before
+    the local filtration radius; triangles are clique 2-simplices in that local
+    filtered graph.  The returned global coordinates are PCA coordinates of the
+    resulting complex signatures, not raw token embeddings.
+    """
+
+    hidden = np.asarray(hidden, dtype=np.float32)
+    nll = np.asarray(nll, dtype=np.float32)
+    n = int(hidden.shape[0])
+    if n <= 0:
+        empty_edges = np.zeros((0, 2), dtype=np.int64)
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0,), dtype=np.float32), np.zeros((0,), dtype=np.float32), empty_edges, []
+    max_vertices = max(3, min(int(max_vertices), n))
+    if nll.shape[0] < n:
+        nll = np.pad(nll, (0, n - nll.shape[0]), constant_values=0.0)
+    nll = np.nan_to_num(nll[:n], nan=float(np.nanmean(nll[:n])) if np.isfinite(np.nanmean(nll[:n])) else 0.0)
+    graph_adj = [set() for _ in range(n)]
+    directed_edges: list[tuple[int, int]] = []
+    for src_raw, dst_raw in np.asarray(edges, dtype=np.int64).reshape(-1, 2):
+        src = int(src_raw)
+        dst = int(dst_raw)
+        if 0 <= src < n and 0 <= dst < n and src != dst:
+            directed_edges.append((src, dst))
+            graph_adj[src].add(dst)
+            graph_adj[dst].add(src)
+    if directed_edges:
+        trajectory_edges = np.asarray(directed_edges, dtype=np.int64)
+    else:
+        trajectory_edges = np.asarray([[idx, idx + 1] for idx in range(n - 1)], dtype=np.int64)
+
+    diff = hidden[:, None, :] - hidden[None, :, :]
+    distance = np.linalg.norm(diff, axis=-1)
+    positive = distance[distance > 1e-8]
+    global_radius = float(np.quantile(positive, radius_quantile)) if positive.size else 0.0
+    signatures: list[np.ndarray] = []
+    mean_nlls: list[float] = []
+    masses: list[float] = []
+    rows: list[dict[str, Any]] = []
+    for anchor in range(n):
+        neighbors = set(graph_adj[anchor])
+        neighbors.add(anchor)
+        for candidate in np.argsort(distance[anchor]):
+            if len(neighbors) >= max_vertices:
+                break
+            neighbors.add(int(candidate))
+        ordered = sorted(neighbors, key=lambda idx: (0.0 if idx == anchor else float(distance[anchor, idx]), idx))
+        local = sorted(ordered[:max_vertices])
+        local_index = {vertex: idx for idx, vertex in enumerate(local)}
+        local_count = len(local)
+        local_distance = distance[np.ix_(local, local)]
+        local_positive = local_distance[local_distance > 1e-8]
+        radius = float(np.quantile(local_positive, radius_quantile)) if local_positive.size else global_radius
+        if radius <= 1e-8 and global_radius > 1e-8:
+            radius = global_radius
+        local_edges: set[tuple[int, int]] = set()
+        for src, dst in directed_edges:
+            if src in local_index and dst in local_index:
+                a, b = sorted((local_index[src], local_index[dst]))
+                if a != b:
+                    local_edges.add((a, b))
+        for i in range(local_count):
+            for j in range(i + 1, local_count):
+                if local_distance[i, j] <= radius:
+                    local_edges.add((i, j))
+        sorted_local_edges = sorted(local_edges)
+        edge_lookup = set(sorted_local_edges)
+        triangles = 0
+        for i in range(local_count):
+            for j in range(i + 1, local_count):
+                if (i, j) not in edge_lookup:
+                    continue
+                for k in range(j + 1, local_count):
+                    if (i, k) in edge_lookup and (j, k) in edge_lookup:
+                        triangles += 1
+        components = connected_components_count(local_count, sorted_local_edges)
+        cycle_rank = max(0, len(sorted_local_edges) - local_count + components)
+        local_hidden = hidden[local]
+        local_projected = pca_project(local_hidden, dims=3)
+        local_nll = nll[local]
+        mean_nll = float(np.mean(local_nll)) if local_nll.size else 0.0
+        mass = float(local_count + len(sorted_local_edges) + triangles)
+        max_possible_edges = max(1, local_count * (local_count - 1) // 2)
+        max_possible_triangles = max(1, local_count * (local_count - 1) * (local_count - 2) // 6)
+        topological_scalars = np.asarray(
+            [
+                local_count / max(1, max_vertices),
+                len(sorted_local_edges) / max_possible_edges,
+                triangles / max_possible_triangles,
+                components / max(1, local_count),
+                cycle_rank / max(1, max_possible_edges),
+                radius / (global_radius + 1e-8),
+                mean_nll,
+                float(np.max(local_nll)) if local_nll.size else mean_nll,
+                mass / max(1, max_vertices + max_possible_edges + max_possible_triangles),
+            ],
+            dtype=np.float32,
+        )
+        signature = np.concatenate(
+            [
+                np.mean(local_hidden, axis=0),
+                np.std(local_hidden, axis=0),
+                topological_scalars,
+            ]
+        )
+        signatures.append(signature)
+        mean_nlls.append(mean_nll)
+        masses.append(mass)
+        rows.append(
+            {
+                "anchor": int(anchor),
+                "anchor_local_index": int(local_index.get(anchor, 0)),
+                "vertices": [int(vertex) for vertex in local],
+                "vertex_count": int(local_count),
+                "local_edges": [[int(src), int(dst)] for src, dst in sorted_local_edges],
+                "local_edge_count": int(len(sorted_local_edges)),
+                "triangle_count": int(triangles),
+                "component_count": int(components),
+                "cycle_rank": float(cycle_rank),
+                "filtration_radius": float(radius),
+                "mean_nll": float(mean_nll),
+                "max_nll": float(np.max(local_nll)) if local_nll.size else float(mean_nll),
+                "simplicial_mass": float(mass),
+                "local_points": local_projected.astype(float).round(6).tolist(),
+                "local_nll": np.asarray(local_nll, dtype=np.float64).round(6).tolist(),
+            }
+        )
+    projected = pca_project(np.stack(signatures, axis=0), dims=3)
+    return (
+        projected,
+        np.asarray(mean_nlls, dtype=np.float32),
+        np.asarray(masses, dtype=np.float32),
+        trajectory_edges,
+        rows,
+    )
 
 
 def per_node_mse(out_node: torch.Tensor, target: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
@@ -464,6 +636,12 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 if not np.isfinite(nll).all():
                     nll = np.nan_to_num(nll, nan=float(np.nanmean(nll)) if np.isfinite(np.nanmean(nll)) else 0.0)
                 edges = valid_edges(batch.edge_index[sample_index], batch.edge_mask[sample_index], n)
+                complex_projected, complex_nll, complex_mass, complex_edges, complex_rows = reasoning_step_complexes(
+                    hidden,
+                    nll,
+                    edges,
+                    max_vertices=min(11, max(3, n)),
+                )
                 record_id = len(records)
                 topology = directed_step_filtration_stats_np(hidden, config=topology_cfg)
                 topology_metrics = topology_summary(topology)
@@ -471,6 +649,12 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 graph_mse = float(energy[energy >= 0].mean()) if energy.size else float(loss.detach().cpu())
                 mean_node_nll = float(nll.mean()) if nll.size else graph_mse
                 max_node_nll = float(nll.max()) if nll.size else graph_mse
+                mean_complex_mass = float(complex_mass.mean()) if complex_mass.size else 0.0
+                max_complex_mass = float(complex_mass.max()) if complex_mass.size else 0.0
+                mean_complex_vertices = finite_mean([float(row.get("vertex_count", 0.0)) for row in complex_rows])
+                mean_complex_edges = finite_mean([float(row.get("local_edge_count", 0.0)) for row in complex_rows])
+                mean_complex_triangles = finite_mean([float(row.get("triangle_count", 0.0)) for row in complex_rows])
+                mean_complex_cycle_rank = finite_mean([float(row.get("cycle_rank", 0.0)) for row in complex_rows])
                 path_speed = np.linalg.norm(np.diff(projected, axis=0), axis=1) if projected.shape[0] > 1 else np.zeros((1,))
                 path_smoothness = float(1.0 / (1.0 + np.std(path_speed)))
                 resolution_metrics = extract_resolution_metrics(batch_objects[sample_index])
@@ -484,6 +668,13 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                     "node_nll_source": nll_source,
                     "node_count": float(n),
                     "edge_count": float(edges.shape[0]),
+                    "reasoning_step_complex_mean_nll": float(complex_nll.mean()) if complex_nll.size else mean_node_nll,
+                    "reasoning_step_complex_mean_mass": mean_complex_mass,
+                    "reasoning_step_complex_max_mass": max_complex_mass,
+                    "reasoning_step_complex_mean_vertices": mean_complex_vertices,
+                    "reasoning_step_complex_mean_edges": mean_complex_edges,
+                    "reasoning_step_complex_mean_triangles": mean_complex_triangles,
+                    "reasoning_step_complex_mean_cycle_rank": mean_complex_cycle_rank,
                     "mst_efficiency": float(mst.get("mst_efficiency", 0.0)),
                     "mst_total_weight": float(mst.get("mst_total_weight", 0.0)),
                     "path_smoothness": path_smoothness,
@@ -515,9 +706,24 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 plot_reasoning_trajectory_3d(projected, energy, traj_dir / f"{prefix}_trajectory_3d.png", edges=edges)
                 plot_energy_landscape(projected, energy, traj_dir / f"{prefix}_energy_landscape.png", edges=edges)
                 plot_pca_nll_4d(projected, nll, traj_dir / f"{prefix}_pca_nll_4d.png", edges=edges)
+                plot_reasoning_step_complex_pca_3d(
+                    complex_projected,
+                    complex_nll,
+                    complex_mass,
+                    traj_dir / f"{prefix}_complex_pca_nll_3d.png",
+                    edges=complex_edges,
+                )
                 write_interactive_energy_landscape(projected, energy, traj_dir / f"{prefix}_energy_landscape.html", edges=edges)
                 write_interactive_reasoning_plot(projected, energy, traj_dir / f"{prefix}_trajectory_3d.html", edges=edges)
                 write_interactive_pca_nll_4d(projected, nll, traj_dir / f"{prefix}_pca_nll_4d.html", edges=edges)
+                write_interactive_reasoning_step_complex_pca_3d(
+                    complex_projected,
+                    complex_nll,
+                    complex_mass,
+                    traj_dir / f"{prefix}_complex_pca_nll_3d.html",
+                    edges=complex_edges,
+                    complex_rows=complex_rows,
+                )
                 plot_topology_heatmap(topology, topo_dir / f"{prefix}_topology_heatmaps.png")
             if len(records) >= int(args.records):
                 break
@@ -569,6 +775,15 @@ def summarize(records: list[dict[str, Any]], args: argparse.Namespace) -> dict[s
         "mean_node_nll": mean("mean_node_nll"),
         "max_node_nll": max(float(record.get("max_node_nll", 0.0)) for record in records),
         "node_nll_source": records[0].get("node_nll_source", "unknown"),
+        "mean_reasoning_step_complex_nll": mean("reasoning_step_complex_mean_nll"),
+        "mean_reasoning_step_complex_mass": mean("reasoning_step_complex_mean_mass"),
+        "max_reasoning_step_complex_mass": max(
+            float(record.get("reasoning_step_complex_max_mass", 0.0)) for record in records
+        ),
+        "mean_reasoning_step_complex_vertices": mean("reasoning_step_complex_mean_vertices"),
+        "mean_reasoning_step_complex_edges": mean("reasoning_step_complex_mean_edges"),
+        "mean_reasoning_step_complex_triangles": mean("reasoning_step_complex_mean_triangles"),
+        "mean_reasoning_step_complex_cycle_rank": mean("reasoning_step_complex_mean_cycle_rank"),
         "mean_mst_efficiency": mean("mst_efficiency"),
         "mean_path_smoothness": mean("path_smoothness"),
         "mean_got_dag_branch_count": mean("got_dag_branch_count"),
@@ -616,6 +831,18 @@ def log_to_wandb(run_path: str, summary: dict[str, Any], step: int) -> None:
             "analysis_control/tokengt_geometry/best_graph_reconstruction_mse": summary["best_graph_reconstruction_mse"],
             "analysis_control/tokengt_geometry/mean_node_nll": summary["mean_node_nll"],
             "analysis_control/tokengt_geometry/max_node_nll": summary["max_node_nll"],
+            "analysis_control/tokengt_geometry/mean_reasoning_step_complex_nll": summary[
+                "mean_reasoning_step_complex_nll"
+            ],
+            "analysis_control/tokengt_geometry/mean_reasoning_step_complex_mass": summary[
+                "mean_reasoning_step_complex_mass"
+            ],
+            "analysis_control/tokengt_geometry/mean_reasoning_step_complex_triangles": summary[
+                "mean_reasoning_step_complex_triangles"
+            ],
+            "analysis_control/tokengt_geometry/mean_reasoning_step_complex_cycle_rank": summary[
+                "mean_reasoning_step_complex_cycle_rank"
+            ],
             "analysis_control/tokengt_geometry/mean_mst_efficiency": summary["mean_mst_efficiency"],
             "analysis_control/tokengt_geometry/mean_path_smoothness": summary["mean_path_smoothness"],
             "analysis_control/tokengt_geometry/mean_got_dag_branch_count": summary["mean_got_dag_branch_count"],
@@ -660,6 +887,12 @@ def main() -> None:
     )
     summary["interactive_pca_nll_4d_outputs"] = sorted(
         str(path.relative_to(out_dir)) for path in (out_dir / "trajectories").glob("*_pca_nll_4d.html")
+    )
+    summary["reasoning_step_complex_png_outputs"] = sorted(
+        str(path.relative_to(out_dir)) for path in (out_dir / "trajectories").glob("*_complex_pca_nll_3d.png")
+    )
+    summary["interactive_reasoning_step_complex_outputs"] = sorted(
+        str(path.relative_to(out_dir)) for path in (out_dir / "trajectories").glob("*_complex_pca_nll_3d.html")
     )
     (out_dir / "reasoning_geometry_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     step = int(records[0].get("checkpoint_step", 0) or 0)

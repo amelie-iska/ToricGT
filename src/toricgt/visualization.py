@@ -239,6 +239,100 @@ def plot_pca_nll_4d(
     plt.close(fig)
 
 
+def _marker_sizes_from_complexity(
+    values: np.ndarray,
+    *,
+    min_size: float = 18.0,
+    max_size: float = 145.0,
+) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float64)
+    if values.size == 0:
+        return values
+    fallback = float(np.nanmean(values)) if np.isfinite(np.nanmean(values)) else 0.0
+    finite = np.nan_to_num(values, nan=fallback, posinf=fallback, neginf=fallback)
+    lo = float(np.min(finite))
+    hi = float(np.max(finite))
+    if hi <= lo + 1e-9:
+        return np.full_like(finite, 0.5 * (min_size + max_size), dtype=np.float64)
+    return min_size + (max_size - min_size) * (finite - lo) / (hi - lo)
+
+
+def plot_reasoning_step_complex_pca_3d(
+    path: np.ndarray,
+    nll: np.ndarray,
+    complexity: np.ndarray,
+    output: str | Path,
+    *,
+    edges: np.ndarray | None = None,
+) -> None:
+    """Plot local filtered simplicial complexes as GoT trajectory vertices."""
+
+    path = np.asarray(path, dtype=np.float64)
+    nll = np.asarray(nll, dtype=np.float64)
+    complexity = np.asarray(complexity, dtype=np.float64)
+    if path.ndim != 2 or path.shape[0] == 0 or path.shape[1] < 3:
+        return
+    count = min(path.shape[0], nll.shape[0], complexity.shape[0])
+    if count <= 0:
+        return
+    path = path[:count]
+    fallback_nll = float(np.nanmean(nll[:count])) if np.isfinite(np.nanmean(nll[:count])) else 0.0
+    finite_nll = np.nan_to_num(nll[:count], nan=fallback_nll, posinf=fallback_nll, neginf=fallback_nll)
+    fallback_complexity = (
+        float(np.nanmean(complexity[:count])) if np.isfinite(np.nanmean(complexity[:count])) else 0.0
+    )
+    finite_complexity = np.nan_to_num(
+        complexity[:count],
+        nan=fallback_complexity,
+        posinf=fallback_complexity,
+        neginf=fallback_complexity,
+    )
+    if edges is None:
+        edges = default_branch_merge_edges_np(count)
+    sizes = _marker_sizes_from_complexity(finite_complexity)
+
+    fig = plt.figure(figsize=(9.2, 7.2), facecolor="#05070d")
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_facecolor("#05070d")
+    _plot_branch_merge_edges_3d(ax, path, edges=edges, linewidth=0.88, alpha=0.42, arrows=True)
+    scatter = ax.scatter(
+        path[:, 0],
+        path[:, 1],
+        path[:, 2],
+        c=finite_nll,
+        s=sizes,
+        cmap="magma",
+        edgecolor="#07111f",
+        linewidth=0.35,
+        alpha=0.92,
+    )
+    best = int(np.nanargmin(finite_nll)) if finite_nll.size else 0
+    ax.scatter(path[best, 0], path[best, 1], path[best, 2], s=170, color="#8cff6a", edgecolor="white")
+    ax.set_title("Reasoning Trajectory of Filtered Simplicial Complexes", color="white")
+    ax.set_xlabel("complex-signature PCA 1", color="white")
+    ax.set_ylabel("complex-signature PCA 2", color="white")
+    ax.set_zlabel("complex-signature PCA 3", color="white")
+    ax.tick_params(colors="white")
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        axis.pane.set_facecolor((0.02, 0.03, 0.06, 1.0))
+        axis.pane.set_edgecolor((0.2, 0.8, 0.9, 0.35))
+    ax.view_init(elev=25, azim=-50)
+    cbar = fig.colorbar(scatter, ax=ax, shrink=0.74, pad=0.08)
+    cbar.set_label("mean complex NLL (nats)", color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.get_yticklabels(), color="white")
+    fig.text(
+        0.04,
+        0.035,
+        "marker size = filtered local simplicial mass (vertices + edges + triangles)",
+        color="#d8f7ff",
+        fontsize=9,
+    )
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=185, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def plot_ramachandran_style_reasoning(path: np.ndarray, energy: np.ndarray, output: str | Path) -> None:
     velocity = np.diff(path, axis=0, prepend=path[:1])
     phi = np.arctan2(velocity[:, 1], velocity[:, 0])
@@ -647,6 +741,204 @@ Plotly.newPlot('plot', [...edgeTraces, nodeTrace, bestTrace], {{
   }},
   margin:{{l:0,r:0,b:0,t:0}}
 }}, {{responsive:true}});
+</script></body></html>"""
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    Path(output).write_text(html, encoding="utf-8")
+
+
+def write_interactive_reasoning_step_complex_pca_3d(
+    path: np.ndarray,
+    nll: np.ndarray,
+    complexity: np.ndarray,
+    output: str | Path,
+    *,
+    edges: np.ndarray | None = None,
+    complex_rows: list[dict[str, object]] | None = None,
+) -> None:
+    """Write a 3D complex-vertex trajectory with local-complex hover panels."""
+
+    path = np.asarray(path, dtype=np.float64)
+    nll = np.asarray(nll, dtype=np.float64)
+    complexity = np.asarray(complexity, dtype=np.float64)
+    if path.ndim != 2 or path.shape[0] == 0 or path.shape[1] < 3:
+        return
+    count = min(path.shape[0], nll.shape[0], complexity.shape[0])
+    if count <= 0:
+        return
+    path = path[:count]
+    fallback_nll = float(np.nanmean(nll[:count])) if np.isfinite(np.nanmean(nll[:count])) else 0.0
+    finite_nll = np.nan_to_num(nll[:count], nan=fallback_nll, posinf=fallback_nll, neginf=fallback_nll)
+    fallback_complexity = (
+        float(np.nanmean(complexity[:count])) if np.isfinite(np.nanmean(complexity[:count])) else 0.0
+    )
+    finite_complexity = np.nan_to_num(
+        complexity[:count],
+        nan=fallback_complexity,
+        posinf=fallback_complexity,
+        neginf=fallback_complexity,
+    )
+    if edges is None:
+        edges = default_branch_merge_edges_np(count)
+    plotly_sizes = _marker_sizes_from_complexity(finite_complexity, min_size=5.5, max_size=18.0)
+    supplied_complex_rows = complex_rows or []
+    rows = []
+    for i, (p, value, mass, size) in enumerate(
+        zip(path, finite_nll, finite_complexity, plotly_sizes, strict=True)
+    ):
+        complex_payload = supplied_complex_rows[i] if i < len(supplied_complex_rows) else {}
+        rows.append(
+            {
+                "x": float(p[0]),
+                "y": float(p[1]),
+                "z": float(p[2]),
+                "nll": float(value),
+                "complexity": float(mass),
+                "size": float(size),
+                "step": int(i),
+                "complex": complex_payload,
+            }
+        )
+    edge_rows = [
+        {"src": int(src), "dst": int(dst), "role": role}
+        for (src, dst), role in zip(edges, _edge_role_colors(edges, count), strict=False)
+        if 0 <= int(src) < count and 0 <= int(dst) < count
+    ]
+    best = int(np.nanargmin(finite_nll)) if finite_nll.size else 0
+    payload = {"rows": rows, "edges": edge_rows, "best": best}
+    html = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>ToricGT Reasoning-Step Complex PCA</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+body{{margin:0;background:#05070d;color:white;font-family:system-ui}}
+#plot{{width:100vw;height:100vh}}
+.note{{position:absolute;z-index:5;left:18px;top:12px;max-width:900px;color:#e8fbff}}
+.note h1{{font-size:20px;line-height:1.15;margin:0 0 5px 0}}
+.note p{{font-size:12px;line-height:1.35;margin:0;opacity:.88}}
+.bubble{{position:absolute;z-index:6;right:18px;top:18px;width:min(440px,42vw);height:min(430px,48vh);
+  background:rgba(4,8,18,.88);border:1px solid rgba(103,232,249,.45);border-radius:14px;
+  box-shadow:0 18px 60px rgba(0,0,0,.46);backdrop-filter:blur(8px);overflow:hidden}}
+.bubbleHeader{{padding:10px 12px 0 12px;color:#e8fbff}}
+.bubbleHeader h2{{font-size:14px;margin:0 0 4px 0;font-weight:650}}
+.bubbleHeader p{{font-size:11px;line-height:1.28;margin:0;opacity:.84}}
+#bubblePlot{{width:100%;height:330px}}
+@media (max-width: 820px){{.bubble{{left:12px;right:12px;top:auto;bottom:12px;width:auto;height:42vh}}#bubblePlot{{height:30vh}}}}
+</style></head><body>
+<div class="note">
+  <h1>Reasoning-Step Filtered Simplicial Complex Trajectory</h1>
+  <p>Each trajectory vertex is a local filtered simplicial complex built from nearby embedding vectors. Spatial coordinates are 3D PCA of complex signatures; color is mean NLL; marker size is simplicial mass. Hover or click a vertex to open its local 3D PCA thought bubble.</p>
+</div>
+<div class="bubble">
+  <div class="bubbleHeader">
+    <h2 id="bubbleTitle">Local reasoning-step complex</h2>
+    <p id="bubbleSummary">Hover a trajectory vertex to inspect its filtered simplicial complex.</p>
+  </div>
+  <div id="bubblePlot"></div>
+</div>
+<div id="plot"></div><script>
+const payload = {json.dumps(payload)};
+const rows = payload.rows;
+const edgeTraces = payload.edges.map((e, idx) => {{
+  const a = rows[e.src], b = rows[e.dst];
+  return {{
+    type:'scatter3d', mode:'lines', showlegend:idx < 8,
+    name:e.role === '#ff4fd8' ? 'branch edge' : (e.role === '#8cff6a' ? 'merge edge' : (e.role === '#ffd166' ? 'branch+merge edge' : 'trajectory edge')),
+    x:[a.x,b.x], y:[a.y,b.y], z:[a.z,b.z],
+    line:{{color:e.role, width:4.2}},
+    text:[`${{e.src}} -> ${{e.dst}}`, `${{e.src}} -> ${{e.dst}}`],
+    hoverinfo:'text'
+  }};
+}});
+const nodeTrace = {{
+  type:'scatter3d', mode:'markers', name:'reasoning-step complexes',
+  x:rows.map(r => r.x), y:rows.map(r => r.y), z:rows.map(r => r.z),
+  marker:{{size:rows.map(r => r.size), color:rows.map(r => r.nll), colorscale:'Magma',
+           colorbar:{{title:'mean NLL'}}, opacity:0.92, line:{{color:'#06111f', width:0.7}}}},
+  text:rows.map(r => {{
+    const c = r.complex || {{}};
+    return `reasoning step ${{r.step}}<br>mean complex NLL ${{r.nll.toFixed(5)}}<br>simplicial mass ${{r.complexity.toFixed(1)}}<br>vertices ${{c.vertex_count ?? 'n/a'}} / edges ${{c.local_edge_count ?? 'n/a'}} / triangles ${{c.triangle_count ?? 'n/a'}}<br><b>hover/click for thought bubble</b>`;
+  }}),
+  hoverinfo:'text'
+}};
+const best = rows[payload.best] || rows[0];
+const bestTrace = {{
+  type:'scatter3d', mode:'markers', name:'lowest-NLL complex',
+  x:[best.x], y:[best.y], z:[best.z],
+  marker:{{size:22, color:'#8cff6a', line:{{color:'white', width:1.4}}}},
+  text:[`lowest-NLL complex ${{best.step}}<br>NLL ${{best.nll.toFixed(5)}}`],
+  hoverinfo:'text'
+}};
+function localComplexTraces(row) {{
+  const c = row.complex || {{}};
+  const points = c.local_points || [];
+  const nll = c.local_nll || points.map(() => row.nll);
+  const vertexIds = c.vertices || points.map((_, i) => i);
+  const edgeX = [], edgeY = [], edgeZ = [];
+  (c.local_edges || []).forEach(e => {{
+    const a = points[e[0]], b = points[e[1]];
+    if (!a || !b) return;
+    edgeX.push(a[0], b[0], null);
+    edgeY.push(a[1], b[1], null);
+    edgeZ.push(a[2], b[2], null);
+  }});
+  const edgeTrace = {{
+    type:'scatter3d', mode:'lines', name:'filtered edges',
+    x:edgeX, y:edgeY, z:edgeZ,
+    line:{{color:'#67e8f9', width:5}},
+    hoverinfo:'skip'
+  }};
+  const sizes = points.map((_, i) => i === c.anchor_local_index ? 10.5 : 6.5);
+  const vertexTrace = {{
+    type:'scatter3d', mode:'markers', name:'local vertices',
+    x:points.map(p => p[0]), y:points.map(p => p[1]), z:points.map(p => p[2]),
+    marker:{{size:sizes, color:nll, colorscale:'Magma', showscale:false,
+             line:{{color:'#f8fafc', width:points.map((_, i) => i === c.anchor_local_index ? 1.7 : 0.45)}}}},
+    text:points.map((p, i) => `global vertex ${{vertexIds[i]}}<br>local NLL ${{Number(nll[i] ?? row.nll).toFixed(5)}}<br>local PCA (${{Number(p[0]).toFixed(3)}}, ${{Number(p[1]).toFixed(3)}}, ${{Number(p[2]).toFixed(3)}})`),
+    hoverinfo:'text'
+  }};
+  return [edgeTrace, vertexTrace];
+}}
+function updateBubble(row) {{
+  const c = row.complex || {{}};
+  document.getElementById('bubbleTitle').textContent = `Thought bubble: reasoning step ${{row.step}}`;
+  document.getElementById('bubbleSummary').textContent =
+    `filtered radius ${{Number(c.filtration_radius ?? 0).toFixed(4)}}; vertices ${{c.vertex_count ?? 0}}, edges ${{c.local_edge_count ?? 0}}, triangles ${{c.triangle_count ?? 0}}, cycle rank ${{Number(c.cycle_rank ?? 0).toFixed(1)}}; mean NLL ${{Number(row.nll).toFixed(4)}}`;
+  Plotly.react('bubblePlot', localComplexTraces(row), {{
+    paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
+    showlegend:false,
+    scene:{{
+      bgcolor:'rgba(0,0,0,0)',
+      xaxis:{{title:'local PCA 1', color:'white', gridcolor:'#17323a', zerolinecolor:'#334155'}},
+      yaxis:{{title:'local PCA 2', color:'white', gridcolor:'#17323a', zerolinecolor:'#334155'}},
+      zaxis:{{title:'local PCA 3', color:'white', gridcolor:'#17323a', zerolinecolor:'#334155'}},
+      camera:{{eye:{{x:1.35,y:-1.45,z:1.12}}}}
+    }},
+    margin:{{l:0,r:0,b:0,t:0}}
+  }}, {{responsive:true, displayModeBar:false}});
+}}
+const mainLayout = {{
+  paper_bgcolor:'#05070d', plot_bgcolor:'#05070d',
+  legend:{{font:{{color:'white'}}, bgcolor:'rgba(5,7,13,.55)'}},
+  scene:{{
+    bgcolor:'#05070d',
+    xaxis:{{title:'complex-signature PCA 1', color:'white', gridcolor:'#17323a'}},
+    yaxis:{{title:'complex-signature PCA 2', color:'white', gridcolor:'#17323a'}},
+    zaxis:{{title:'complex-signature PCA 3', color:'white', gridcolor:'#17323a'}},
+    camera:{{eye:{{x:1.55,y:-1.70,z:1.22}}}}
+  }},
+  margin:{{l:0,r:0,b:0,t:0}}
+}};
+const plot = document.getElementById('plot');
+Plotly.newPlot(plot, [...edgeTraces, nodeTrace, bestTrace], mainLayout, {{responsive:true}}).then(() => {{
+  if (rows.length) updateBubble(rows[payload.best] || rows[0]);
+  plot.on('plotly_hover', ev => {{
+    const point = ev.points.find(p => p.data && p.data.name === 'reasoning-step complexes');
+    if (point) updateBubble(rows[point.pointIndex]);
+  }});
+  plot.on('plotly_click', ev => {{
+    const point = ev.points.find(p => p.data && p.data.name === 'reasoning-step complexes');
+    if (point) updateBubble(rows[point.pointIndex]);
+  }});
+}});
 </script></body></html>"""
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     Path(output).write_text(html, encoding="utf-8")
