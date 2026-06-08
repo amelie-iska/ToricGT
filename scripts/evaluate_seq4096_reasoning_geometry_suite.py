@@ -952,6 +952,377 @@ def save_html(path: Path, title: str, body: str, image: str | None = None) -> No
     )
 
 
+def json_safe(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return json_safe(value.tolist())
+    if isinstance(value, (np.floating, float)):
+        number = float(value)
+        return number if math.isfinite(number) else None
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    return value
+
+
+def finite_1d(values: Any, length: int | None = None, fill: float = 0.0) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    if length is not None:
+        if arr.size < length:
+            arr = np.pad(arr, (0, length - arr.size), constant_values=fill)
+        arr = arr[:length]
+    return np.nan_to_num(arr, nan=fill, posinf=fill, neginf=fill)
+
+
+def finite_proj3(record: dict[str, Any]) -> np.ndarray:
+    proj = np.asarray(record["_arrays"].get("proj3", np.zeros((0, 3))), dtype=np.float64)
+    if proj.ndim == 1:
+        proj = proj[:, None]
+    if proj.shape[1] < 3:
+        proj = np.pad(proj, ((0, 0), (0, 3 - proj.shape[1])))
+    return np.nan_to_num(proj[:, :3], nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def marker_size_from_path(proj: np.ndarray, energy: np.ndarray) -> np.ndarray:
+    if proj.shape[0] <= 1:
+        return np.full((proj.shape[0],), 9.0, dtype=np.float64)
+    speed = np.zeros((proj.shape[0],), dtype=np.float64)
+    speed[1:] = np.linalg.norm(np.diff(proj, axis=0), axis=1)
+    size_source = 0.65 * normalize01(speed) + 0.35 * normalize01(energy)
+    return 6.0 + 13.0 * size_source
+
+
+def line_segments_trace(name: str, x: np.ndarray, y: np.ndarray, z: np.ndarray, color: str, *, width: float = 4.0) -> dict[str, Any]:
+    line_x: list[float | None] = []
+    line_y: list[float | None] = []
+    line_z: list[float | None] = []
+    for idx in range(max(0, len(x) - 1)):
+        line_x.extend([float(x[idx]), float(x[idx + 1]), None])
+        line_y.extend([float(y[idx]), float(y[idx + 1]), None])
+        line_z.extend([float(z[idx]), float(z[idx + 1]), None])
+    return {
+        "type": "scatter3d",
+        "mode": "lines",
+        "name": name,
+        "x": line_x,
+        "y": line_y,
+        "z": line_z,
+        "line": {"color": color, "width": width},
+        "hoverinfo": "skip",
+        "showlegend": True,
+    }
+
+
+def sparse_neighbor_trace(proj: np.ndarray, *, max_edges: int = 96) -> dict[str, Any] | None:
+    n = int(proj.shape[0])
+    if n < 3:
+        return None
+    distances = np.linalg.norm(proj[:, None, :] - proj[None, :, :], axis=-1)
+    np.fill_diagonal(distances, np.inf)
+    pairs: set[tuple[int, int]] = set()
+    for idx in range(n):
+        for nbr in np.argsort(distances[idx])[:2]:
+            j = int(nbr)
+            if math.isfinite(float(distances[idx, j])):
+                a, b = sorted((idx, j))
+                if b - a > 1:
+                    pairs.add((a, b))
+            if len(pairs) >= max_edges:
+                break
+        if len(pairs) >= max_edges:
+            break
+    if not pairs:
+        return None
+    x: list[float | None] = []
+    y: list[float | None] = []
+    z: list[float | None] = []
+    for a, b in sorted(pairs):
+        x.extend([float(proj[a, 0]), float(proj[b, 0]), None])
+        y.extend([float(proj[a, 1]), float(proj[b, 1]), None])
+        z.extend([float(proj[a, 2]), float(proj[b, 2]), None])
+    return {
+        "type": "scatter3d",
+        "mode": "lines",
+        "name": "filtered complex nearest-neighbor chords",
+        "x": x,
+        "y": y,
+        "z": z,
+        "line": {"color": "rgba(173,124,255,0.42)", "width": 2.0},
+        "hoverinfo": "skip",
+        "showlegend": True,
+    }
+
+
+def triangulation_trace(
+    name: str,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    intensity: np.ndarray,
+    *,
+    colorscale: str = "Magma",
+    opacity: float = 0.58,
+) -> dict[str, Any] | None:
+    if len(x) < 4:
+        return None
+    try:
+        tri = mtri.Triangulation(x, y)
+        triangles = np.asarray(tri.triangles, dtype=int)
+    except Exception:
+        return None
+    if triangles.size == 0:
+        return None
+    return {
+        "type": "mesh3d",
+        "name": name,
+        "x": x.tolist(),
+        "y": y.tolist(),
+        "z": z.tolist(),
+        "i": triangles[:, 0].tolist(),
+        "j": triangles[:, 1].tolist(),
+        "k": triangles[:, 2].tolist(),
+        "intensity": intensity.tolist(),
+        "colorscale": colorscale,
+        "opacity": opacity,
+        "showscale": False,
+        "hoverinfo": "skip",
+    }
+
+
+def record_hover_text(record: dict[str, Any], energy: np.ndarray, size: np.ndarray, extra: dict[str, np.ndarray] | None = None) -> list[str]:
+    n = int(energy.size)
+    record_id = str(record.get("record_id", "record"))
+    family = str(record.get("family", "unknown"))
+    text: list[str] = []
+    extra = extra or {}
+    for idx in range(n):
+        lines = [
+            f"<b>{record_id}</b>",
+            f"family: {family}",
+            f"trajectory index: {idx}",
+            f"energy/NLL proxy: {energy[idx]:.6g}",
+            f"marker size proxy: {size[idx]:.4g}",
+        ]
+        for key, values in extra.items():
+            if idx < len(values):
+                lines.append(f"{key}: {values[idx]:.6g}")
+        text.append("<br>".join(lines))
+    return text
+
+
+def plotly_dark_layout(title: str, *, z_title: str = "PC3") -> dict[str, Any]:
+    axis_style = {
+        "backgroundcolor": DARK_BG,
+        "gridcolor": DARK_GRID,
+        "zerolinecolor": "#2de2e6",
+        "showbackground": True,
+        "color": DARK_TEXT,
+    }
+    return {
+        "title": {"text": title, "font": {"color": "#ffffff"}},
+        "paper_bgcolor": DARK_BG,
+        "plot_bgcolor": DARK_BG,
+        "font": {"color": DARK_TEXT},
+        "legend": {"bgcolor": "rgba(6,17,31,0.82)", "bordercolor": "#2de2e6", "borderwidth": 1},
+        "margin": {"l": 0, "r": 0, "t": 52, "b": 0},
+        "scene": {
+            "xaxis": {"title": "PC1", **axis_style},
+            "yaxis": {"title": "PC2", **axis_style},
+            "zaxis": {"title": z_title, **axis_style},
+            "camera": {"eye": {"x": 1.55, "y": -1.65, "z": 1.15}},
+        },
+    }
+
+
+def write_plotly_html(path: Path, title: str, traces: list[dict[str, Any]], layout: dict[str, Any], metadata: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        json_safe({"traces": traces, "layout": layout, "metadata": metadata}),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    html = f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+body {{ margin:0; background:{DARK_BG}; color:{DARK_TEXT}; font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+#plot {{ width:100vw; height:82vh; }}
+#meta {{ box-sizing:border-box; max-height:18vh; overflow:auto; padding:12px 16px; background:{DARK_PANEL}; border-top:1px solid #2de2e6; font-size:12px; }}
+pre {{ margin:0; white-space:pre-wrap; }}
+</style>
+</head>
+<body>
+<div id="plot"></div>
+<div id="meta"><pre id="metadata"></pre></div>
+<script>
+const payload = {payload};
+Plotly.newPlot('plot', payload.traces, payload.layout, {{responsive: true, displaylogo: false}});
+document.getElementById('metadata').textContent = JSON.stringify(payload.metadata, null, 2);
+</script>
+</body>
+</html>
+"""
+    path.write_text(html, encoding="utf-8")
+
+
+def interactive_record_trajectory_3d(record: dict[str, Any], out: Path) -> None:
+    proj = finite_proj3(record)
+    energy = finite_1d(record["_arrays"].get("energy", []), length=proj.shape[0], fill=0.0)
+    size = marker_size_from_path(proj, energy)
+    traces = []
+    if proj.shape[0] > 1:
+        traces.append(line_segments_trace("directed trajectory edges", proj[:, 0], proj[:, 1], proj[:, 2], "#6df6ff"))
+    traces.append(
+        {
+            "type": "scatter3d",
+            "mode": "markers",
+            "name": "reasoning trajectory vertices",
+            "x": proj[:, 0].tolist(),
+            "y": proj[:, 1].tolist(),
+            "z": proj[:, 2].tolist(),
+            "text": record_hover_text(record, energy, size),
+            "hovertemplate": "%{text}<extra></extra>",
+            "marker": {
+                "size": size.tolist(),
+                "color": energy.tolist(),
+                "colorscale": "Viridis",
+                "showscale": True,
+                "colorbar": {"title": "energy"},
+                "line": {"color": "#030712", "width": 1.0},
+                "opacity": 0.9,
+            },
+        }
+    )
+    write_plotly_html(out, f"{record['record_id']} interactive 3D trajectory", traces, plotly_dark_layout(f"{record['record_id']} 3D trajectory"), record_public(record))
+
+
+def interactive_record_energy_landscape(record: dict[str, Any], out: Path) -> None:
+    proj = finite_proj3(record)
+    energy = finite_1d(record["_arrays"].get("energy", []), length=proj.shape[0], fill=0.0)
+    size = marker_size_from_path(proj, energy)
+    traces: list[dict[str, Any]] = []
+    surface = triangulation_trace("energy landscape surface", proj[:, 0], proj[:, 1], energy, energy)
+    if surface is not None:
+        traces.append(surface)
+    if proj.shape[0] > 1:
+        traces.append(line_segments_trace("directed path over energy", proj[:, 0], proj[:, 1], energy, "#6df6ff", width=5.0))
+    traces.append(
+        {
+            "type": "scatter3d",
+            "mode": "markers",
+            "name": "energy samples",
+            "x": proj[:, 0].tolist(),
+            "y": proj[:, 1].tolist(),
+            "z": energy.tolist(),
+            "text": record_hover_text(record, energy, size),
+            "hovertemplate": "%{text}<extra></extra>",
+            "marker": {
+                "size": size.tolist(),
+                "color": energy.tolist(),
+                "colorscale": "Viridis",
+                "showscale": True,
+                "colorbar": {"title": "energy"},
+                "line": {"color": "#030712", "width": 1.0},
+                "opacity": 0.92,
+            },
+        }
+    )
+    write_plotly_html(
+        out,
+        f"{record['record_id']} interactive energy landscape",
+        traces,
+        plotly_dark_layout(f"{record['record_id']} 3D energy landscape", z_title="energy"),
+        record_public(record),
+    )
+
+
+def interactive_record_phase_energy(record: dict[str, Any], out: Path) -> None:
+    arrays = record["_arrays"]
+    energy = finite_1d(arrays.get("energy", []), fill=0.0)
+    u = finite_1d(arrays.get("phase_u", []), length=energy.size, fill=0.0)
+    v = finite_1d(arrays.get("phase_v", []), length=energy.size, fill=0.0)
+    proj = np.stack([u, v, energy], axis=1) if energy.size else np.zeros((0, 3), dtype=np.float64)
+    size = marker_size_from_path(proj, energy)
+    traces: list[dict[str, Any]] = []
+    if energy.size > 1:
+        traces.append(line_segments_trace("toric phase trajectory", u, v, energy, "#6df6ff", width=5.0))
+    traces.append(
+        {
+            "type": "scatter3d",
+            "mode": "markers",
+            "name": "phase-energy vertices",
+            "x": u.tolist(),
+            "y": v.tolist(),
+            "z": energy.tolist(),
+            "text": record_hover_text(record, energy, size, extra={"phase_u": u, "phase_v": v}),
+            "hovertemplate": "%{text}<extra></extra>",
+            "marker": {
+                "size": size.tolist(),
+                "color": energy.tolist(),
+                "colorscale": "Plasma",
+                "showscale": True,
+                "colorbar": {"title": "energy"},
+                "line": {"color": "#030712", "width": 1.0},
+            },
+        }
+    )
+    layout = plotly_dark_layout(f"{record['record_id']} toric phase simplicial trajectory", z_title="energy")
+    layout["scene"]["xaxis"]["title"] = "toric phase u"
+    layout["scene"]["yaxis"]["title"] = "toric phase v"
+    write_plotly_html(out, f"{record['record_id']} interactive toric phase trajectory", traces, layout, record_public(record))
+
+
+def interactive_record_projected_simplicial_toric_geometry(record: dict[str, Any], out: Path) -> None:
+    arrays = record["_arrays"]
+    proj = finite_proj3(record)
+    energy = finite_1d(arrays.get("energy", []), length=proj.shape[0], fill=0.0)
+    size = marker_size_from_path(proj, energy)
+    toric = arrays.get("toric", {})
+    active_faces = finite_1d(toric.get("active_faces", []), length=proj.shape[0], fill=0.0) if isinstance(toric, dict) else energy
+    traces: list[dict[str, Any]] = []
+    if proj.shape[0] > 1:
+        traces.append(line_segments_trace("directed trajectory skeleton", proj[:, 0], proj[:, 1], proj[:, 2], "#6df6ff", width=4.5))
+    neighbor_trace = sparse_neighbor_trace(proj)
+    if neighbor_trace is not None:
+        traces.append(neighbor_trace)
+    traces.append(
+        {
+            "type": "scatter3d",
+            "mode": "markers",
+            "name": "filtered simplicial-complex vertices",
+            "x": proj[:, 0].tolist(),
+            "y": proj[:, 1].tolist(),
+            "z": proj[:, 2].tolist(),
+            "text": record_hover_text(record, energy, size, extra={"active_face": active_faces}),
+            "hovertemplate": "%{text}<extra></extra>",
+            "marker": {
+                "size": size.tolist(),
+                "color": active_faces.tolist(),
+                "colorscale": "Turbo",
+                "showscale": True,
+                "colorbar": {"title": "active face"},
+                "line": {"color": "#030712", "width": 1.0},
+                "opacity": 0.91,
+            },
+        }
+    )
+    write_plotly_html(
+        out,
+        f"{record['record_id']} interactive projected simplicial toric geometry",
+        traces,
+        plotly_dark_layout(f"{record['record_id']} projected simplicial toric geometry"),
+        record_public(record),
+    )
+
+
 def plot_trajectory_3d(record: dict[str, Any], out: Path) -> None:
     arrays = record["_arrays"]
     proj = arrays["proj3"]
@@ -1652,12 +2023,12 @@ def plot_record_artifacts(record: dict[str, Any], geometry_dir: Path) -> list[st
     path = traj_dir / f"{base}_trajectory_3d.png"
     plot_trajectory_3d(record, path)
     files.append(path)
-    save_html(path.with_suffix(".html"), f"{base} trajectory 3D", json.dumps(record_public(record), indent=2), path.name)
+    interactive_record_trajectory_3d(record, path.with_suffix(".html"))
     files.append(path.with_suffix(".html"))
     path = traj_dir / f"{base}_energy_landscape.png"
     plot_energy_landscape(record, path)
     files.append(path)
-    save_html(path.with_suffix(".html"), f"{base} energy landscape", json.dumps(record_public(record), indent=2), path.name)
+    interactive_record_energy_landscape(record, path.with_suffix(".html"))
     files.append(path.with_suffix(".html"))
     for suffix, fn in (
         ("phase_energy", plot_phase_energy),
@@ -1668,14 +2039,9 @@ def plot_record_artifacts(record: dict[str, Any], geometry_dir: Path) -> list[st
         fn(record, path)
         files.append(path)
         if suffix == "toric_phase_simplicial_trajectory":
-            save_html(path.with_suffix(".html"), f"{base} toric phase simplicial trajectory", json.dumps(record_public(record), indent=2), path.name)
+            interactive_record_phase_energy(record, path.with_suffix(".html"))
             files.append(path.with_suffix(".html"))
-    save_html(
-        traj_dir / f"{base}_projected_simplicial_toric_geometry.html",
-        f"{base} projected simplicial toric geometry",
-        json.dumps(record_public(record), indent=2),
-        f"{base}_toric_phase_simplicial_trajectory.png",
-    )
+    interactive_record_projected_simplicial_toric_geometry(record, traj_dir / f"{base}_projected_simplicial_toric_geometry.html")
     files.append(traj_dir / f"{base}_projected_simplicial_toric_geometry.html")
     for suffix, fn in (
         ("directed_filtration", plot_directed_filtration),

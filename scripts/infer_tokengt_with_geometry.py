@@ -3,7 +3,8 @@
 
 This is a thin CLI wrapper around the TokenGT reasoning-geometry evaluator.  It
 keeps inference use simple while still allowing the full checkpoint-analysis
-plot family bundle to be emitted for an individual model run.
+plot family bundle, including dark-mode Plotly HTML trajectory/energy/toric
+geometry scenes, to be emitted for an individual model run.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ def parse_args() -> argparse.Namespace:
         dest="emit_geometry",
         action="store_true",
         default=True,
-        help="Emit trajectory, topology, CCA, toric, GraphCG, analogical, triangle, tetrahedron, and HTML outputs.",
+        help="Emit trajectory, topology, CCA, toric, GraphCG, analogical, triangle, tetrahedron, static PNG, and Plotly HTML outputs.",
     )
     parser.add_argument(
         "--no-emit-geometry",
@@ -170,6 +171,7 @@ def main() -> None:
         "seed": int(args.seed),
         "geometry_enabled": bool(args.emit_geometry),
         "rich_legacy_geometry_enabled": bool(args.rich_legacy_geometry),
+        "interactive_geometry_html_enabled": bool(args.emit_geometry),
         **load_checkpoint_meta(checkpoint),
     }
 
