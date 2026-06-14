@@ -26,6 +26,8 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
+from .gudhi_persistence import torch_persistence_image, torch_persistence_landscape
+
 
 @dataclass(frozen=True)
 class ReasoningTopologyConfig:
@@ -73,6 +75,9 @@ def _zero_like(hidden: torch.Tensor) -> dict[str, torch.Tensor]:
         "reasoning_step_hdbscan_noise_fraction",
         "reasoning_step_hdbscan_persistent_edge_density",
         "reasoning_step_hdbscan_core_radius",
+        "reasoning_step_ph_landscape_loss",
+        "reasoning_step_ph_landscape_norm",
+        "reasoning_step_ph_image_energy",
         "reasoning_step_edge_density",
         "reasoning_step_triangle_density",
         "reasoning_step_cycle_rank",
@@ -171,6 +176,9 @@ def reasoning_step_topology_loss(
         "hdbscan_noise": [],
         "hdbscan_persistent_edge": [],
         "hdbscan_core": [],
+        "ph_landscape_loss": [],
+        "ph_landscape_norm": [],
+        "ph_image_energy": [],
         "edge_density": [],
         "triangle_density": [],
         "cycle_rank": [],
@@ -201,6 +209,23 @@ def reasoning_step_topology_loss(
                 eye = torch.eye(n, device=points.device, dtype=points.dtype)
                 eye_cache[n] = eye
             masked_dist = dist + eye * 1.0e6
+            nn_deaths = masked_dist.topk(min(2, n - 1), dim=-1, largest=False).values[:, 0].clamp_min(0.0)
+            ph_diagram0 = torch.stack([torch.zeros_like(nn_deaths), nn_deaths], dim=-1)
+            ph_grid = torch.linspace(
+                0.0,
+                max(float(cfg.radius_max), float(cfg.radius_min) + 1.0e-4),
+                steps=24,
+                device=points.device,
+                dtype=points.dtype,
+            )
+            ph_landscape = torch_persistence_landscape(ph_diagram0, ph_grid, layers=3)
+            ph_image = torch_persistence_image(ph_diagram0, ph_grid, ph_grid, sigma=max(float(cfg.temperature), 1e-3))
+            ph_landscape_loss = ph_landscape.diff(n=2, dim=-1).abs().mean() if ph_landscape.shape[-1] > 2 else zero
+            ph_landscape_norm = ph_landscape.norm(p=2) / max(1, ph_landscape.numel())
+            ph_image_energy = ph_image.pow(2).mean()
+            window_terms["ph_landscape_loss"].append(ph_landscape_loss)
+            window_terms["ph_landscape_norm"].append(ph_landscape_norm.detach())
+            window_terms["ph_image_energy"].append(ph_image_energy.detach())
             core_k = min(max(1, int(cfg.hdbscan_min_samples)), n - 1)
             core_radius = masked_dist.topk(core_k, dim=-1, largest=False).values[:, -1].detach()
             mutual_reachability = torch.maximum(dist, torch.maximum(core_radius[:, None], core_radius[None, :]))
@@ -451,6 +476,7 @@ def reasoning_step_topology_loss(
         + 0.15 * inclusion_loss
         + 0.15 * boundary_residual
         + 0.25 * dirichlet_energy
+        + 0.05 * mean_term("ph_landscape_loss")
         + 0.15 * dec_conservation
         + 0.35 * directed_loss
         + 0.15 * analogical_map_loss
@@ -484,6 +510,9 @@ def reasoning_step_topology_loss(
         "reasoning_step_hdbscan_noise_fraction": mean_term("hdbscan_noise").detach(),
         "reasoning_step_hdbscan_persistent_edge_density": mean_term("hdbscan_persistent_edge").detach(),
         "reasoning_step_hdbscan_core_radius": mean_term("hdbscan_core").detach(),
+        "reasoning_step_ph_landscape_loss": mean_term("ph_landscape_loss").detach(),
+        "reasoning_step_ph_landscape_norm": mean_term("ph_landscape_norm").detach(),
+        "reasoning_step_ph_image_energy": mean_term("ph_image_energy").detach(),
         "reasoning_step_edge_density": mean_term("edge_density").detach(),
         "reasoning_step_triangle_density": mean_term("triangle_density").detach(),
         "reasoning_step_cycle_rank": mean_term("cycle_rank").detach(),

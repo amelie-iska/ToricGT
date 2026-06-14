@@ -35,7 +35,16 @@ CHECKPOINT_DIR="${CHECKPOINT_DIR:-checkpoints/parameter_golf_all_phases_fineweb_
 LOG_DIR="${LOG_DIR:-logs/parameter_golf_all_phases/${RUN_ID}}"
 ANALYSIS_ROOT="${ANALYSIS_ROOT:-outputs/post_resume_analysis/${RUN_ID}}"
 CAS_TARGET_DIR="${CAS_TARGET_DIR:-outputs/cas_training_targets/${RUN_ID}}"
-CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
+if [[ -z "${CHECKPOINT_INTERVAL:-}" ]]; then
+  CHECKPOINT_INTERVAL="$("$CONDA_BIN" run --no-capture-output -n "$CONDA_ENV" python - "$CONFIG" <<'PY'
+import sys
+from pathlib import Path
+import yaml
+cfg = yaml.safe_load(Path(sys.argv[1]).read_text(encoding="utf-8")) or {}
+print(int(((cfg.get("analysis") or {}).get("periodic_interval_steps")) or 250))
+PY
+)"
+fi
 POLL_SECONDS="${POLL_SECONDS:-60}"
 ENABLE_CODEX_REVIEW="${ENABLE_CODEX_REVIEW:-1}"
 

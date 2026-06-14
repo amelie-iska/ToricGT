@@ -1,0 +1,8 @@
+{
+  "point_clouds": [
+    {
+      "record_id": "cas_install_square",
+      "points": [[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0.5]]
+    }
+  ]
+}

@@ -329,6 +329,7 @@ Local implementation:
 - `src/toricgt/polar_cache.py`: recursive polar encode/decode utilities for optional KV-cache compression experiments.
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
 - `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing, advanced reasoning/memory special-token encoding, official-byte TokenGT-style causal graph supervision, GraphCG/analogy/topology hooks, Toric BGG/Koszul probes, and differentiable Slepian/Pollak trajectory-concentration losses.
+- `src/toricgt/gudhi_persistence.py`: exact GUDHI simplex-tree persistence audits, vectorized PH metrics, explicit `F2[x_level,y_radius]` reasoning/radius module maps, Macaulay2 bigraded chain-complex scripts, homology modules, free resolutions, and Betti-table extraction.
 - `src/toricgt/toric_geometry_tasks.py`: training-only low-rank toric probes for Newton active-face, bend, binomial, affine-Coxeter, braid, and phase-foliation signals.
 - `src/toricgt/toric_vector_bundles.py`: training-only Klyachko vector-bundle and equivariant-sheaf probes over the tropical-to-toric embedding fan, with exact finite filtration nesting, chart-transition cocycle checks, cone-splitting regularizers, and Cech-style gluing metrics.
 - `src/toricgt/cas_certificates.py`, `src/toricgt/cas_oracles.py`, and `src/toricgt/cas_backed_losses.py`: exact certificate schemas/cache, strict SageMath/Macaulay2 discovery and oracle wrappers, closed-form finite Stanley-Reisner certificates, and differentiable losses that consume exact CAS/closed-form targets without inventing algebraic facts in Torch.
@@ -343,6 +344,7 @@ Local implementation:
 - `planning/DATA.md`: dataset research, curation, and segmentation plan.
 - `planning/SEQUENTIAL-FINEWEB-PIVOT.md`: current Parameter-Golf BPB pivot record and launch policy for the sequential FineWeb-first branch.
 - `planning/TROPICAL-TORIC-CAS-IMPLEMENTATION.md`: CAS-backed plan for embedding tropical attention/fan diagnostics into toric varieties and using SageMath/Macaulay2 certificates for exact algebraic metrics, losses, and audits.
+- `planning/GUDHI-M2-TWO-PARAMETER-PERSISTENCE.md`: exact GUDHI plus Macaulay2 plan for 2-parameter reasoning/radius persistence modules over `F2[x_level,y_radius]`, including simplex maps, vectorized PH metrics, free resolutions, HTML reports, and periodic/inference integration.
 - `planning/TORIC-VECTOR-BUNDLES-SHEAVES-TRAINING.md`: research and implementation plan for Klyachko toric vector bundles, equivariant sheaves, Cech gluing, and their training use once tropical varieties are embedded into toric varieties.
 - `docs/PARAMETER_GOLF.md`: dense random-order Parameter-Golf adaptation notes.
 - `docs/HYBRID_BYTE_TOKENGT_BPB.md`: official byte-BPB plus TokenGT-style internal graph objective notes and pseudocode.
@@ -379,7 +381,9 @@ exact CAS-required metrics. The script installs SageMath for the `tokengt`
 workflow, installs Macaulay2 through Ubuntu apt when needed, installs/checks
 supporting toric and tropical tools (`gfan`, `Singular`, Normaliz/PyNormaliz,
 4ti2, LattE integrale, lrslib, nauty, TOPCOM, and polymake when available),
-and runs the required Sage/Macaulay2 ToricGT certificate verification.
+checks/installs the Python GUDHI and Plotly packages needed for exact
+persistent-homology HTML audits, and runs the required Sage/Macaulay2 ToricGT
+certificate verification.
 Macaulay2's `ToricVectorBundles` package is also checked by the discovery
 code.  When available, `--all-exact-cas` constructs a real Klyachko vector
 bundle certificate and records `isVectorBundle`, chart count, Euler
@@ -392,6 +396,55 @@ Periodic checkpoint analysis can include the same check with
 Sage/Macaulay2 availability, exact-certificate build status, and the exact
 command-line toric toolchain status. The supervised all-phases launcher passes
 these audit flags automatically.
+
+GUDHI/Macaulay2 two-parameter persistence audits are also wired into periodic
+analysis.  The all-phases config sets `analysis.periodic_interval_steps: 250`
+and enables `analysis.gudhi_persistence`, so the supervisor calls
+`scripts/watch_training_analysis.py --gudhi-persistence-audit` every 250
+checkpoint steps by default.  Each audit samples checkpoint tensors or
+inference point clouds, builds exact GUDHI Rips simplex trees, computes
+landscapes, persistence images, silhouettes, entropy vectors, and exact
+`F2[x_level,y_radius]` structure maps for reasoning level and embedding-space
+radius.  Macaulay2 then receives the homogeneous bigraded chain complex over
+`GF(2)[x_level,y_radius]` and emits `HH_i`, presentations, free resolutions,
+and Betti tables.  The output lives at
+`outputs/post_resume_analysis/<run>/step-*/gudhi_persistence/index.html`, with
+per-record pages and the exact `.m2` scripts under `records/` and
+`macaulay2/`.  The parent analysis directory also writes a dark-mode
+`index.html` linking the GUDHI/M2 audit to CAS, topology, OAI BPB,
+derived-category, memory, and test-time-scaling reports when available.
+
+Run the exact audit manually on a checkpoint with:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/run_gudhi_persistence_audit.py \
+  --checkpoint outputs/trainer_smoke_vector_bundle/random_order_step_00000001.pt \
+  --output-dir outputs/gudhi_old_checkpoint_audit \
+  --records 1 \
+  --max-points 8 \
+  --num-radii 3 \
+  --num-levels 3 \
+  --macaulay2-timeout-seconds 60
+```
+
+The same report is optional at inference time:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/infer_tokengt_with_geometry.py \
+  --checkpoint <checkpoint.pt> \
+  --output-dir outputs/inference_with_gudhi \
+  --emit-gudhi-persistence
+```
+
+The training objective does not differentiate through GUDHI.  Train-time
+regularization uses differentiable landscape/image vectorizers on small
+diagram-like 0D tensors, and W&B logs `train/analogy_step_ph_landscape_loss`,
+`train/analogy_step_ph_landscape_norm`, `train/analogy_step_ph_image_energy`,
+`topology/ph_landscape_loss`, `topology/ph_landscape_norm`, and
+`topology/ph_image_energy`.  Exact GUDHI and Macaulay2 values remain CPU
+analysis artifacts and are never replaced by silent Torch fallbacks.
 
 ## Setup
 
@@ -1400,6 +1453,11 @@ homology/Tor/Betti residuals`, with Fitting-minor ranks, varieties-of-complexes
 residuals, and Buchsbaum-Eisenbud complementary-minor multiplier checks logged
 as small-window audits. It is gated as an audit-first training signal so the
 Parameter-Golf BPB objective is not disrupted by unvalidated geometry.
+[`planning/GUDHI-M2-TWO-PARAMETER-PERSISTENCE.md`](planning/GUDHI-M2-TWO-PARAMETER-PERSISTENCE.md)
+records the exact implementation contract for GUDHI simplex trees, vectorized
+PH metrics, simplicial inclusion maps, explicit `F2[x_level,y_radius]`
+reasoning/radius modules, Macaulay2 homology/free resolutions, periodic
+250-step HTML audits, and optional inference output.
 The Toric BGG rewrite in
 [`assets/toricgt_toric_bgg_rewrite_amelie_schreiber.tex`](assets/toricgt_toric_bgg_rewrite_amelie_schreiber.tex)
 adds the representation-theoretic companion: finite shadows of hypertoric

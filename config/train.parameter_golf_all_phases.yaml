@@ -321,6 +321,20 @@ complexity:
     - zlib
     - lzma
 
+analysis:
+  # Periodic sidecar audit cadence. The launcher and supervisor read this value
+  # so checkpoint, GUDHI/PH, CAS, geometry, and Codex-review sidecars stay on a
+  # single configurable 250-step rhythm.
+  periodic_interval_steps: 250
+  gudhi_persistence:
+    enabled: true
+    records: 3
+    max_points: 18
+    num_radii: 5
+    num_levels: 5
+    radius_quantile: 0.62
+    macaulay2_timeout_seconds: 180
+
 hessian:
   enabled: true
   eval_every: 250

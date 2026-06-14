@@ -51,7 +51,7 @@ import yaml
 CHECKPOINT_PATTERN = re.compile(r"(?:random_order_step_|_step_)(\d+)\.pt$")
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint-dir", default="checkpoints/parameter_golf_oai_dense")
     parser.add_argument("--start-step", type=int, required=True)
@@ -78,6 +78,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--simplex-samples", type=int, default=8)
     parser.add_argument("--geometry-records", type=int, default=4)
     parser.add_argument("--geometry-branches", type=int, default=6)
+    parser.add_argument("--gudhi-persistence-audit", action="store_true")
+    parser.add_argument("--gudhi-records", type=int, default=3)
+    parser.add_argument("--gudhi-max-points", type=int, default=18)
+    parser.add_argument("--gudhi-num-radii", type=int, default=5)
+    parser.add_argument("--gudhi-num-levels", type=int, default=5)
+    parser.add_argument("--gudhi-radius-quantile", type=float, default=0.62)
+    parser.add_argument("--gudhi-macaulay2-timeout-seconds", type=int, default=180)
     parser.add_argument(
         "--tokengt-bpb-batches",
         type=int,
@@ -153,7 +160,7 @@ def parse_args() -> argparse.Namespace:
         help="Send Ctrl-C to --training-tmux after the target checkpoint appears and before analysis starts.",
     )
     parser.add_argument("--pause-wait-seconds", type=float, default=10.0)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def latest_checkpoint(checkpoint_dir: Path, min_step: int, min_mtime_unix: float = 0.0) -> tuple[int, Path] | None:
@@ -323,6 +330,7 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     derived_dir = base / "derived_category"
     memory_dir = base / "memory_trace"
     cas_dir = base / "cas_audit"
+    gudhi_dir = base / "gudhi_persistence"
     test_time_dir = base / "test_time_scaling"
     category = load_json(metrics_dir / "category_summary.json")
     geometry = load_json(geometry_dir / "reasoning_geometry_summary.json")
@@ -331,6 +339,7 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     derived = load_json(derived_dir / "summary.json")
     memory = load_json(memory_dir / "summary.json")
     cas_audit = load_json(cas_dir / "cas_audit_summary.json")
+    gudhi = load_json(gudhi_dir / "summary.json")
     test_time = load_json(test_time_dir / "summary.json")
     checkpoint_meta = load_json(metrics_dir / "checkpoint_meta.json")
     proposal = load_json(base / "training_adjustment_proposal.json")
@@ -460,6 +469,23 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
             ]
             lines.append(f"- Exact command-line tools available: `{', '.join(available_tools) or 'none'}`")
             lines.append(f"- Exact command-line tools unavailable: `{', '.join(missing_tools) or 'none'}`")
+    if gudhi:
+        lines.extend(
+            [
+                "",
+                "## GUDHI / Macaulay2 Persistence Audit",
+                f"- Output directory: `{gudhi_dir}`",
+                f"- Browser index: `{gudhi_dir / 'index.html'}`",
+                f"- Records: `{gudhi.get('records', 'n/a')}`",
+                f"- Mean GUDHI simplex count: `{gudhi.get('mean_num_simplices', 'n/a')}`",
+                f"- Mean Betti0 / Betti1: `{gudhi.get('mean_betti0', 'n/a')}` / `{gudhi.get('mean_betti1', 'n/a')}`",
+                f"- Mean H0 landscape norm: `{gudhi.get('mean_h0_landscape_norm', 'n/a')}`",
+                f"- Mean H1 persistence-image norm: `{gudhi.get('mean_h1_persistence_image_norm', 'n/a')}`",
+                f"- M2 homogeneous d1/d2: `{gudhi.get('mean_macaulay2_homogeneous_d1', 'n/a')}` / `{gudhi.get('mean_macaulay2_homogeneous_d2', 'n/a')}`",
+                f"- M2 d^2=0: `{gudhi.get('mean_macaulay2_d_squared_zero', 'n/a')}`",
+                f"- 2-parameter square residual: `{gudhi.get('mean_two_parameter_commutative_square_residual', 'n/a')}`",
+            ]
+        )
     if test_time:
         test_summary = test_time.get("summary", {}) if isinstance(test_time.get("summary", {}), dict) else {}
         budgets = test_summary.get("summary", {}) if isinstance(test_summary.get("summary", {}), dict) else {}
@@ -521,6 +547,49 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     )
     out = base / "SYNOPSIS.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
+def write_analysis_index(base: Path, checkpoint: Path, step: int, run_path: str) -> Path:
+    """Write a browser landing page linking all periodic analysis families."""
+
+    def exists_rel(path: Path) -> str:
+        if path.exists():
+            return path.relative_to(base).as_posix()
+        return ""
+
+    cards = [
+        ("Synopsis", exists_rel(base / "SYNOPSIS.md"), "Human-readable checkpoint summary and training-control proposal."),
+        ("GUDHI / M2 Persistence", exists_rel(base / "gudhi_persistence" / "index.html"), "Exact simplex trees, vectorized PH, F2[x_level,y_radius] modules, and Macaulay2 resolutions."),
+        ("Geometry Summary", exists_rel(base / "geometry" / "reasoning_geometry_summary.json"), "Reasoning geometry, toric, tropical, topology, GraphCG, and analogical metrics."),
+        ("Simplex Summary", exists_rel(base / "simplex" / "reasoning_simplex_summary.json"), "Reasoning/K/BPB triangle and tetrahedron projections."),
+        ("CAS Audit", exists_rel(base / "cas_audit" / "cas_audit_summary.json"), "Exact Sage/Macaulay2/toric-toolchain certificate report."),
+        ("OAI Competition BPB", exists_rel(base / "oai_competition" / "summary.json"), "Score-first byte-level evaluation summary when available."),
+        ("Derived Category", exists_rel(base / "derived_category" / "REPORT.md"), "Derived-category, CCA, and chain-complex example analysis."),
+        ("Memory Trace", exists_rel(base / "memory_trace" / "REPORT.md"), "Analogical trajectory-memory retrieval analysis."),
+        ("Test-Time Scaling", exists_rel(base / "test_time_scaling" / "summary.json"), "Budgeted branch/search scaling metrics."),
+    ]
+    html_cards = []
+    for title, href, desc in cards:
+        link = f'<a class="pill" href="{href}">open</a>' if href else '<span class="pill muted">not generated</span>'
+        html_cards.append(
+            f"""<div class="card"><h2>{title}</h2><p>{desc}</p><div class="links">{link}</div></div>"""
+        )
+    css = """
+:root{color-scheme:dark;--bg:#030712;--panel:#07111f;--text:#e8fbff;--muted:#91a8b7;--cyan:#37e8ff;--border:rgba(55,232,255,.28)}
+body{margin:0;background:radial-gradient(circle at top left,#092238 0,var(--bg) 42rem);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1200px;margin:0 auto;padding:32px 24px 64px}.hero,.card{background:linear-gradient(180deg,rgba(11,23,40,.94),rgba(5,13,25,.96));border:1px solid var(--border);border-radius:8px;box-shadow:0 18px 50px rgba(0,0,0,.28)}
+.hero{padding:24px;margin-bottom:20px}.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}.card{padding:16px}h1{margin:0 0 8px;font-size:28px;letter-spacing:0}h2{margin:0 0 10px;font-size:17px}p{color:var(--muted);line-height:1.5}.links{display:flex;gap:8px;flex-wrap:wrap}.pill{border:1px solid var(--border);border-radius:999px;padding:6px 10px;background:rgba(55,232,255,.07);color:var(--cyan);text-decoration:none}.muted{color:var(--muted)}
+"""
+    out = base / "index.html"
+    out.write_text(
+        f"""<!doctype html><html><head><meta charset="utf-8"><title>ToricGT Periodic Analysis Step {step}</title><style>{css}</style></head>
+<body><main><section class="hero"><h1>ToricGT Periodic Analysis</h1>
+<p>Checkpoint <code>{checkpoint}</code> at step <code>{step}</code>. W&B run: <code>{run_path or 'not requested'}</code>.</p>
+</section><section class="grid">{''.join(html_cards)}</section></main></body></html>
+""",
+        encoding="utf-8",
+    )
     return out
 
 
@@ -834,6 +903,31 @@ def main() -> None:
             cwd=repo,
             log_path=base / "logs" / "cas_audit.log",
         )
+    if args.gudhi_persistence_audit:
+        run_command(
+            [
+                sys.executable,
+                "scripts/run_gudhi_persistence_audit.py",
+                "--checkpoint",
+                str(checkpoint),
+                "--output-dir",
+                str(base / "gudhi_persistence"),
+                "--records",
+                str(args.gudhi_records),
+                "--max-points",
+                str(args.gudhi_max_points),
+                "--num-radii",
+                str(args.gudhi_num_radii),
+                "--num-levels",
+                str(args.gudhi_num_levels),
+                "--radius-quantile",
+                str(args.gudhi_radius_quantile),
+                "--macaulay2-timeout-seconds",
+                str(args.gudhi_macaulay2_timeout_seconds),
+            ],
+            cwd=repo,
+            log_path=base / "logs" / "gudhi_persistence.log",
+        )
     if not args.skip_test_time_scaling:
         run_optional_command(
             [
@@ -880,7 +974,9 @@ def main() -> None:
         log_path=base / "logs" / "training_adjustment_proposal.log",
     )
     synopsis = write_synopsis(base, checkpoint, step, args.run_path)
+    index = write_analysis_index(base, checkpoint, step, args.run_path)
     print(f"wrote {synopsis}", flush=True)
+    print(f"wrote {index}", flush=True)
     trigger_codex_review_hook(args, base, checkpoint, step)
 
 

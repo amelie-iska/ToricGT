@@ -24,6 +24,7 @@ ASSUME_YES=1
 INSTALL_SAGE=1
 INSTALL_MACAULAY2=1
 INSTALL_EXTRAS=1
+INSTALL_PYTHON_PH=1
 VERIFY=1
 APT_UPDATE=1
 
@@ -38,6 +39,7 @@ Options:
   --no-sage                  Do not install SageMath
   --no-macaulay2             Do not install Macaulay2
   --no-extras                Do not install/check supporting toric tools
+  --no-python-ph             Do not install/check GUDHI and Plotly Python packages
   --no-apt-update            Skip apt-get update before installing Macaulay2
   --no-verify                Skip final ToricGT CAS verification
   --yes                      Noninteractive installs (default)
@@ -89,6 +91,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-extras)
       INSTALL_EXTRAS=0
+      shift
+      ;;
+    --no-python-ph)
+      INSTALL_PYTHON_PH=0
       shift
       ;;
     --no-apt-update)
@@ -267,6 +273,27 @@ install_extra_toric_tools() {
   fi
 }
 
+install_python_ph_tools() {
+  log "checking Python persistent-homology/reporting packages in ${TORICGT_ENV}"
+  if conda run -n "${TORICGT_ENV}" python - <<'PY'
+import gudhi
+import plotly
+print("gudhi", gudhi.__version__)
+print("plotly", plotly.__version__)
+PY
+  then
+    return
+  fi
+  log "installing GUDHI and Plotly into ${TORICGT_ENV}"
+  conda run --no-capture-output -n "${TORICGT_ENV}" python -m pip install 'gudhi>=3.12' 'plotly>=5.22'
+  conda run -n "${TORICGT_ENV}" python - <<'PY'
+import gudhi
+import plotly
+print("gudhi", gudhi.__version__)
+print("plotly", plotly.__version__)
+PY
+}
+
 verify_backends() {
   log "verifying CAS binaries in ${TORICGT_ENV}"
   conda run --no-capture-output -n "${TORICGT_ENV}" bash -lc '
@@ -299,6 +326,18 @@ verify_backends() {
 
   conda run --no-capture-output -n "${TORICGT_ENV}" env PYTHONPATH=src \
     python scripts/validate_cas_certificates.py outputs/cas_install_check/cache
+
+  log "running GUDHI/Macaulay2 two-parameter persistence smoke audit"
+  rm -rf "${REPO_ROOT}/outputs/gudhi_cas_install_check"
+  conda run --no-capture-output -n "${TORICGT_ENV}" env PYTHONPATH=src \
+    python scripts/run_gudhi_persistence_audit.py \
+      --points-json tests/fixtures/gudhi_square_points.json \
+      --output-dir outputs/gudhi_cas_install_check \
+      --records 1 \
+      --max-points 5 \
+      --num-radii 3 \
+      --num-levels 3 \
+      --macaulay2-timeout-seconds 60
 }
 
 main() {
@@ -316,6 +355,9 @@ main() {
   fi
   if [[ "${INSTALL_EXTRAS}" -eq 1 ]]; then
     install_extra_toric_tools
+  fi
+  if [[ "${INSTALL_PYTHON_PH}" -eq 1 ]]; then
+    install_python_ph_tools
   fi
   if [[ "${VERIFY}" -eq 1 ]]; then
     verify_backends

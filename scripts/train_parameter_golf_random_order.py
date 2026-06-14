@@ -3789,6 +3789,9 @@ def main() -> None:
         step_analogy_step_hdbscan_noise_fraction = 0.0
         step_analogy_step_hdbscan_persistent_edge_density = 0.0
         step_analogy_step_hdbscan_core_radius = 0.0
+        step_analogy_step_ph_landscape_loss = 0.0
+        step_analogy_step_ph_landscape_norm = 0.0
+        step_analogy_step_ph_image_energy = 0.0
         step_analogy_step_edge_density = 0.0
         step_analogy_step_triangle_density = 0.0
         step_analogy_step_cycle_rank = 0.0
@@ -4213,6 +4216,15 @@ def main() -> None:
             step_analogy_step_hdbscan_core_radius += float(
                 out.get("analogy_step_hdbscan_core_radius", torch.zeros(())).detach().cpu()
             )
+            step_analogy_step_ph_landscape_loss += float(
+                out.get("analogy_step_ph_landscape_loss", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_ph_landscape_norm += float(
+                out.get("analogy_step_ph_landscape_norm", torch.zeros(())).detach().cpu()
+            )
+            step_analogy_step_ph_image_energy += float(
+                out.get("analogy_step_ph_image_energy", torch.zeros(())).detach().cpu()
+            )
             step_analogy_step_edge_density += float(
                 out.get("analogy_step_edge_density", torch.zeros(())).detach().cpu()
             )
@@ -4485,6 +4497,9 @@ def main() -> None:
         step_analogy_step_hdbscan_noise_fraction /= grad_accum
         step_analogy_step_hdbscan_persistent_edge_density /= grad_accum
         step_analogy_step_hdbscan_core_radius /= grad_accum
+        step_analogy_step_ph_landscape_loss /= grad_accum
+        step_analogy_step_ph_landscape_norm /= grad_accum
+        step_analogy_step_ph_image_energy /= grad_accum
         step_analogy_step_edge_density /= grad_accum
         step_analogy_step_triangle_density /= grad_accum
         step_analogy_step_cycle_rank /= grad_accum
@@ -4737,6 +4752,9 @@ def main() -> None:
                 "train/analogy_step_hdbscan_noise_fraction": step_analogy_step_hdbscan_noise_fraction,
                 "train/analogy_step_hdbscan_persistent_edge_density": step_analogy_step_hdbscan_persistent_edge_density,
                 "train/analogy_step_hdbscan_core_radius": step_analogy_step_hdbscan_core_radius,
+                "train/analogy_step_ph_landscape_loss": step_analogy_step_ph_landscape_loss,
+                "train/analogy_step_ph_landscape_norm": step_analogy_step_ph_landscape_norm,
+                "train/analogy_step_ph_image_energy": step_analogy_step_ph_image_energy,
                 "train/analogy_step_edge_density": step_analogy_step_edge_density,
                 "train/analogy_step_triangle_density": step_analogy_step_triangle_density,
                 "train/analogy_step_cycle_rank": step_analogy_step_cycle_rank,
@@ -4794,6 +4812,9 @@ def main() -> None:
                 "topology/step_hdbscan_noise_fraction": step_analogy_step_hdbscan_noise_fraction,
                 "topology/step_hdbscan_persistent_edge_density": step_analogy_step_hdbscan_persistent_edge_density,
                 "topology/step_hdbscan_core_radius": step_analogy_step_hdbscan_core_radius,
+                "topology/ph_landscape_loss": step_analogy_step_ph_landscape_loss,
+                "topology/ph_landscape_norm": step_analogy_step_ph_landscape_norm,
+                "topology/ph_image_energy": step_analogy_step_ph_image_energy,
                 "topology/step_edge_density": step_analogy_step_edge_density,
                 "topology/step_triangle_density": step_analogy_step_triangle_density,
                 "topology/step_cycle_rank": step_analogy_step_cycle_rank,

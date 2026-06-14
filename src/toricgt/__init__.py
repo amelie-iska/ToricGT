@@ -50,6 +50,14 @@ from .toric_vector_bundles import (
     default_klyachko_certificate,
     klyachko_nesting_residual,
 )
+from .gudhi_persistence import (
+    GudhiPersistenceConfig,
+    audit_point_cloud,
+    bigraded_chain_presentation,
+    macaulay2_bigraded_resolution_certificate,
+    torch_persistence_image,
+    torch_persistence_landscape,
+)
 from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryMemoryIndex, TrajectoryMemoryRecord, TrajectoryRetrievalHead
 
 __all__ = [
@@ -61,6 +69,7 @@ __all__ = [
     "DenseRandomOrderToricLM",
     "GraphTokenSoftMoE",
     "GoTDAGConfig",
+    "GudhiPersistenceConfig",
     "LowRankToricGeometryProbe",
     "PrefixCausalSoftMoE",
     "RandomOrderLMConfig",
@@ -76,6 +85,8 @@ __all__ = [
     "ToricVectorBundleConfig",
     "ToricVectorBundleProbe",
     "analogical_derived_category_loss",
+    "audit_point_cloud",
+    "bigraded_chain_presentation",
     "chain_complex_from_edges_np",
     "cech_cocycle_residual",
     "combinatorial_toric_cca_topology_loss",
@@ -102,9 +113,12 @@ __all__ = [
     "got_dag_summary_np",
     "klyachko_nesting_residual",
     "Macaulay2TropicalOracle",
+    "macaulay2_bigraded_resolution_certificate",
     "projective_resolution_certificate",
     "reasoning_step_topology_loss",
     "SageToricOracle",
+    "torch_persistence_image",
+    "torch_persistence_landscape",
     "validate_certificate_payload",
 ]
 

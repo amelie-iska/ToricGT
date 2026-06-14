@@ -21,6 +21,7 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 GEOMETRY_SCRIPT = ROOT / "scripts" / "evaluate_tokengt_reasoning_geometry_suite.py"
+GUDHI_SCRIPT = ROOT / "scripts" / "run_gudhi_persistence_audit.py"
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,6 +78,16 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Override where geometry files are written. Defaults to <output-dir>/geometry.",
     )
+    parser.add_argument(
+        "--emit-gudhi-persistence",
+        action="store_true",
+        help="Also emit exact GUDHI/Macaulay2 persistent-homology HTML pages from checkpoint tensors.",
+    )
+    parser.add_argument("--gudhi-output-dir", default="")
+    parser.add_argument("--gudhi-records", type=int, default=2)
+    parser.add_argument("--gudhi-max-points", type=int, default=18)
+    parser.add_argument("--gudhi-num-radii", type=int, default=5)
+    parser.add_argument("--gudhi-num-levels", type=int, default=5)
     return parser.parse_args()
 
 
@@ -150,6 +161,25 @@ def geometry_command(args: argparse.Namespace, geometry_dir: Path) -> list[str]:
     return cmd
 
 
+def gudhi_command(args: argparse.Namespace, gudhi_dir: Path) -> list[str]:
+    return [
+        sys.executable,
+        str(GUDHI_SCRIPT),
+        "--checkpoint",
+        str(args.checkpoint),
+        "--output-dir",
+        str(gudhi_dir),
+        "--records",
+        str(max(1, int(args.gudhi_records))),
+        "--max-points",
+        str(max(4, int(args.gudhi_max_points))),
+        "--num-radii",
+        str(max(2, int(args.gudhi_num_radii))),
+        "--num-levels",
+        str(max(2, int(args.gudhi_num_levels))),
+    ]
+
+
 def main() -> None:
     args = parse_args()
     checkpoint = Path(args.checkpoint)
@@ -158,6 +188,7 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     geometry_dir = Path(args.geometry_output_dir) if args.geometry_output_dir else output_dir / "geometry"
+    gudhi_dir = Path(args.gudhi_output_dir) if args.gudhi_output_dir else output_dir / "gudhi_persistence"
 
     manifest: dict[str, Any] = {
         "schema": "toricgt.tokengt_inference.v1",
@@ -172,6 +203,7 @@ def main() -> None:
         "geometry_enabled": bool(args.emit_geometry),
         "rich_legacy_geometry_enabled": bool(args.rich_legacy_geometry),
         "interactive_geometry_html_enabled": bool(args.emit_geometry),
+        "gudhi_persistence_enabled": bool(args.emit_gudhi_persistence),
         **load_checkpoint_meta(checkpoint),
     }
 
@@ -182,6 +214,13 @@ def main() -> None:
         manifest["geometry_output_dir"] = str(geometry_dir)
         manifest["geometry_summary"] = read_json(geometry_dir / "reasoning_geometry_summary.json")
         manifest["plot_family_manifest"] = read_json(geometry_dir / "plot_family_manifest.json")
+
+    if args.emit_gudhi_persistence:
+        gudhi_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.run(gudhi_command(args, gudhi_dir), cwd=ROOT, check=True)
+        manifest["gudhi_persistence_output_dir"] = str(gudhi_dir)
+        manifest["gudhi_persistence_index_html"] = str(gudhi_dir / "index.html")
+        manifest["gudhi_persistence_summary"] = read_json(gudhi_dir / "summary.json")
 
     output_path = output_dir / "inference_output.json"
     output_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")

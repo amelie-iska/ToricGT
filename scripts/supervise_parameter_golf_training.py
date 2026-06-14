@@ -68,6 +68,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--simplex-samples", type=int, default=8)
     parser.add_argument("--geometry-records", type=int, default=4)
     parser.add_argument("--geometry-branches", type=int, default=6)
+    parser.add_argument("--gudhi-records", type=int, default=0)
+    parser.add_argument("--gudhi-max-points", type=int, default=0)
+    parser.add_argument("--gudhi-num-radii", type=int, default=0)
+    parser.add_argument("--gudhi-num-levels", type=int, default=0)
+    parser.add_argument("--gudhi-radius-quantile", type=float, default=0.0)
+    parser.add_argument("--gudhi-macaulay2-timeout-seconds", type=int, default=0)
     parser.add_argument("--seed", type=int, default=10017)
     parser.add_argument(
         "--enable-codex-review",
@@ -373,6 +379,19 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         "--cas-audit",
         "--cas-audit-all-exact-cas",
         "--cas-audit-require-cas",
+        "--gudhi-persistence-audit",
+        "--gudhi-records",
+        str(args.gudhi_records),
+        "--gudhi-max-points",
+        str(args.gudhi_max_points),
+        "--gudhi-num-radii",
+        str(args.gudhi_num_radii),
+        "--gudhi-num-levels",
+        str(args.gudhi_num_levels),
+        "--gudhi-radius-quantile",
+        str(args.gudhi_radius_quantile),
+        "--gudhi-macaulay2-timeout-seconds",
+        str(args.gudhi_macaulay2_timeout_seconds),
     ]
     if codex_review_enabled:
         command.extend(
@@ -431,6 +450,25 @@ def main() -> None:
         args.analysis_root = f"outputs/post_resume_analysis/{args.run_id}"
     if not args.state_path:
         args.state_path = str(Path(args.log_root) / "supervisor_state.json")
+    analysis_cfg = config_get(config, "analysis", default={})
+    gudhi_cfg = config_get(config, "analysis", "gudhi_persistence", default={})
+    if isinstance(analysis_cfg, dict) and int(analysis_cfg.get("periodic_interval_steps", 0) or 0) > 0:
+        args.checkpoint_interval = int(analysis_cfg["periodic_interval_steps"])
+    if isinstance(gudhi_cfg, dict):
+        args.gudhi_records = args.gudhi_records or int(gudhi_cfg.get("records", 3) or 3)
+        args.gudhi_max_points = args.gudhi_max_points or int(gudhi_cfg.get("max_points", 18) or 18)
+        args.gudhi_num_radii = args.gudhi_num_radii or int(gudhi_cfg.get("num_radii", 5) or 5)
+        args.gudhi_num_levels = args.gudhi_num_levels or int(gudhi_cfg.get("num_levels", 5) or 5)
+        args.gudhi_radius_quantile = args.gudhi_radius_quantile or float(gudhi_cfg.get("radius_quantile", 0.62) or 0.62)
+        args.gudhi_macaulay2_timeout_seconds = args.gudhi_macaulay2_timeout_seconds or int(
+            gudhi_cfg.get("macaulay2_timeout_seconds", 180) or 180
+        )
+    args.gudhi_records = args.gudhi_records or 3
+    args.gudhi_max_points = args.gudhi_max_points or 18
+    args.gudhi_num_radii = args.gudhi_num_radii or 5
+    args.gudhi_num_levels = args.gudhi_num_levels or 5
+    args.gudhi_radius_quantile = args.gudhi_radius_quantile or 0.62
+    args.gudhi_macaulay2_timeout_seconds = args.gudhi_macaulay2_timeout_seconds or 180
 
     Path(args.log_root).mkdir(parents=True, exist_ok=True)
     Path(args.analysis_root).mkdir(parents=True, exist_ok=True)
@@ -449,6 +487,15 @@ def main() -> None:
             "watch_session": args.watch_session,
             "target_bpb": args.target_bpb,
             "gate_step": args.gate_step,
+            "checkpoint_interval": args.checkpoint_interval,
+            "gudhi_persistence": {
+                "records": args.gudhi_records,
+                "max_points": args.gudhi_max_points,
+                "num_radii": args.gudhi_num_radii,
+                "num_levels": args.gudhi_num_levels,
+                "radius_quantile": args.gudhi_radius_quantile,
+                "macaulay2_timeout_seconds": args.gudhi_macaulay2_timeout_seconds,
+            },
             "updated_utc": utc_iso(),
         }
     )
