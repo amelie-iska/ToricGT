@@ -632,22 +632,35 @@ These should be late-phase reasoning losses, not primary FineWeb BPB losses.
 
 ## Practical Next Steps
 
-1. Add `src/toricgt/cas_oracles.py` with backend discovery and typed
-   subprocess wrappers.
-2. Add `src/toricgt/cas_certificates.py` with dataclass schemas and
-   deterministic hashing.
-3. Add M2/Sage smoke tests that skip when CAS is unavailable and run exact
-   checks when installed.
-4. Add a small certificate generator for:
+Implemented foundation:
+
+- `src/toricgt/cas_certificates.py` defines certificate provenance, stable
+  hashes, validation, and cache storage.
+- `src/toricgt/cas_oracles.py` discovers SageMath and Macaulay2, refuses
+  silent fallback, wraps exact Sage/M2 smoke computations, and emits an exact
+  closed-form cyclic Stanley-Reisner certificate.
+- `src/toricgt/cas_backed_losses.py` contains differentiable consumers for
+  exact binomial, balancing, Cartier-bend, and cone-label targets. These losses
+  do not compute algebraic targets themselves.
+- `scripts/build_toric_tropical_certificates.py`,
+  `scripts/validate_cas_certificates.py`, and
+  `scripts/run_periodic_cas_audit.py` provide the first CLI entrypoints.
+- `tests/test_cas_certificates.py` checks exact closed-form certificates,
+  cache validation, script round-trips, backend unavailability behavior, and
+  exact-backend tests that run only when `sage` or `M2` are installed.
+
+Remaining next steps:
+
+1. Add a small certificate generator for:
    - one toric ideal;
    - one Newton polytope normal fan;
    - one Stanley-Reisner ideal;
    - one Koszul/free-resolution certificate.
-5. Extend `scripts/watch_training_analysis.py` with an optional
+2. Extend `scripts/watch_training_analysis.py` with an optional
    `--cas-audit` flag and summary section.
-6. Extend W&B metric organization with `cas/*` and
+3. Extend W&B metric organization with `cas/*` and
    `toric_tropical_exact/*`.
-7. Update the paper and condensed NeurIPS version to state that exact
+4. Update the paper and condensed NeurIPS version to state that exact
    algebraic metrics are produced by CAS-backed finite certificates, while
    differentiable training losses are cached-target surrogates.
 

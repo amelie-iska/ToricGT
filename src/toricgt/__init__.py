@@ -3,6 +3,18 @@
 from .random_order_lm import DenseRandomOrderToricLM, RandomOrderLMConfig
 from .soft_moe import GraphTokenSoftMoE, PrefixCausalSoftMoE
 from .combinatorial_toric_metrics import CombinatorialToricConfig, combinatorial_toric_cca_topology_loss
+from .cas_certificates import (
+    CASBackendInfo,
+    CertificateCache,
+    ToricTropicalCertificate,
+    validate_certificate_payload,
+)
+from .cas_oracles import (
+    Macaulay2TropicalOracle,
+    SageToricOracle,
+    cyclic_stanley_reisner_closed_form_certificate,
+    discover_all_backends,
+)
 from .derived_category_metrics import (
     DerivedCategoryConfig,
     analogical_derived_category_loss,
@@ -34,6 +46,8 @@ from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryMemoryIndex, Tr
 __all__ = [
     "__version__",
     "CombinatorialToricConfig",
+    "CASBackendInfo",
+    "CertificateCache",
     "DerivedCategoryConfig",
     "DenseRandomOrderToricLM",
     "GraphTokenSoftMoE",
@@ -48,11 +62,13 @@ __all__ = [
     "TrajectoryMemoryRecord",
     "TrajectoryRetrievalHead",
     "ToricGeometryConfig",
+    "ToricTropicalCertificate",
     "analogical_derived_category_loss",
     "chain_complex_from_edges_np",
     "combinatorial_toric_cca_topology_loss",
     "cyclic_flag_face_rows",
     "cyclic_stanley_reisner_betti_rows",
+    "cyclic_stanley_reisner_closed_form_certificate",
     "cyclic_stanley_reisner_generator_masks",
     "cyclic_stanley_reisner_resolution_certificate",
     "cyclic_stanley_reisner_resolution_dict",
@@ -66,10 +82,14 @@ __all__ = [
     "default_branch_merge_edges",
     "derived_category_feature_summary",
     "derived_category_objects_from_batch",
+    "discover_all_backends",
     "got_dag_metrics",
     "got_dag_summary_np",
+    "Macaulay2TropicalOracle",
     "projective_resolution_certificate",
     "reasoning_step_topology_loss",
+    "SageToricOracle",
+    "validate_certificate_payload",
 ]
 
 __version__ = "0.1.0"

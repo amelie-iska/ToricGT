@@ -107,6 +107,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--memory-trace-max-files", type=int, default=8)
     parser.add_argument("--memory-trace-max-queries", type=int, default=96)
     parser.add_argument("--skip-memory-trace-analysis", action="store_true")
+    parser.add_argument(
+        "--cas-audit",
+        action="store_true",
+        help="Run a small exact CAS/closed-form certificate audit as part of periodic analysis.",
+    )
+    parser.add_argument(
+        "--cas-audit-require-cas",
+        action="store_true",
+        help="Fail the optional CAS audit command when requested Sage/Macaulay2 checks are unavailable.",
+    )
+    parser.add_argument("--cas-audit-num-vertices", type=int, default=6)
+    parser.add_argument("--cas-audit-sage-normal-fan", action="store_true")
+    parser.add_argument("--cas-audit-macaulay2-smoke", action="store_true")
     parser.add_argument("--skip-test-time-scaling", action="store_true")
     parser.add_argument("--test-time-scaling-batches", type=int, default=8)
     parser.add_argument("--test-time-scaling-budgets", type=int, nargs="+", default=[1, 4, 16])
@@ -307,6 +320,7 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     oai_dir = base / "oai_competition"
     derived_dir = base / "derived_category"
     memory_dir = base / "memory_trace"
+    cas_dir = base / "cas_audit"
     test_time_dir = base / "test_time_scaling"
     category = load_json(metrics_dir / "category_summary.json")
     geometry = load_json(geometry_dir / "reasoning_geometry_summary.json")
@@ -314,6 +328,7 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     oai = load_json(oai_dir / "summary.json")
     derived = load_json(derived_dir / "summary.json")
     memory = load_json(memory_dir / "summary.json")
+    cas_audit = load_json(cas_dir / "cas_audit_summary.json")
     test_time = load_json(test_time_dir / "summary.json")
     checkpoint_meta = load_json(metrics_dir / "checkpoint_meta.json")
     proposal = load_json(base / "training_adjustment_proposal.json")
@@ -412,6 +427,25 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
                 f"- Report: `{memory_dir / 'REPORT.md'}`",
             ]
         )
+    if cas_audit:
+        backends = cas_audit.get("backend_status", {}) if isinstance(cas_audit.get("backend_status", {}), dict) else {}
+        build_ok = cas_audit.get("build_returncode") == 0
+        lines.extend(
+            [
+                "",
+                "## CAS Exact-Certificate Audit",
+                f"- Output directory: `{cas_dir}`",
+                f"- Build command returned: `{cas_audit.get('build_returncode', 'n/a')}`",
+                f"- Closed-form/CAS certificate build ok: `{build_ok}`",
+            ]
+        )
+        for name, info in sorted(backends.items()):
+            if isinstance(info, dict):
+                lines.append(
+                    f"- `{name}` available: `{info.get('available', 'n/a')}`; "
+                    f"provenance: `{info.get('provenance', 'n/a')}`; "
+                    f"version: `{info.get('version', 'n/a')}`"
+                )
     if test_time:
         test_summary = test_time.get("summary", {}) if isinstance(test_time.get("summary", {}), dict) else {}
         budgets = test_summary.get("summary", {}) if isinstance(test_summary.get("summary", {}), dict) else {}
@@ -759,6 +793,28 @@ def main() -> None:
             ],
             cwd=repo,
             log_path=base / "logs" / "memory_trace.log",
+        )
+    if args.cas_audit:
+        cas_command = [
+            sys.executable,
+            "scripts/run_periodic_cas_audit.py",
+            "--output-dir",
+            str(base / "cas_audit"),
+            "--num-vertices",
+            str(args.cas_audit_num_vertices),
+            "--python-bin",
+            sys.executable,
+        ]
+        if args.cas_audit_sage_normal_fan:
+            cas_command.append("--sage-normal-fan")
+        if args.cas_audit_macaulay2_smoke:
+            cas_command.append("--macaulay2-smoke")
+        if args.cas_audit_require_cas:
+            cas_command.append("--require-cas")
+        run_optional_command(
+            cas_command,
+            cwd=repo,
+            log_path=base / "logs" / "cas_audit.log",
         )
     if not args.skip_test_time_scaling:
         run_optional_command(

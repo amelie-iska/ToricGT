@@ -330,6 +330,7 @@ Local implementation:
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
 - `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing, advanced reasoning/memory special-token encoding, official-byte TokenGT-style causal graph supervision, GraphCG/analogy/topology hooks, Toric BGG/Koszul probes, and differentiable Slepian/Pollak trajectory-concentration losses.
 - `src/toricgt/toric_geometry_tasks.py`: training-only low-rank toric probes for Newton active-face, bend, binomial, affine-Coxeter, braid, and phase-foliation signals.
+- `src/toricgt/cas_certificates.py`, `src/toricgt/cas_oracles.py`, and `src/toricgt/cas_backed_losses.py`: exact certificate schemas/cache, strict SageMath/Macaulay2 discovery and oracle wrappers, closed-form finite Stanley-Reisner certificates, and differentiable losses that consume exact CAS/closed-form targets without inventing algebraic facts in Torch.
 - `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves used by the geometry audit suite.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, Slepian envelopes, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
@@ -343,6 +344,27 @@ Local implementation:
 - `planning/TROPICAL-TORIC-CAS-IMPLEMENTATION.md`: CAS-backed plan for embedding tropical attention/fan diagnostics into toric varieties and using SageMath/Macaulay2 certificates for exact algebraic metrics, losses, and audits.
 - `docs/PARAMETER_GOLF.md`: dense random-order Parameter-Golf adaptation notes.
 - `docs/HYBRID_BYTE_TOKENGT_BPB.md`: official byte-BPB plus TokenGT-style internal graph objective notes and pseudocode.
+
+CAS-backed exact certificate entrypoints:
+
+```bash
+python scripts/build_toric_tropical_certificates.py \
+  --output-dir outputs/cas_certificates \
+  --num-vertices 6
+
+python scripts/validate_cas_certificates.py outputs/cas_certificates/cache
+
+python scripts/run_periodic_cas_audit.py \
+  --output-dir outputs/periodic_cas_audit
+```
+
+The closed-form cyclic Stanley-Reisner certificate is exact and always
+available. SageMath and Macaulay2 checks run only when `sage` and `M2` are on
+`PATH`; missing backends are reported as unavailable and are never replaced by
+Torch surrogate metrics.
+Periodic checkpoint analysis can include the same check with
+`scripts/watch_training_analysis.py --cas-audit`; the generated `SYNOPSIS.md`
+then records Sage/Macaulay2 availability and exact-certificate build status.
 
 ## Setup
 

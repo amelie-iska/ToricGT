@@ -73,6 +73,8 @@ RAW_HIDDEN_PATTERNS = (
     "tokengt_graph/*",
     "toric/*",
     "tropical/*",
+    "toric_tropical_exact/*",
+    "cas/*",
     "bgg_category_o/*",
     "category_o/*",
     "koszul/*",
@@ -346,7 +348,7 @@ def _category_alias(key: str) -> str | None:
         return f"16_status/{key}"
     if key.startswith(("topology/",)):
         return f"07_topology_geometry/{key}"
-    if key.startswith(("toric/", "tropical/", "bgg_category_o/", "category_o/", "koszul/", "slepian_pollak/")):
+    if key.startswith(("toric/", "tropical/", "toric_tropical_exact/", "cas/", "bgg_category_o/", "category_o/", "koszul/", "slepian_pollak/")):
         return f"08_toric_tropical_bgg/{key}"
     if key.startswith(("checkpoint/", "trigger/", "audit/", "publish/")):
         return f"12_optimization/{key}"
