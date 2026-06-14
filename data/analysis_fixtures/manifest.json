@@ -1,0 +1,15 @@
+{
+  "jsonl": "data/analysis_fixtures/toricgt_analysis_fixture.jsonl",
+  "parquet": "data/analysis_fixtures/toricgt_analysis_fixture.parquet",
+  "points_json": "data/analysis_fixtures/toricgt_analysis_points.json",
+  "records": 6,
+  "schema": "toricgt.analysis_fixture_manifest.v1",
+  "task_families": [
+    "gudhi_persistence_simplicial_maps",
+    "hebrew_morphology_graph",
+    "noncommutative_torus_phase_memory",
+    "parameter_golf_bpb_control",
+    "toric_bgg_category_o",
+    "toric_tropical_graph_reasoning"
+  ]
+}

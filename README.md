@@ -78,6 +78,50 @@ only the newer TokenGT-native plots without the R97 compatibility bundle, add
 `--no-rich-legacy-geometry`.  To direct the figure bundle elsewhere, use
 `--geometry-output-dir <path>`.
 
+**Local analysis fixtures**
+
+When the full curated shards are unavailable, generate a small deterministic
+analysis fixture that exercises the same loaders and sidecars used by the
+periodic training audits.  The fixture writes a six-record Parquet/JSONL graph
+bundle plus point-cloud JSON for exact GUDHI/Macaulay2 persistence checks:
+
+```bash
+PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/create_analysis_fixture_data.py \
+  --output-dir data/analysis_fixtures
+```
+
+Run the exact topological/algebraic audit on the fixture point clouds:
+
+```bash
+PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/run_gudhi_persistence_audit.py \
+  --points-json data/analysis_fixtures/toricgt_analysis_points.json \
+  --output-dir outputs/analysis_fixture_gudhi_points \
+  --records 3 \
+  --max-points 18 \
+  --num-radii 4 \
+  --num-levels 4
+```
+
+Run TokenGT inference plus geometry and GUDHI sidecars against the fixture:
+
+```bash
+PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/infer_tokengt_with_geometry.py \
+  --checkpoint checkpoints/<run>/toricgt_step_00023250.pt \
+  --config config/train.full_tokengt_got_fineweb_derived.yaml \
+  --data-glob data/analysis_fixtures/toricgt_analysis_fixture.parquet \
+  --output-dir outputs/analysis_fixture_tokengt_inference \
+  --records 2 \
+  --batch-size 1 \
+  --device cpu \
+  --precision fp32 \
+  --emit-gudhi-persistence
+```
+
+The fixture records cover toric/tropical active-face reasoning,
+GUDHI-driven two-parameter persistence, Toric BGG category-O certificates,
+Hebrew root-template graphs, noncommutative torus phase memory, and
+Parameter-Golf BPB causality controls.
+
 **OpenAI competition baseline model**
 
 ```bash
