@@ -133,6 +133,9 @@ The current smoke-generated pages are:
 - `outputs/analysis_fixture_gudhi_points_latest/index.html`: GUDHI/Macaulay2
   two-parameter persistence with Miller-Sturmfels-style
   `F2[x_level,y_radius]` xy-grid module views.
+- `outputs/analysis_fixture_tokengt_inference_latest/index.html`: root
+  dark-mode browser entrypoint linking the run manifest, reasoning geometry,
+  exact GUDHI/Macaulay2 persistence, and embedding CAS sidecar.
 - `outputs/analysis_fixture_tokengt_inference_latest/geometry/embeddings/manifest.json`:
   exact hidden-state, PCA, energy, NLL, edge, and local-complex arrays used by
   the inference geometry plots.
@@ -436,13 +439,19 @@ python scripts/run_periodic_cas_audit.py \
 ```
 
 The closed-form cyclic Stanley-Reisner certificate is exact and always
-available. The full exact audit currently builds five certificates: the
+available. The full exact audit currently builds six certificates: the
 closed-form Stanley-Reisner certificate, a SageMath Newton-polytope normal-fan
 certificate, a Macaulay2 smoke certificate, and a Macaulay2 elimination
 certificate for a nontrivial toric ideal whose exact binomial rows feed the
 CAS-backed toric relation loss, plus a Macaulay2 `ToricVectorBundles`
-certificate for a rank-2 Klyachko vector bundle on `P^2`. Missing backends are
-reported as unavailable and are never replaced by Torch surrogate metrics.
+certificate for a rank-2 Klyachko vector bundle on `P^2`, plus a Macaulay2
+Koszul/free-resolution certificate for `QQ[x,y,z]/(x,y,z)`.  The Koszul
+certificate verifies `d1*d2 == 0`, `d2*d3 == 0`, free ranks `[1,3,3,1]`,
+projective dimension, regularity, and the Betti table in Macaulay2; cached
+certificates can be consumed by `cas_backed_losses.py` through
+`load_exact_certificate` and `koszul_betti_loss_from_certificate`. Missing
+backends are reported as unavailable and are never replaced by Torch surrogate
+metrics.
 Run `scripts/install_cas_backends.sh` on a ToricGT workstation before enabling
 exact CAS-required metrics. The script installs SageMath for the `tokengt`
 workflow, installs Macaulay2 through Ubuntu apt when needed, installs/checks
@@ -481,6 +490,9 @@ per-record pages and the exact `.m2` scripts under `records/` and
 boundary maps, `d1*d2 == 0`, and two-parameter square residuals; they also
 render the actual bigraded chain generators on an xy lattice grid, following
 the bivariate monomial-ideal/staircase convention from Miller-Sturmfels.  The
+xy-grid overlays the actual C1 Pareto frontier and adjacent lcm corners
+computed from emitted chain-generator bidegrees, so the visible report mirrors
+the two-variable monomial-module picture rather than only dumping CAS text. The
 parent analysis directory also writes a dark-mode
 `index.html` linking the GUDHI/M2 audit to CAS, topology, OAI BPB,
 derived-category, memory, and test-time-scaling reports when available.

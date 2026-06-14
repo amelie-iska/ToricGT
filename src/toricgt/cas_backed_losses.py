@@ -7,10 +7,14 @@ targets are errors by default.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import torch
 from torch.nn import functional as F
+
+from .cas_certificates import validate_certificate_payload
 
 
 def _zero_like(reference: torch.Tensor) -> torch.Tensor:
@@ -33,6 +37,25 @@ def _get_path(payload: dict[str, Any], path: tuple[str, ...]) -> Any:
             raise KeyError("missing certificate field: " + ".".join(path))
         cursor = cursor[key]
     return cursor
+
+
+def load_exact_certificate(path: str | Path) -> dict[str, Any]:
+    """Load and validate an exact CAS/closed-form certificate from JSON."""
+
+    certificate_path = Path(path)
+    payload = json.loads(certificate_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise TypeError(f"certificate JSON must contain an object: {certificate_path}")
+    errors = validate_certificate_payload(payload)
+    if errors:
+        raise ValueError(f"invalid certificate {certificate_path}: {'; '.join(errors)}")
+    return _certificate_payload(payload)
+
+
+def load_exact_certificates(paths: list[str | Path] | tuple[str | Path, ...]) -> list[dict[str, Any]]:
+    """Load multiple exact certificates with strict validation."""
+
+    return [load_exact_certificate(path) for path in paths]
 
 
 def relation_tensor_from_certificate(
@@ -204,3 +227,56 @@ def cone_label_loss_from_certificate(
     if cone_logits.shape[-1] < len(expected_cones):
         raise ValueError("cone_logits has fewer classes than certified maximal cones")
     return F.cross_entropy(cone_logits.reshape(-1, cone_logits.shape[-1]), cone_labels.reshape(-1).long())
+
+
+def koszul_betti_vector_from_certificate(
+    certificate: dict[str, Any],
+    *,
+    device: torch.device | str | None = None,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Return exact free ranks/Betti ranks from a Koszul/free-resolution cert."""
+
+    payload = _certificate_payload(certificate)
+    algebra = _get_path(payload, ("commutative_algebra",))
+    ranks = algebra.get("free_module_ranks")
+    if ranks is None:
+        rows = algebra.get("betti_rows")
+        if not rows:
+            raise KeyError("certificate has no commutative_algebra.free_module_ranks or betti_rows")
+        max_degree = max(int(row.get("homological_degree", -1)) for row in rows if isinstance(row, dict))
+        if max_degree < 0:
+            raise ValueError("certificate betti_rows do not contain homological_degree fields")
+        ranks = [0.0 for _ in range(max_degree + 1)]
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            degree = int(row["homological_degree"])
+            ranks[degree] += float(row.get("rank", 0.0))
+    if not isinstance(ranks, list) or not ranks:
+        raise ValueError("certificate free_module_ranks must be a nonempty list")
+    return torch.tensor([float(value) for value in ranks], dtype=dtype, device=device)
+
+
+def koszul_betti_loss_from_certificate(
+    predicted_betti: torch.Tensor,
+    certificate: dict[str, Any],
+    *,
+    normalize: bool = True,
+) -> torch.Tensor:
+    """Profile loss against exact CAS free ranks/Betti ranks.
+
+    `predicted_betti` may be `[D]`, `[B,D]`, or any tensor whose final axis is
+    homological degree.  The certificate supplies exact ranks, for example
+    `[1, 3, 3, 1]` for the Koszul resolution of `QQ[x,y,z]/(x,y,z)`.
+    """
+
+    pred = predicted_betti.float()
+    target = koszul_betti_vector_from_certificate(certificate, device=pred.device, dtype=pred.dtype)
+    if pred.shape[-1] < target.numel():
+        raise ValueError(f"predicted_betti width {pred.shape[-1]} is smaller than target width {target.numel()}")
+    residual = pred[..., : target.numel()] - target
+    loss = residual.square().mean()
+    if normalize:
+        loss = loss / target.square().mean().clamp_min(1e-6)
+    return loss

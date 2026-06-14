@@ -297,15 +297,19 @@ def select_recovery_validation(
     then to the inclusive best only when no earlier validation exists.
     """
 
-    min_step = int(gate_step) - max(1, int(min_recovery_runway_steps))
+    requested_runway = max(1, int(min_recovery_runway_steps))
+    min_step = int(gate_step) - requested_runway
     roomy = [row for row in rows if row.step <= min_step and math.isfinite(row.val_bpb)]
     before_gate = [row for row in rows if row.step < int(gate_step) and math.isfinite(row.val_bpb)]
     best_before_gate = min(before_gate, key=lambda row: (row.val_bpb, -row.step)) if before_gate else None
     if roomy:
         roomy_best = min(roomy, key=lambda row: (row.val_bpb, -row.step))
+        best_before_runway = int(gate_step) - best_before_gate.step if best_before_gate is not None else 0
+        late_checkpoint_keeps_most_runway = best_before_runway >= math.ceil(0.8 * requested_runway)
         if (
             best_before_gate is not None
             and best_before_gate.step > roomy_best.step
+            and late_checkpoint_keeps_most_runway
             and best_before_gate.val_bpb <= roomy_best.val_bpb - max(0.0, float(late_better_margin_bpb))
         ):
             return best_before_gate

@@ -42,9 +42,38 @@ nonnegative integer exponent set derived from the actual saved embedding
 vectors.  If SageMath or Macaulay2 is unavailable, or if the exact computation
 fails, the sidecar fails rather than emitting a substitute result.
 
+## Implementation Status - 2026-06-14 Second Pass
+
+The CAS-backed training target path now includes a strict Macaulay2
+Koszul/free-resolution certificate for `QQ[x,y,z]/(x,y,z)`.  The certificate
+is produced by `Macaulay2TropicalOracle.koszul_resolution_certificate`,
+included in `scripts/build_toric_tropical_certificates.py --all-exact-cas`,
+and tested in `tests/test_cas_certificates.py`.  Macaulay2 verifies the
+explicit boundary products `d1*d2 == 0` and `d2*d3 == 0`, computes the minimal
+free resolution, and records free ranks `[1,3,3,1]`, projective dimension,
+regularity, and Betti rows.  `src/toricgt/cas_backed_losses.py` now has
+strict cached-certificate loading plus `koszul_betti_loss_from_certificate`,
+so GPU losses can consume the cached exact target without running CAS in the
+hot loop.
+
+The GUDHI/Macaulay2 record pages now render the emitted two-variable module
+data with a stronger Miller-Sturmfels-style view.  The xy-grid still shows H0
+rank as cell fill and C0/C1/C2 chain generators by true bidegree, and now also
+overlays the actual C1 Pareto frontier and adjacent lcm corners computed from
+the emitted chain-generator degrees.  This makes the visible page look like a
+two-variable monomial-module diagram rather than only a heatmap and raw
+Macaulay2 text.
+
+The inference wrapper now writes a root dark-mode `index.html` in the output
+directory.  That page links the run manifest, geometry bundle, saved embedding
+payloads, exact GUDHI/Macaulay2 persistence audit, and embedding CAS sidecar
+when those optional outputs are enabled.  Existing fixture output was refreshed
+at `outputs/analysis_fixture_tokengt_inference_latest/index.html`.
+
 New fixture outputs were generated:
 
 - `outputs/analysis_fixture_gudhi_points_latest/index.html`
+- `outputs/analysis_fixture_tokengt_inference_latest/index.html`
 - `outputs/analysis_fixture_tokengt_inference_latest/geometry/embeddings/manifest.json`
 - `outputs/analysis_fixture_tokengt_inference_latest/embedding_cas_sidecar/index.html`
 - `outputs/analysis_fixture_tokengt_inference_latest/gudhi_persistence/index.html`

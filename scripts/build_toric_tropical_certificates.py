@@ -35,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--macaulay2-smoke", action="store_true", help="Build a small exact Macaulay2 smoke certificate if M2 is available.")
     parser.add_argument("--macaulay2-toric-ideal", action="store_true", help="Build a real exact Macaulay2 toric-ideal certificate by elimination.")
     parser.add_argument("--macaulay2-vector-bundle", action="store_true", help="Build a real exact Macaulay2 toric vector-bundle certificate.")
+    parser.add_argument("--macaulay2-koszul-resolution", action="store_true", help="Build a real exact Macaulay2 Koszul/free-resolution certificate.")
     parser.add_argument("--all-exact-cas", action="store_true", help="Enable all current exact Sage/Macaulay2 certificate builders.")
     parser.add_argument("--require-cas", action="store_true", help="Fail if requested Sage/Macaulay2 exact checks are unavailable.")
     return parser.parse_args()
@@ -82,6 +83,7 @@ def main() -> None:
         args.macaulay2_smoke = True
         args.macaulay2_toric_ideal = True
         args.macaulay2_vector_bundle = True
+        args.macaulay2_koszul_resolution = True
 
     if args.sage_normal_fan:
         oracle = SageToricOracle()
@@ -185,6 +187,34 @@ def main() -> None:
                     raise
                 report["errors"].append(
                     {"backend": "macaulay2", "error": str(exc), "required": False, "certificate": "toric_vector_bundle"}
+                )
+
+    if args.macaulay2_koszul_resolution:
+        oracle = Macaulay2TropicalOracle()
+        if not oracle.info.available:
+            message = oracle.info.error or "Macaulay2 backend unavailable"
+            if args.require_cas:
+                raise CASUnavailableError(message)
+            report["errors"].append(
+                {"backend": "macaulay2", "error": message, "required": False, "certificate": "koszul_resolution"}
+            )
+        else:
+            try:
+                cert = oracle.koszul_resolution_certificate()
+                path = cache.write(cert)
+                report["certificates"].append(
+                    {
+                        "kind": cert.kind,
+                        "provenance": cert.provenance,
+                        "path": str(path),
+                        "certificate_hash": cert.certificate_hash,
+                    }
+                )
+            except (CASExecutionError, CASUnavailableError) as exc:
+                if args.require_cas:
+                    raise
+                report["errors"].append(
+                    {"backend": "macaulay2", "error": str(exc), "required": False, "certificate": "koszul_resolution"}
                 )
 
     write_json(output_dir / "build_report.json", report)

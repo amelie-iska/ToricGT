@@ -646,21 +646,29 @@ Implemented foundation:
   command-line toric toolchain, wraps exact Sage normal-fan and M2 smoke
   computations, emits an exact closed-form cyclic Stanley-Reisner certificate,
   builds an exact Macaulay2 toric-ideal elimination certificate, and builds a
-  Macaulay2 `ToricVectorBundles` Klyachko vector-bundle certificate.
+  Macaulay2 `ToricVectorBundles` Klyachko vector-bundle certificate.  It also
+  builds an exact Macaulay2 Koszul/free-resolution certificate for
+  `QQ[x,y,z]/(x,y,z)`, including verified boundary products, free ranks,
+  projective dimension, regularity, and Betti rows.
 - `src/toricgt/cas_backed_losses.py` contains differentiable consumers for
-  exact binomial, balancing, Cartier-bend, and cone-label targets. These losses
-  do not compute algebraic targets themselves.
+  exact binomial, balancing, Cartier-bend, cone-label, and Koszul Betti/free
+  rank targets.  It also has strict cached-certificate loading that validates
+  certificate hashes and rejects surrogate provenance before a training loss
+  consumes the target. These losses do not compute algebraic targets
+  themselves.
 - `scripts/build_toric_tropical_certificates.py`,
   `scripts/validate_cas_certificates.py`, and
   `scripts/run_periodic_cas_audit.py` provide the exact-CAS CLI entrypoints.
   `--all-exact-cas --require-cas` currently builds and validates the
   closed-form Stanley-Reisner, Sage normal-fan, Macaulay2 smoke, Macaulay2
-  toric-ideal, and Macaulay2 toric-vector-bundle certificates.
+  toric-ideal, Macaulay2 toric-vector-bundle, and Macaulay2 Koszul/free
+  resolution certificates.
 - `tests/test_cas_certificates.py` checks exact closed-form certificates,
   cache validation, script round-trips, backend unavailability behavior,
   command-line toolchain discovery, exact Sage normal fans, exact Macaulay2
   smoke certificates, exact Macaulay2 toric ideals, exact Macaulay2 toric
-  vector bundles, and CAS-backed binomial losses.
+  vector bundles, exact Macaulay2 Koszul/free resolutions, strict cached
+  certificate loading, and CAS-backed binomial/Koszul losses.
 - `scripts/install_cas_backends.sh` installs/checks Sage, Macaulay2, gfan,
   Singular, Normaliz/PyNormaliz, 4ti2, LattE integrale, lrslib, nauty, TOPCOM,
   and polymake where the package manager makes them available, then runs the
@@ -672,11 +680,12 @@ Implemented foundation:
 
 Remaining next steps:
 
-1. Add a small CAS-backed Koszul/free-resolution certificate beyond the current
-   closed-form Stanley-Reisner finite resolution.
-2. Add optional cached-certificate loading to the hot training config so
-   selected toric relation losses can consume exact Macaulay2 rows instead of
-   synthetic toy relations when a matching certificate is present.
+1. Wire the cached Koszul/free-resolution certificate into a late-phase BGG or
+   Koszul-profile training config, keeping its loss weight off until the
+   phase gate enables it.
+2. Extend the cached-certificate config beyond the current toric-ideal path so
+   multiple certificate kinds can be selected by hash or path in one training
+   run.
 3. Update the paper and condensed NeurIPS version to state that exact
    algebraic metrics are produced by CAS-backed finite certificates, while
    differentiable training losses are cached-target surrogates.

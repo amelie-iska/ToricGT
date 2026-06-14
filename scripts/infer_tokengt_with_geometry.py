@@ -10,6 +10,7 @@ geometry scenes, to be emitted for an individual model run.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import subprocess
 import sys
@@ -141,6 +142,145 @@ def read_json(path: Path) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+INDEX_CSS = """
+:root { color-scheme: dark; --bg:#030712; --panel:#07111f; --text:#e8fbff; --muted:#91a8b7; --cyan:#37e8ff; --border:rgba(55,232,255,.26); }
+body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:radial-gradient(circle at top left,#092238 0,var(--bg) 42rem); color:var(--text); }
+main { max-width:1180px; margin:0 auto; padding:32px 24px 64px; }
+.hero,.card { background:linear-gradient(180deg,rgba(11,23,40,.94),rgba(5,13,25,.96)); border:1px solid var(--border); border-radius:8px; box-shadow:0 18px 50px rgba(0,0,0,.28); }
+.hero { padding:24px; margin-bottom:18px; }
+.grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }
+.card { padding:16px; }
+h1 { margin:0 0 8px; font-size:28px; letter-spacing:0; }
+h2 { margin:0 0 10px; font-size:18px; letter-spacing:0; }
+p { color:var(--muted); line-height:1.55; }
+a { color:var(--cyan); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.metric { display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid rgba(145,168,183,.14); padding:7px 0; }
+.metric span:first-child { color:var(--muted); }
+.metric span:last-child { text-align:right; overflow-wrap:anywhere; }
+.links { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.pill { border:1px solid var(--border); border-radius:999px; padding:6px 10px; background:rgba(55,232,255,.07); }
+.badge { display:inline-block; border:1px solid rgba(140,255,106,.35); border-radius:999px; color:#d9ffd2; background:rgba(140,255,106,.11); padding:4px 8px; font-size:12px; margin:2px 4px 2px 0; }
+.badge.off { border-color:rgba(255,79,216,.45); color:#ffd8f7; background:rgba(255,79,216,.12); }
+"""
+
+
+def _rel_link(base: Path, target: str | Path | None) -> str:
+    if not target:
+        return ""
+    path = Path(target)
+    if not path.is_absolute():
+        cwd_relative = path.resolve()
+        if cwd_relative.exists():
+            path = cwd_relative
+        else:
+            path = (base / path).resolve()
+    try:
+        return path.relative_to(base.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _metric(label: str, value: Any) -> str:
+    return f'<div class="metric"><span>{html.escape(label)}</span><span>{html.escape(str(value))}</span></div>'
+
+
+def _badge(label: str, enabled: bool) -> str:
+    cls = "badge" if enabled else "badge off"
+    value = "ON" if enabled else "OFF"
+    return f'<span class="{cls}">{html.escape(label)}: {value}</span>'
+
+
+def write_inference_index(output_dir: Path, manifest: dict[str, Any]) -> Path:
+    """Write a dark-mode root index linking every emitted inference artifact."""
+
+    cards: list[str] = []
+
+    def add_card(title: str, description: str, links: list[tuple[str, str]], metrics: list[tuple[str, Any]] | None = None) -> None:
+        link_html = "".join(f'<a class="pill" href="{html.escape(href)}">{html.escape(label)}</a>' for label, href in links if href)
+        metric_html = "".join(_metric(label, value) for label, value in (metrics or []))
+        cards.append(
+            f"""<div class="card"><h2>{html.escape(title)}</h2><p>{html.escape(description)}</p>{metric_html}<div class="links">{link_html}</div></div>"""
+        )
+
+    add_card(
+        "Run Manifest",
+        "Top-level inference manifest, checkpoint metadata, and enabled analysis sidecars.",
+        [("inference_output.json", "inference_output.json")],
+        [
+            ("checkpoint step", manifest.get("checkpoint_step", "n/a")),
+            ("parameter count", manifest.get("parameter_count", "n/a")),
+            ("device", manifest.get("device", "n/a")),
+            ("records", manifest.get("records", "n/a")),
+        ],
+    )
+    if manifest.get("geometry_output_dir"):
+        geometry_dir = _rel_link(output_dir, manifest.get("geometry_output_dir"))
+        add_card(
+            "Reasoning Geometry",
+            "TokenGT trajectory, topology, toric/tropical, GraphCG, analogical, and energy-landscape HTML outputs.",
+            [
+                ("geometry directory", geometry_dir),
+                ("plot manifest", f"{geometry_dir}/plot_family_manifest.json" if geometry_dir else ""),
+                ("summary JSON", f"{geometry_dir}/reasoning_geometry_summary.json" if geometry_dir else ""),
+            ],
+            [
+                ("embedding payloads", _rel_link(output_dir, manifest.get("embedding_payload_manifest")) or "not emitted"),
+            ],
+        )
+    if manifest.get("gudhi_persistence_index_html"):
+        add_card(
+            "GUDHI / Macaulay2 Persistence",
+            "Exact simplex-tree persistence, vectorized PH, F2[x_level,y_radius] modules, and Macaulay2 free resolutions.",
+            [
+                ("HTML index", _rel_link(output_dir, manifest.get("gudhi_persistence_index_html"))),
+                ("summary JSON", _rel_link(output_dir, Path(str(manifest.get("gudhi_persistence_output_dir", ""))) / "summary.json")),
+            ],
+            [
+                ("records", manifest.get("gudhi_persistence_summary", {}).get("records", "n/a")),
+                ("mean H1 landscape norm", manifest.get("gudhi_persistence_summary", {}).get("mean_h1_landscape_norm", "n/a")),
+            ],
+        )
+    if manifest.get("embedding_cas_sidecar_index_html"):
+        add_card(
+            "Embedding CAS Sidecar",
+            "Strict Sage normal-fan and Macaulay2 toric-ideal certificates derived from saved embedding payloads.",
+            [
+                ("HTML index", _rel_link(output_dir, manifest.get("embedding_cas_sidecar_index_html"))),
+                ("manifest JSON", _rel_link(output_dir, Path(str(manifest.get("embedding_cas_sidecar_output_dir", ""))) / "manifest.json")),
+            ],
+            [
+                ("records", manifest.get("embedding_cas_sidecar_manifest", {}).get("records", "n/a")),
+                ("failures", manifest.get("embedding_cas_sidecar_manifest", {}).get("failures", "n/a")),
+            ],
+        )
+
+    badges = "".join(
+        [
+            _badge("geometry", bool(manifest.get("geometry_enabled"))),
+            _badge("embedding payloads", bool(manifest.get("embedding_payloads_enabled"))),
+            _badge("GUDHI persistence", bool(manifest.get("gudhi_persistence_enabled"))),
+            _badge("CAS sidecar", bool(manifest.get("embedding_cas_sidecar_enabled"))),
+        ]
+    )
+    index = output_dir / "index.html"
+    index.write_text(
+        f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>ToricGT Inference Analysis Bundle</title><style>{INDEX_CSS}</style></head>
+<body><main>
+<section class="hero">
+  <h1>ToricGT Inference Analysis Bundle</h1>
+  <p>Single entry point for optional inference outputs: hidden-state embeddings, geometry plots, exact GUDHI/Macaulay2 persistence, and strict Sage/Macaulay2 toric sidecars.</p>
+  <div>{badges}</div>
+</section>
+<section class="grid">{''.join(cards)}</section>
+</main></body></html>
+""",
+        encoding="utf-8",
+    )
+    return index
 
 
 def geometry_command(args: argparse.Namespace, geometry_dir: Path) -> list[str]:
@@ -289,6 +429,9 @@ def main() -> None:
         manifest["embedding_cas_sidecar_manifest"] = read_json(cas_dir / "manifest.json")
 
     output_path = output_dir / "inference_output.json"
+    output_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    index = write_inference_index(output_dir, manifest)
+    manifest["index_html"] = str(index)
     output_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps(manifest, indent=2, sort_keys=True))
 

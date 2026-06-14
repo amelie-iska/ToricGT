@@ -191,15 +191,49 @@ def generator_counts_by_degree(record: dict[str, Any]) -> dict[tuple[int, int], 
     return counts
 
 
+def generator_points_for_chain_degree(record: dict[str, Any], chain_degree: str) -> list[tuple[int, int]]:
+    presentation = record.get("bigraded_chain_presentation", {})
+    generators = presentation.get("generators", {}) if isinstance(presentation, dict) else {}
+    raw = generators.get(chain_degree, [])
+    points: list[tuple[int, int]] = []
+    if not isinstance(raw, list):
+        return points
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        degree = item.get("degree", [0, 0])
+        if isinstance(degree, list) and len(degree) == 2:
+            points.append((int(degree[0]), int(degree[1])))
+    return sorted(set(points))
+
+
+def pareto_minimal_points(points: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    frontier: list[tuple[int, int]] = []
+    for point in sorted(set(points)):
+        x, y = point
+        dominated = any((u <= x and v <= y and (u, v) != point) for u, v in points)
+        if not dominated:
+            frontier.append(point)
+    return frontier
+
+
+def adjacent_lcm_corners(points: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    ordered = sorted(set(points), key=lambda item: (item[0], -item[1]))
+    return sorted({(max(a[0], b[0]), max(a[1], b[1])) for a, b in zip(ordered, ordered[1:])})
+
+
 def xy_grid_svg(record: dict[str, Any]) -> str:
     """Render the actual bigraded generator degrees as an xy lattice grid."""
 
     counts = generator_counts_by_degree(record)
+    c1_frontier = pareto_minimal_points(generator_points_for_chain_degree(record, "1"))
+    c1_lcms = adjacent_lcm_corners(c1_frontier)
     module = record.get("two_parameter_module", {})
     h0 = finite_matrix(module.get("hilbert_h0", []))
     h1 = finite_matrix(module.get("hilbert_h1", []))
-    max_x = max([h0.shape[0] - 1, h1.shape[0] - 1, *[point[0] for point in counts]] or [0])
-    max_y = max([h0.shape[1] - 1, h1.shape[1] - 1, *[point[1] for point in counts]] or [0])
+    all_points = [*counts.keys(), *c1_frontier, *c1_lcms]
+    max_x = max([h0.shape[0] - 1, h1.shape[0] - 1, *[point[0] for point in all_points]] or [0])
+    max_y = max([h0.shape[1] - 1, h1.shape[1] - 1, *[point[1] for point in all_points]] or [0])
     cell = 54
     pad_l = 68
     pad_b = 56
@@ -234,6 +268,27 @@ def xy_grid_svg(record: dict[str, Any]) -> str:
                     f'<text x="{x_pos(y):.1f}" y="{y_pos(x)+4:.1f}" text-anchor="middle" '
                     f'font-size="12" fill="#e8fbff">H0 {format_value(value)}</text>'
                 )
+    if len(c1_frontier) >= 2:
+        line_points = " ".join(f"{x_pos(y):.1f},{y_pos(x):.1f}" for x, y in sorted(c1_frontier, key=lambda item: (item[0], item[1])))
+        parts.append(
+            f'<polyline points="{line_points}" fill="none" stroke="#ffb86b" stroke-width="2.4" '
+            'stroke-dasharray="5 5" opacity="0.9"/>'
+        )
+        for (a_x, a_y), (b_x, b_y) in zip(c1_frontier, c1_frontier[1:]):
+            parts.append(
+                f'<line x1="{x_pos(a_y):.1f}" y1="{y_pos(a_x):.1f}" '
+                f'x2="{x_pos(b_y):.1f}" y2="{y_pos(b_x):.1f}" '
+                'stroke="#ffd39b" stroke-width="1.3" opacity="0.8"/>'
+            )
+    for x, y in c1_lcms:
+        cx, cy = x_pos(y), y_pos(x)
+        parts.append(
+            f'<polygon points="{cx:.1f},{cy-9:.1f} {cx+9:.1f},{cy:.1f} {cx:.1f},{cy+9:.1f} {cx-9:.1f},{cy:.1f}" '
+            'fill="none" stroke="#8cff6a" stroke-width="2"/>'
+        )
+        parts.append(
+            f'<text x="{cx:.1f}" y="{cy+23:.1f}" text-anchor="middle" font-size="10" fill="#8cff6a">lcm</text>'
+        )
     for x in range(max_x + 1):
         parts.append(
             f'<text x="{pad_l-12}" y="{y_pos(x)+4:.1f}" text-anchor="end" font-size="12" fill="#91a8b7">x={x}</text>'
@@ -271,6 +326,8 @@ def xy_grid_svg(record: dict[str, Any]) -> str:
         ("C1 edges", "#ffb86b", "rect"),
         ("C2 triangles", "#ff4fd8", "tri"),
         ("cell fill = H0 rank", "#1b6c7c", "rect"),
+        ("C1 Pareto frontier", "#ffd39b", "line"),
+        ("adjacent lcm corners", "#8cff6a", "diamond"),
     ]
     parts.append(f'<text x="{legend_x}" y="42" font-size="13" fill="#e8fbff">Bigraded generators</text>')
     for idx, (label, color, shape) in enumerate(legend):
@@ -280,6 +337,12 @@ def xy_grid_svg(record: dict[str, Any]) -> str:
         elif shape == "tri":
             parts.append(
                 f'<polygon points="{legend_x+8},{ly-12} {legend_x+1},{ly+2} {legend_x+15},{ly+2}" fill="{color}"/>'
+            )
+        elif shape == "line":
+            parts.append(f'<line x1="{legend_x+1}" y1="{ly-5}" x2="{legend_x+18}" y2="{ly-5}" stroke="{color}" stroke-width="2.4" stroke-dasharray="5 5"/>')
+        elif shape == "diamond":
+            parts.append(
+                f'<polygon points="{legend_x+9},{ly-14} {legend_x+18},{ly-5} {legend_x+9},{ly+4} {legend_x},{ly-5}" fill="none" stroke="{color}" stroke-width="2"/>'
             )
         else:
             parts.append(f'<rect x="{legend_x+2}" y="{ly-12}" width="12" height="12" fill="{color}"/>')
@@ -457,7 +520,7 @@ def write_record_html(record: dict[str, Any], out: Path, *, rel_json: str, rel_m
     <p>Ring: <code>{html.escape(str(record.get('two_parameter_module', {}).get('ring', 'F2[x_level,y_radius]')))}</code></p>
     <p>Commutative squares checked: <code>{html.escape(str(record.get('two_parameter_module', {}).get('commutative_squares_checked', 'n/a')))}</code></p>
     <p>Square residual: <code>{html.escape(str(record.get('two_parameter_module', {}).get('commutative_square_residual', 'n/a')))}</code></p>
-    <p class="legend">The xy-grid below follows the bivariate monomial-ideal convention: x is reasoning level, y is radius degree, cell fill is H0 rank, and overlaid markers are actual chain generators by bidegree.</p>
+    <p class="legend">The xy-grid below follows the bivariate monomial-ideal convention: x is reasoning level, y is radius degree, cell fill is H0 rank, and overlaid markers are actual chain generators by bidegree.  The dashed C1 frontier and green lcm corners are computed from the emitted bidegrees, matching the two-variable lattice picture used for monomial modules.</p>
   </div>
 </section>
 <section class="panel card">

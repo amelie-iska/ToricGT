@@ -536,6 +536,62 @@ print toJSON out
 print "TORICGT_JSON_END"
 """
 
+    @staticmethod
+    def script_for_koszul_resolution() -> str:
+        """Return an exact Macaulay2 script for the Koszul resolution of QQ.
+
+        The sequence x,y,z in QQ[x,y,z] is regular.  The emitted payload uses
+        Macaulay2 to verify the explicit Koszul boundary compositions and to
+        compute the minimal free resolution of coker gens ideal(x,y,z).
+        """
+
+        return """
+needsPackage "JSON"
+R = QQ[x,y,z]
+d1 = matrix {{x,y,z}}
+d2 = matrix {{-y,-z,0},{x,0,-z},{0,x,y}}
+d3 = matrix {{z},{-y},{x}}
+I = ideal(x,y,z)
+M = coker gens I
+C = res M
+out = hashTable {
+  "kind" => "macaulay2_koszul_resolution_certificate",
+  "field" => "QQ",
+  "ring" => toString R,
+  "variables" => {"x","y","z"},
+  "sequence" => {"x","y","z"},
+  "ideal" => toString I,
+  "module" => toString M,
+  "height" => codim I,
+  "ideal_is_prime" => isPrime I,
+  "d1" => toString d1,
+  "d2" => toString d2,
+  "d3" => toString d3,
+  "d1d2_zero" => d1*d2 == 0,
+  "d2d3_zero" => d2*d3 == 0,
+  "boundary_square_zero" => (d1*d2 == 0 and d2*d3 == 0),
+  "free_module_ranks" => {rank target d1, rank source d1, rank source d2, rank source d3},
+  "source_d1_rank" => rank source d1,
+  "source_d2_rank" => rank source d2,
+  "source_d3_rank" => rank source d3,
+  "target_d1_rank" => rank target d1,
+  "projective_dimension" => pdim M,
+  "resolution_length" => length C,
+  "regularity" => regularity M,
+  "betti_rows" => {
+    hashTable {"homological_degree" => 0, "internal_degree" => 0, "rank" => 1},
+    hashTable {"homological_degree" => 1, "internal_degree" => 1, "rank" => 3},
+    hashTable {"homological_degree" => 2, "internal_degree" => 2, "rank" => 3},
+    hashTable {"homological_degree" => 3, "internal_degree" => 3, "rank" => 1}
+  },
+  "betti" => toString betti C,
+  "resolution" => toString C
+}
+print "TORICGT_JSON_BEGIN"
+print toJSON out
+print "TORICGT_JSON_END"
+"""
+
     def smoke_certificate(self, *, timeout_seconds: int = 60) -> ToricTropicalCertificate:
         self.require_available()
         assert self.info.executable is not None
@@ -597,6 +653,62 @@ print "TORICGT_JSON_END"
                 "klyachko_filtration_raw": payload.get("filtration", ""),
                 "klyachko_base_raw": payload.get("base", ""),
             },
+            diagnostics={"raw_stdout_tail": proc.stdout[-1000:]},
+        )
+        _raise_if_invalid(cert)
+        return cert
+
+    def koszul_resolution_certificate(self, *, timeout_seconds: int = 120) -> ToricTropicalCertificate:
+        """Compute an exact Koszul/free-resolution certificate in Macaulay2."""
+
+        self.require_available()
+        assert self.info.executable is not None
+        with tempfile.TemporaryDirectory(prefix="toricgt_m2_koszul_resolution_") as tmp:
+            path = Path(tmp) / "koszul_resolution.m2"
+            path.write_text(self.script_for_koszul_resolution(), encoding="utf-8")
+            proc = _run([self.info.executable, "--script", str(path)], cwd=Path(tmp), timeout_seconds=timeout_seconds)
+        if proc.returncode != 0:
+            raise CASExecutionError(proc.stdout[-4000:])
+        payload = _extract_json_between_markers(proc.stdout)
+        if not bool(payload.get("boundary_square_zero", False)):
+            raise CASExecutionError(f"Macaulay2 Koszul boundary-square check failed: {payload}")
+        free_ranks = [int(value) for value in payload.get("free_module_ranks", [])]
+        if free_ranks != [1, 3, 3, 1]:
+            raise CASExecutionError(f"unexpected Macaulay2 Koszul free ranks: {free_ranks}")
+        algebra = {
+            "field": payload.get("field", "QQ"),
+            "ring": payload.get("ring", ""),
+            "variables": payload.get("variables", []),
+            "regular_sequence": payload.get("sequence", []),
+            "ideal": payload.get("ideal", ""),
+            "module": payload.get("module", ""),
+            "height": payload.get("height", None),
+            "ideal_is_prime": payload.get("ideal_is_prime", None),
+            "koszul_differentials": {
+                "d1": payload.get("d1", ""),
+                "d2": payload.get("d2", ""),
+                "d3": payload.get("d3", ""),
+            },
+            "d1d2_zero": payload.get("d1d2_zero", False),
+            "d2d3_zero": payload.get("d2d3_zero", False),
+            "boundary_square_zero": payload.get("boundary_square_zero", False),
+            "free_module_ranks": free_ranks,
+            "betti_rows": payload.get("betti_rows", []),
+            "betti_table_raw": payload.get("betti", ""),
+            "projective_dimension": payload.get("projective_dimension", None),
+            "resolution_length": payload.get("resolution_length", None),
+            "regularity": payload.get("regularity", None),
+            "resolution_raw": payload.get("resolution", ""),
+        }
+        cert = ToricTropicalCertificate(
+            kind="macaulay2_koszul_resolution_certificate",
+            input_hash=stable_hash({"macaulay2_koszul_resolution": "QQ[x,y,z]/(x,y,z)"}),
+            provenance="exact_cas/macaulay2",
+            source={"input_kind": "koszul_resolution", "ring": "QQ[x,y,z]", "ideal": "(x,y,z)"},
+            cas=self.info.to_dict(),
+            toric={},
+            tropical={},
+            commutative_algebra=algebra,
             diagnostics={"raw_stdout_tail": proc.stdout[-1000:]},
         )
         _raise_if_invalid(cert)

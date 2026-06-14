@@ -9,6 +9,9 @@ import torch
 from toricgt.cas_backed_losses import (
     balanced_cycle_loss_from_certificate,
     cartier_bend_loss_from_certificate,
+    koszul_betti_loss_from_certificate,
+    koszul_betti_vector_from_certificate,
+    load_exact_certificate,
     toric_binomial_loss_from_certificate,
 )
 from toricgt.cas_certificates import CertificateCache, validate_certificate_payload
@@ -214,6 +217,7 @@ def test_build_script_all_exact_cas_when_backends_installed(tmp_path: Path) -> N
     assert "sage_normal_fan_certificate" in kinds
     assert "macaulay2_smoke_certificate" in kinds
     assert "macaulay2_toric_ideal_certificate" in kinds
+    assert "macaulay2_koszul_resolution_certificate" in kinds
 
     validate = subprocess.run(
         [sys.executable, "scripts/validate_cas_certificates.py", str(out / "cache")],
@@ -284,6 +288,38 @@ def test_exact_macaulay2_toric_vector_bundle_certificate_if_installed() -> None:
     assert payload["commutative_algebra"]["is_vector_bundle"] is True
     assert "ToricVectorBundleKlyachko" in payload["commutative_algebra"]["class"]
     assert validate_certificate_payload(payload) == []
+
+
+def test_exact_macaulay2_koszul_resolution_certificate_if_installed(tmp_path: Path) -> None:
+    oracle = Macaulay2TropicalOracle()
+    if not oracle.info.available:
+        pytest.skip("Macaulay2 not installed")
+    cert = oracle.koszul_resolution_certificate()
+    payload = cert.with_hash()
+
+    assert payload["provenance"] == "exact_cas/macaulay2"
+    assert payload["kind"] == "macaulay2_koszul_resolution_certificate"
+    algebra = payload["commutative_algebra"]
+    assert algebra["boundary_square_zero"] is True
+    assert algebra["d1d2_zero"] is True
+    assert algebra["d2d3_zero"] is True
+    assert algebra["free_module_ranks"] == [1, 3, 3, 1]
+    assert algebra["projective_dimension"] == 3
+    assert algebra["regularity"] == 0
+    assert validate_certificate_payload(payload) == []
+
+    cert_path = tmp_path / "koszul_resolution.json"
+    cert_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    loaded = load_exact_certificate(cert_path)
+    target = koszul_betti_vector_from_certificate(loaded)
+    assert target.tolist() == [1.0, 3.0, 3.0, 1.0]
+
+    predicted = torch.tensor([[1.0, 3.0, 3.0, 1.0]], requires_grad=True)
+    loss = koszul_betti_loss_from_certificate(predicted, loaded, normalize=False)
+    assert loss.item() == pytest.approx(0.0)
+    loss.backward()
+    assert predicted.grad is not None
+    assert torch.isfinite(predicted.grad).all()
 
 
 def test_toric_probe_consumes_exact_macaulay2_relations_if_installed(tmp_path: Path) -> None:
