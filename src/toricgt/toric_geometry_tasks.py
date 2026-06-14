@@ -10,11 +10,15 @@ noncommutative phase leaves while leaving BPB as the primary objective.
 from __future__ import annotations
 
 import math
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+from .cas_backed_losses import relation_tensor_from_certificate
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,7 @@ class ToricGeometryConfig:
     braid_weight: float = 0.1
     leaf_weight: float = 0.25
     max_positions: int = 256
+    cas_toric_ideal_certificate_path: str = ""
 
 
 def _fake_quantize_st(x: torch.Tensor, bits: int) -> torch.Tensor:
@@ -138,7 +143,10 @@ class LowRankToricGeometryProbe(nn.Module):
         self.rank_to_face = nn.Linear(rank, num_exponents, bias=True)
         self.moment_projection = nn.Linear(exponent_dim, 2, bias=False)
         exponents = make_exponent_table(num_exponents, exponent_dim)
-        relations = make_binomial_relations(exponents)
+        relations, relation_source_exact = self._load_binomial_relations(
+            str(config.cas_toric_ideal_certificate_path or ""),
+            exponents,
+        )
         roots = []
         for idx in range(min(3, exponent_dim - 1)):
             root = torch.zeros(exponent_dim, dtype=torch.float32)
@@ -149,6 +157,7 @@ class LowRankToricGeometryProbe(nn.Module):
             roots.append(torch.tensor([1.0, -1.0], dtype=torch.float32))
         self.register_buffer("exponents", exponents)
         self.register_buffer("binomial_relations", relations)
+        self.register_buffer("binomial_relation_source_exact", torch.tensor(float(relation_source_exact)))
         self.register_buffer("simple_roots", torch.stack(roots, dim=0))
         nn.init.xavier_uniform_(self.hidden_to_rank.weight)
         nn.init.xavier_uniform_(self.rank_to_face.weight)
@@ -218,19 +227,41 @@ class LowRankToricGeometryProbe(nn.Module):
             bend_magnitude = bend_loss.detach()
 
         relations = self.binomial_relations.to(device=hidden.device)
+        relation_source_exact = bool(float(self.binomial_relation_source_exact.detach().cpu()))
         if relations.numel() > 0:
-            pred_relation = (
-                logits[..., relations[:, 0]]
-                + logits[..., relations[:, 1]]
-                - logits[..., relations[:, 2]]
-                - logits[..., relations[:, 3]]
-            )
-            teacher_relation = (
-                teacher_logits[..., relations[:, 0]]
-                + teacher_logits[..., relations[:, 1]]
-                - teacher_logits[..., relations[:, 2]]
-                - teacher_logits[..., relations[:, 3]]
-            )
+            if relations.dtype == torch.long and relations.ndim == 2 and relations.shape[-1] == 4:
+                max_col = int(relations.max().item())
+                if max_col >= logits.shape[-1]:
+                    raise ValueError(f"binomial relation index {max_col} exceeds logits width {logits.shape[-1]}")
+                pred_relation = (
+                    logits[..., relations[:, 0]]
+                    + logits[..., relations[:, 1]]
+                    - logits[..., relations[:, 2]]
+                    - logits[..., relations[:, 3]]
+                )
+                if relation_source_exact:
+                    teacher_relation = torch.zeros_like(pred_relation)
+                else:
+                    teacher_relation = (
+                        teacher_logits[..., relations[:, 0]]
+                        + teacher_logits[..., relations[:, 1]]
+                        - teacher_logits[..., relations[:, 2]]
+                        - teacher_logits[..., relations[:, 3]]
+                    )
+            elif relations.ndim == 2:
+                if relations.shape[-1] > logits.shape[-1]:
+                    raise ValueError(f"binomial relation width {relations.shape[-1]} exceeds logits width {logits.shape[-1]}")
+                rel_float = relations.to(device=hidden.device, dtype=logits.dtype)
+                pred_relation = torch.matmul(logits[..., : relations.shape[-1]], rel_float.transpose(0, 1))
+                if relation_source_exact:
+                    teacher_relation = torch.zeros_like(pred_relation)
+                else:
+                    teacher_relation = torch.matmul(
+                        teacher_logits[..., : relations.shape[-1]],
+                        rel_float.transpose(0, 1),
+                    )
+            else:
+                raise ValueError("binomial relation tensor must be [R,4] or [R,C]")
             binom_loss = (pred_relation - teacher_relation).pow(2).mean()
             binom_residual = pred_relation.abs().mean()
         else:
@@ -293,6 +324,7 @@ class LowRankToricGeometryProbe(nn.Module):
             "toric_bend_magnitude": bend_magnitude.detach(),
             "toric_binomial_loss": binom_loss.detach(),
             "toric_binomial_residual": binom_residual.detach(),
+            "toric_binomial_relation_source_exact": torch.as_tensor(float(relation_source_exact), device=hidden.device),
             "toric_moment_loss": moment_loss.detach(),
             "toric_coxeter_loss": coxeter_loss.detach(),
             "toric_affine_wall_distance": nearest_wall_distance.detach(),
@@ -301,6 +333,22 @@ class LowRankToricGeometryProbe(nn.Module):
             "toric_probe_rank": torch.as_tensor(float(self.config.probe_rank), device=hidden.device),
             "toric_probe_quant_bits": torch.as_tensor(float(self.config.quant_bits), device=hidden.device),
         }
+
+    @staticmethod
+    def _load_binomial_relations(path: str, exponents: torch.Tensor) -> tuple[torch.Tensor, bool]:
+        if not path:
+            return make_binomial_relations(exponents), False
+        certificate_path = Path(path)
+        if not certificate_path.exists():
+            raise FileNotFoundError(
+                f"CAS toric-ideal certificate not found: {certificate_path}. "
+                "Run scripts/build_toric_tropical_certificates.py --all-exact-cas first."
+            )
+        payload = json.loads(certificate_path.read_text(encoding="utf-8"))
+        relations = relation_tensor_from_certificate(payload)
+        if relations.ndim != 2:
+            raise ValueError(f"CAS toric-ideal relation tensor must be rank 2, got {tuple(relations.shape)}")
+        return relations.detach().cpu(), True
 
 
 @torch.no_grad()

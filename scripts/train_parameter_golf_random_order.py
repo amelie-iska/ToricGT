@@ -786,6 +786,7 @@ PHASE_CONTROL_KEYS = {
     "contrastive_loss_weight",
     "mtp_loss_weight",
     "toric_geometry_loss_weight",
+    "toric_vector_bundle_loss_weight",
     "toric_bgg_loss_weight",
     "toric_entropy_loss_weight",
     "qat_loss_weight",
@@ -1550,6 +1551,7 @@ def load_state_dict_with_optional_position_resize(
     allowed_missing_prefixes = (
         "graphcg_",
         "toric_geometry_probe.",
+        "toric_vector_bundle_probe.",
         "toric_bgg_probe.",
         "trajectory_memory_head.",
         "revealed_left_logits.",
@@ -2264,6 +2266,44 @@ def main() -> None:
         toric_geometry_braid_weight=config_get(file_config, "model", "toric_geometry_braid_weight", 0.1),
         toric_geometry_leaf_weight=config_get(file_config, "model", "toric_geometry_leaf_weight", 0.25),
         toric_geometry_max_positions=config_get(file_config, "model", "toric_geometry_max_positions", 256),
+        toric_geometry_cas_toric_ideal_certificate_path=config_get(
+            file_config,
+            "model",
+            "toric_geometry_cas_toric_ideal_certificate_path",
+            os.environ.get("TORICGT_CAS_TORIC_IDEAL_CERT", ""),
+        ),
+        use_toric_vector_bundle=config_get(file_config, "model", "use_toric_vector_bundle", True),
+        toric_vector_bundle_rank=config_get(file_config, "model", "toric_vector_bundle_rank", 8),
+        toric_vector_bundle_num_rays=config_get(file_config, "model", "toric_vector_bundle_num_rays", 8),
+        toric_vector_bundle_num_cones=config_get(file_config, "model", "toric_vector_bundle_num_cones", 8),
+        toric_vector_bundle_filtration_levels=config_get(
+            file_config,
+            "model",
+            "toric_vector_bundle_filtration_levels",
+            3,
+        ),
+        toric_vector_bundle_max_positions=config_get(file_config, "model", "toric_vector_bundle_max_positions", 128),
+        toric_vector_bundle_temperature=config_get(file_config, "model", "toric_vector_bundle_temperature", 0.25),
+        toric_vector_bundle_ray_weight=config_get(file_config, "model", "toric_vector_bundle_ray_weight", 0.20),
+        toric_vector_bundle_filtration_weight=config_get(
+            file_config,
+            "model",
+            "toric_vector_bundle_filtration_weight",
+            1.00,
+        ),
+        toric_vector_bundle_splitting_weight=config_get(
+            file_config,
+            "model",
+            "toric_vector_bundle_splitting_weight",
+            0.35,
+        ),
+        toric_vector_bundle_cech_weight=config_get(file_config, "model", "toric_vector_bundle_cech_weight", 0.25),
+        toric_vector_bundle_cocycle_weight=config_get(
+            file_config,
+            "model",
+            "toric_vector_bundle_cocycle_weight",
+            0.05,
+        ),
         use_graphcg=(
             False
             if args.no_graphcg
@@ -2562,6 +2602,7 @@ def main() -> None:
         if args.toric_geometry_loss_weight is not None
         else config_get(file_config, "training", "toric_geometry_loss_weight", 0.0)
     )
+    toric_vector_bundle_loss_weight = config_get_float(file_config, "training", "toric_vector_bundle_loss_weight", 0.0)
     toric_bgg_loss_weight = config_get_float(file_config, "training", "toric_bgg_loss_weight", 0.0)
     koszul_persistence_loss_weight = config_get(file_config, "training", "koszul_persistence_loss_weight", 0.0)
     slepian_pollak_loss_weight = config_get_float(file_config, "training", "slepian_pollak_loss_weight", 0.0)
@@ -3218,6 +3259,7 @@ def main() -> None:
                     "graphcg_loss_weight": graphcg_loss_weight,
                     "analogy_lattice_loss_weight": analogy_lattice_loss_weight,
                     "toric_geometry_loss_weight": toric_geometry_loss_weight,
+                    "toric_vector_bundle_loss_weight": toric_vector_bundle_loss_weight,
                     "toric_bgg_loss_weight": toric_bgg_loss_weight,
                     "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
                     "slepian_pollak_loss_weight": slepian_pollak_loss_weight,
@@ -3404,6 +3446,7 @@ def main() -> None:
                 "metrics_status/topology_probe_instantiated": float(model_config.use_analogy_lattice),
                 "metrics_status/toric_probe_instantiated": float(model_config.use_toric_geometry_tasks),
                 "metrics_status/tropical_metric_aliases_instantiated": float(model_config.use_toric_geometry_tasks),
+                "metrics_status/toric_vector_bundle_probe_instantiated": float(model_config.use_toric_vector_bundle),
                 "metrics_status/bgg_category_o_probe_instantiated": float(model_config.use_toric_bgg),
                 "metrics_status/koszul_persistence_probe_instantiated": float(model_config.use_koszul_persistence),
                 "metrics_status/slepian_pollak_probe_instantiated": float(model_config.use_slepian_pollak),
@@ -3507,6 +3550,7 @@ def main() -> None:
             "toric_entropy_floor": toric_entropy_floor,
             "toric_entropy_loss_weight": toric_entropy_loss_weight,
             "toric_geometry_loss_weight": toric_geometry_loss_weight,
+            "toric_vector_bundle_loss_weight": toric_vector_bundle_loss_weight,
             "toric_bgg_loss_weight": toric_bgg_loss_weight,
             "koszul_persistence_loss_weight": koszul_persistence_loss_weight,
             "slepian_pollak_loss_weight": slepian_pollak_loss_weight,
@@ -3631,6 +3675,7 @@ def main() -> None:
         step_toric_bend_magnitude = 0.0
         step_toric_binomial_loss = 0.0
         step_toric_binomial_residual = 0.0
+        step_toric_binomial_relation_source_exact = 0.0
         step_toric_moment_loss = 0.0
         step_toric_coxeter_loss = 0.0
         step_toric_affine_wall_distance = 0.0
@@ -3638,6 +3683,19 @@ def main() -> None:
         step_toric_leaf_residual = 0.0
         step_toric_probe_rank = 0.0
         step_toric_probe_quant_bits = 0.0
+        step_toric_vector_bundle_loss = 0.0
+        step_toric_vector_bundle_ray_ce = 0.0
+        step_toric_vector_bundle_level_ce = 0.0
+        step_toric_vector_bundle_filtration_residual = 0.0
+        step_toric_vector_bundle_nesting_residual = 0.0
+        step_toric_vector_bundle_splitting_residual = 0.0
+        step_toric_vector_bundle_cech_gluing_residual = 0.0
+        step_toric_sheaf_cocycle_residual = 0.0
+        step_toric_vector_bundle_ray_entropy = 0.0
+        step_toric_vector_bundle_active_ray_mass = 0.0
+        step_toric_vector_bundle_rank = 0.0
+        step_toric_vector_bundle_num_rays = 0.0
+        step_toric_vector_bundle_filtration_levels = 0.0
         step_toric_bgg_loss = 0.0
         step_toric_bgg_d2_residual = 0.0
         step_toric_bgg_resolution_consistency = 0.0
@@ -3783,6 +3841,10 @@ def main() -> None:
             0.0,
             control_float(phase_controls, "toric_geometry_loss_weight", toric_geometry_loss_weight),
         )
+        effective_toric_vector_bundle_loss_weight = max(
+            0.0,
+            control_float(phase_controls, "toric_vector_bundle_loss_weight", toric_vector_bundle_loss_weight),
+        )
         effective_toric_bgg_loss_weight = max(
             0.0,
             control_float(phase_controls, "toric_bgg_loss_weight", toric_bgg_loss_weight),
@@ -3818,6 +3880,7 @@ def main() -> None:
         effective_graphcg_loss_weight *= structural_loss_multiplier
         effective_analogy_lattice_loss_weight *= structural_loss_multiplier
         effective_toric_geometry_loss_weight *= structural_loss_multiplier
+        effective_toric_vector_bundle_loss_weight *= structural_loss_multiplier
         effective_toric_bgg_loss_weight *= structural_loss_multiplier
         effective_koszul_persistence_loss_weight *= structural_loss_multiplier
         effective_slepian_pollak_loss_weight *= structural_loss_multiplier
@@ -3891,6 +3954,7 @@ def main() -> None:
                 graphcg_loss = out.get("graphcg_loss", torch.zeros((), device=device))
                 analogy_lattice_loss = out.get("analogy_lattice_loss", torch.zeros((), device=device))
                 toric_geometry_loss = out.get("toric_geometry_loss", torch.zeros((), device=device))
+                toric_vector_bundle_loss = out.get("toric_vector_bundle_loss", torch.zeros((), device=device))
                 toric_bgg_loss = out.get("toric_bgg_loss", torch.zeros((), device=device))
                 koszul_persistence_loss = out.get("koszul_persistence_loss", torch.zeros((), device=device))
                 slepian_pollak_loss = out.get("slepian_pollak_loss", torch.zeros((), device=device))
@@ -3944,6 +4008,11 @@ def main() -> None:
                     total_micro_loss,
                     effective_toric_geometry_loss_weight,
                     toric_geometry_loss,
+                )
+                total_micro_loss = add_weighted_aux_loss(
+                    total_micro_loss,
+                    effective_toric_vector_bundle_loss_weight,
+                    toric_vector_bundle_loss,
                 )
                 total_micro_loss = add_weighted_aux_loss(
                     total_micro_loss,
@@ -4177,6 +4246,9 @@ def main() -> None:
             step_toric_binomial_residual += float(
                 out.get("toric_binomial_residual", torch.zeros(())).detach().cpu()
             )
+            step_toric_binomial_relation_source_exact += float(
+                out.get("toric_binomial_relation_source_exact", torch.zeros(())).detach().cpu()
+            )
             step_toric_moment_loss += float(out.get("toric_moment_loss", torch.zeros(())).detach().cpu())
             step_toric_coxeter_loss += float(out.get("toric_coxeter_loss", torch.zeros(())).detach().cpu())
             step_toric_affine_wall_distance += float(
@@ -4187,6 +4259,43 @@ def main() -> None:
             step_toric_probe_rank += float(out.get("toric_probe_rank", torch.zeros(())).detach().cpu())
             step_toric_probe_quant_bits += float(
                 out.get("toric_probe_quant_bits", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_loss += float(toric_vector_bundle_loss.detach().cpu())
+            step_toric_vector_bundle_ray_ce += float(
+                out.get("toric_vector_bundle_ray_ce", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_level_ce += float(
+                out.get("toric_vector_bundle_level_ce", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_filtration_residual += float(
+                out.get("toric_vector_bundle_filtration_residual", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_nesting_residual += float(
+                out.get("toric_vector_bundle_klyachko_nesting_residual", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_splitting_residual += float(
+                out.get("toric_vector_bundle_cone_splitting_residual", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_cech_gluing_residual += float(
+                out.get("toric_vector_bundle_cech_gluing_residual", torch.zeros(())).detach().cpu()
+            )
+            step_toric_sheaf_cocycle_residual += float(
+                out.get("toric_sheaf_cocycle_residual", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_ray_entropy += float(
+                out.get("toric_vector_bundle_ray_entropy", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_active_ray_mass += float(
+                out.get("toric_vector_bundle_active_ray_mass", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_rank += float(
+                out.get("toric_vector_bundle_rank", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_num_rays += float(
+                out.get("toric_vector_bundle_num_rays", torch.zeros(())).detach().cpu()
+            )
+            step_toric_vector_bundle_filtration_levels += float(
+                out.get("toric_vector_bundle_filtration_levels", torch.zeros(())).detach().cpu()
             )
             step_toric_bgg_loss += float(toric_bgg_loss.detach().cpu())
             step_toric_bgg_d2_residual += float(out.get("toric_bgg_d2_residual", torch.zeros(())).detach().cpu())
@@ -4419,6 +4528,7 @@ def main() -> None:
         step_toric_bend_magnitude /= grad_accum
         step_toric_binomial_loss /= grad_accum
         step_toric_binomial_residual /= grad_accum
+        step_toric_binomial_relation_source_exact /= grad_accum
         step_toric_moment_loss /= grad_accum
         step_toric_coxeter_loss /= grad_accum
         step_toric_affine_wall_distance /= grad_accum
@@ -4426,6 +4536,19 @@ def main() -> None:
         step_toric_leaf_residual /= grad_accum
         step_toric_probe_rank /= grad_accum
         step_toric_probe_quant_bits /= grad_accum
+        step_toric_vector_bundle_loss /= grad_accum
+        step_toric_vector_bundle_ray_ce /= grad_accum
+        step_toric_vector_bundle_level_ce /= grad_accum
+        step_toric_vector_bundle_filtration_residual /= grad_accum
+        step_toric_vector_bundle_nesting_residual /= grad_accum
+        step_toric_vector_bundle_splitting_residual /= grad_accum
+        step_toric_vector_bundle_cech_gluing_residual /= grad_accum
+        step_toric_sheaf_cocycle_residual /= grad_accum
+        step_toric_vector_bundle_ray_entropy /= grad_accum
+        step_toric_vector_bundle_active_ray_mass /= grad_accum
+        step_toric_vector_bundle_rank /= grad_accum
+        step_toric_vector_bundle_num_rays /= grad_accum
+        step_toric_vector_bundle_filtration_levels /= grad_accum
         step_toric_bgg_loss /= grad_accum
         step_toric_bgg_d2_residual /= grad_accum
         step_toric_bgg_resolution_consistency /= grad_accum
@@ -4725,6 +4848,7 @@ def main() -> None:
                 "train/toric_bend_magnitude": step_toric_bend_magnitude,
                 "train/toric_binomial_loss": step_toric_binomial_loss,
                 "train/toric_binomial_residual": step_toric_binomial_residual,
+                "train/toric_binomial_relation_source_exact": step_toric_binomial_relation_source_exact,
                 "train/toric_moment_loss": step_toric_moment_loss,
                 "train/toric_coxeter_loss": step_toric_coxeter_loss,
                 "train/toric_affine_wall_distance": step_toric_affine_wall_distance,
@@ -4746,6 +4870,7 @@ def main() -> None:
                 "toric/bend_magnitude": step_toric_bend_magnitude,
                 "toric/binomial_loss": step_toric_binomial_loss,
                 "toric/binomial_residual": step_toric_binomial_residual,
+                "toric/binomial_relation_source_exact": step_toric_binomial_relation_source_exact,
                 "toric/moment_loss": step_toric_moment_loss,
                 "toric/coxeter_loss": step_toric_coxeter_loss,
                 "toric/affine_wall_distance": step_toric_affine_wall_distance,
@@ -4758,6 +4883,32 @@ def main() -> None:
                 "tropical/active_face_entropy": step_toric_active_face_entropy,
                 "tropical/fan_loss": step_toric_fan_loss,
                 "tropical/bend_magnitude": step_toric_bend_magnitude,
+                "train/toric_vector_bundle_loss": step_toric_vector_bundle_loss,
+                "train/toric_vector_bundle_loss_weight": float(effective_toric_vector_bundle_loss_weight),
+                "train/toric_vector_bundle_ray_ce": step_toric_vector_bundle_ray_ce,
+                "train/toric_vector_bundle_level_ce": step_toric_vector_bundle_level_ce,
+                "train/toric_vector_bundle_filtration_residual": step_toric_vector_bundle_filtration_residual,
+                "train/toric_vector_bundle_klyachko_nesting_residual": step_toric_vector_bundle_nesting_residual,
+                "train/toric_vector_bundle_cone_splitting_residual": step_toric_vector_bundle_splitting_residual,
+                "train/toric_vector_bundle_cech_gluing_residual": step_toric_vector_bundle_cech_gluing_residual,
+                "train/toric_sheaf_cocycle_residual": step_toric_sheaf_cocycle_residual,
+                "train/toric_vector_bundle_ray_entropy": step_toric_vector_bundle_ray_entropy,
+                "train/toric_vector_bundle_active_ray_mass": step_toric_vector_bundle_active_ray_mass,
+                "toric_vector_bundle/loss": step_toric_vector_bundle_loss,
+                "toric_vector_bundle/loss_weight": float(effective_toric_vector_bundle_loss_weight),
+                "toric_vector_bundle/ray_ce": step_toric_vector_bundle_ray_ce,
+                "toric_vector_bundle/level_ce": step_toric_vector_bundle_level_ce,
+                "toric_vector_bundle/filtration_residual": step_toric_vector_bundle_filtration_residual,
+                "toric_vector_bundle/klyachko_nesting_residual": step_toric_vector_bundle_nesting_residual,
+                "toric_vector_bundle/cone_splitting_residual": step_toric_vector_bundle_splitting_residual,
+                "toric_vector_bundle/cech_gluing_residual": step_toric_vector_bundle_cech_gluing_residual,
+                "toric_vector_bundle/ray_entropy": step_toric_vector_bundle_ray_entropy,
+                "toric_vector_bundle/active_ray_mass": step_toric_vector_bundle_active_ray_mass,
+                "toric_vector_bundle/rank": step_toric_vector_bundle_rank,
+                "toric_vector_bundle/num_rays": step_toric_vector_bundle_num_rays,
+                "toric_vector_bundle/filtration_levels": step_toric_vector_bundle_filtration_levels,
+                "toric_sheaf/chart_gluing_residual": step_toric_vector_bundle_cech_gluing_residual,
+                "toric_sheaf/cocycle_residual": step_toric_sheaf_cocycle_residual,
                 "train/toric_bgg_loss": step_toric_bgg_loss,
                 "train/toric_bgg_loss_weight": float(effective_toric_bgg_loss_weight),
                 "train/toric_bgg_d2_residual": step_toric_bgg_d2_residual,

@@ -34,8 +34,10 @@ SUPERVISOR_SESSION="${SUPERVISOR_SESSION:-${TRAIN_SESSION}_supervisor}"
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-checkpoints/parameter_golf_all_phases_fineweb_from0}"
 LOG_DIR="${LOG_DIR:-logs/parameter_golf_all_phases/${RUN_ID}}"
 ANALYSIS_ROOT="${ANALYSIS_ROOT:-outputs/post_resume_analysis/${RUN_ID}}"
+CAS_TARGET_DIR="${CAS_TARGET_DIR:-outputs/cas_training_targets/${RUN_ID}}"
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
+ENABLE_CODEX_REVIEW="${ENABLE_CODEX_REVIEW:-1}"
 
 export BPB_TARGET="${BPB_TARGET:-1.2}"
 export BPB_GATE_STEP="${BPB_GATE_STEP:-4000}"
@@ -44,9 +46,32 @@ export BPB_LOOP_STATE="${BPB_LOOP_STATE:-outputs/bpb_codex_loop_state_all_phases
 export BPB_LOOP_STOP_FILE="${BPB_LOOP_STOP_FILE:-outputs/bpb_codex_loop_stop_all_phases}"
 export BPB_LOOP_NAME="${BPB_LOOP_NAME:-all_phases_native_toricgt}"
 
-mkdir -p "$LOG_DIR" "$ANALYSIS_ROOT" "$CHECKPOINT_DIR"
+mkdir -p "$LOG_DIR" "$ANALYSIS_ROOT" "$CHECKPOINT_DIR" "$CAS_TARGET_DIR"
 START_EPOCH="$(date +%s)"
 printf '%s\n' "$START_EPOCH" > "${LOG_DIR}/start_epoch.txt"
+
+"$CONDA_BIN" run --no-capture-output -n "$CONDA_ENV" env PYTHONPATH=src \
+  python scripts/build_toric_tropical_certificates.py \
+    --output-dir "$CAS_TARGET_DIR" \
+    --all-exact-cas \
+    --require-cas \
+  > "${LOG_DIR}/cas_training_targets.log" 2>&1
+
+CAS_TORIC_IDEAL_CERT="$("$CONDA_BIN" run --no-capture-output -n "$CONDA_ENV" python - "$CAS_TARGET_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]) / "cache"
+for path in sorted(root.glob("*/*.json")):
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("kind") == "macaulay2_toric_ideal_certificate":
+        print(path)
+        raise SystemExit(0)
+raise SystemExit("macaulay2_toric_ideal_certificate was not generated")
+PY
+)"
+printf '%s\n' "$CAS_TORIC_IDEAL_CERT" > "${LOG_DIR}/cas_toric_ideal_certificate_path.txt"
 
 if tmux has-session -t "$SUPERVISOR_SESSION" 2>/dev/null; then
   echo "supervisor tmux session already exists: $SUPERVISOR_SESSION" >&2
@@ -61,6 +86,7 @@ SUPERVISOR_CMD=(
   BPB_TARGET="$BPB_TARGET"
   BPB_MAX_REVIEW_ITERATIONS="$BPB_MAX_REVIEW_ITERATIONS"
   PYTORCH_CUDA_ALLOC_CONF="$PYTORCH_CUDA_ALLOC_CONF"
+  TORICGT_CAS_TORIC_IDEAL_CERT="$CAS_TORIC_IDEAL_CERT"
   CONDA_BIN="$CONDA_BIN"
   python scripts/supervise_parameter_golf_training.py
   --config "$CONFIG"
@@ -81,6 +107,9 @@ SUPERVISOR_CMD=(
   --gate-step "$BPB_GATE_STEP"
   --max-analysis-iterations "$BPB_MAX_REVIEW_ITERATIONS"
 )
+if [[ "$ENABLE_CODEX_REVIEW" != "0" && "$ENABLE_CODEX_REVIEW" != "false" && "$ENABLE_CODEX_REVIEW" != "False" ]]; then
+  SUPERVISOR_CMD+=(--enable-codex-review)
+fi
 
 printf '%q ' "${SUPERVISOR_CMD[@]}" > "${LOG_DIR}/supervisor_command.sh"
 printf '\n' >> "${LOG_DIR}/supervisor_command.sh"
@@ -98,7 +127,10 @@ started supervised native ToricGT all-phases training
   training tmux: $TRAIN_SESSION
   analysis tmux: $WATCH_SESSION
   review cadence: every $CHECKPOINT_INTERVAL checkpoint steps
+  codex review:  ${ENABLE_CODEX_REVIEW}
   logs:          $LOG_DIR
   analysis root: $ANALYSIS_ROOT
+  CAS targets:    $CAS_TARGET_DIR
+  CAS toric ideal certificate: $CAS_TORIC_IDEAL_CERT
   BPB loop:      target=$BPB_TARGET gate_step=$BPB_GATE_STEP max_reviews=$BPB_MAX_REVIEW_ITERATIONS
 EOF

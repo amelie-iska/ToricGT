@@ -68,6 +68,7 @@ class CASBackendInfo:
     executable: str | None
     version: str | None
     packages: tuple[str, ...] = ()
+    package_status: dict[str, bool] = field(default_factory=dict)
     available: bool = False
     provenance: CertificateProvenance = "cas_unavailable"
     error: str = ""

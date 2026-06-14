@@ -95,6 +95,7 @@ def discover_backend(name: str) -> CASBackendInfo:
             executable=executable,
             version=version,
             packages=("sage.schemes.toric", "sage.geometry.polyhedron"),
+            package_status={"sage.schemes.toric": ok, "sage.geometry.polyhedron": ok},
             available=ok,
             provenance="exact_cas/sage" if ok else "cas_unavailable",
             error="" if ok else proc.stdout[-1000:],
@@ -107,7 +108,14 @@ def discover_backend(name: str) -> CASBackendInfo:
                 backend="macaulay2",
                 executable=None,
                 version=None,
-                packages=("Tropical", "TropicalToric", "NormalToricVarieties", "gfanInterface"),
+                packages=(),
+                package_status={
+                    "Tropical": False,
+                    "TropicalToric": False,
+                    "NormalToricVarieties": False,
+                    "gfanInterface": False,
+                    "Binomials": False,
+                },
                 available=False,
                 provenance="cas_unavailable",
                 error="M2 executable not found on PATH",
@@ -116,21 +124,25 @@ def discover_backend(name: str) -> CASBackendInfo:
             proc = _run([executable, "--version"], timeout_seconds=30)
             version = proc.stdout.strip().splitlines()[0] if proc.stdout.strip() else "unknown"
             ok = proc.returncode == 0
+            package_status = _macaulay2_package_status(executable) if ok else {}
         except Exception as exc:
             return CASBackendInfo(
                 backend="macaulay2",
                 executable=executable,
                 version=None,
-                packages=("Tropical", "TropicalToric", "NormalToricVarieties", "gfanInterface"),
+                packages=(),
+                package_status={},
                 available=False,
                 provenance="cas_unavailable",
                 error=f"{type(exc).__name__}: {exc}",
             )
+        available_packages = tuple(name for name, available in package_status.items() if available)
         return CASBackendInfo(
             backend="macaulay2",
             executable=executable,
             version=version,
-            packages=("Tropical", "TropicalToric", "NormalToricVarieties", "gfanInterface"),
+            packages=available_packages,
+            package_status=package_status,
             available=ok,
             provenance="exact_cas/macaulay2" if ok else "cas_unavailable",
             error="" if ok else proc.stdout[-1000:],
@@ -144,6 +156,92 @@ def discover_all_backends() -> dict[str, CASBackendInfo]:
         "sage": discover_backend("sage"),
         "macaulay2": discover_backend("macaulay2"),
     }
+
+
+def discover_toric_toolchain() -> dict[str, dict[str, Any]]:
+    """Discover exact toric/tropical command-line tools on PATH.
+
+    These tools are not called in the hot training loop.  The periodic audit
+    records them so reports can distinguish exact CAS/toolchain-backed metrics
+    from metrics that only consumed cached certificates.
+    """
+
+    tool_groups = {
+        "gfan": ("gfan",),
+        "singular": ("Singular",),
+        "normaliz": ("normaliz", "Normaliz"),
+        "4ti2": ("graver", "hilbert", "zsolve", "4ti2-zsolve"),
+        "latte_integrale": ("count", "integrate", "latte-count", "latte-integrate"),
+        "lrslib": ("lrs", "redund"),
+        "topcom": ("topcom-points2triangs", "points2triangs", "topcom-chiro2allfinetriangs"),
+        "polymake": ("polymake",),
+        "nauty": ("dreadnaut", "geng"),
+    }
+    return {name: _discover_tool_group(commands) for name, commands in tool_groups.items()}
+
+
+def _discover_tool_group(commands: tuple[str, ...]) -> dict[str, Any]:
+    executables: dict[str, str] = {}
+    versions: dict[str, str] = {}
+    for command in commands:
+        path = shutil.which(command)
+        if not path:
+            continue
+        executables[command] = path
+        version = _tool_version(path)
+        if version:
+            versions[command] = version
+    return {
+        "available": bool(executables),
+        "commands": executables,
+        "versions": versions,
+    }
+
+
+def _tool_version(executable: str) -> str:
+    for flag in ("--version", "-v"):
+        try:
+            proc = _run([executable, flag], timeout_seconds=10)
+        except Exception:
+            continue
+        text = proc.stdout.strip()
+        if proc.returncode == 0 and text:
+            return text.splitlines()[0][:200]
+    return ""
+
+
+def _macaulay2_package_status(executable: str) -> dict[str, bool]:
+    packages = (
+        "Tropical",
+        "TropicalToric",
+        "NormalToricVarieties",
+        "gfanInterface",
+        "Binomials",
+        "ToricVectorBundles",
+    )
+    script_lines = [
+        'needsPackage "JSON"',
+        "rows = hashTable {",
+        *[
+            f'  "{package}" => try (loadPackage "{package}"; true) else false{"," if idx + 1 < len(packages) else ""}'
+            for idx, package in enumerate(packages)
+        ],
+        "}",
+        'print "TORICGT_JSON_BEGIN"',
+        "print toJSON rows",
+        'print "TORICGT_JSON_END"',
+    ]
+    with tempfile.TemporaryDirectory(prefix="toricgt_m2_pkg_") as tmp:
+        path = Path(tmp) / "packages.m2"
+        path.write_text("\n".join(script_lines) + "\n", encoding="utf-8")
+        proc = _run([executable, "--script", str(path)], cwd=Path(tmp), timeout_seconds=60)
+    if proc.returncode != 0:
+        return {package: False for package in packages}
+    try:
+        payload = _extract_json_between_markers(proc.stdout)
+    except CASExecutionError:
+        return {package: False for package in packages}
+    return {package: bool(payload.get(package, False)) for package in packages}
 
 
 def cyclic_stanley_reisner_closed_form_certificate(num_vertices: int) -> ToricTropicalCertificate:
@@ -248,6 +346,7 @@ class SageToricOracle:
                 executable=executable,
                 version=self.info.version,
                 packages=self.info.packages,
+                package_status=self.info.package_status,
                 available=bool(executable),
                 provenance="exact_cas/sage" if executable else "cas_unavailable",
                 error="" if executable else "sage executable not provided",
@@ -324,6 +423,7 @@ class Macaulay2TropicalOracle:
                 executable=executable,
                 version=self.info.version,
                 packages=self.info.packages,
+                package_status=self.info.package_status,
                 available=bool(executable),
                 provenance="exact_cas/macaulay2" if executable else "cas_unavailable",
                 error="" if executable else "M2 executable not provided",
@@ -341,6 +441,95 @@ out = hashTable {
   "kind" => "macaulay2_smoke_certificate",
   "ring_ok" => true,
   "version" => version
+}
+print "TORICGT_JSON_BEGIN"
+print toJSON out
+print "TORICGT_JSON_END"
+"""
+
+    @staticmethod
+    def script_for_toric_ideal(exponent_matrix: list[list[int]]) -> str:
+        if not exponent_matrix or not exponent_matrix[0]:
+            raise ValueError("exponent_matrix must be nonempty with shape [dimension, generators]")
+        rows = [[int(value) for value in row] for row in exponent_matrix]
+        row_width = len(rows[0])
+        if any(len(row) != row_width for row in rows):
+            raise ValueError("all exponent_matrix rows must have the same length")
+        if any(value < 0 for row in rows for value in row):
+            raise ValueError("Macaulay2 toric ideal certificate requires nonnegative exponents")
+        d = len(rows)
+        n = row_width
+        t_vars = [f"t_{idx}" for idx in range(d)]
+        x_vars = [f"x_{idx}" for idx in range(n)]
+        ring_vars = ", ".join([*t_vars, *x_vars])
+        matrix_literal = "{" + ",".join("{" + ",".join(str(value) for value in row) + "}" for row in rows) + "}"
+
+        def monomial_for_column(col: int) -> str:
+            factors: list[str] = []
+            for row_idx in range(d):
+                exponent = rows[row_idx][col]
+                if exponent == 0:
+                    continue
+                if exponent == 1:
+                    factors.append(t_vars[row_idx])
+                else:
+                    factors.append(f"{t_vars[row_idx]}^{exponent}")
+            return "*".join(factors) if factors else "1"
+
+        equations = ", ".join(f"{x_vars[col]} - {monomial_for_column(col)}" for col in range(n))
+        return f"""
+needsPackage "JSON"
+A = {matrix_literal}
+d = {d}
+n = {n}
+R = QQ[{ring_vars}, MonomialOrder => Eliminate d]
+J = ideal({equations})
+G = gens gb J
+Igens = selectInSubring(1, G)
+I = ideal Igens
+polys = flatten entries gens I
+relationRows = apply(polys, f -> (
+    ee := exponents f;
+    hashTable {{
+        "polynomial" => toString f,
+        "positive_exponent" => if #ee > 0 then drop(ee#0, d) else {{}},
+        "negative_exponent" => if #ee > 1 then drop(ee#1, d) else {{}}
+    }}
+))
+out = hashTable {{
+  "kind" => "macaulay2_toric_ideal_certificate",
+  "dimension" => d,
+  "num_generators" => n,
+  "exponent_matrix" => A,
+  "ideal" => toString I,
+  "generator_count" => #polys,
+  "relations" => relationRows,
+  "betti" => toString betti res I
+}}
+print "TORICGT_JSON_BEGIN"
+print toJSON out
+print "TORICGT_JSON_END"
+"""
+
+    @staticmethod
+    def script_for_vector_bundle_smoke() -> str:
+        return """
+needsPackage "JSON"
+needsPackage "ToricVectorBundles"
+F = projectiveSpaceFan 2
+E = toricVectorBundle(2,F)
+out = hashTable {
+  "kind" => "macaulay2_toric_vector_bundle_certificate",
+  "ambient" => "P2",
+  "rank" => 2,
+  "class" => toString class E,
+  "charts" => charts E,
+  "is_vector_bundle" => isVectorBundle E,
+  "is_general" => isGeneral E,
+  "euler_chi" => eulerChi E,
+  "details" => toString details E,
+  "filtration" => toString filtration E,
+  "base" => toString base E
 }
 print "TORICGT_JSON_BEGIN"
 print toJSON out
@@ -371,6 +560,96 @@ print "TORICGT_JSON_END"
         _raise_if_invalid(cert)
         return cert
 
+    def vector_bundle_smoke_certificate(self, *, timeout_seconds: int = 120) -> ToricTropicalCertificate:
+        """Construct and verify a small exact toric vector bundle in Macaulay2."""
+
+        self.require_available()
+        assert self.info.executable is not None
+        if not self.info.package_status.get("ToricVectorBundles", False):
+            raise CASUnavailableError("Macaulay2 package ToricVectorBundles is unavailable")
+        with tempfile.TemporaryDirectory(prefix="toricgt_m2_toric_vector_bundle_") as tmp:
+            path = Path(tmp) / "toric_vector_bundle.m2"
+            path.write_text(self.script_for_vector_bundle_smoke(), encoding="utf-8")
+            proc = _run([self.info.executable, "--script", str(path)], cwd=Path(tmp), timeout_seconds=timeout_seconds)
+        if proc.returncode != 0:
+            raise CASExecutionError(proc.stdout[-4000:])
+        payload = _extract_json_between_markers(proc.stdout)
+        if not bool(payload.get("is_vector_bundle", False)):
+            raise CASExecutionError(f"Macaulay2 rejected toric vector bundle certificate: {payload}")
+        cert = ToricTropicalCertificate(
+            kind="macaulay2_toric_vector_bundle_certificate",
+            input_hash=stable_hash({"macaulay2_toric_vector_bundle": "P2_rank2_trivial"}),
+            provenance="exact_cas/macaulay2",
+            source={"input_kind": "toric_vector_bundle_smoke", "ambient": "P2", "rank": 2},
+            cas=self.info.to_dict(),
+            toric={
+                "ambient": payload.get("ambient", "P2"),
+                "charts": payload.get("charts", 0),
+                "rank": payload.get("rank", 2),
+            },
+            tropical={},
+            commutative_algebra={
+                "is_vector_bundle": payload.get("is_vector_bundle", False),
+                "is_general": payload.get("is_general", False),
+                "euler_chi": payload.get("euler_chi", None),
+                "class": payload.get("class", ""),
+                "klyachko_details_raw": payload.get("details", ""),
+                "klyachko_filtration_raw": payload.get("filtration", ""),
+                "klyachko_base_raw": payload.get("base", ""),
+            },
+            diagnostics={"raw_stdout_tail": proc.stdout[-1000:]},
+        )
+        _raise_if_invalid(cert)
+        return cert
+
+    def toric_ideal_certificate(
+        self,
+        exponent_matrix: list[list[int]],
+        *,
+        timeout_seconds: int = 120,
+    ) -> ToricTropicalCertificate:
+        """Compute an exact toric ideal certificate by Macaulay2 elimination.
+
+        The input matrix has shape `[dimension, generators]` and must contain
+        nonnegative integer exponents.  Macaulay2 computes the elimination
+        ideal of the monomial parametrization exactly, then returns binomial
+        exponent vectors and a Betti tally string for the resulting ideal.
+        """
+
+        self.require_available()
+        assert self.info.executable is not None
+        rows = [[int(value) for value in row] for row in exponent_matrix]
+        with tempfile.TemporaryDirectory(prefix="toricgt_m2_toric_ideal_") as tmp:
+            path = Path(tmp) / "toric_ideal.m2"
+            path.write_text(self.script_for_toric_ideal(rows), encoding="utf-8")
+            proc = _run([self.info.executable, "--script", str(path)], cwd=Path(tmp), timeout_seconds=timeout_seconds)
+        if proc.returncode != 0:
+            raise CASExecutionError(proc.stdout[-4000:])
+        payload = _extract_json_between_markers(proc.stdout)
+        relations = _relations_from_m2_payload(payload.get("relations", []))
+        algebra = {
+            "field": "QQ",
+            "exponent_matrix": payload.get("exponent_matrix", rows),
+            "toric_ideal": payload.get("ideal", ""),
+            "toric_ideal_generator_count": payload.get("generator_count", len(relations)),
+            "toric_ideal_binomials": payload.get("relations", []),
+            "toric_ideal_relations": relations,
+            "betti_table_raw": payload.get("betti", ""),
+        }
+        cert = ToricTropicalCertificate(
+            kind="macaulay2_toric_ideal_certificate",
+            input_hash=stable_hash({"macaulay2_toric_ideal": rows}),
+            provenance="exact_cas/macaulay2",
+            source={"input_kind": "exponent_matrix", "input_hash": stable_hash(rows)},
+            cas=self.info.to_dict(),
+            toric={},
+            tropical={},
+            commutative_algebra=algebra,
+            diagnostics={"raw_stdout_tail": proc.stdout[-1000:]},
+        )
+        _raise_if_invalid(cert)
+        return cert
+
 
 def _extract_json_between_markers(text: str) -> dict[str, Any]:
     start = text.find("TORICGT_JSON_BEGIN")
@@ -382,6 +661,37 @@ def _extract_json_between_markers(text: str) -> dict[str, Any]:
         return json.loads(body)
     except json.JSONDecodeError as exc:
         raise CASExecutionError(f"failed to parse CAS JSON payload: {exc}: {body[:1000]}") from exc
+
+
+def _m2_string_literal(text: str) -> str:
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _exponent_relation_pairs(exponent: list[int]) -> list[list[int | float]]:
+    return [[index, float(value)] for index, value in enumerate(exponent) if int(value) != 0]
+
+
+def _relations_from_m2_payload(rows: Any) -> list[dict[str, Any]]:
+    relations: list[dict[str, Any]] = []
+    if not isinstance(rows, list):
+        return relations
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        positive = [int(value) for value in row.get("positive_exponent", [])]
+        negative = [int(value) for value in row.get("negative_exponent", [])]
+        if not positive or not negative:
+            continue
+        relations.append(
+            {
+                "polynomial": row.get("polynomial", ""),
+                "positive": _exponent_relation_pairs(positive),
+                "negative": _exponent_relation_pairs(negative),
+                "positive_exponent": positive,
+                "negative_exponent": negative,
+            }
+        )
+    return relations
 
 
 def _raise_if_invalid(certificate: ToricTropicalCertificate) -> None:

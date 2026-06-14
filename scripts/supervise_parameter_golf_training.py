@@ -230,6 +230,10 @@ def start_training(args: argparse.Namespace, state: dict[str, Any], checkpoint: 
     cuda_alloc_env = []
     if cuda_alloc_conf:
         cuda_alloc_env.append(f"PYTORCH_CUDA_ALLOC_CONF={cuda_alloc_conf}")
+    cas_env = []
+    cas_toric_ideal_cert = os.environ.get("TORICGT_CAS_TORIC_IDEAL_CERT", "").strip()
+    if cas_toric_ideal_cert:
+        cas_env.append(f"TORICGT_CAS_TORIC_IDEAL_CERT={cas_toric_ideal_cert}")
 
     stamp = utc_stamp()
     run_name = args.run_name or args.run_id
@@ -249,6 +253,7 @@ def start_training(args: argparse.Namespace, state: dict[str, Any], checkpoint: 
         f"WANDB_RUN_ID={args.run_id}",
         f"CONDA_BIN={args.conda_bin}",
         *cuda_alloc_env,
+        *cas_env,
         "WANDB_RESUME=allow",
         "python",
         "scripts/train_parameter_golf_random_order.py",
@@ -365,6 +370,9 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         str(args.gate_step),
         "--training-tmux",
         args.train_session,
+        "--cas-audit",
+        "--cas-audit-all-exact-cas",
+        "--cas-audit-require-cas",
     ]
     if codex_review_enabled:
         command.extend(

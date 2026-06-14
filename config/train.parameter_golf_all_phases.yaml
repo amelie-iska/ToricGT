@@ -65,6 +65,26 @@ model:
   toric_geometry_braid_weight: 0.10
   toric_geometry_leaf_weight: 0.25
   toric_geometry_max_positions: 256
+  # Blank in config so ad hoc runs do not require a local cache. The all-phases
+  # launcher builds a Macaulay2 toric-ideal certificate and passes the exact
+  # path through TORICGT_CAS_TORIC_IDEAL_CERT before training starts.
+  toric_geometry_cas_toric_ideal_certificate_path: ""
+
+  # Klyachko vector-bundle/sheaf probe.  This is instantiated from step 0 so
+  # W&B always shows the metrics, while training weight is controlled by the
+  # phase curriculum below.
+  use_toric_vector_bundle: true
+  toric_vector_bundle_rank: 8
+  toric_vector_bundle_num_rays: 8
+  toric_vector_bundle_num_cones: 8
+  toric_vector_bundle_filtration_levels: 3
+  toric_vector_bundle_max_positions: 128
+  toric_vector_bundle_temperature: 0.25
+  toric_vector_bundle_ray_weight: 0.20
+  toric_vector_bundle_filtration_weight: 1.00
+  toric_vector_bundle_splitting_weight: 0.35
+  toric_vector_bundle_cech_weight: 0.25
+  toric_vector_bundle_cocycle_weight: 0.05
 
   use_graphcg: true
   # Full-rank GraphCG chart from step 0: d_model is 384, so this basis spans
@@ -260,6 +280,7 @@ training:
   graphcg_loss_weight: 0.00005
   analogy_lattice_loss_weight: 0.0
   toric_geometry_loss_weight: 0.0
+  toric_vector_bundle_loss_weight: 0.0
   toric_bgg_loss_weight: 0.0
   koszul_persistence_loss_weight: 0.0
   slepian_pollak_loss_weight: 0.0
@@ -350,6 +371,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00005
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.0
+      toric_vector_bundle_loss_weight: 0.0
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       slepian_pollak_loss_weight: 0.0
@@ -374,6 +396,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00008
       analogy_lattice_loss_weight: 0.0
       toric_geometry_loss_weight: 0.00004
+      toric_vector_bundle_loss_weight: 0.00002
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.0
       slepian_pollak_loss_weight: 0.00002
@@ -398,6 +421,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00012
       analogy_lattice_loss_weight: 0.00008
       toric_geometry_loss_weight: 0.00008
+      toric_vector_bundle_loss_weight: 0.00004
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.000015
       slepian_pollak_loss_weight: 0.000035
@@ -422,6 +446,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00018
       analogy_lattice_loss_weight: 0.00012
       toric_geometry_loss_weight: 0.00010
+      toric_vector_bundle_loss_weight: 0.00005
       toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.000025
       slepian_pollak_loss_weight: 0.00005
@@ -446,6 +471,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00018
       analogy_lattice_loss_weight: 0.00014
       toric_geometry_loss_weight: 0.00010
+      toric_vector_bundle_loss_weight: 0.00005
       toric_bgg_loss_weight: 0.000025
       koszul_persistence_loss_weight: 0.000025
       slepian_pollak_loss_weight: 0.00005
@@ -470,6 +496,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00012
       analogy_lattice_loss_weight: 0.00010
       toric_geometry_loss_weight: 0.00008
+      toric_vector_bundle_loss_weight: 0.00004
       toric_bgg_loss_weight: 0.000015
       koszul_persistence_loss_weight: 0.000020
       slepian_pollak_loss_weight: 0.00003

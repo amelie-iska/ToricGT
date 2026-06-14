@@ -14,6 +14,7 @@ from .cas_oracles import (
     SageToricOracle,
     cyclic_stanley_reisner_closed_form_certificate,
     discover_all_backends,
+    discover_toric_toolchain,
 )
 from .derived_category_metrics import (
     DerivedCategoryConfig,
@@ -41,6 +42,14 @@ from .symbolic_multigraded_resolution import (
 )
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
 from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
+from .toric_vector_bundles import (
+    KlyachkoBundleCertificate,
+    ToricVectorBundleConfig,
+    ToricVectorBundleProbe,
+    cech_cocycle_residual,
+    default_klyachko_certificate,
+    klyachko_nesting_residual,
+)
 from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryMemoryIndex, TrajectoryMemoryRecord, TrajectoryRetrievalHead
 
 __all__ = [
@@ -57,14 +66,18 @@ __all__ = [
     "RandomOrderLMConfig",
     "ReasoningTopologyConfig",
     "SymbolicResolutionMetrics",
+    "KlyachkoBundleCertificate",
     "TrajectoryMemoryConfig",
     "TrajectoryMemoryIndex",
     "TrajectoryMemoryRecord",
     "TrajectoryRetrievalHead",
     "ToricGeometryConfig",
     "ToricTropicalCertificate",
+    "ToricVectorBundleConfig",
+    "ToricVectorBundleProbe",
     "analogical_derived_category_loss",
     "chain_complex_from_edges_np",
+    "cech_cocycle_residual",
     "combinatorial_toric_cca_topology_loss",
     "cyclic_flag_face_rows",
     "cyclic_stanley_reisner_betti_rows",
@@ -80,11 +93,14 @@ __all__ = [
     "cyclic_taylor_multidegree_counts",
     "cyclic_taylor_rank_rows",
     "default_branch_merge_edges",
+    "default_klyachko_certificate",
     "derived_category_feature_summary",
     "derived_category_objects_from_batch",
     "discover_all_backends",
+    "discover_toric_toolchain",
     "got_dag_metrics",
     "got_dag_summary_np",
+    "klyachko_nesting_residual",
     "Macaulay2TropicalOracle",
     "projective_resolution_certificate",
     "reasoning_step_topology_loss",

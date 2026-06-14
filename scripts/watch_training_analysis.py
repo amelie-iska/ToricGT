@@ -120,6 +120,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cas-audit-num-vertices", type=int, default=6)
     parser.add_argument("--cas-audit-sage-normal-fan", action="store_true")
     parser.add_argument("--cas-audit-macaulay2-smoke", action="store_true")
+    parser.add_argument("--cas-audit-macaulay2-toric-ideal", action="store_true")
+    parser.add_argument("--cas-audit-all-exact-cas", action="store_true")
     parser.add_argument("--skip-test-time-scaling", action="store_true")
     parser.add_argument("--test-time-scaling-batches", type=int, default=8)
     parser.add_argument("--test-time-scaling-budgets", type=int, nargs="+", default=[1, 4, 16])
@@ -429,6 +431,7 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
         )
     if cas_audit:
         backends = cas_audit.get("backend_status", {}) if isinstance(cas_audit.get("backend_status", {}), dict) else {}
+        toolchain = cas_audit.get("toolchain_status", {}) if isinstance(cas_audit.get("toolchain_status", {}), dict) else {}
         build_ok = cas_audit.get("build_returncode") == 0
         lines.extend(
             [
@@ -446,6 +449,17 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
                     f"provenance: `{info.get('provenance', 'n/a')}`; "
                     f"version: `{info.get('version', 'n/a')}`"
                 )
+        if toolchain:
+            available_tools = [
+                name for name, info in sorted(toolchain.items())
+                if isinstance(info, dict) and bool(info.get("available", False))
+            ]
+            missing_tools = [
+                name for name, info in sorted(toolchain.items())
+                if isinstance(info, dict) and not bool(info.get("available", False))
+            ]
+            lines.append(f"- Exact command-line tools available: `{', '.join(available_tools) or 'none'}`")
+            lines.append(f"- Exact command-line tools unavailable: `{', '.join(missing_tools) or 'none'}`")
     if test_time:
         test_summary = test_time.get("summary", {}) if isinstance(test_time.get("summary", {}), dict) else {}
         budgets = test_summary.get("summary", {}) if isinstance(test_summary.get("summary", {}), dict) else {}
@@ -809,6 +823,10 @@ def main() -> None:
             cas_command.append("--sage-normal-fan")
         if args.cas_audit_macaulay2_smoke:
             cas_command.append("--macaulay2-smoke")
+        if args.cas_audit_macaulay2_toric_ideal:
+            cas_command.append("--macaulay2-toric-ideal")
+        if args.cas_audit_all_exact_cas:
+            cas_command.append("--all-exact-cas")
         if args.cas_audit_require_cas:
             cas_command.append("--require-cas")
         run_optional_command(

@@ -11,11 +11,16 @@ The training loop must never report a Torch heuristic as an exact algebraic
 metric unless it was checked against a CAS certificate.
 ```
 
-On the current machine, `sage` and `M2` are not on `PATH`. The implementation
-must therefore support optional CAS backends, deterministic cache keys, and
-explicit provenance fields. If an exact metric is requested and the required
-CAS backend is unavailable, the job should fail that metric or mark it
-`cas_unavailable`; it should not silently substitute a surrogate.
+On the current machine, `sage` and `M2` are now available inside the `tokengt`
+environment. The implementation still supports optional CAS backends,
+deterministic cache keys, and explicit provenance fields because training
+artifacts may run on other hosts. If an exact metric is requested and the
+required CAS backend is unavailable, the job should fail that metric or mark it
+`cas_unavailable`; it should not silently substitute a surrogate. The verified
+local exact toolchain currently includes SageMath 10.7, Macaulay2 1.22, gfan,
+Singular, Normaliz/PyNormaliz, 4ti2, LattE integrale, lrslib, nauty, and
+system TOPCOM. `polymake` remains unavailable unless installed through the
+user's sudo/apt path.
 
 ## Research Grounding
 
@@ -637,30 +642,42 @@ Implemented foundation:
 - `src/toricgt/cas_certificates.py` defines certificate provenance, stable
   hashes, validation, and cache storage.
 - `src/toricgt/cas_oracles.py` discovers SageMath and Macaulay2, refuses
-  silent fallback, wraps exact Sage/M2 smoke computations, and emits an exact
-  closed-form cyclic Stanley-Reisner certificate.
+  silent fallback, reports Macaulay2 package availability, reports the exact
+  command-line toric toolchain, wraps exact Sage normal-fan and M2 smoke
+  computations, emits an exact closed-form cyclic Stanley-Reisner certificate,
+  builds an exact Macaulay2 toric-ideal elimination certificate, and builds a
+  Macaulay2 `ToricVectorBundles` Klyachko vector-bundle certificate.
 - `src/toricgt/cas_backed_losses.py` contains differentiable consumers for
   exact binomial, balancing, Cartier-bend, and cone-label targets. These losses
   do not compute algebraic targets themselves.
 - `scripts/build_toric_tropical_certificates.py`,
   `scripts/validate_cas_certificates.py`, and
-  `scripts/run_periodic_cas_audit.py` provide the first CLI entrypoints.
+  `scripts/run_periodic_cas_audit.py` provide the exact-CAS CLI entrypoints.
+  `--all-exact-cas --require-cas` currently builds and validates the
+  closed-form Stanley-Reisner, Sage normal-fan, Macaulay2 smoke, Macaulay2
+  toric-ideal, and Macaulay2 toric-vector-bundle certificates.
 - `tests/test_cas_certificates.py` checks exact closed-form certificates,
-  cache validation, script round-trips, backend unavailability behavior, and
-  exact-backend tests that run only when `sage` or `M2` are installed.
+  cache validation, script round-trips, backend unavailability behavior,
+  command-line toolchain discovery, exact Sage normal fans, exact Macaulay2
+  smoke certificates, exact Macaulay2 toric ideals, exact Macaulay2 toric
+  vector bundles, and CAS-backed binomial losses.
+- `scripts/install_cas_backends.sh` installs/checks Sage, Macaulay2, gfan,
+  Singular, Normaliz/PyNormaliz, 4ti2, LattE integrale, lrslib, nauty, TOPCOM,
+  and polymake where the package manager makes them available, then runs the
+  all-exact certificate verification.
+- `scripts/supervise_parameter_golf_training.py` now launches periodic
+  checkpoint watchers with `--cas-audit --cas-audit-all-exact-cas
+  --cas-audit-require-cas`; the all-phases launcher opts into Codex review
+  automation by default.
 
 Remaining next steps:
 
-1. Add a small certificate generator for:
-   - one toric ideal;
-   - one Newton polytope normal fan;
-   - one Stanley-Reisner ideal;
-   - one Koszul/free-resolution certificate.
-2. Extend `scripts/watch_training_analysis.py` with an optional
-   `--cas-audit` flag and summary section.
-3. Extend W&B metric organization with `cas/*` and
-   `toric_tropical_exact/*`.
-4. Update the paper and condensed NeurIPS version to state that exact
+1. Add a small CAS-backed Koszul/free-resolution certificate beyond the current
+   closed-form Stanley-Reisner finite resolution.
+2. Add optional cached-certificate loading to the hot training config so
+   selected toric relation losses can consume exact Macaulay2 rows instead of
+   synthetic toy relations when a matching certificate is present.
+3. Update the paper and condensed NeurIPS version to state that exact
    algebraic metrics are produced by CAS-backed finite certificates, while
    differentiable training losses are cached-target surrogates.
 

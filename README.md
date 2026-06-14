@@ -330,6 +330,7 @@ Local implementation:
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
 - `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing, advanced reasoning/memory special-token encoding, official-byte TokenGT-style causal graph supervision, GraphCG/analogy/topology hooks, Toric BGG/Koszul probes, and differentiable Slepian/Pollak trajectory-concentration losses.
 - `src/toricgt/toric_geometry_tasks.py`: training-only low-rank toric probes for Newton active-face, bend, binomial, affine-Coxeter, braid, and phase-foliation signals.
+- `src/toricgt/toric_vector_bundles.py`: training-only Klyachko vector-bundle and equivariant-sheaf probes over the tropical-to-toric embedding fan, with exact finite filtration nesting, chart-transition cocycle checks, cone-splitting regularizers, and Cech-style gluing metrics.
 - `src/toricgt/cas_certificates.py`, `src/toricgt/cas_oracles.py`, and `src/toricgt/cas_backed_losses.py`: exact certificate schemas/cache, strict SageMath/Macaulay2 discovery and oracle wrappers, closed-form finite Stanley-Reisner certificates, and differentiable losses that consume exact CAS/closed-form targets without inventing algebraic facts in Torch.
 - `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves used by the geometry audit suite.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, Slepian envelopes, and Soft-MoE-style routing.
@@ -342,6 +343,7 @@ Local implementation:
 - `planning/DATA.md`: dataset research, curation, and segmentation plan.
 - `planning/SEQUENTIAL-FINEWEB-PIVOT.md`: current Parameter-Golf BPB pivot record and launch policy for the sequential FineWeb-first branch.
 - `planning/TROPICAL-TORIC-CAS-IMPLEMENTATION.md`: CAS-backed plan for embedding tropical attention/fan diagnostics into toric varieties and using SageMath/Macaulay2 certificates for exact algebraic metrics, losses, and audits.
+- `planning/TORIC-VECTOR-BUNDLES-SHEAVES-TRAINING.md`: research and implementation plan for Klyachko toric vector bundles, equivariant sheaves, Cech gluing, and their training use once tropical varieties are embedded into toric varieties.
 - `docs/PARAMETER_GOLF.md`: dense random-order Parameter-Golf adaptation notes.
 - `docs/HYBRID_BYTE_TOKENGT_BPB.md`: official byte-BPB plus TokenGT-style internal graph objective notes and pseudocode.
 
@@ -352,25 +354,44 @@ scripts/install_cas_backends.sh
 
 python scripts/build_toric_tropical_certificates.py \
   --output-dir outputs/cas_certificates \
-  --num-vertices 6
+  --num-vertices 6 \
+  --all-exact-cas \
+  --require-cas
 
 python scripts/validate_cas_certificates.py outputs/cas_certificates/cache
 
 python scripts/run_periodic_cas_audit.py \
-  --output-dir outputs/periodic_cas_audit
+  --output-dir outputs/periodic_cas_audit \
+  --all-exact-cas \
+  --require-cas
 ```
 
 The closed-form cyclic Stanley-Reisner certificate is exact and always
-available. SageMath and Macaulay2 checks run only when `sage` and `M2` are on
-`PATH`; missing backends are reported as unavailable and are never replaced by
-Torch surrogate metrics.
+available. The full exact audit currently builds five certificates: the
+closed-form Stanley-Reisner certificate, a SageMath Newton-polytope normal-fan
+certificate, a Macaulay2 smoke certificate, and a Macaulay2 elimination
+certificate for a nontrivial toric ideal whose exact binomial rows feed the
+CAS-backed toric relation loss, plus a Macaulay2 `ToricVectorBundles`
+certificate for a rank-2 Klyachko vector bundle on `P^2`. Missing backends are
+reported as unavailable and are never replaced by Torch surrogate metrics.
 Run `scripts/install_cas_backends.sh` on a ToricGT workstation before enabling
 exact CAS-required metrics. The script installs SageMath for the `tokengt`
-workflow, installs Macaulay2 through Ubuntu apt when needed, and runs the
-required Sage/Macaulay2 ToricGT certificate verification.
+workflow, installs Macaulay2 through Ubuntu apt when needed, installs/checks
+supporting toric and tropical tools (`gfan`, `Singular`, Normaliz/PyNormaliz,
+4ti2, LattE integrale, lrslib, nauty, TOPCOM, and polymake when available),
+and runs the required Sage/Macaulay2 ToricGT certificate verification.
+Macaulay2's `ToricVectorBundles` package is also checked by the discovery
+code.  When available, `--all-exact-cas` constructs a real Klyachko vector
+bundle certificate and records `isVectorBundle`, chart count, Euler
+characteristic, filtration data, and basis data.  The train-time
+vector-bundle/sheaf probe still uses bounded finite Klyachko/Cech certificates
+for GPU losses, while CAS audits provide exact external verification targets.
 Periodic checkpoint analysis can include the same check with
-`scripts/watch_training_analysis.py --cas-audit`; the generated `SYNOPSIS.md`
-then records Sage/Macaulay2 availability and exact-certificate build status.
+`scripts/watch_training_analysis.py --cas-audit --cas-audit-all-exact-cas
+--cas-audit-require-cas`; the generated `SYNOPSIS.md` then records
+Sage/Macaulay2 availability, exact-certificate build status, and the exact
+command-line toric toolchain status. The supervised all-phases launcher passes
+these audit flags automatically.
 
 ## Setup
 
@@ -1295,6 +1316,18 @@ without increasing deploy bytes. W&B reports `train/toric_geometry_loss`,
 `train/toric_active_face_margin`, `train/toric_bend_magnitude`,
 `train/toric_binomial_residual`, `train/toric_coxeter_loss`,
 `train/toric_braid_loss`, and `train/toric_leaf_residual`.
+
+The same tropical-to-toric embedding now has a Klyachko vector-bundle/sheaf
+probe.  Once tropical active rays are treated as boundary rays in an ambient
+toric fan, hidden states can be read as vectors in a small learned fiber.  The
+probe attaches exact finite ray filtrations, affine chart frames, and chart
+transition maps, then measures whether the hidden fiber lies in the expected
+Klyachko subspace, splits coherently over cones, and glues across chart
+overlaps like a local sheaf section.  The all-phases config instantiates this
+probe from step 0 so W&B always reports `toric_vector_bundle/*` and
+`toric_sheaf/*`; its optimization weight is phase-controlled through
+`toric_vector_bundle_loss_weight` and remains training-only/excluded from
+Parameter-Golf export by default.
 
 The `oai` branch now includes an optional anticipative reasoning-trajectory
 memory head. Completed graph-of-thought DAGs are summarized by pooled

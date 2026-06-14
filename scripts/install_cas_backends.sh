@@ -6,6 +6,9 @@
 #     Sage env with a wrapper installed into the ToricGT env.
 #   - Macaulay2: Ubuntu apt package, with an M2 wrapper installed into the
 #     ToricGT env when needed.
+#   - Supporting toric/tropical tools: gfan, Singular, Normaliz/PyNormaliz,
+#     TOPCOM, 4ti2, LattE integrale, lrslib, nauty, and polymake where
+#     available from Ubuntu apt or conda-forge.
 #
 # This script is intentionally strict: the final verification runs the actual
 # CAS-backed ToricGT certificate builder with --require-cas.
@@ -20,6 +23,7 @@ SAGE_FALLBACK_ENV="toricgt-sage"
 ASSUME_YES=1
 INSTALL_SAGE=1
 INSTALL_MACAULAY2=1
+INSTALL_EXTRAS=1
 VERIFY=1
 APT_UPDATE=1
 
@@ -33,6 +37,7 @@ Options:
   --sage-env NAME            Fallback Sage env name if Sage cannot solve in --env (default: toricgt-sage)
   --no-sage                  Do not install SageMath
   --no-macaulay2             Do not install Macaulay2
+  --no-extras                Do not install/check supporting toric tools
   --no-apt-update            Skip apt-get update before installing Macaulay2
   --no-verify                Skip final ToricGT CAS verification
   --yes                      Noninteractive installs (default)
@@ -43,12 +48,15 @@ Notes:
   - SageMath is installed from conda-forge.
   - Macaulay2 is installed from Ubuntu apt because conda-forge does not provide
     a macaulay2 package on this machine.
+  - Supporting tools are installed opportunistically: gfan, Normaliz, TOPCOM,
+    4ti2, LattE integrale, lrslib, nauty, polymake, and Singular when provided
+    by apt/conda.
   - If Sage cannot be installed directly into the ToricGT env, the script
     creates a separate ToricGT-named Sage env and installs a wrapper at:
       $CONDA_PREFIX/bin/sage
     for the ToricGT env.
   - Final verification runs:
-      python scripts/build_toric_tropical_certificates.py --sage-normal-fan --macaulay2-smoke --require-cas
+      python scripts/build_toric_tropical_certificates.py --all-exact-cas --require-cas
 USAGE
 }
 
@@ -77,6 +85,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-macaulay2)
       INSTALL_MACAULAY2=0
+      shift
+      ;;
+    --no-extras)
+      INSTALL_EXTRAS=0
       shift
       ;;
     --no-apt-update)
@@ -204,6 +216,57 @@ install_macaulay2() {
   have_in_env M2 || die "Macaulay2 wrapper installed but M2 is not visible in ${TORICGT_ENV}"
 }
 
+apt_install_available() {
+  local packages=("$@")
+  local installable=()
+  local package
+  for package in "${packages[@]}"; do
+    if apt-cache policy "${package}" 2>/dev/null | grep -q 'Candidate: (none)'; then
+      log "apt package unavailable, skipping: ${package}"
+      continue
+    fi
+    if apt-cache policy "${package}" 2>/dev/null | grep -q 'Candidate:'; then
+      installable+=("${package}")
+    fi
+  done
+  if [[ "${#installable[@]}" -eq 0 ]]; then
+    return
+  fi
+  log "installing apt toric/tropical support packages: ${installable[*]}"
+  if [[ "${EUID}" -eq 0 ]]; then
+    if [[ "${APT_UPDATE}" -eq 1 ]]; then
+      apt-get update
+    fi
+    apt-get install "${APT_YES[@]}" "${installable[@]}"
+  else
+    command -v sudo >/dev/null 2>&1 || die "sudo is required for apt support package install"
+    if [[ "${APT_UPDATE}" -eq 1 ]]; then
+      sudo apt-get update
+      APT_UPDATE=0
+    fi
+    sudo apt-get install "${APT_YES[@]}" "${installable[@]}"
+  fi
+}
+
+install_extra_toric_tools() {
+  log "checking supporting toric/tropical command-line tools"
+  # These names are available on Ubuntu 24.04 universe on this workstation
+  # except where the distribution omits them. apt_install_available skips
+  # unavailable packages instead of failing the full CAS setup.
+  if command -v apt-get >/dev/null 2>&1; then
+    apt_install_available gfan normaliz topcom 4ti2 polymake singular
+  fi
+
+  # Conda-forge carries the command-line tools that do not require root on the
+  # current workstation. TOPCOM is apt-only here; polymake is apt-only here and
+  # requires the user's sudo path when not already installed.
+  if ! have_in_env gfan || ! have_in_env Singular || ! have_in_env normaliz || ! have_in_env graver || ! have_in_env lrs; then
+    conda install -n "${TORICGT_ENV}" -c conda-forge \
+      gfan singular normaliz pynormaliz 4ti2 latte-integrale lrslib nauty \
+      --solver=libmamba "${CONDA_YES[@]}" || true
+  fi
+}
+
 verify_backends() {
   log "verifying CAS binaries in ${TORICGT_ENV}"
   conda run --no-capture-output -n "${TORICGT_ENV}" bash -lc '
@@ -212,6 +275,17 @@ verify_backends() {
     sage --version
     command -v M2
     M2 --version
+    command -v gfan
+    command -v normaliz || command -v Normaliz
+    command -v Singular
+    command -v graver || true
+    command -v hilbert || true
+    command -v lrs || true
+    command -v count || true
+    command -v dreadnaut || true
+    command -v points2triangs || true
+    command -v 4ti2-zsolve || command -v zsolve || true
+    command -v polymake || true
   '
 
   log "running ToricGT exact CAS certificate verification"
@@ -220,8 +294,7 @@ verify_backends() {
     python scripts/build_toric_tropical_certificates.py \
       --output-dir outputs/cas_install_check \
       --num-vertices 6 \
-      --sage-normal-fan \
-      --macaulay2-smoke \
+      --all-exact-cas \
       --require-cas
 
   conda run --no-capture-output -n "${TORICGT_ENV}" env PYTHONPATH=src \
@@ -240,6 +313,9 @@ main() {
   fi
   if [[ "${INSTALL_MACAULAY2}" -eq 1 ]]; then
     install_macaulay2
+  fi
+  if [[ "${INSTALL_EXTRAS}" -eq 1 ]]; then
+    install_extra_toric_tools
   fi
   if [[ "${VERIFY}" -eq 1 ]]; then
     verify_backends

@@ -26,6 +26,7 @@ from .tropical_attention import TransformerBlock
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
 from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
 from .toric_bgg import ToricBGGConfig, ToricBGGProbe
+from .toric_vector_bundles import ToricVectorBundleConfig, ToricVectorBundleProbe
 from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryRetrievalHead
 
 
@@ -141,6 +142,19 @@ class RandomOrderLMConfig:
     toric_geometry_braid_weight: float = 0.1
     toric_geometry_leaf_weight: float = 0.25
     toric_geometry_max_positions: int = 256
+    toric_geometry_cas_toric_ideal_certificate_path: str = ""
+    use_toric_vector_bundle: bool = True
+    toric_vector_bundle_rank: int = 8
+    toric_vector_bundle_num_rays: int = 8
+    toric_vector_bundle_num_cones: int = 8
+    toric_vector_bundle_filtration_levels: int = 3
+    toric_vector_bundle_max_positions: int = 128
+    toric_vector_bundle_temperature: float = 0.25
+    toric_vector_bundle_ray_weight: float = 0.20
+    toric_vector_bundle_filtration_weight: float = 1.00
+    toric_vector_bundle_splitting_weight: float = 0.35
+    toric_vector_bundle_cech_weight: float = 0.25
+    toric_vector_bundle_cocycle_weight: float = 0.05
     use_graphcg: bool = False
     graphcg_num_directions: int = 12
     graphcg_alpha: float = 0.12
@@ -545,9 +559,30 @@ class DenseRandomOrderToricLM(nn.Module):
                     braid_weight=config.toric_geometry_braid_weight,
                     leaf_weight=config.toric_geometry_leaf_weight,
                     max_positions=config.toric_geometry_max_positions,
+                    cas_toric_ideal_certificate_path=config.toric_geometry_cas_toric_ideal_certificate_path,
                 ),
             )
             if config.use_toric_geometry_tasks
+            else None
+        )
+        self.toric_vector_bundle_probe = (
+            ToricVectorBundleProbe(
+                config.d_model,
+                ToricVectorBundleConfig(
+                    rank=config.toric_vector_bundle_rank,
+                    num_rays=config.toric_vector_bundle_num_rays,
+                    num_cones=config.toric_vector_bundle_num_cones,
+                    filtration_levels=config.toric_vector_bundle_filtration_levels,
+                    max_positions=config.toric_vector_bundle_max_positions,
+                    temperature=config.toric_vector_bundle_temperature,
+                    ray_weight=config.toric_vector_bundle_ray_weight,
+                    filtration_weight=config.toric_vector_bundle_filtration_weight,
+                    splitting_weight=config.toric_vector_bundle_splitting_weight,
+                    cech_weight=config.toric_vector_bundle_cech_weight,
+                    cocycle_weight=config.toric_vector_bundle_cocycle_weight,
+                ),
+            )
+            if config.use_toric_vector_bundle
             else None
         )
         self.toric_bgg_probe = (
@@ -1834,6 +1869,8 @@ class DenseRandomOrderToricLM(nn.Module):
             out.update(self._analogy_lattice_losses(hidden, target_tokens))
             if self.toric_geometry_probe is not None and target_positions is not None:
                 out.update(self.toric_geometry_probe(hidden, target_positions, target_tokens))
+            if self.toric_vector_bundle_probe is not None:
+                out.update(self.toric_vector_bundle_probe(hidden, target_positions, target_tokens))
             if self.toric_bgg_probe is not None:
                 out.update(self.toric_bgg_probe(hidden, target_positions, target_tokens))
             if self.trajectory_memory_head is not None:
@@ -2110,6 +2147,7 @@ def estimate_uncompressed_quantized_bytes(
         "aux_",
         "graphcg_direction_basis",
         "toric_geometry_probe.",
+        "toric_vector_bundle_probe.",
         "toric_bgg_probe.",
         "trajectory_memory_head.",
     ),

@@ -22,6 +22,7 @@ from toricgt.cas_oracles import (
     SageToricOracle,
     cyclic_stanley_reisner_closed_form_certificate,
     discover_all_backends,
+    discover_toric_toolchain,
 )
 
 
@@ -32,6 +33,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--write-backend-status", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--sage-normal-fan", action="store_true", help="Build a small exact Sage normal-fan certificate if Sage is available.")
     parser.add_argument("--macaulay2-smoke", action="store_true", help="Build a small exact Macaulay2 smoke certificate if M2 is available.")
+    parser.add_argument("--macaulay2-toric-ideal", action="store_true", help="Build a real exact Macaulay2 toric-ideal certificate by elimination.")
+    parser.add_argument("--macaulay2-vector-bundle", action="store_true", help="Build a real exact Macaulay2 toric vector-bundle certificate.")
+    parser.add_argument("--all-exact-cas", action="store_true", help="Enable all current exact Sage/Macaulay2 certificate builders.")
     parser.add_argument("--require-cas", action="store_true", help="Fail if requested Sage/Macaulay2 exact checks are unavailable.")
     return parser.parse_args()
 
@@ -51,6 +55,7 @@ def main() -> None:
         "output_dir": str(output_dir),
         "certificates": [],
         "backend_status": {},
+        "toolchain_status": {},
         "errors": [],
     }
 
@@ -58,6 +63,8 @@ def main() -> None:
         statuses = discover_all_backends()
         report["backend_status"] = {name: info.to_dict() for name, info in statuses.items()}
         write_json(output_dir / "backend_status.json", report["backend_status"])
+        report["toolchain_status"] = discover_toric_toolchain()
+        write_json(output_dir / "toolchain_status.json", report["toolchain_status"])
 
     closed_form = cyclic_stanley_reisner_closed_form_certificate(args.num_vertices)
     path = cache.write(closed_form)
@@ -69,6 +76,12 @@ def main() -> None:
             "certificate_hash": closed_form.certificate_hash,
         }
     )
+
+    if args.all_exact_cas:
+        args.sage_normal_fan = True
+        args.macaulay2_smoke = True
+        args.macaulay2_toric_ideal = True
+        args.macaulay2_vector_bundle = True
 
     if args.sage_normal_fan:
         oracle = SageToricOracle()
@@ -119,6 +132,60 @@ def main() -> None:
                 if args.require_cas:
                     raise
                 report["errors"].append({"backend": "macaulay2", "error": str(exc), "required": False})
+
+    if args.macaulay2_toric_ideal:
+        oracle = Macaulay2TropicalOracle()
+        if not oracle.info.available:
+            message = oracle.info.error or "Macaulay2 backend unavailable"
+            if args.require_cas:
+                raise CASUnavailableError(message)
+            report["errors"].append({"backend": "macaulay2", "error": message, "required": False, "certificate": "toric_ideal"})
+        else:
+            try:
+                # Columns are semigroup exponents in N^2. This nontrivial
+                # example gives ideal(x_2^2-x_1*x_3, x_0*x_2-x_3, x_0*x_1-x_2).
+                cert = oracle.toric_ideal_certificate([[1, 0, 1, 2], [0, 1, 1, 1]])
+                path = cache.write(cert)
+                report["certificates"].append(
+                    {
+                        "kind": cert.kind,
+                        "provenance": cert.provenance,
+                        "path": str(path),
+                        "certificate_hash": cert.certificate_hash,
+                    }
+                )
+            except (CASExecutionError, CASUnavailableError) as exc:
+                if args.require_cas:
+                    raise
+                report["errors"].append({"backend": "macaulay2", "error": str(exc), "required": False, "certificate": "toric_ideal"})
+
+    if args.macaulay2_vector_bundle:
+        oracle = Macaulay2TropicalOracle()
+        if not oracle.info.available:
+            message = oracle.info.error or "Macaulay2 backend unavailable"
+            if args.require_cas:
+                raise CASUnavailableError(message)
+            report["errors"].append(
+                {"backend": "macaulay2", "error": message, "required": False, "certificate": "toric_vector_bundle"}
+            )
+        else:
+            try:
+                cert = oracle.vector_bundle_smoke_certificate()
+                path = cache.write(cert)
+                report["certificates"].append(
+                    {
+                        "kind": cert.kind,
+                        "provenance": cert.provenance,
+                        "path": str(path),
+                        "certificate_hash": cert.certificate_hash,
+                    }
+                )
+            except (CASExecutionError, CASUnavailableError) as exc:
+                if args.require_cas:
+                    raise
+                report["errors"].append(
+                    {"backend": "macaulay2", "error": str(exc), "required": False, "certificate": "toric_vector_bundle"}
+                )
 
     write_json(output_dir / "build_report.json", report)
     print(json.dumps(report, indent=2, sort_keys=True))
