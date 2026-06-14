@@ -340,6 +340,7 @@ Local implementation:
 - `planning/IMPLEMENTATION-PLAN.md`: detailed implementation plan.
 - `planning/DATA.md`: dataset research, curation, and segmentation plan.
 - `planning/SEQUENTIAL-FINEWEB-PIVOT.md`: current Parameter-Golf BPB pivot record and launch policy for the sequential FineWeb-first branch.
+- `planning/TROPICAL-TORIC-CAS-IMPLEMENTATION.md`: CAS-backed plan for embedding tropical attention/fan diagnostics into toric varieties and using SageMath/Macaulay2 certificates for exact algebraic metrics, losses, and audits.
 - `docs/PARAMETER_GOLF.md`: dense random-order Parameter-Golf adaptation notes.
 - `docs/HYBRID_BYTE_TOKENGT_BPB.md`: official byte-BPB plus TokenGT-style internal graph objective notes and pseudocode.
 
@@ -1322,6 +1323,12 @@ defines the directed persistent-topology implementation contract, and
 with the HoTT book reference: <https://homotopytypetheory.org/book/>.
 [`planning/TORIC-GEOMETRY-TRAINING-SIGNAL.md`](planning/TORIC-GEOMETRY-TRAINING-SIGNAL.md)
 records the toric probe losses, metrics, resume policy, and analysis gate.
+[`planning/TROPICAL-TORIC-CAS-IMPLEMENTATION.md`](planning/TROPICAL-TORIC-CAS-IMPLEMENTATION.md)
+adds the exact-CAS contract: SageMath and Macaulay2 generate finite toric,
+tropical, ideal, fan, intersection, resolution, and Euler-Koszul certificates;
+PyTorch losses consume cached certificate tensors as differentiable surrogates,
+and W&B metrics must report whether a value is exact CAS output, CAS-validated
+surrogate, or an unvalidated Torch heuristic.
 [`planning/DEC-CONSERVATIVE-REASONING.md`](planning/DEC-CONSERVATIVE-REASONING.md)
 records the DEC/NSE comparison and the conservative reasoning-flow additions.
 [`planning/TORIC-AFFINE-KOSZUL-PERSISTENCE.md`](planning/TORIC-AFFINE-KOSZUL-PERSISTENCE.md)
