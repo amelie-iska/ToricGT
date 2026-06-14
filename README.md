@@ -348,6 +348,8 @@ Local implementation:
 CAS-backed exact certificate entrypoints:
 
 ```bash
+scripts/install_cas_backends.sh
+
 python scripts/build_toric_tropical_certificates.py \
   --output-dir outputs/cas_certificates \
   --num-vertices 6
@@ -362,6 +364,10 @@ The closed-form cyclic Stanley-Reisner certificate is exact and always
 available. SageMath and Macaulay2 checks run only when `sage` and `M2` are on
 `PATH`; missing backends are reported as unavailable and are never replaced by
 Torch surrogate metrics.
+Run `scripts/install_cas_backends.sh` on a ToricGT workstation before enabling
+exact CAS-required metrics. The script installs SageMath for the `tokengt`
+workflow, installs Macaulay2 through Ubuntu apt when needed, and runs the
+required Sage/Macaulay2 ToricGT certificate verification.
 Periodic checkpoint analysis can include the same check with
 `scripts/watch_training_analysis.py --cas-audit`; the generated `SYNOPSIS.md`
 then records Sage/Macaulay2 availability and exact-certificate build status.
