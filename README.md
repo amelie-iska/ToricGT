@@ -122,6 +122,11 @@ GUDHI-driven two-parameter persistence, Toric BGG category-O certificates,
 Hebrew root-template graphs, noncommutative torus phase memory, and
 Parameter-Golf BPB causality controls.
 
+Rendered screenshot audits of the fixture HTML reports are written under
+`outputs/latest_rendered_html_screenshots` when Playwright capture is run.  The
+current review and implementation plan for the generated pages is tracked in
+`planning/RENDERED-HTML-AUDIT-AND-IMPLEMENTATION-PLAN-20260614.md`.
+
 **OpenAI competition baseline model**
 
 ```bash
