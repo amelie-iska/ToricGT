@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 
+import numpy as np
 import torch
 
 from toricgt.config import ModelConfig, TrainConfig
@@ -62,6 +63,8 @@ def test_tokengt_geometry_suite_smoke(tmp_path):
             "cpu",
             "--precision",
             "fp32",
+            "--no-rich-legacy-geometry",
+            "--emit-embedding-payloads",
         ],
         check=True,
         text=True,
@@ -73,9 +76,19 @@ def test_tokengt_geometry_suite_smoke(tmp_path):
     assert summary["checkpoint_family"] == "tokengt_graph"
     assert summary["records"] == 1
     assert summary["oai_competition_bpb_available"] == 0.0
+    assert summary["embedding_payloads_enabled"] is True
+    assert summary["embedding_payload_manifest"] == "embeddings/manifest.json"
     assert (output_dir / "tokengt_geometry_records.csv").exists()
     assert (output_dir / "derived_category_objects.json").exists()
     assert (output_dir / "graph_energy_topology_triangle.png").exists()
+    embedding_manifest = json.loads((output_dir / "embeddings" / "manifest.json").read_text(encoding="utf-8"))
+    assert embedding_manifest["records"] == 1
+    payload_npz = output_dir / embedding_manifest["payloads"][0]["relative_npz"]
+    with np.load(payload_npz) as payload:
+        assert "hidden" in payload.files
+        assert "projected" in payload.files
+        assert "complex_projected" in payload.files
+        assert payload["hidden"].ndim == 2
     assert list((output_dir / "trajectories").glob("*trajectory_3d.png"))
     assert list((output_dir / "topology").glob("*topology_heatmaps.png"))
     assert "tokengt_graph" in result.stdout

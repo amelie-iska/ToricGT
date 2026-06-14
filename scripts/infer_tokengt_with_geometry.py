@@ -22,6 +22,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 GEOMETRY_SCRIPT = ROOT / "scripts" / "evaluate_tokengt_reasoning_geometry_suite.py"
 GUDHI_SCRIPT = ROOT / "scripts" / "run_gudhi_persistence_audit.py"
+CAS_SIDECAR_SCRIPT = ROOT / "scripts" / "run_embedding_cas_sidecar.py"
 
 
 def parse_args() -> argparse.Namespace:
@@ -79,6 +80,19 @@ def parse_args() -> argparse.Namespace:
         help="Override where geometry files are written. Defaults to <output-dir>/geometry.",
     )
     parser.add_argument(
+        "--emit-embedding-payloads",
+        dest="emit_embedding_payloads",
+        action="store_true",
+        default=True,
+        help="Persist exact hidden-state embedding payloads during geometry inference.",
+    )
+    parser.add_argument(
+        "--no-emit-embedding-payloads",
+        dest="emit_embedding_payloads",
+        action="store_false",
+        help="Skip embedding payload NPZ/JSON output.",
+    )
+    parser.add_argument(
         "--emit-gudhi-persistence",
         action="store_true",
         help="Also emit exact GUDHI/Macaulay2 persistent-homology HTML pages from checkpoint tensors.",
@@ -88,6 +102,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gudhi-max-points", type=int, default=18)
     parser.add_argument("--gudhi-num-radii", type=int, default=5)
     parser.add_argument("--gudhi-num-levels", type=int, default=5)
+    parser.add_argument(
+        "--emit-cas-sidecar",
+        action="store_true",
+        help="Run exact Sage/Macaulay2 toric audits from the saved embedding payloads.",
+    )
+    parser.add_argument("--cas-sidecar-output-dir", default="")
+    parser.add_argument("--cas-sidecar-records", type=int, default=1)
+    parser.add_argument("--cas-sidecar-max-points", type=int, default=12)
+    parser.add_argument("--cas-sidecar-exponent-dim", type=int, default=2)
+    parser.add_argument("--cas-sidecar-quantization-scale", type=int, default=12)
     return parser.parse_args()
 
 
@@ -158,6 +182,8 @@ def geometry_command(args: argparse.Namespace, geometry_dir: Path) -> list[str]:
         cmd.extend(["--fineweb-stride-tokens", str(int(args.fineweb_stride_tokens))])
     if not bool(args.rich_legacy_geometry):
         cmd.append("--no-rich-legacy-geometry")
+    if not bool(args.emit_embedding_payloads):
+        cmd.append("--no-emit-embedding-payloads")
     return cmd
 
 
@@ -180,6 +206,25 @@ def gudhi_command(args: argparse.Namespace, gudhi_dir: Path) -> list[str]:
     ]
 
 
+def cas_sidecar_command(args: argparse.Namespace, embedding_manifest: Path, cas_dir: Path) -> list[str]:
+    return [
+        sys.executable,
+        str(CAS_SIDECAR_SCRIPT),
+        "--embedding-manifest",
+        str(embedding_manifest),
+        "--output-dir",
+        str(cas_dir),
+        "--records",
+        str(max(1, int(args.cas_sidecar_records))),
+        "--max-points",
+        str(max(3, int(args.cas_sidecar_max_points))),
+        "--exponent-dim",
+        str(max(1, int(args.cas_sidecar_exponent_dim))),
+        "--quantization-scale",
+        str(max(2, int(args.cas_sidecar_quantization_scale))),
+    ]
+
+
 def main() -> None:
     args = parse_args()
     checkpoint = Path(args.checkpoint)
@@ -189,6 +234,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     geometry_dir = Path(args.geometry_output_dir) if args.geometry_output_dir else output_dir / "geometry"
     gudhi_dir = Path(args.gudhi_output_dir) if args.gudhi_output_dir else output_dir / "gudhi_persistence"
+    cas_dir = Path(args.cas_sidecar_output_dir) if args.cas_sidecar_output_dir else output_dir / "embedding_cas_sidecar"
 
     manifest: dict[str, Any] = {
         "schema": "toricgt.tokengt_inference.v1",
@@ -203,7 +249,9 @@ def main() -> None:
         "geometry_enabled": bool(args.emit_geometry),
         "rich_legacy_geometry_enabled": bool(args.rich_legacy_geometry),
         "interactive_geometry_html_enabled": bool(args.emit_geometry),
+        "embedding_payloads_enabled": bool(args.emit_embedding_payloads),
         "gudhi_persistence_enabled": bool(args.emit_gudhi_persistence),
+        "embedding_cas_sidecar_enabled": bool(args.emit_cas_sidecar),
         **load_checkpoint_meta(checkpoint),
     }
 
@@ -214,6 +262,9 @@ def main() -> None:
         manifest["geometry_output_dir"] = str(geometry_dir)
         manifest["geometry_summary"] = read_json(geometry_dir / "reasoning_geometry_summary.json")
         manifest["plot_family_manifest"] = read_json(geometry_dir / "plot_family_manifest.json")
+        embedding_manifest = geometry_dir / "embeddings" / "manifest.json"
+        if embedding_manifest.exists():
+            manifest["embedding_payload_manifest"] = str(embedding_manifest)
 
     if args.emit_gudhi_persistence:
         gudhi_dir.mkdir(parents=True, exist_ok=True)
@@ -221,6 +272,21 @@ def main() -> None:
         manifest["gudhi_persistence_output_dir"] = str(gudhi_dir)
         manifest["gudhi_persistence_index_html"] = str(gudhi_dir / "index.html")
         manifest["gudhi_persistence_summary"] = read_json(gudhi_dir / "summary.json")
+
+    if args.emit_cas_sidecar:
+        if not args.emit_geometry:
+            raise ValueError("--emit-cas-sidecar requires --emit-geometry so embedding payloads can be generated")
+        embedding_manifest = geometry_dir / "embeddings" / "manifest.json"
+        if not embedding_manifest.exists():
+            raise FileNotFoundError(
+                f"embedding payload manifest not found: {embedding_manifest}. "
+                "Run without --no-emit-embedding-payloads."
+            )
+        cas_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.run(cas_sidecar_command(args, embedding_manifest, cas_dir), cwd=ROOT, check=True)
+        manifest["embedding_cas_sidecar_output_dir"] = str(cas_dir)
+        manifest["embedding_cas_sidecar_index_html"] = str(cas_dir / "index.html")
+        manifest["embedding_cas_sidecar_manifest"] = read_json(cas_dir / "manifest.json")
 
     output_path = output_dir / "inference_output.json"
     output_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")

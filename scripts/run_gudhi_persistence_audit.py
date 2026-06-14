@@ -73,11 +73,21 @@ h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }
 p { color: var(--muted); line-height: 1.55; }
 .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .card { padding: 16px; }
-.metric { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(145,168,183,0.14); padding: 7px 0; }
+.metric { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid rgba(145,168,183,0.14); padding: 7px 0; }
 .metric span:first-child { color: var(--muted); }
-.metric span:last-child { color: white; font-variant-numeric: tabular-nums; text-align: right; }
+.metric span:last-child { color: white; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
 .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .pill { border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; background: rgba(55,232,255,0.07); }
+.badge { display: inline-block; border: 1px solid rgba(140,255,106,0.35); border-radius: 999px; color: #d9ffd2; background: rgba(140,255,106,0.11); padding: 4px 8px; font-size: 12px; margin: 2px 4px 2px 0; }
+.badge.fail { border-color: rgba(255,79,216,0.45); color: #ffd8f7; background: rgba(255,79,216,0.12); }
+.tablewrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { border: 1px solid rgba(145,168,183,0.17); padding: 6px 8px; text-align: right; }
+th:first-child, td:first-child { text-align: left; color: var(--muted); }
+.xygrid { width: 100%; max-width: 820px; height: auto; display: block; background: #020713; border: 1px solid rgba(145,168,183,0.18); border-radius: 8px; }
+.legend { color: var(--muted); font-size: 13px; line-height: 1.5; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--cyan); }
 pre {
   white-space: pre-wrap;
   overflow-x: auto;
@@ -127,6 +137,157 @@ def finite_matrix(payload: Any) -> np.ndarray:
     if arr.ndim == 1:
         arr = arr.reshape(1, -1)
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def format_value(value: Any) -> str:
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    if isinstance(value, (list, tuple)) and len(value) <= 4:
+        return "(" + ", ".join(format_value(v) for v in value) + ")"
+    return str(value)
+
+
+def pass_badge(label: str, ok: Any) -> str:
+    passed = bool(ok)
+    cls = "badge" if passed else "badge fail"
+    value = "PASS" if passed else "FAIL"
+    return f'<span class="{cls}">{html.escape(label)}: {value}</span>'
+
+
+def matrix_table(matrix: Any, *, row_label: str = "x_level") -> str:
+    arr = finite_matrix(matrix)
+    rows: list[str] = []
+    header = "<tr><th>{}</th>{}</tr>".format(
+        html.escape(row_label),
+        "".join(f"<th>y={idx}</th>" for idx in range(arr.shape[1])),
+    )
+    for row_idx, row in enumerate(arr):
+        rows.append(
+            "<tr><td>x={}</td>{}</tr>".format(
+                row_idx,
+                "".join(f"<td>{html.escape(format_value(float(v)))}</td>" for v in row),
+            )
+        )
+    return f'<div class="tablewrap"><table>{header}{"".join(rows)}</table></div>'
+
+
+def generator_counts_by_degree(record: dict[str, Any]) -> dict[tuple[int, int], dict[str, int]]:
+    presentation = record.get("bigraded_chain_presentation", {})
+    generators = presentation.get("generators", {}) if isinstance(presentation, dict) else {}
+    counts: dict[tuple[int, int], dict[str, int]] = {}
+    for dim_name, items in generators.items():
+        if not isinstance(items, list):
+            continue
+        key = f"C{dim_name}"
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            degree = item.get("degree", [0, 0])
+            if not isinstance(degree, list) or len(degree) != 2:
+                continue
+            point = (int(degree[0]), int(degree[1]))
+            counts.setdefault(point, {"C0": 0, "C1": 0, "C2": 0})
+            counts[point][key] = counts[point].get(key, 0) + 1
+    return counts
+
+
+def xy_grid_svg(record: dict[str, Any]) -> str:
+    """Render the actual bigraded generator degrees as an xy lattice grid."""
+
+    counts = generator_counts_by_degree(record)
+    module = record.get("two_parameter_module", {})
+    h0 = finite_matrix(module.get("hilbert_h0", []))
+    h1 = finite_matrix(module.get("hilbert_h1", []))
+    max_x = max([h0.shape[0] - 1, h1.shape[0] - 1, *[point[0] for point in counts]] or [0])
+    max_y = max([h0.shape[1] - 1, h1.shape[1] - 1, *[point[1] for point in counts]] or [0])
+    cell = 54
+    pad_l = 68
+    pad_b = 56
+    pad_t = 24
+    pad_r = 180
+    width = pad_l + (max_y + 1) * cell + pad_r
+    height = pad_t + (max_x + 1) * cell + pad_b
+    max_h0 = float(np.max(h0)) if h0.size else 0.0
+
+    def x_pos(y: int) -> float:
+        return pad_l + y * cell + cell / 2
+
+    def y_pos(x: int) -> float:
+        return pad_t + (max_x - x) * cell + cell / 2
+
+    parts = [
+        f'<svg class="xygrid" viewBox="0 0 {width} {height}" role="img" aria-label="F2[x_level,y_radius] xy-grid module view">',
+        '<rect x="0" y="0" width="100%" height="100%" fill="#020713"/>',
+    ]
+    for x in range(max_x + 1):
+        for y in range(max_y + 1):
+            value = float(h0[x, y]) if x < h0.shape[0] and y < h0.shape[1] else 0.0
+            alpha = 0.08 + (0.34 * value / max(max_h0, 1.0))
+            px = pad_l + y * cell
+            py = pad_t + (max_x - x) * cell
+            parts.append(
+                f'<rect x="{px:.1f}" y="{py:.1f}" width="{cell:.1f}" height="{cell:.1f}" '
+                f'fill="rgba(55,232,255,{alpha:.3f})" stroke="rgba(145,168,183,0.20)"/>'
+            )
+            if value:
+                parts.append(
+                    f'<text x="{x_pos(y):.1f}" y="{y_pos(x)+4:.1f}" text-anchor="middle" '
+                    f'font-size="12" fill="#e8fbff">H0 {format_value(value)}</text>'
+                )
+    for x in range(max_x + 1):
+        parts.append(
+            f'<text x="{pad_l-12}" y="{y_pos(x)+4:.1f}" text-anchor="end" font-size="12" fill="#91a8b7">x={x}</text>'
+        )
+    for y in range(max_y + 1):
+        parts.append(
+            f'<text x="{x_pos(y):.1f}" y="{height-24}" text-anchor="middle" font-size="12" fill="#91a8b7">y={y}</text>'
+        )
+    marker_specs = {
+        "C0": ("#37e8ff", "circle"),
+        "C1": ("#ffb86b", "rect"),
+        "C2": ("#ff4fd8", "tri"),
+    }
+    for (x, y), dim_counts in sorted(counts.items()):
+        cx, cy = x_pos(y), y_pos(x)
+        offsets = {"C0": -12, "C1": 0, "C2": 12}
+        for name, count in dim_counts.items():
+            if count <= 0:
+                continue
+            color, shape = marker_specs.get(name, ("#ffffff", "circle"))
+            ox = offsets.get(name, 0)
+            if shape == "circle":
+                parts.append(f'<circle cx="{cx+ox:.1f}" cy="{cy-14:.1f}" r="6" fill="{color}"/>')
+            elif shape == "rect":
+                parts.append(f'<rect x="{cx+ox-6:.1f}" y="{cy-20:.1f}" width="12" height="12" fill="{color}"/>')
+            else:
+                pts = f"{cx+ox:.1f},{cy-22:.1f} {cx+ox-7:.1f},{cy-8:.1f} {cx+ox+7:.1f},{cy-8:.1f}"
+                parts.append(f'<polygon points="{pts}" fill="{color}"/>')
+            parts.append(
+                f'<text x="{cx+ox:.1f}" y="{cy-25:.1f}" text-anchor="middle" font-size="10" fill="#e8fbff">{count}</text>'
+            )
+    legend_x = pad_l + (max_y + 1) * cell + 24
+    legend = [
+        ("C0 vertices", "#37e8ff", "circle"),
+        ("C1 edges", "#ffb86b", "rect"),
+        ("C2 triangles", "#ff4fd8", "tri"),
+        ("cell fill = H0 rank", "#1b6c7c", "rect"),
+    ]
+    parts.append(f'<text x="{legend_x}" y="42" font-size="13" fill="#e8fbff">Bigraded generators</text>')
+    for idx, (label, color, shape) in enumerate(legend):
+        ly = 68 + idx * 24
+        if shape == "circle":
+            parts.append(f'<circle cx="{legend_x+8}" cy="{ly-4}" r="6" fill="{color}"/>')
+        elif shape == "tri":
+            parts.append(
+                f'<polygon points="{legend_x+8},{ly-12} {legend_x+1},{ly+2} {legend_x+15},{ly+2}" fill="{color}"/>'
+            )
+        else:
+            parts.append(f'<rect x="{legend_x+2}" y="{ly-12}" width="12" height="12" fill="{color}"/>')
+        parts.append(f'<text x="{legend_x+26}" y="{ly}" font-size="12" fill="#91a8b7">{html.escape(label)}</text>')
+    parts.append(f'<text x="{pad_l + (max_y + 1) * cell / 2:.1f}" y="{height-6}" text-anchor="middle" font-size="12" fill="#91a8b7">y_radius degree</text>')
+    parts.append(f'<text x="18" y="{pad_t + (max_x + 1) * cell / 2:.1f}" text-anchor="middle" font-size="12" fill="#91a8b7" transform="rotate(-90 18 {pad_t + (max_x + 1) * cell / 2:.1f})">x_level degree</text>')
+    parts.append("</svg>")
+    return "".join(parts)
 
 
 def record_figure(record: dict[str, Any]) -> go.Figure:
@@ -221,7 +382,7 @@ def metric_rows(record: dict[str, Any]) -> str:
     metrics = {
         "points": record.get("points"),
         "ambient dimension": record.get("dimension"),
-        "max radius": f"{float(record.get('max_radius', 0.0)):.5f}",
+        "max radius": float(record.get("max_radius", 0.0)),
         "GUDHI simplices": record.get("simplex_tree", {}).get("num_simplices"),
         "Betti": chain.get("betti"),
         "M2 homogeneous d1": resolution.get("homogeneous_d1"),
@@ -234,9 +395,43 @@ def metric_rows(record: dict[str, Any]) -> str:
         ),
     }
     return "\n".join(
-        f'<div class="metric"><span>{html.escape(str(k))}</span><span>{html.escape(str(v))}</span></div>'
+        f'<div class="metric"><span>{html.escape(str(k))}</span><span>{html.escape(format_value(v))}</span></div>'
         for k, v in metrics.items()
     )
+
+
+def module_check_badges(record: dict[str, Any]) -> str:
+    resolution = record.get("macaulay2_resolution", {})
+    module = record.get("two_parameter_module", {})
+    chain_residuals = module.get("commutative_square_chain_residuals_by_dimension", {})
+    return "".join(
+        [
+            pass_badge("M2 homogeneous d1", resolution.get("homogeneous_d1", False)),
+            pass_badge("M2 homogeneous d2", resolution.get("homogeneous_d2", False)),
+            pass_badge("M2 d1*d2=0", resolution.get("d_squared_zero", False)),
+            pass_badge("2-param square residual", float(module.get("commutative_square_residual", 1.0) or 0.0) == 0.0),
+            pass_badge(
+                "chain square residuals",
+                isinstance(chain_residuals, dict) and all(int(value) == 0 for value in chain_residuals.values()),
+            ),
+        ]
+    )
+
+
+def module_tables(record: dict[str, Any]) -> str:
+    module = record.get("two_parameter_module", {})
+    table_specs = [
+        ("Hilbert H0 grid", "hilbert_h0"),
+        ("Hilbert H1 grid", "hilbert_h1"),
+        ("Chain generators C0", "chain_generators_c0"),
+        ("Chain generators C1", "chain_generators_c1"),
+        ("Chain generators C2", "chain_generators_c2"),
+    ]
+    sections = []
+    for title, key in table_specs:
+        if key in module:
+            sections.append(f"<h3>{html.escape(title)}</h3>{matrix_table(module[key])}")
+    return "".join(sections)
 
 
 def write_record_html(record: dict[str, Any], out: Path, *, rel_json: str, rel_m2: str) -> None:
@@ -258,33 +453,61 @@ def write_record_html(record: dict[str, Any], out: Path, *, rel_json: str, rel_m
 <section class="grid">
   <div class="card"><h2>Core Metrics</h2>{metric_rows(record)}</div>
   <div class="card"><h2>Module</h2>
+    <div>{module_check_badges(record)}</div>
     <p>Ring: <code>{html.escape(str(record.get('two_parameter_module', {}).get('ring', 'F2[x_level,y_radius]')))}</code></p>
     <p>Commutative squares checked: <code>{html.escape(str(record.get('two_parameter_module', {}).get('commutative_squares_checked', 'n/a')))}</code></p>
     <p>Square residual: <code>{html.escape(str(record.get('two_parameter_module', {}).get('commutative_square_residual', 'n/a')))}</code></p>
+    <p class="legend">The xy-grid below follows the bivariate monomial-ideal convention: x is reasoning level, y is radius degree, cell fill is H0 rank, and overlaid markers are actual chain generators by bidegree.</p>
   </div>
+</section>
+<section class="panel card">
+  <h2>F2[x_level,y_radius] xy-grid module view</h2>
+  {xy_grid_svg(record)}
+  {module_tables(record)}
 </section>
 <section class="panel plot">{fig_html}</section>
 <section class="panel card">
   <h2>Macaulay2 Homology Modules And Free Resolutions</h2>
+  <details open><summary>Homology modules and free resolutions</summary>
   <pre>{html.escape(json.dumps(hom, indent=2, sort_keys=True))}</pre>
+  </details>
+  <details><summary>Full Macaulay2 resolution payload</summary>
+  <pre>{html.escape(json.dumps(resolution, indent=2, sort_keys=True))}</pre>
+  </details>
 </section>
 </main></body></html>
 """
     out.write_text(body, encoding="utf-8")
 
 
-def write_index(output_dir: Path, summary: dict[str, Any], record_pages: list[dict[str, str]]) -> Path:
+def write_index(output_dir: Path, summary: dict[str, Any], record_pages: list[dict[str, Any]]) -> Path:
     cards = []
     for page in record_pages:
+        badges = "".join(
+            [
+                pass_badge("M2 d1*d2=0", page.get("m2_d_squared_zero", False)),
+                pass_badge("homogeneous", page.get("m2_homogeneous", False)),
+                pass_badge("square residual", float(page.get("square_residual", 1.0) or 0.0) == 0.0),
+            ]
+        )
+        metrics = "".join(
+            [
+                f'<div class="metric"><span>simplices</span><span>{html.escape(format_value(page.get("num_simplices", "n/a")))}</span></div>',
+                f'<div class="metric"><span>Betti</span><span>{html.escape(format_value(page.get("betti", "n/a")))}</span></div>',
+                f'<div class="metric"><span>H1 landscape norm</span><span>{html.escape(format_value(page.get("h1_landscape_norm", "n/a")))}</span></div>',
+            ]
+        )
         cards.append(
             f"""<div class="card">
   <h2>{html.escape(page['record_id'])}</h2>
   <p>Exact GUDHI/Macaulay2 reasoning-radius persistence audit.</p>
+  <div>{badges}</div>
+  {metrics}
   <div class="links"><a class="pill" href="{html.escape(page['html'])}">open page</a><a class="pill" href="{html.escape(page['json'])}">JSON</a><a class="pill" href="{html.escape(page['m2'])}">M2 script</a></div>
 </div>"""
         )
     metrics = "\n".join(
-        f'<div class="metric"><span>{html.escape(str(k))}</span><span>{html.escape(str(v))}</span></div>'
+        f'<div class="metric"><span>{html.escape(str(k))}</span><span>{html.escape(format_value(v))}</span></div>'
         for k, v in summary.items()
         if k != "records_detail"
     )
@@ -356,6 +579,13 @@ def main() -> None:
                 "html": f"records/{record_html.name}",
                 "json": f"records/{record_json.name}",
                 "m2": f"macaulay2/{m2_script.name}",
+                "num_simplices": audit.get("simplex_tree", {}).get("num_simplices"),
+                "betti": audit.get("chain_complex", {}).get("betti"),
+                "h1_landscape_norm": audit.get("vectorizations", {}).get("1", {}).get("landscape_norm"),
+                "m2_d_squared_zero": audit.get("macaulay2_resolution", {}).get("d_squared_zero", False),
+                "m2_homogeneous": bool(audit.get("macaulay2_resolution", {}).get("homogeneous_d1", False))
+                and bool(audit.get("macaulay2_resolution", {}).get("homogeneous_d2", False)),
+                "square_residual": audit.get("two_parameter_module", {}).get("commutative_square_residual", 1.0),
             }
         )
 

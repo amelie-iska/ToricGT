@@ -331,7 +331,7 @@ PLOT_FAMILY_REGISTRY = [
         "static_pattern": "fineweb_curve_diagnostic_payload.json",
         "interactive_pattern": "",
         "interactive_required": False,
-        "description": "FineWeb/BPB curve diagnostic payload stubbed from TokenGT geometry-sidecar metrics.",
+        "description": "TokenGT geometry diagnostic payload; true byte BPB is produced only by the FineWeb BPB evaluator.",
     },
     {
         "family": "graph_energy_topology_triangle",
@@ -405,6 +405,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--derived-category-max-vertices", type=int, default=8)
     parser.add_argument("--topology-max-points", type=int, default=32)
     parser.add_argument("--topology-max-windows", type=int, default=4)
+    parser.add_argument(
+        "--emit-embedding-payloads",
+        dest="emit_embedding_payloads",
+        action="store_true",
+        default=True,
+        help="Persist exact hidden-state, PCA, energy, NLL, edge, and local-complex arrays for CAS/inference audits.",
+    )
+    parser.add_argument(
+        "--no-emit-embedding-payloads",
+        dest="emit_embedding_payloads",
+        action="store_false",
+        help="Skip NPZ embedding payload output.",
+    )
     parser.add_argument(
         "--rich-legacy-geometry",
         dest="rich_legacy_geometry",
@@ -523,6 +536,72 @@ def valid_edges(edge_index: torch.Tensor, edge_mask: torch.Tensor, n: int) -> np
     edges = raw[mask].reshape(-1, 2)
     keep = (edges[:, 0] >= 0) & (edges[:, 1] >= 0) & (edges[:, 0] < n) & (edges[:, 1] < n) & (edges[:, 0] != edges[:, 1])
     return edges[keep].astype(np.int64)
+
+
+def write_embedding_payload(
+    embedding_dir: Path,
+    *,
+    record_id: int,
+    checkpoint_step: int,
+    hidden: np.ndarray,
+    projected: np.ndarray,
+    energy: np.ndarray,
+    nll: np.ndarray,
+    edges: np.ndarray,
+    complex_projected: np.ndarray,
+    complex_nll: np.ndarray,
+    complex_mass: np.ndarray,
+    complex_edges: np.ndarray,
+    complex_rows: list[dict[str, Any]],
+    nll_source: str,
+) -> dict[str, Any]:
+    """Persist the exact arrays consumed by geometry and CAS sidecar audits."""
+
+    embedding_dir.mkdir(parents=True, exist_ok=True)
+    prefix = f"record_{record_id:03d}"
+    npz_path = embedding_dir / f"{prefix}_embedding_payload.npz"
+    json_path = embedding_dir / f"{prefix}_embedding_payload.json"
+    np.savez_compressed(
+        npz_path,
+        hidden=np.asarray(hidden, dtype=np.float32),
+        projected=np.asarray(projected, dtype=np.float32),
+        energy=np.asarray(energy, dtype=np.float32),
+        nll=np.asarray(nll, dtype=np.float32),
+        edges=np.asarray(edges, dtype=np.int64).reshape(-1, 2),
+        complex_projected=np.asarray(complex_projected, dtype=np.float32),
+        complex_nll=np.asarray(complex_nll, dtype=np.float32),
+        complex_mass=np.asarray(complex_mass, dtype=np.float32),
+        complex_edges=np.asarray(complex_edges, dtype=np.int64).reshape(-1, 2),
+    )
+    metadata = {
+        "schema": "toricgt.embedding_payload.v1",
+        "record_index": int(record_id),
+        "checkpoint_step": int(checkpoint_step),
+        "nll_source": str(nll_source),
+        "npz": npz_path.name,
+        "array_shapes": {
+            "hidden": list(np.asarray(hidden).shape),
+            "projected": list(np.asarray(projected).shape),
+            "energy": list(np.asarray(energy).shape),
+            "nll": list(np.asarray(nll).shape),
+            "edges": list(np.asarray(edges).reshape(-1, 2).shape),
+            "complex_projected": list(np.asarray(complex_projected).shape),
+            "complex_nll": list(np.asarray(complex_nll).shape),
+            "complex_mass": list(np.asarray(complex_mass).shape),
+            "complex_edges": list(np.asarray(complex_edges).reshape(-1, 2).shape),
+        },
+        "complex_rows": complex_rows,
+    }
+    json_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+    return {
+        "record_index": int(record_id),
+        "npz": str(npz_path),
+        "json": str(json_path),
+        "relative_npz": f"embeddings/{npz_path.name}",
+        "relative_json": f"embeddings/{json_path.name}",
+        "node_count": int(np.asarray(hidden).shape[0]),
+        "hidden_dim": int(np.asarray(hidden).shape[1]) if np.asarray(hidden).ndim == 2 else 0,
+    }
 
 
 def connected_components_count(node_count: int, edges: list[tuple[int, int]]) -> int:
@@ -704,11 +783,11 @@ def per_node_lm_nll(outputs: dict[str, torch.Tensor], batch: GraphBatch) -> tupl
     logits = outputs.get("lm_logits")
     targets = batch.lm_target_ids
     if logits is None or targets is None:
-        return None, "graph_reconstruction_mse_fallback"
+        return None, "lm_token_nll_unavailable"
     vocab = int(logits.shape[-1])
     node_count = min(int(logits.shape[1]), int(targets.shape[1]), int(batch.node_mask.shape[1]))
     if node_count <= 0 or vocab <= 1:
-        return None, "graph_reconstruction_mse_fallback"
+        return None, "lm_token_nll_unavailable"
     logits = logits[:, :node_count, :].float()
     targets = targets[:, :node_count].to(device=logits.device, dtype=torch.long)
     node_mask = batch.node_mask[:, :node_count].to(device=logits.device, dtype=torch.bool)
@@ -923,7 +1002,7 @@ def write_rich_legacy_geometry_outputs(records: list[dict[str, Any]], out_dir: P
         [{"record_id": record["record_id"], "family": record.get("family", "")} for record in annotated],
     )
     fineweb_payload = {
-        "source": "tokengt_geometry_sidecar_proxy",
+        "source": "tokengt_geometry_sidecar_not_byte_bpb",
         "checkpoint": checkpoint,
         "records": len(annotated),
         "mean_energy": finite_mean([float(record.get("energy_mean", 0.0)) for record in annotated]),
@@ -978,9 +1057,11 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
     out_dir = Path(args.output_dir)
     traj_dir = out_dir / "trajectories"
     topo_dir = out_dir / "topology"
+    embedding_dir = out_dir / "embeddings"
     records: list[dict[str, Any]] = []
     objects: list[dict[str, Any]] = []
     rich_records: list[dict[str, Any]] = []
+    embedding_payloads: list[dict[str, Any]] = []
     topology_cfg = ReasoningTopologyConfig(
         max_points=max(4, int(args.topology_max_points)),
         max_windows=max(1, int(args.topology_max_windows)),
@@ -1000,8 +1081,10 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 loss = masked_mse(out["node"], target, batch.node_mask)
             node_energy = per_node_mse(out["node"], target, batch.node_mask)
             node_nll, nll_source = per_node_lm_nll(out, batch)
+            node_nll_available = node_nll is not None
             if node_nll is None:
                 node_nll = node_energy
+                nll_source = "graph_reconstruction_mse_visualization_energy"
             got = got_dag_metrics(
                 out["node_embeddings"],
                 node_mask=batch.node_mask,
@@ -1069,6 +1152,7 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                     "mean_node_nll": mean_node_nll,
                     "max_node_nll": max_node_nll,
                     "node_nll_source": nll_source,
+                    "node_nll_available": float(1.0 if node_nll_available else 0.0),
                     "node_count": float(n),
                     "edge_count": float(edges.shape[0]),
                     "reasoning_step_complex_mean_nll": float(complex_nll.mean()) if complex_nll.size else mean_node_nll,
@@ -1101,6 +1185,26 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                     **resolution_metrics,
                     **topology_metrics,
                 }
+                if bool(getattr(args, "emit_embedding_payloads", True)):
+                    payload_record = write_embedding_payload(
+                        embedding_dir,
+                        record_id=record_id,
+                        checkpoint_step=int(payload.get("step", 0) or 0),
+                        hidden=hidden,
+                        projected=projected,
+                        energy=energy,
+                        nll=nll,
+                        edges=edges,
+                        complex_projected=complex_projected,
+                        complex_nll=complex_nll,
+                        complex_mass=complex_mass,
+                        complex_edges=complex_edges,
+                        complex_rows=complex_rows,
+                        nll_source=nll_source,
+                    )
+                    embedding_payloads.append(payload_record)
+                    record["embedding_payload_npz"] = payload_record["relative_npz"]
+                    record["embedding_payload_json"] = payload_record["relative_json"]
                 records.append(record)
                 if bool(getattr(args, "rich_legacy_geometry", True)):
                     rich_records.append(
@@ -1144,6 +1248,18 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                 break
     if not records:
         raise RuntimeError("no TokenGT graph records were evaluated")
+    if bool(getattr(args, "emit_embedding_payloads", True)):
+        embedding_manifest = {
+            "schema": "toricgt.embedding_payload_manifest.v1",
+            "checkpoint": str(args.checkpoint),
+            "records": len(embedding_payloads),
+            "payloads": embedding_payloads,
+        }
+        embedding_dir.mkdir(parents=True, exist_ok=True)
+        (embedding_dir / "manifest.json").write_text(
+            json.dumps(embedding_manifest, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
     return records, objects, rich_records
 
 
@@ -1406,6 +1522,11 @@ def main() -> None:
     summary["rich_legacy_geometry_enabled"] = bool(getattr(args, "rich_legacy_geometry", True))
     summary["rich_legacy_geometry_record_count"] = len(rich_records)
     summary["rich_legacy_geometry_outputs"] = rich_legacy_outputs
+    summary["embedding_payloads_enabled"] = bool(getattr(args, "emit_embedding_payloads", True))
+    summary["embedding_payload_manifest"] = "embeddings/manifest.json" if (out_dir / "embeddings" / "manifest.json").exists() else ""
+    summary["embedding_payload_outputs"] = sorted(
+        str(path.relative_to(out_dir)) for path in (out_dir / "embeddings").glob("*_embedding_payload.npz")
+    )
     (out_dir / "reasoning_geometry_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     step = int(records[0].get("checkpoint_step", 0) or 0)
     log_to_wandb(args.wandb_run_path, summary, step=step)

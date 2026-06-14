@@ -127,7 +127,13 @@ def test_gudhi_audit_script_writes_dark_html_and_m2_script(tmp_path: Path) -> No
     index = out / "index.html"
     assert index.exists()
     assert "F2[x_level,y_radius]" in index.read_text(encoding="utf-8")
-    assert list((out / "records").glob("*.html"))
+    record_pages = list((out / "records").glob("*.html"))
+    assert record_pages
+    record_html = record_pages[0].read_text(encoding="utf-8")
+    assert "F2[x_level,y_radius] xy-grid module view" in record_html
+    assert "M2 d1*d2=0" in record_html
+    assert "Hilbert H0 grid" in record_html
+    assert "<details" in record_html
     assert list((out / "macaulay2").glob("*.m2"))
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert summary["mean_macaulay2_d_squared_zero"] == 1.0

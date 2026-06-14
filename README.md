@@ -59,7 +59,8 @@ TokenGT checkpoints can now be run with an optional geometry sidecar that emits
 the same plot-family union used by periodic checkpoint analyses.  The default
 command writes TokenGT-native trajectory plots, the R97-style rich geometry
 bundle, interactive HTML for every 3D/4D family, symbolic CCA/resolution
-certificates, triangle/tetrahedron diagnostics, and an `inference_output.json`
+certificates, triangle/tetrahedron diagnostics, exact hidden-state embedding
+payloads under `geometry/embeddings/`, and an `inference_output.json`
 manifest:
 
 ```bash
@@ -76,7 +77,11 @@ PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/infer_token
 For a lightweight model run without figures, add `--no-emit-geometry`.  For
 only the newer TokenGT-native plots without the R97 compatibility bundle, add
 `--no-rich-legacy-geometry`.  To direct the figure bundle elsewhere, use
-`--geometry-output-dir <path>`.
+`--geometry-output-dir <path>`.  To attach exact external algebra to the
+saved embedding tensors, add `--emit-cas-sidecar`; this runs SageMath on the
+finite exponent polytope derived from the actual hidden embeddings and
+Macaulay2 on the corresponding toric ideal, writing
+`embedding_cas_sidecar/index.html` plus JSON certificates.
 
 **Local analysis fixtures**
 
@@ -114,13 +119,26 @@ PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/infer_token
   --batch-size 1 \
   --device cpu \
   --precision fp32 \
-  --emit-gudhi-persistence
+  --emit-gudhi-persistence \
+  --emit-cas-sidecar
 ```
 
 The fixture records cover toric/tropical active-face reasoning,
 GUDHI-driven two-parameter persistence, Toric BGG category-O certificates,
 Hebrew root-template graphs, noncommutative torus phase memory, and
 Parameter-Golf BPB causality controls.
+
+The current smoke-generated pages are:
+
+- `outputs/analysis_fixture_gudhi_points_latest/index.html`: GUDHI/Macaulay2
+  two-parameter persistence with Miller-Sturmfels-style
+  `F2[x_level,y_radius]` xy-grid module views.
+- `outputs/analysis_fixture_tokengt_inference_latest/geometry/embeddings/manifest.json`:
+  exact hidden-state, PCA, energy, NLL, edge, and local-complex arrays used by
+  the inference geometry plots.
+- `outputs/analysis_fixture_tokengt_inference_latest/embedding_cas_sidecar/index.html`:
+  Sage normal-fan and Macaulay2 toric-ideal certificates computed from the
+  saved embedding payloads.
 
 Rendered screenshot audits of the fixture HTML reports are written under
 `outputs/latest_rendered_html_screenshots` when Playwright capture is run.  The
@@ -459,7 +477,11 @@ radius.  Macaulay2 then receives the homogeneous bigraded chain complex over
 and Betti tables.  The output lives at
 `outputs/post_resume_analysis/<run>/step-*/gudhi_persistence/index.html`, with
 per-record pages and the exact `.m2` scripts under `records/` and
-`macaulay2/`.  The parent analysis directory also writes a dark-mode
+`macaulay2/`.  Per-record pages now include pass/fail badges for homogeneous
+boundary maps, `d1*d2 == 0`, and two-parameter square residuals; they also
+render the actual bigraded chain generators on an xy lattice grid, following
+the bivariate monomial-ideal/staircase convention from Miller-Sturmfels.  The
+parent analysis directory also writes a dark-mode
 `index.html` linking the GUDHI/M2 audit to CAS, topology, OAI BPB,
 derived-category, memory, and test-time-scaling reports when available.
 
@@ -486,6 +508,22 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --output-dir outputs/inference_with_gudhi \
   --emit-gudhi-persistence
 ```
+
+The embedding-CAS sidecar is optional at inference time and requires embedding
+payload output:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src \
+  python scripts/infer_tokengt_with_geometry.py \
+  --checkpoint <checkpoint.pt> \
+  --output-dir outputs/inference_with_cas \
+  --emit-gudhi-persistence \
+  --emit-cas-sidecar
+```
+
+For lower-level use, call `scripts/run_embedding_cas_sidecar.py` directly on
+`geometry/embeddings/manifest.json`.  The script is strict: SageMath and
+Macaulay2 must be available, and failed exact computations stop the command.
 
 The training objective does not differentiate through GUDHI.  Train-time
 regularization uses differentiable landscape/image vectorizers on small

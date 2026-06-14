@@ -20,6 +20,35 @@ The immediate artifacts are:
 All 29 pages rendered successfully.  The review below treats the screenshots
 as a design and mathematical audit, not as a model-quality report.
 
+## Implementation Status - 2026-06-14 Update
+
+The first implementation pass is now complete for the exact audit path.
+`scripts/run_gudhi_persistence_audit.py` renders pass/fail badges for
+homogeneous Macaulay2 boundary maps, `d1*d2 == 0`, and two-parameter
+commutative-square residuals.  Each per-record page now includes an
+`F2[x_level,y_radius]` xy-grid module view: cell fill is the actual H0 rank,
+and overlaid markers show C0, C1, and C2 generator counts at their true
+bidegrees.  Hilbert and chain-generator matrices are displayed as readable
+tables, while raw Macaulay2 payloads are moved into collapsible sections.
+
+The inference path now persists exact embedding payloads.  Running
+`scripts/evaluate_tokengt_reasoning_geometry_suite.py` or
+`scripts/infer_tokengt_with_geometry.py` writes `geometry/embeddings/*.npz`
+and metadata JSON files containing the hidden states, PCA projections, energy,
+NLL, graph edges, local complex coordinates, and complex edges used by the
+plots.  `scripts/run_embedding_cas_sidecar.py` consumes that manifest and runs
+strict SageMath normal-fan and Macaulay2 toric-ideal computations from a finite
+nonnegative integer exponent set derived from the actual saved embedding
+vectors.  If SageMath or Macaulay2 is unavailable, or if the exact computation
+fails, the sidecar fails rather than emitting a substitute result.
+
+New fixture outputs were generated:
+
+- `outputs/analysis_fixture_gudhi_points_latest/index.html`
+- `outputs/analysis_fixture_tokengt_inference_latest/geometry/embeddings/manifest.json`
+- `outputs/analysis_fixture_tokengt_inference_latest/embedding_cas_sidecar/index.html`
+- `outputs/analysis_fixture_tokengt_inference_latest/gudhi_persistence/index.html`
+
 ## Mathematical Anchors
 
 ### Miller-Sturmfels, Page 42
