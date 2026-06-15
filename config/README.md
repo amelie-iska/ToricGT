@@ -54,15 +54,22 @@ the historical rebound band.
 | Soft-MoE | off for the contest track; still on by default in the graph research model |
 | Artifact target | `15,600,000` bytes, below the `16,000,000` byte cap |
 
-The full all-phases OAI configs now add a native TokenGT graph-token path on top
-of the byte stream.  `use_tokengt_graph_fusion: true` builds a prefix-causal
-graph over random-order reveal steps, tokenizes node/edge/endpoint records, runs
-rank-causal graph attention, and fuses node contexts into logits from step 0.
+The full all-phases OAI config is now the BPB-first default.  It sets
+`model.order_mode: sequential`, so the trained likelihood is ordinary
+left-to-right byte prediction from step 0 rather than random target-position
+completion.  The same trainer can still run random order with
+`--order-mode random`, but FineWeb/OAI BPB branches should use the sequential
+default.  The config also adds a native TokenGT graph-token path on top of the
+byte stream.  `use_tokengt_graph_fusion: true` builds a prefix-causal graph over
+reveal steps, tokenizes node/edge/endpoint records, runs rank-causal graph
+attention, and fuses node contexts into logits from step 0.
 `use_tokengt_causal_graph: true` keeps the audited auxiliary graph losses active
 in parallel.  The trajectory-memory teacher also uses vectorized persistence
 landscapes/images through `trajectory_memory_persistence_*` settings, while the
 report-grade exact persistence and CAS resolutions remain in the GUDHI/Sage/M2
-analysis sidecars.
+analysis sidecars.  The supervised all-phases launcher now creates run-specific
+checkpoint and BPB-loop state paths and passes that checkpoint directory through
+to the trainer, preventing accidental reuse of stale all-phases checkpoints.
 
 Run:
 

@@ -1059,11 +1059,16 @@ This path uses `config/train.parameter_golf_all_phases.yaml` and trains the
 implemented stack in ordered phases: byte warmup, GraphCG/toric probes,
 directed topology plus Koszul persistence, trajectory memory and reasoning,
 late Toric BGG Category O supervision, and final QAT/export stabilization.
-The OAI byte model now has a native TokenGT graph-token fusion path from step
-0: every random-order byte chunk is converted into a prefix-causal graph over
-reveal-step nodes and local byte-neighborhood edges, the graph is tokenized with
-node/edge/endpoint tokens, rank-causal graph attention processes those tokens,
-and node contexts are fused back into byte logits. The separate
+The all-phases config is now BPB-first by default: `model.order_mode:
+sequential` scores ordinary left-to-right byte prediction from step 0 while
+retaining the same score-before-update causality audit. Random-order graph
+completion remains available through `--order-mode random`, but it is no longer
+the default for FineWeb/OAI BPB optimization. The OAI byte model also has a
+native TokenGT graph-token fusion path from step 0: every byte chunk is
+converted into a prefix-causal graph over reveal-step nodes and local
+byte-neighborhood edges, the graph is tokenized with node/edge/endpoint tokens,
+rank-causal graph attention processes those tokens, and node contexts are fused
+back into byte logits. The separate
 `tokengt_graph/*` auxiliary metrics remain active for auditability. The Toric
 BGG probe is instantiated from the start so `train/toric_bgg_*` diagnostics are
 visible in W&B, but `toric_bgg_loss_weight` remains `0.0` until the late
@@ -1072,7 +1077,10 @@ visible in W&B, but `toric_bgg_loss_weight` remains `0.0` until the late
 alive, restarts from the latest checkpoint if the process dies or stalls, and
 runs W&B/OAI BPB/simplex/geometry analyses as non-interrupting sidecars. Codex
 review handoffs are allowed to time out without stopping training; the BPB loop
-uses `BPB_TARGET=1.2` and a 100-analysis cap.
+uses `BPB_TARGET=1.2` and a 100-analysis cap. Fresh launches use run-specific
+checkpoint and BPB-loop state paths by default, so a new step-0 run cannot
+silently resume from an old all-phases checkpoint unless `CHECKPOINT_DIR` or
+`--resume` is set explicitly.
 
 Current `oai-advanced` OpenAI Parameter-Golf checkpoint and advanced-run status
 (2026-06-05):

@@ -85,6 +85,7 @@ def special_token_map_for_mode(mode: str | None) -> dict[str, int]:
 class RandomOrderLMConfig:
     """Configuration for the Parameter-Golf random-order ToricGT adapter."""
 
+    order_mode: Literal["random", "sequential"] = "random"
     vocab_size: int = 260
     max_seq_len: int = 1024
     d_model: int = 384
@@ -304,12 +305,18 @@ def random_order_batch(
     pass_id: int = 0,
     bos_token_id: int | None = None,
     permutation: torch.Tensor | None = None,
+    order_mode: Literal["random", "sequential"] = "random",
 ) -> RandomOrderBatch:
     """Create score-before-update inputs for random-order AR training.
 
     ``previous_tokens[:, k]`` contains BOS for ``k=0`` and otherwise the token
     revealed at the previous random-order step.  The current target token is
     never present in the same row that scores it.
+
+    ``order_mode="sequential"`` keeps the same score-before-update contract but
+    uses the identity order.  This is the BPB-first left-to-right path used for
+    FineWeb/OAI calibration; ``order_mode="random"`` is the graph-completion
+    path used for random-order reasoning ablations.
     """
 
     if tokens.ndim != 2:
@@ -318,20 +325,26 @@ def random_order_batch(
     device = tokens.device
     if bos_token_id is None:
         bos_token_id = int(tokens.max().item()) + 1
+    order_mode = str(order_mode).lower().strip()
+    if order_mode not in {"random", "sequential"}:
+        raise ValueError("order_mode must be 'random' or 'sequential'")
     if permutation is None:
-        if sample_ids is None:
-            sample_ids = torch.arange(batch, device=device)
-        orders = [
-            random_order_permutation(
-                length,
-                seed=seed,
-                sample_id=int(sample_ids[i].detach().cpu().item()),
-                pass_id=pass_id,
-                device=device,
-            )
-            for i in range(batch)
-        ]
-        permutation = torch.stack(orders, dim=0)
+        if order_mode == "sequential":
+            permutation = torch.arange(length, device=device, dtype=torch.long).view(1, -1).expand(batch, -1)
+        else:
+            if sample_ids is None:
+                sample_ids = torch.arange(batch, device=device)
+            orders = [
+                random_order_permutation(
+                    length,
+                    seed=seed,
+                    sample_id=int(sample_ids[i].detach().cpu().item()),
+                    pass_id=pass_id,
+                    device=device,
+                )
+                for i in range(batch)
+            ]
+            permutation = torch.stack(orders, dim=0)
     if permutation.shape != tokens.shape:
         raise ValueError("permutation must have the same [batch, length] shape as tokens")
     target_tokens = torch.gather(tokens, dim=1, index=permutation)
@@ -2157,6 +2170,7 @@ class DenseRandomOrderToricLM(nn.Module):
             pass_id=pass_id,
             bos_token_id=self.bos_token_id,
             permutation=permutation,
+            order_mode=self.config.order_mode,
         )
         order_aux: dict[str, torch.Tensor] | None = None
         if self.config.use_gflownet_policy and gflownet_samples > 1:
@@ -2257,6 +2271,7 @@ class DenseRandomOrderToricLM(nn.Module):
             pass_id=pass_id,
             bos_token_id=self.bos_token_id,
             permutation=permutation,
+            order_mode=self.config.order_mode,
         )
         sample_log_probs = []
         for sample in range(max(1, gflownet_samples)):

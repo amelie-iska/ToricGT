@@ -2013,6 +2013,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-stream-burnin", action="store_true")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--attention", choices=["softmax", "tropical", "tropical_ring", "hybrid"])
+    parser.add_argument("--order-mode", choices=["random", "sequential"])
     parser.add_argument("--ring-block-size", type=int)
     parser.add_argument("--polarquant-kv-bits", type=int)
     parser.add_argument("--polarquant-train", action="store_true")
@@ -2145,6 +2146,7 @@ def main() -> None:
         max_codes=int(configured_graphcg_max_codes),
     )
     model_config = RandomOrderLMConfig(
+        order_mode=args.order_mode if args.order_mode is not None else config_get(file_config, "model", "order_mode", "random"),
         vocab_size=config_get(file_config, "model", "vocab_size", default_vocab_size),
         max_seq_len=args.seq_len if args.seq_len is not None else config_get(file_config, "model", "max_seq_len", 1024),
         d_model=configured_d_model,
@@ -3276,6 +3278,7 @@ def main() -> None:
             name=args.wandb_run_name or config_get(file_config, "logging", "run_name", None),
             config={
                 "model": model.config_dict(),
+                "order_mode": model_config.order_mode,
                 "special_token_mode": model_config.special_token_mode,
                 "special_token_ids": model_config.special_token_ids,
                 "training": {
@@ -3467,7 +3470,13 @@ def main() -> None:
                     "excluded_tensors": report.excluded_tensors,
                 },
             },
-            tags=["parameter-golf", "random-order-ar", "dense", "tropical-ring", "toricgt"],
+            tags=[
+                "parameter-golf",
+                f"{model_config.order_mode}-order-ar",
+                "dense",
+                "tropical-ring",
+                "toricgt",
+            ],
             id=os.environ.get("WANDB_RUN_ID") or None,
             resume=os.environ.get("WANDB_RESUME") or None,
         )
@@ -3475,6 +3484,8 @@ def main() -> None:
         wandb_run.log(
             organize_wandb_payload({
                 "trainer/step": float(start_step),
+                "trainer/order_mode_sequential": float(model_config.order_mode == "sequential"),
+                "trainer/order_mode_random": float(model_config.order_mode == "random"),
                 "metrics_status/all_metric_namespaces_always_on": 1.0,
                 "metrics_status/losses_follow_phase_curriculum": 1.0,
                 "metrics_status/topology_probe_instantiated": float(model_config.use_analogy_lattice),
@@ -3501,6 +3512,7 @@ def main() -> None:
     print(json.dumps(
         {
             "model_type": "random_order_dense_lm",
+            "order_mode": model_config.order_mode,
             "parameters": params,
             "artifact_bytes": report.bytes_total,
             "estimated_tensor_bytes": estimated_tensor_bytes,
@@ -3664,7 +3676,12 @@ def main() -> None:
     ][: max(0, int(qat_max_tensors))]
     amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
     use_amp = device.type == "cuda" and precision in {"bf16", "fp16"}
-    progress = tqdm(range(start_step + 1, steps + 1), initial=start_step, total=steps, desc="parameter-golf-random-order")
+    progress = tqdm(
+        range(start_step + 1, steps + 1),
+        initial=start_step,
+        total=steps,
+        desc=f"parameter-golf-{model_config.order_mode}-order",
+    )
     running_loss = 0.0
     last_train_metrics: dict[str, float] = {}
     for step in progress:
@@ -5119,6 +5136,8 @@ def main() -> None:
                 "artifact/deployment_parameters": report.deployment_parameters,
                 "artifact/excluded_tensors": report.excluded_tensors,
                 "model/parameters": params,
+                "trainer/order_mode_sequential": float(model_config.order_mode == "sequential"),
+                "trainer/order_mode_random": float(model_config.order_mode == "random"),
                 "data/coprime_row_stride": float(coprime_row_stride),
                 "data/stream_origin_step": float(stream_origin_step),
                 "data/stream_burnin_steps": float(stream_burnin_steps),

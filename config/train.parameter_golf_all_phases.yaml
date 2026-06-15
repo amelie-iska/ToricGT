@@ -1,4 +1,9 @@
 model:
+  # BPB-first default: ordinary left-to-right score-before-update order.  The
+  # random graph-completion objective remains available with
+  # `--order-mode random`, but full all-metrics runs should optimize the same
+  # sequential byte prediction problem used by FineWeb/OAI BPB from step 0.
+  order_mode: sequential
   # Reserve graph-of-thought, reasoning-step, memory, and analogy markers
   # before byte IDs so directed reasoning/memory trajectories can be trained
   # and audited without colliding with ordinary UTF-8 bytes.

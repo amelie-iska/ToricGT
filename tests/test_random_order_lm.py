@@ -57,6 +57,33 @@ def test_random_order_is_content_independent_and_seeded():
     )
 
 
+def test_sequential_order_mode_uses_identity_order_and_previous_byte_context():
+    tokens = torch.tensor([[4, 5, 6, 7, 8, 9, 10, 11]])
+    sample_ids = torch.tensor([123])
+    batch = random_order_batch(
+        tokens,
+        seed=17,
+        sample_ids=sample_ids,
+        bos_token_id=40,
+        order_mode="sequential",
+    )
+    assert torch.equal(batch.permutation, torch.arange(8).view(1, 8))
+    assert torch.equal(batch.target_tokens, tokens)
+    assert batch.previous_tokens[0, 0].item() == 40
+    assert torch.equal(batch.previous_tokens[0, 1:], tokens[0, :-1])
+
+
+def test_sequential_config_forward_is_prefix_safe():
+    cfg = tiny_config(order_mode="sequential")
+    model = DenseRandomOrderToricLM(cfg).eval()
+    tokens_a = torch.tensor([[4, 5, 6, 7, 8, 9, 10, 11]])
+    tokens_b = torch.tensor([[4, 5, 6, 7, 20, 21, 22, 23]])
+    out_a = model(tokens_a, sample_ids=torch.tensor([123]), return_order=True)
+    out_b = model(tokens_b, sample_ids=torch.tensor([123]), return_order=True)
+    assert torch.equal(out_a["permutation"], torch.arange(8).view(1, 8))
+    assert torch.allclose(out_a["logits"][:, 4], out_b["logits"][:, 4], atol=1e-6)
+
+
 def test_score_before_update_future_tokens_do_not_affect_current_logit():
     cfg = tiny_config()
     model = DenseRandomOrderToricLM(cfg).eval()
@@ -144,6 +171,7 @@ def test_all_phases_config_enables_tokengt_fusion_from_step_zero():
     model = payload["model"]
     training = payload["training"]
     first_phase = payload["phase_curriculum"]["phases"][0]
+    assert model["order_mode"] == "sequential"
     assert model["use_tokengt_causal_graph"] is True
     assert model["use_tokengt_graph_fusion"] is True
     assert model["trajectory_memory_persistence_weight"] > 0.0

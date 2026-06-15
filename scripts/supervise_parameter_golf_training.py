@@ -265,6 +265,8 @@ def start_training(args: argparse.Namespace, state: dict[str, Any], checkpoint: 
         "scripts/train_parameter_golf_random_order.py",
         "--config",
         args.config,
+        "--checkpoint-dir",
+        args.checkpoint_dir,
         "--wandb",
         "--wandb-project",
         args.wandb_project,
