@@ -153,6 +153,9 @@ only against scalar topology summaries.  Each GUDHI/Macaulay2 record includes:
 - simplicial-map validity for the level and radius maps between simplex trees;
 - Miller-Sturmfels-style bivariate xy-grid summaries with minimal inner
   corners, adjacent lcm outer corners, and adjacent syzygy multipliers;
+- Macaulay2 identity chain maps, mapping cones, pruned cone homology, Ext
+  modules, and Tor modules for the exact `F2[x_level,y_radius]` persistence
+  complex and its homology-module resolutions;
 - W&B aliases under `gudhi_persistence/*`, `topology/exact_gudhi/*`, and
   `bgg_category_o/persistence/*`.
 

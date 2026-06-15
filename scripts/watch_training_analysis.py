@@ -233,6 +233,7 @@ def gudhi_wandb_payload(summary: dict[str, Any], *, step: int) -> dict[str, floa
         "mean_macaulay2_homogeneous_d1": "mean_macaulay2_homogeneous_d1",
         "mean_macaulay2_homogeneous_d2": "mean_macaulay2_homogeneous_d2",
         "mean_macaulay2_d_squared_zero": "mean_macaulay2_d_squared_zero",
+        "mean_macaulay2_identity_cone_acyclic": "mean_macaulay2_identity_cone_acyclic",
         "mean_finite_field_d_squared_zero": "mean_finite_field_d_squared_zero",
         "mean_finite_field_exact_at_c1": "mean_finite_field_exact_at_c1",
         "mean_be_rank_residual_c1": "mean_be_rank_residual_c1",
@@ -262,6 +263,12 @@ def gudhi_wandb_payload(summary: dict[str, Any], *, step: int) -> dict[str, floa
     )
     payload["bgg_category_o/persistence/macaulay2_d_squared_zero"] = finite_float(
         summary.get("mean_macaulay2_d_squared_zero"), 0.0
+    )
+    payload["bgg_category_o/persistence/macaulay2_identity_cone_acyclic"] = finite_float(
+        summary.get("mean_macaulay2_identity_cone_acyclic"), 0.0
+    )
+    payload["topology/exact_gudhi/macaulay2_identity_cone_acyclic"] = finite_float(
+        summary.get("mean_macaulay2_identity_cone_acyclic"), 0.0
     )
     payload["bgg_category_o/persistence/gf2_exact_at_c1"] = finite_float(
         summary.get("mean_finite_field_exact_at_c1"), 0.0

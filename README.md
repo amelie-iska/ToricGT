@@ -136,7 +136,9 @@ The current smoke-generated pages are:
   show exact `GF(2)` chain audits (`d_1 d_2=0`, exactness at `C_1`,
   Buchsbaum-Eisenbud rank residuals), simplicial-map validity for the
   reasoning/radius structure maps, minimal xy-grid inner corners, adjacent
-  lcm outer corners, and adjacent monomial syzygies.
+  lcm outer corners, adjacent monomial syzygies, and Macaulay2-derived
+  identity chain maps, mapping cones, Ext modules, and Tor modules for the
+  `F2[x_level,y_radius]` persistence complex.
 - `outputs/analysis_fixture_tokengt_inference_latest/index.html`: root
   dark-mode browser entrypoint linking the run manifest, reasoning geometry,
   exact GUDHI/Macaulay2 persistence, and embedding CAS sidecar.
@@ -148,12 +150,15 @@ The current smoke-generated pages are:
   saved embedding payloads.  The Macaulay2 section includes the toric ideal,
   Betti table, free resolution, resolution length, projective dimension, and
   regularity, plus the same fields for the cokernel module used by downstream
-  CAS-backed losses.
+  CAS-backed losses.  It also renders the module-presentation differentials,
+  square-zero checks, dual resolution, Ext/Tor modules, and the identity
+  chain-map/mapping-cone sanity check.
 
 When these audits are run by `scripts/watch_training_analysis.py`, the summary
 is mirrored to W&B under both compact and explicit namespaces, including
 `gudhi_persistence/mean_finite_field_exact_at_c1`,
 `gudhi_persistence/mean_be_rank_residual_c1`,
+`gudhi_persistence/mean_macaulay2_identity_cone_acyclic`,
 `topology/exact_gudhi/simplicial_map_valid_fraction`, and
 `bgg_category_o/persistence/gf2_exact_at_c1`.  These are analysis metrics:
 they are emitted without starting, stopping, or restarting training unless the
@@ -415,10 +420,10 @@ Local implementation:
 - `src/toricgt/polar_cache.py`: recursive polar encode/decode utilities for optional KV-cache compression experiments.
 - `src/toricgt/parameter_golf_export.py`: byte accounting and compressed artifact export helpers.
 - `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing, advanced reasoning/memory special-token encoding, official-byte TokenGT-style causal graph supervision, GraphCG/analogy/topology hooks, Toric BGG/Koszul probes, and differentiable Slepian/Pollak trajectory-concentration losses.
-- `src/toricgt/gudhi_persistence.py`: exact GUDHI simplex-tree persistence audits, vectorized PH metrics, explicit `F2[x_level,y_radius]` reasoning/radius module maps, exact `GF(2)` chain-complex checks, Miller-Sturmfels-style xy-grid corner/syzygy summaries, Macaulay2 bigraded chain-complex scripts, homology modules, free resolutions, and Betti-table extraction.
+- `src/toricgt/gudhi_persistence.py`: exact GUDHI simplex-tree persistence audits, vectorized PH metrics, explicit `F2[x_level,y_radius]` reasoning/radius module maps, exact `GF(2)` chain-complex checks, Miller-Sturmfels-style xy-grid corner/syzygy summaries, Macaulay2 bigraded chain-complex scripts, homology modules, free resolutions, identity chain-map/mapping-cone audits, Ext/Tor modules, and Betti-table extraction.
 - `src/toricgt/toric_geometry_tasks.py`: training-only low-rank toric probes for Newton active-face, bend, binomial, affine-Coxeter, braid, and phase-foliation signals.
 - `src/toricgt/toric_vector_bundles.py`: training-only Klyachko vector-bundle and equivariant-sheaf probes over the tropical-to-toric embedding fan, with exact finite filtration nesting, chart-transition cocycle checks, cone-splitting regularizers, and Cech-style gluing metrics.
-- `src/toricgt/cas_certificates.py`, `src/toricgt/cas_oracles.py`, and `src/toricgt/cas_backed_losses.py`: exact certificate schemas/cache, strict SageMath/Macaulay2 discovery and oracle wrappers, closed-form finite Stanley-Reisner certificates, toric-ideal free-resolution certificates with projective dimension and regularity, and differentiable losses that consume exact CAS/closed-form targets without inventing algebraic facts in Torch.
+- `src/toricgt/cas_certificates.py`, `src/toricgt/cas_oracles.py`, and `src/toricgt/cas_backed_losses.py`: exact certificate schemas/cache, strict SageMath/Macaulay2 discovery and oracle wrappers, closed-form finite Stanley-Reisner certificates, toric-ideal free-resolution certificates with projective dimension, regularity, dual complexes, Ext/Tor modules, and derived identity-cone sanity checks, and differentiable losses that consume exact CAS/closed-form targets without inventing algebraic facts in Torch.
 - `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves used by the geometry audit suite.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, Slepian envelopes, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.

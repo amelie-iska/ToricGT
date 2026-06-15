@@ -333,6 +333,14 @@ def macaulay2_script_for_bigraded_chain(presentation: dict[str, Any]) -> str:
             "H0 = HH_0 C",
             "H1 = HH_1 C",
             "H2 = HH_2 C",
+            "RH0 = res H0",
+            "RH1 = res H1",
+            "RH2 = res H2",
+            "IdC = id_C",
+            "ConeIdC = try cone IdC else null",
+            "ConeIdRH0 = try cone id_RH0 else null",
+            "ConeIdRH1 = try cone id_RH1 else null",
+            "ConeIdRH2 = try cone id_RH2 else null",
             "resolutionSummary = hashTable {",
             '  "H0_module" => toString H0,',
             '  "H1_module" => toString H1,',
@@ -340,12 +348,56 @@ def macaulay2_script_for_bigraded_chain(presentation: dict[str, Any]) -> str:
             '  "H0_presentation" => toString presentation H0,',
             '  "H1_presentation" => toString presentation H1,',
             '  "H2_presentation" => toString presentation H2,',
-            '  "H0_betti" => toString betti res H0,',
-            '  "H1_betti" => toString betti res H1,',
-            '  "H2_betti" => toString betti res H2,',
-            '  "H0_resolution" => toString res H0,',
-            '  "H1_resolution" => toString res H1,',
-            '  "H2_resolution" => toString res H2',
+            '  "H0_betti" => toString betti RH0,',
+            '  "H1_betti" => toString betti RH1,',
+            '  "H2_betti" => toString betti RH2,',
+            '  "H0_resolution" => toString RH0,',
+            '  "H1_resolution" => toString RH1,',
+            '  "H2_resolution" => toString RH2',
+            "}",
+            "derivedSummary = hashTable {",
+            '  "chain_identity_map" => toString IdC,',
+            '  "chain_identity_mapping_cone" => toString ConeIdC,',
+            '  "chain_identity_mapping_cone_homology_pruned" => hashTable {',
+            '    "H0" => toString (try prune HH_0 ConeIdC else ""),',
+            '    "H1" => toString (try prune HH_1 ConeIdC else ""),',
+            '    "H2" => toString (try prune HH_2 ConeIdC else "")',
+            "  },",
+            '  "homology_resolution_identity_maps" => hashTable {',
+            '    "H0" => toString (try id_RH0 else ""),',
+            '    "H1" => toString (try id_RH1 else ""),',
+            '    "H2" => toString (try id_RH2 else "")',
+            "  },",
+            '  "homology_resolution_identity_cone_homology_pruned" => hashTable {',
+            '    "H0" => hashTable {',
+            '      "H0" => toString (try prune HH_0 ConeIdRH0 else ""),',
+            '      "H1" => toString (try prune HH_1 ConeIdRH0 else "")',
+            "    },",
+            '    "H1" => hashTable {',
+            '      "H0" => toString (try prune HH_0 ConeIdRH1 else ""),',
+            '      "H1" => toString (try prune HH_1 ConeIdRH1 else "")',
+            "    },",
+            '    "H2" => hashTable {',
+            '      "H0" => toString (try prune HH_0 ConeIdRH2 else ""),',
+            '      "H1" => toString (try prune HH_1 ConeIdRH2 else "")',
+            "    }",
+            "  },",
+            '  "Ext_modules" => hashTable {',
+            '    "H0_Ext0" => toString (try Ext^0(H0,R) else ""),',
+            '    "H0_Ext1" => toString (try Ext^1(H0,R) else ""),',
+            '    "H1_Ext0" => toString (try Ext^0(H1,R) else ""),',
+            '    "H1_Ext1" => toString (try Ext^1(H1,R) else ""),',
+            '    "H2_Ext0" => toString (try Ext^0(H2,R) else ""),',
+            '    "H2_Ext1" => toString (try Ext^1(H2,R) else "")',
+            "  },",
+            '  "Tor_residue_modules" => hashTable {',
+            '    "H0_Tor0" => toString (try Tor_0(H0,coker vars R) else ""),',
+            '    "H0_Tor1" => toString (try Tor_1(H0,coker vars R) else ""),',
+            '    "H1_Tor0" => toString (try Tor_0(H1,coker vars R) else ""),',
+            '    "H1_Tor1" => toString (try Tor_1(H1,coker vars R) else ""),',
+            '    "H2_Tor0" => toString (try Tor_0(H2,coker vars R) else ""),',
+            '    "H2_Tor1" => toString (try Tor_1(H2,coker vars R) else "")',
+            "  }",
             "}",
             "out = hashTable {",
             '  "kind" => "macaulay2_bigraded_persistence_resolution",',
@@ -360,7 +412,8 @@ def macaulay2_script_for_bigraded_chain(presentation: dict[str, Any]) -> str:
             '  "chain_complex" => toString C,',
             '  "boundary_d1" => toString d1,',
             '  "boundary_d2" => toString d2,',
-            '  "homology_and_resolutions" => resolutionSummary',
+            '  "homology_and_resolutions" => resolutionSummary,',
+            '  "derived_category_maps" => derivedSummary',
             "}",
             'print "TORICGT_JSON_BEGIN"',
             "print toJSON out",
@@ -983,6 +1036,17 @@ def summarize_audits(records: list[dict[str, Any]]) -> dict[str, Any]:
                 values.append(float(node))
         return float(np.mean(values)) if values else 0.0
 
+    def derived_identity_cone_acyclic(record: dict[str, Any]) -> float:
+        derived = record.get("macaulay2_resolution", {}).get("derived_category_maps", {})
+        homology = derived.get("chain_identity_mapping_cone_homology_pruned", {}) if isinstance(derived, dict) else {}
+        if not homology:
+            return 0.0
+        return (
+            1.0
+            if all(str(homology.get(key, "")).strip() == "R^0" for key in ("H0", "H1", "H2"))
+            else 0.0
+        )
+
     return {
         "schema": "toricgt.gudhi_persistence.summary.v1",
         "backend": "gudhi",
@@ -998,6 +1062,11 @@ def summarize_audits(records: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_macaulay2_homogeneous_d1": mean(("macaulay2_resolution", "homogeneous_d1")),
         "mean_macaulay2_homogeneous_d2": mean(("macaulay2_resolution", "homogeneous_d2")),
         "mean_macaulay2_d_squared_zero": mean(("macaulay2_resolution", "d_squared_zero")),
+        "mean_macaulay2_identity_cone_acyclic": float(
+            np.mean([derived_identity_cone_acyclic(item) for item in records])
+        )
+        if records
+        else 0.0,
         "mean_finite_field_d_squared_zero": mean(("finite_field_chain_audit", "d_squared_zero")),
         "mean_finite_field_exact_at_c1": mean(("finite_field_chain_audit", "exact_at_c1")),
         "mean_be_rank_residual_c1": mean(("finite_field_chain_audit", "buchsbaum_eisenbud_rank_residual_c1")),
@@ -1011,6 +1080,7 @@ def summarize_audits(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "num_simplices": item.get("simplex_tree", {}).get("num_simplices"),
                 "finite_field_chain_audit": item.get("finite_field_chain_audit", {}),
                 "structure_map_summary": item.get("two_parameter_module", {}).get("structure_map_summary", {}),
+                "macaulay2_identity_cone_acyclic": derived_identity_cone_acyclic(item),
             }
             for item in records
         ],

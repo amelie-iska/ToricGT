@@ -536,6 +536,7 @@ def write_record_html(record: dict[str, Any], out: Path, *, rel_json: str, rel_m
     fig_html = record_figure(record).to_html(include_plotlyjs="cdn", full_html=False, div_id=f"plot_{safe_slug(record['record_id'])}")
     resolution = record.get("macaulay2_resolution", {})
     hom = resolution.get("homology_and_resolutions", {}) if isinstance(resolution.get("homology_and_resolutions", {}), dict) else {}
+    derived = resolution.get("derived_category_maps", {}) if isinstance(resolution.get("derived_category_maps", {}), dict) else {}
     body = f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>{html.escape(record['record_id'])} GUDHI persistence audit</title><style>{CSS}</style></head>
 <body><main>
@@ -578,6 +579,9 @@ def write_record_html(record: dict[str, Any], out: Path, *, rel_json: str, rel_m
   <h2>Macaulay2 Homology Modules And Free Resolutions</h2>
   <details open><summary>Homology modules and free resolutions</summary>
   <pre>{html.escape(json.dumps(hom, indent=2, sort_keys=True))}</pre>
+  </details>
+  <details open><summary>Derived maps, identity mapping cones, Ext, and Tor modules</summary>
+  <pre>{html.escape(json.dumps(derived, indent=2, sort_keys=True))}</pre>
   </details>
   <details><summary>Full Macaulay2 resolution payload</summary>
   <pre>{html.escape(json.dumps(resolution, indent=2, sort_keys=True))}</pre>

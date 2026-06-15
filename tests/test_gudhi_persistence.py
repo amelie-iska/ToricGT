@@ -54,6 +54,12 @@ def test_gudhi_macaulay2_bigraded_resolution_for_small_cloud() -> None:
     assert audit["macaulay2_resolution"]["homogeneous_d2"] is True
     assert audit["macaulay2_resolution"]["d_squared_zero"] is True
     assert "H0_betti" in audit["macaulay2_resolution"]["homology_and_resolutions"]
+    derived = audit["macaulay2_resolution"]["derived_category_maps"]
+    assert "ChainComplexMap" in derived["chain_identity_map"]
+    assert derived["chain_identity_mapping_cone_homology_pruned"]["H0"] == "R^0"
+    assert derived["chain_identity_mapping_cone_homology_pruned"]["H1"] == "R^0"
+    assert "H0_Ext0" in derived["Ext_modules"]
+    assert "H1_Tor1" in derived["Tor_residue_modules"]
     assert audit["xy_grid_module"]["kind"] == "miller_sturmfels_bivariate_grid_summary"
     assert audit["xy_grid_module"]["chain_degrees"]["1"]["generator_count"] > 0
     assert "adjacent_lcm_syzygies" in audit["xy_grid_module"]["chain_degrees"]["1"]
@@ -185,11 +191,13 @@ def test_gudhi_audit_script_writes_dark_html_and_m2_script(tmp_path: Path) -> No
     assert "M2 d1*d2=0" in record_html
     assert "Hilbert H0 grid" in record_html
     assert "Exact Chain And Simplicial-Map Audit" in record_html
+    assert "Derived maps, identity mapping cones, Ext, and Tor modules" in record_html
     assert "adjacent syzygies" in record_html
     assert "<details" in record_html
     assert list((out / "macaulay2").glob("*.m2"))
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert summary["mean_macaulay2_d_squared_zero"] == 1.0
+    assert summary["mean_macaulay2_identity_cone_acyclic"] == 1.0
 
 
 def test_watcher_index_and_gudhi_args_are_available() -> None:
@@ -237,6 +245,7 @@ def test_watcher_gudhi_wandb_payload_has_exact_metric_aliases() -> None:
             "mean_macaulay2_homogeneous_d1": 1.0,
             "mean_macaulay2_homogeneous_d2": 1.0,
             "mean_macaulay2_d_squared_zero": 1.0,
+            "mean_macaulay2_identity_cone_acyclic": 1.0,
             "mean_finite_field_exact_at_c1": 1.0,
             "mean_be_rank_residual_c1": 0.0,
             "mean_simplicial_map_valid_fraction": 1.0,
@@ -250,6 +259,8 @@ def test_watcher_gudhi_wandb_payload_has_exact_metric_aliases() -> None:
     assert payload["topology/exact_gudhi/mean_h1_persistence_image_norm"] == 0.125
     assert payload["bgg_category_o/persistence/two_parameter_square_residual"] == 0.0
     assert payload["bgg_category_o/persistence/macaulay2_d_squared_zero"] == 1.0
+    assert payload["bgg_category_o/persistence/macaulay2_identity_cone_acyclic"] == 1.0
+    assert payload["topology/exact_gudhi/macaulay2_identity_cone_acyclic"] == 1.0
     assert payload["bgg_category_o/persistence/gf2_exact_at_c1"] == 1.0
     assert payload["bgg_category_o/persistence/be_rank_residual_c1"] == 0.0
     assert payload["topology/exact_gudhi/simplicial_map_valid_fraction"] == 1.0

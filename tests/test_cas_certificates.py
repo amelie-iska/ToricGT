@@ -269,6 +269,19 @@ def test_exact_macaulay2_toric_ideal_certificate_if_installed() -> None:
     assert algebra["regularity"] is not None
     assert "ChainComplex" in algebra["free_resolution_raw"] or "Complex" in algebra["free_resolution_raw"]
     assert algebra["module_projective_dimension"] is not None
+    assert algebra["module_presentation_raw"]
+    assert algebra["module_resolution_square_zero"]["d1d2"] is True
+    assert algebra["module_resolution_square_zero"]["d2d3"] is True
+    assert algebra["module_resolution_differentials"]["d1"]
+    assert algebra["module_dual_resolution_raw"]
+    assert "Ext1" in algebra["module_ext_modules"]
+    assert "Tor1" in algebra["module_tor_residue_modules"]
+    derived = algebra["derived_category_maps"]
+    assert "ChainComplexMap" in derived["identity_chain_map_raw"]
+    assert "ChainComplex" in derived["identity_mapping_cone_raw"]
+    assert derived["identity_mapping_cone_homology_pruned"]["H0"] == "R^0"
+    assert derived["identity_mapping_cone_homology_pruned"]["H1"] == "R^0"
+    assert derived["identity_mapping_cone_homology_pruned"]["H2"] == "R^0"
     assert validate_certificate_payload(payload) == []
 
     logits = torch.tensor([[3.0, 5.0, 8.0, 11.0]], requires_grad=True)

@@ -90,5 +90,9 @@ def test_embedding_cas_sidecar_runs_sage_and_macaulay2(tmp_path: Path) -> None:
     algebra = record["macaulay2_toric_ideal"]["commutative_algebra"]
     assert algebra["resolution_length"] is not None
     assert algebra["free_resolution_raw"]
-    assert "Macaulay2 Free Resolution" in (out / "records" / "record_000_cas_sidecar.html").read_text(encoding="utf-8")
+    assert algebra["derived_category_maps"]["identity_mapping_cone_homology_pruned"]["H0"] == "R^0"
+    html = (out / "records" / "record_000_cas_sidecar.html").read_text(encoding="utf-8")
+    assert "Macaulay2 Free Resolution" in html
+    assert "Macaulay2 Derived Maps And Modules" in html
+    assert "Identity chain map and mapping cone" in html
     assert (out / "index.html").exists()

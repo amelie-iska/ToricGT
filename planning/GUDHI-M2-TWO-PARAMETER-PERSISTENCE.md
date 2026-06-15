@@ -126,6 +126,14 @@ corresponding adjacent monomial syzygy multipliers.  This is the browser-level
 version of the two-variable monomial-ideal grid picture used to make module
 data inspectable.
 
+The Macaulay2 payload now includes exact derived-category sanity data.  It
+constructs the identity chain map of the bigraded persistence complex, its
+mapping cone, pruned homology of that cone, identity maps on the free
+resolutions of `H_0`, `H_1`, and `H_2`, mapping-cone homology for those
+resolution identity maps, and `Ext`/`Tor` modules over
+`F2[x_level,y_radius]`.  Periodic reports therefore show actual chain maps and
+derived objects in addition to scalar Betti summaries.
+
 The simplicial structure maps are audited twice.  The exact chain-square audit
 checks commutativity by multiplying GF(2) inclusion matrices.  The simplex-tree
 map audit separately checks that vertex maps induced by the level/radius
@@ -189,9 +197,12 @@ gudhi_persistence/mean_finite_field_d_squared_zero
 gudhi_persistence/mean_finite_field_exact_at_c1
 gudhi_persistence/mean_be_rank_residual_c1
 gudhi_persistence/mean_simplicial_map_valid_fraction
+gudhi_persistence/mean_macaulay2_identity_cone_acyclic
+topology/exact_gudhi/macaulay2_identity_cone_acyclic
 topology/exact_gudhi/gf2_exact_at_c1
 topology/exact_gudhi/be_rank_residual_c1
 topology/exact_gudhi/simplicial_map_valid_fraction
+bgg_category_o/persistence/macaulay2_identity_cone_acyclic
 bgg_category_o/persistence/gf2_exact_at_c1
 bgg_category_o/persistence/be_rank_residual_c1
 ```

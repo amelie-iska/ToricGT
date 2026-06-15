@@ -490,6 +490,8 @@ I = ideal Igens
 Cideal = res I
 M = coker gens I
 Cmodule = res M
+IdModuleResolution = id_Cmodule
+ConeIdModuleResolution = try cone IdModuleResolution else null
 polys = flatten entries gens I
 relationRows = apply(polys, f -> (
     ee := exponents f;
@@ -513,10 +515,28 @@ out = hashTable {{
   "projective_dimension" => try pdim I else -1,
   "regularity" => try regularity I else -1,
   "module" => toString M,
+  "module_presentation" => toString presentation M,
   "module_betti" => toString betti Cmodule,
   "module_resolution" => toString Cmodule,
+  "module_resolution_d1" => toString try Cmodule.dd_1 else "",
+  "module_resolution_d2" => toString try Cmodule.dd_2 else "",
+  "module_resolution_d3" => toString try Cmodule.dd_3 else "",
+  "module_resolution_d1d2_zero" => try Cmodule.dd_1 * Cmodule.dd_2 == 0 else true,
+  "module_resolution_d2d3_zero" => try Cmodule.dd_2 * Cmodule.dd_3 == 0 else true,
   "module_projective_dimension" => try pdim M else -1,
-  "module_regularity" => try regularity M else -1
+  "module_regularity" => try regularity M else -1,
+  "module_dual_resolution" => toString try dual Cmodule else "",
+  "module_ext0" => toString try Ext^0(M,R) else "",
+  "module_ext1" => toString try Ext^1(M,R) else "",
+  "module_ext2" => toString try Ext^2(M,R) else "",
+  "module_tor0_residue" => toString try Tor_0(M,coker vars R) else "",
+  "module_tor1_residue" => toString try Tor_1(M,coker vars R) else "",
+  "module_tor2_residue" => toString try Tor_2(M,coker vars R) else "",
+  "identity_chain_map" => toString try IdModuleResolution else "",
+  "identity_mapping_cone" => toString try ConeIdModuleResolution else "",
+  "identity_mapping_cone_h0_pruned" => toString try prune HH_0 ConeIdModuleResolution else "",
+  "identity_mapping_cone_h1_pruned" => toString try prune HH_1 ConeIdModuleResolution else "",
+  "identity_mapping_cone_h2_pruned" => toString try prune HH_2 ConeIdModuleResolution else ""
 }}
 print "TORICGT_JSON_BEGIN"
 print toJSON out
@@ -764,10 +784,40 @@ print "TORICGT_JSON_END"
             "projective_dimension": payload.get("projective_dimension", None),
             "regularity": payload.get("regularity", None),
             "module": payload.get("module", ""),
+            "module_presentation_raw": payload.get("module_presentation", ""),
             "module_betti_table_raw": payload.get("module_betti", ""),
             "module_free_resolution_raw": payload.get("module_resolution", ""),
+            "module_resolution_differentials": {
+                "d1": payload.get("module_resolution_d1", ""),
+                "d2": payload.get("module_resolution_d2", ""),
+                "d3": payload.get("module_resolution_d3", ""),
+            },
+            "module_resolution_square_zero": {
+                "d1d2": payload.get("module_resolution_d1d2_zero", False),
+                "d2d3": payload.get("module_resolution_d2d3_zero", False),
+            },
             "module_projective_dimension": payload.get("module_projective_dimension", None),
             "module_regularity": payload.get("module_regularity", None),
+            "module_dual_resolution_raw": payload.get("module_dual_resolution", ""),
+            "module_ext_modules": {
+                "Ext0": payload.get("module_ext0", ""),
+                "Ext1": payload.get("module_ext1", ""),
+                "Ext2": payload.get("module_ext2", ""),
+            },
+            "module_tor_residue_modules": {
+                "Tor0": payload.get("module_tor0_residue", ""),
+                "Tor1": payload.get("module_tor1_residue", ""),
+                "Tor2": payload.get("module_tor2_residue", ""),
+            },
+            "derived_category_maps": {
+                "identity_chain_map_raw": payload.get("identity_chain_map", ""),
+                "identity_mapping_cone_raw": payload.get("identity_mapping_cone", ""),
+                "identity_mapping_cone_homology_pruned": {
+                    "H0": payload.get("identity_mapping_cone_h0_pruned", ""),
+                    "H1": payload.get("identity_mapping_cone_h1_pruned", ""),
+                    "H2": payload.get("identity_mapping_cone_h2_pruned", ""),
+                },
+            },
         }
         cert = ToricTropicalCertificate(
             kind="macaulay2_toric_ideal_certificate",
