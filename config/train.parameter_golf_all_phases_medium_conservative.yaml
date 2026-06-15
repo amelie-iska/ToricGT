@@ -165,8 +165,8 @@ model:
   trajectory_memory_persistence_landscape_resolution: 24
   trajectory_memory_persistence_image_resolution: 12
 
-  # Instantiated and trained from the start with a small Category O/Koszul
-  # pressure, then gently increased once OAI BPB stabilizes.
+  # Instantiated from the start so diagnostics are logged, but Category O/BGG
+  # loss pressure stays zero until the late toric_bgg_category_o phase.
   use_toric_bgg: true
   toric_bgg_num_standard_tokens: 8
   toric_bgg_probe_rank: 8
@@ -288,7 +288,7 @@ training:
   graphcg_loss_weight: 0.00004
   analogy_lattice_loss_weight: 0.00002
   toric_geometry_loss_weight: 0.000015
-  toric_bgg_loss_weight: 0.000002
+  toric_bgg_loss_weight: 0.0
   koszul_persistence_loss_weight: 0.000002
   slepian_pollak_loss_weight: 0.000006
   tokengt_graph_loss_weight: 0.00005
@@ -379,7 +379,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00004
       analogy_lattice_loss_weight: 0.00002
       toric_geometry_loss_weight: 0.000015
-      toric_bgg_loss_weight: 0.000002
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.000002
       slepian_pollak_loss_weight: 0.000006
       tokengt_graph_loss_weight: 0.00005
@@ -404,7 +404,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00010
       analogy_lattice_loss_weight: 0.00008
       toric_geometry_loss_weight: 0.00006
-      toric_bgg_loss_weight: 0.000018
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.000020
       slepian_pollak_loss_weight: 0.000035
       tokengt_graph_loss_weight: 0.00006
@@ -429,7 +429,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00012
       analogy_lattice_loss_weight: 0.00010
       toric_geometry_loss_weight: 0.00008
-      toric_bgg_loss_weight: 0.000022
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.000030
       slepian_pollak_loss_weight: 0.000035
       tokengt_graph_loss_weight: 0.00008
@@ -454,7 +454,7 @@ phase_curriculum:
       graphcg_loss_weight: 0.00018
       analogy_lattice_loss_weight: 0.00012
       toric_geometry_loss_weight: 0.00010
-      toric_bgg_loss_weight: 0.000025
+      toric_bgg_loss_weight: 0.0
       koszul_persistence_loss_weight: 0.000035
       slepian_pollak_loss_weight: 0.00005
       tokengt_graph_loss_weight: 0.00008

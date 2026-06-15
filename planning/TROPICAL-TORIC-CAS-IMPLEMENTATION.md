@@ -129,7 +129,7 @@ Sage is the preferred oracle for rational polyhedral and toric-combinatorial
 objects:
 
 - construct cones and rational polyhedral fans;
-- compute face lattices, ray incidences, star/subfan relations, and
+- compute face lattices, one-dimensional-cone incidences, star/subfan relations, and
   refinements;
 - construct normal toric varieties from fans;
 - check whether active-face vectors lie in expected cones;
@@ -498,13 +498,13 @@ The Sage script emitted by `SageToricOracle` should:
 ```python
 from sage.all import *
 
-# Read rational rays, cones, and exponent matrix from JSON.
+# Read rational one-dimensional cones, higher-dimensional cones, and exponent matrix from JSON.
 # Construct Polyhedron(vertices=...) for Newton polytope.
 # Compute or ingest the normal fan.
-# Construct Fan(cones, rays=...)
+# Construct Fan(cones, rays=...) using Sage's API name for the one-dimensional cones.
 # Check cone containment and refinement relations.
 # Build ToricVariety(fan) when needed.
-# Emit rays, maximal cones, face incidence, wall normals,
+# Emit one-dimensional cones, maximal cones, face incidence, wall normals,
 # support-function slope data, lattice indices, and orbit codimensions.
 ```
 

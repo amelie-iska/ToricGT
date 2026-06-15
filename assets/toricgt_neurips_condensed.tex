@@ -128,6 +128,17 @@ Let a tropical probe be $\psi(h)=\max_r(\ip{a_r}{h}+b_r)$ with rational slopes $
 \end{equation}
 is the exposed face of the lifted polytope $\Conv\{(a_r,b_r)\}_r$ under the linear functional $(a,b)\mapsto\ip{a}{h}+b$.  Hence tropical active-face diagnostics are cells of a normal fan.  This imports the ReLU fan / Cartier-divisor viewpoint of Fu \cite{fu2025toricrelu} into ToricGT tropical subcomputations, complementing earlier tropical rational interpretations of ReLU networks \cite{zhang2018tropical}.
 
+\paragraph{Tropical-to-toric embedding.}
+The more precise construction is a finite sidecar, not a claim that every Transformer layer is toric.  Let $N\simeq\Z^r$, $M=\operatorname{Hom}(N,\Z)$, $T_N=\operatorname{Spec}K[M]$, and let a rationalized tropical head provide characters $a_r\in M$ and scores
+\begin{equation}
+  \ell_r(u)=\ip{a_r}{u}+b_r,\qquad u=P h\in N_\R.
+\end{equation}
+Over a nonarchimedean field with uniformizer $\tau$, define
+\begin{equation}
+  f=\sum_r \tau^{-b_r}\chi^{a_r}.
+\end{equation}
+With the max-plus sign convention, $\operatorname{in}_{-u}(f)$ keeps exactly those monomials whose indices lie in $\argmax_r\ell_r(u)$.  Thus attention provenance is an initial degeneration; the tie locus is the tropical hypersurface, while the unique-max chambers are the surrounding normal-fan decision regions.  For a family of heads one forms an ideal $I_H\subset K[M]$ and chooses a rational fan $\Sigma$ refining the observed normal and Groebner decompositions.  The toric variety $X_\Sigma$ then supplies orbit strata, invariant divisors, Chow/Minkowski weights, monomial initial ideals, Cox modules, and Klyachko-style vector-bundle filtrations for exact audits \cite{maclagan2012intro,maclaganrincon2018tropicalideals,maclaganrincon2020balanced,m2tropical2019,khanmaclagan2024tropicalbundles}.  If $|\Sigma|=\operatorname{Trop}(V(I_H)\cap T_N)$ and the usual multiplication map is flat and surjective, the closure is a tropical compactification; otherwise $\Sigma$ is still a reproducible finite toric envelope for training metrics.
+
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{fig_toric_geometry_relu_toricgt.pdf}
@@ -526,6 +537,61 @@ Yaoying Fu.
 Liwen Zhang, Gregory Naitzat, and Lek-Heng Lim.
 \newblock Tropical geometry of deep neural networks.
 \newblock In \emph{ICML}, PMLR 80:5824--5832, 2018.
+
+\bibitem{maclagan2012intro}
+Diane Maclagan.
+\newblock Introduction to tropical algebraic geometry.
+\newblock arXiv:1207.1925, 2012.
+
+\bibitem{maclaganrincon2018tropicalideals}
+Diane Maclagan and Felipe Rinc\'on.
+\newblock Tropical ideals.
+\newblock \emph{Compositio Mathematica}, 154(3):640--670, 2018. arXiv:1609.03838.
+
+\bibitem{maclaganrincon2020balanced}
+Diane Maclagan and Felipe Rinc\'on.
+\newblock Varieties of tropical ideals are balanced.
+\newblock arXiv:2009.14557, 2020.
+
+\bibitem{m2tropical2019}
+Carlos Am\'endola, Kathl\'en Kohn, Sara Lamboglia, Diane Maclagan, Ben Smith, Jeff Sommars, Paolo Tripoli, and Magdalena Zajaczkowska.
+\newblock Computing tropical varieties in Macaulay2.
+\newblock arXiv:1710.10651, 2019.
+
+\bibitem{khanmaclagan2024tropicalbundles}
+Bivas Khan and Diane Maclagan.
+\newblock Tropical vector bundles.
+\newblock arXiv:2405.03505, 2024.
+
+\bibitem{junminchevatolliver2023tropicalschemes}
+Jaiung Jun, Kalina Mincheva, and Jeffrey Tolliver.
+\newblock Vector bundles on tropical schemes.
+\newblock arXiv:2009.03030, 2023.
+
+\bibitem{kavehmanon2023toricbundles}
+Kiumars Kaveh and Christopher Manon.
+\newblock Toric vector bundles, valuations and tropical geometry.
+\newblock arXiv:2304.11211, 2023.
+
+\bibitem{schock2024quasilinear}
+Nolan Schock.
+\newblock Quasilinear tropical compactifications.
+\newblock arXiv:2112.02062, 2024.
+
+\bibitem{fultonsturmfels1994intersection}
+William Fulton and Bernd Sturmfels.
+\newblock Intersection theory on toric varieties.
+\newblock arXiv:alg-geom/9403002, 1994.
+
+\bibitem{katz2009tropicalintersection}
+Eric Katz.
+\newblock Tropical intersection theory from toric varieties.
+\newblock arXiv:0907.2488, 2009.
+
+\bibitem{millersturmfels2005cca}
+Ezra Miller and Bernd Sturmfels.
+\newblock \emph{Combinatorial Commutative Algebra}.
+\newblock Graduate Texts in Mathematics 227. Springer, 2005.
 
 \bibitem{liu2024graphcg}
 Shengchao Liu, Chengpeng Wang, Jiarui Lu, Weili Nie, Hanchen Wang, Zhuoxinran Li, Bolei Zhou, and Jian Tang.

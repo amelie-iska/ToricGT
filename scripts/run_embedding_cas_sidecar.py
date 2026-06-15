@@ -168,7 +168,10 @@ def metric_rows(payload: dict[str, Any]) -> str:
         "exponent method": payload["exponent_metadata"]["method"],
         "unique exponents": payload["exponent_metadata"]["unique_exponent_count"],
         "Sage fan dimension": payload["sage_normal_fan"]["toric"].get("dimension"),
-        "Sage fan rays": payload["sage_normal_fan"]["toric"].get("num_rays"),
+        "Sage fan one-dimensional cones": payload["sage_normal_fan"]["toric"].get(
+            "num_one_dimensional_cones",
+            payload["sage_normal_fan"]["toric"].get("num_rays"),
+        ),
         "Macaulay2 toric generators": payload["macaulay2_toric_ideal"]["commutative_algebra"].get(
             "toric_ideal_generator_count"
         ),

@@ -217,6 +217,55 @@ def finite_float(value: Any, default: float = 0.0) -> float:
     return out
 
 
+DEFAULT_REQUIRED_METRIC_GROUPS: dict[str, tuple[str, ...]] = {
+    "exact_ph": (
+        "persistent_homology/h0/landscape_norm",
+        "persistent_homology/h1/landscape_norm",
+        "persistent_homology/h1/persistence_image_norm",
+        "persistent_homology/h1/silhouette_norm",
+        "persistent_homology/h1/entropy_vector_norm",
+        "persistent_homology/h1/interval_count",
+    ),
+    "exact_cas": (
+        "bgg_category_o/persistence/macaulay2_d_squared_zero",
+        "bgg_category_o/persistence/macaulay2_identity_cone_acyclic",
+        "analysis_control/exact_gudhi/macaulay2_resolution_ok",
+    ),
+    "bgg_category_o": (
+        "bgg_category_o/persistence/two_parameter_square_residual",
+        "bgg_category_o/persistence/gf2_exact_at_c1",
+        "bgg_category_o/persistence/be_rank_residual_c1",
+    ),
+    "toric_vector_bundle": (
+        "toric_vector_bundle/loss",
+        "toric_vector_bundle/filtration_residual",
+        "toric_vector_bundle/cech_gluing_residual",
+        "toric_sheaf/cocycle_residual",
+    ),
+}
+
+
+def metric_key_fragment(key: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in key).strip("_")
+
+
+def missing_metric_alert_payload(
+    observed: dict[str, Any],
+    required_groups: dict[str, tuple[str, ...]] | None = None,
+) -> dict[str, float]:
+    """Return strict missing-metric status flags for exact analysis groups."""
+
+    groups = required_groups or DEFAULT_REQUIRED_METRIC_GROUPS
+    payload: dict[str, float] = {}
+    for group, keys in groups.items():
+        missing = [key for key in keys if key not in observed]
+        payload[f"metrics_status/{group}_missing_metric_count"] = float(len(missing))
+        payload[f"metrics_status/{group}_all_metrics_present"] = 1.0 if not missing else 0.0
+        for key in missing:
+            payload[f"metrics_missing/{group}/{metric_key_fragment(key)}"] = 1.0
+    return payload
+
+
 def gudhi_wandb_payload(summary: dict[str, Any], *, step: int) -> dict[str, float]:
     """Stable metric aliases for exact GUDHI/Macaulay2 periodic audits."""
 
@@ -239,6 +288,20 @@ def gudhi_wandb_payload(summary: dict[str, Any], *, step: int) -> dict[str, floa
         "mean_be_rank_residual_c1": "mean_be_rank_residual_c1",
         "mean_simplicial_map_valid_fraction": "mean_simplicial_map_valid_fraction",
     }
+    for dim in range(3):
+        for suffix in (
+            "interval_count",
+            "total_persistence",
+            "max_persistence",
+            "mean_persistence",
+            "persistence_entropy",
+            "landscape_norm",
+            "persistence_image_norm",
+            "silhouette_norm",
+            "entropy_vector_norm",
+        ):
+            key = f"mean_h{dim}_{suffix}"
+            fields[key] = key
     payload: dict[str, float] = {
         "trainer/step": float(step),
         "metrics_status/gudhi_persistence_audit_available": 1.0,
@@ -283,6 +346,38 @@ def gudhi_wandb_payload(summary: dict[str, Any], *, step: int) -> dict[str, floa
     payload["analysis_control/exact_gudhi/f2_xy_module_available"] = 1.0
     payload["analysis_control/exact_gudhi/macaulay2_resolution_ok"] = finite_float(
         summary.get("mean_macaulay2_d_squared_zero"), 0.0
+    )
+    for dim in range(3):
+        payload[f"persistent_homology/h{dim}/interval_count"] = finite_float(
+            summary.get(f"mean_h{dim}_interval_count"), 0.0
+        )
+        payload[f"persistent_homology/h{dim}/total_persistence"] = finite_float(
+            summary.get(f"mean_h{dim}_total_persistence"), 0.0
+        )
+        payload[f"persistent_homology/h{dim}/persistence_entropy"] = finite_float(
+            summary.get(f"mean_h{dim}_persistence_entropy"), 0.0
+        )
+        payload[f"persistent_homology/h{dim}/landscape_norm"] = finite_float(
+            summary.get(f"mean_h{dim}_landscape_norm"), 0.0
+        )
+        payload[f"persistent_homology/h{dim}/persistence_image_norm"] = finite_float(
+            summary.get(f"mean_h{dim}_persistence_image_norm"), 0.0
+        )
+        payload[f"persistent_homology/h{dim}/silhouette_norm"] = finite_float(
+            summary.get(f"mean_h{dim}_silhouette_norm"), 0.0
+        )
+        payload[f"persistent_homology/h{dim}/entropy_vector_norm"] = finite_float(
+            summary.get(f"mean_h{dim}_entropy_vector_norm"), 0.0
+        )
+    payload.update(
+        missing_metric_alert_payload(
+            payload,
+            {
+                "exact_ph": DEFAULT_REQUIRED_METRIC_GROUPS["exact_ph"],
+                "exact_cas": DEFAULT_REQUIRED_METRIC_GROUPS["exact_cas"],
+                "bgg_category_o": DEFAULT_REQUIRED_METRIC_GROUPS["bgg_category_o"],
+            },
+        )
     )
     return payload
 

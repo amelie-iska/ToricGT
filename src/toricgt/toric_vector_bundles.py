@@ -2,11 +2,12 @@
 
 This module implements the trainable part of the Klyachko/sheaf story in a
 bounded form.  A toric vector bundle on a toric variety is represented by a
-shared fiber together with compatible filtrations indexed by fan rays.  The
+shared fiber together with compatible filtrations indexed by fan
+one-dimensional cones.  The
 probe below uses an exact finite certificate for those filtrations and trains
 hidden states to expose:
 
-* boundary-ray labels for tropical/toric compactification strata,
+* boundary one-dimensional-cone labels for tropical/toric compactification strata,
 * membership in Klyachko filtration subspaces,
 * local splitting over affine toric charts, and
 * Cech-style gluing of local sheaf sections across chart overlaps.
@@ -47,10 +48,10 @@ class KlyachkoBundleCertificate:
     """Finite toric vector-bundle certificate.
 
     ``filtration_masks[r, l]`` is the basis mask for the level ``l`` subspace
-    of the decreasing filtration attached to ray ``r``.  ``chart_frames`` are
-    orthogonal bases for affine charts.  Transition matrices derived from these
-    frames satisfy the Cech cocycle identity exactly up to floating-point round
-    off.
+    of the decreasing filtration attached to the one-dimensional cone indexed
+    by ``r``.  ``chart_frames`` are orthogonal bases for affine charts.
+    Transition matrices derived from these frames satisfy the Cech cocycle
+    identity exactly up to floating-point round off.
     """
 
     rays: torch.Tensor
@@ -86,10 +87,11 @@ def default_klyachko_certificate(
 ) -> KlyachkoBundleCertificate:
     """Construct a small exact Klyachko-style certificate.
 
-    The fan is the cyclic two-dimensional fan with adjacent-ray cones.  The
-    filtration masks are nested coordinate subspaces; this makes the certificate
-    itself exactly compatible while still giving hidden states a nontrivial
-    membership and chart-splitting target.
+    The fan is the cyclic two-dimensional fan whose maximal cones are spanned
+    by adjacent one-dimensional cones.  The filtration masks are nested
+    coordinate subspaces; this makes the certificate itself exactly compatible
+    while still giving hidden states a nontrivial membership and
+    chart-splitting target.
     """
 
     rank = max(2, int(rank))

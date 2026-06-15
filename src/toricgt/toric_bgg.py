@@ -15,6 +15,18 @@ from torch import nn
 from torch.nn import functional as F
 
 
+TORIC_BGG_METRIC_PROVENANCE = {
+    "toric_bgg_resolution_consistency": "exact_finite_chain_complex_boundary_square",
+    "toric_bgg_d2_residual": "exact_finite_chain_complex_boundary_square",
+    "toric_bgg_standard_leakage": "exact_finite_chain_poset_standard_mask",
+    "toric_bgg_standard_allowed_mass": "exact_finite_chain_poset_standard_mask",
+    "toric_bgg_koszul_linearity_residual": "exact_finite_koszul_degree_profile",
+    "toric_bgg_gale_dual_consistency": "finite_gale_dual_signature_pair",
+    "toric_bgg_signature_smoothness": "finite_bgg_signature_path",
+    "toric_bgg_standard_entropy": "finite_standard_label_distribution",
+}
+
+
 @dataclass(frozen=True)
 class ToricBGGCertificate:
     """Compact finite shadow of a Toric BGG supervision object."""
@@ -39,6 +51,12 @@ class ToricBGGConfig:
     koszul_weight: float = 0.15
     gale_weight: float = 0.10
     signature_weight: float = 0.10
+
+
+def toric_bgg_metric_provenance() -> dict[str, str]:
+    """Return exact finite-certificate provenance for Toric BGG metrics."""
+
+    return dict(TORIC_BGG_METRIC_PROVENANCE)
 
 
 def chain_standard_mask(num_labels: int, *, device: torch.device | None = None) -> torch.Tensor:
@@ -197,6 +215,9 @@ class ToricBGGProbe(nn.Module):
             "toric_bgg_gale_dual_consistency": gale_loss.detach(),
             "toric_bgg_signature_smoothness": signature_loss.detach(),
             "toric_bgg_standard_entropy": entropy.detach(),
+            "toric_bgg_exact_certificate_available": torch.ones((), device=hidden.device, dtype=hidden.float().dtype),
+            "toric_bgg_provenance_exact_finite_chain": torch.ones((), device=hidden.device, dtype=hidden.float().dtype),
+            "toric_bgg_late_gate_required": torch.ones((), device=hidden.device, dtype=hidden.float().dtype),
         }
 
     def _standard_labels(
@@ -236,4 +257,7 @@ class ToricBGGProbe(nn.Module):
             "toric_bgg_gale_dual_consistency": zero.detach(),
             "toric_bgg_signature_smoothness": zero.detach(),
             "toric_bgg_standard_entropy": zero.detach(),
+            "toric_bgg_exact_certificate_available": zero.detach() + 1.0,
+            "toric_bgg_provenance_exact_finite_chain": zero.detach() + 1.0,
+            "toric_bgg_late_gate_required": zero.detach() + 1.0,
         }

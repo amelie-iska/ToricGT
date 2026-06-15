@@ -1,5 +1,12 @@
 # Rendered HTML Audit And Implementation Plan - 2026-06-14
 
+Current completion ledger: see
+[`planning/EXACTNESS-PH-TORICGT-COMPLETE-IMPLEMENTATION-PLAN-20260615.md`](EXACTNESS-PH-TORICGT-COMPLETE-IMPLEMENTATION-PLAN-20260615.md).
+That pass implements the remaining exact PH dashboards, optional inference PH
+visualization flags, strict screenshot and exactness validators, TokenGT graph
+data validation reports, PH-signature retrieval panels, BGG/Category O browser
+panels, and vector-bundle/sheaf browser panels.
+
 ## Scope
 
 This review covers the 29 rendered HTML pages captured as PNGs in
@@ -336,8 +343,9 @@ without reconstructing paths manually.
 
 This page again shows the core need for edge filtering and better toric
 semantics.  It should include actual toric-variety embedding metadata when
-available: rays, cones, semigroup generators, Newton polytope face id, and
-active tropical face.  The current "projected simplicial toric geometry" view
+available: one-dimensional cones, higher-dimensional cones, semigroup
+generators, Newton polytope face id, and active tropical face.  The current
+"projected simplicial toric geometry" view
 is mostly a dense hidden-state chord plot; the next version must separate
 tropical active-face structure from generic nearest-neighbor topology.
 

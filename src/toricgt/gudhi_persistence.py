@@ -1047,7 +1047,7 @@ def summarize_audits(records: list[dict[str, Any]]) -> dict[str, Any]:
             else 0.0
         )
 
-    return {
+    summary = {
         "schema": "toricgt.gudhi_persistence.summary.v1",
         "backend": "gudhi",
         "records": int(len(records)),
@@ -1085,6 +1085,19 @@ def summarize_audits(records: list[dict[str, Any]]) -> dict[str, Any]:
             for item in records
         ],
     }
+    for dim in range(3):
+        prefix = f"mean_h{dim}"
+        dim_key = str(dim)
+        summary[f"{prefix}_interval_count"] = mean(("vectorizations", dim_key, "count"))
+        summary[f"{prefix}_total_persistence"] = mean(("vectorizations", dim_key, "total_persistence"))
+        summary[f"{prefix}_max_persistence"] = mean(("vectorizations", dim_key, "max_persistence"))
+        summary[f"{prefix}_mean_persistence"] = mean(("vectorizations", dim_key, "mean_persistence"))
+        summary[f"{prefix}_persistence_entropy"] = mean(("vectorizations", dim_key, "persistence_entropy"))
+        summary[f"{prefix}_landscape_norm"] = mean(("vectorizations", dim_key, "landscape_norm"))
+        summary[f"{prefix}_persistence_image_norm"] = mean(("vectorizations", dim_key, "persistence_image_norm"))
+        summary[f"{prefix}_silhouette_norm"] = mean(("vectorizations", dim_key, "silhouette_norm"))
+        summary[f"{prefix}_entropy_vector_norm"] = mean(("vectorizations", dim_key, "entropy_vector_norm"))
+    return summary
 
 
 def load_points_json(path: Path) -> list[dict[str, Any]]:

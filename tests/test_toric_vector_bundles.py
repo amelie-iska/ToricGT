@@ -1,3 +1,8 @@
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 import torch
 
 from toricgt.parameter_golf_export import quantized_state_dict
@@ -89,3 +94,59 @@ def test_wandb_routes_vector_bundle_and_sheaf_metrics() -> None:
     assert organized["00_primary/toric_vector_bundle_loss"] == 0.2
     assert organized["08_toric_tropical_bgg/toric_vector_bundle/filtration_residual"] == 0.1
     assert organized["08_toric_tropical_bgg/toric_sheaf/cocycle_residual"] == 0.0
+
+
+def test_render_toric_vector_bundle_report_writes_sheaf_panels(tmp_path: Path) -> None:
+    cert = {
+        "kind": "macaulay2_toric_vector_bundle_certificate",
+        "input_hash": "unit",
+        "provenance": "exact_cas/macaulay2",
+        "created_at_utc": "2026-01-01T00:00:00Z",
+        "source": {},
+        "cas": {},
+        "toric": {
+            "ambient": "P2",
+            "rank": 2,
+            "charts": 3,
+            "one_dimensional_cones": [[1, 0], [0, 1], [-1, -1]],
+            "maximal_cones": [[0, 1], [1, 2], [2, 0]],
+        },
+        "commutative_algebra": {
+            "is_vector_bundle": True,
+            "is_general": True,
+            "euler_chi": 2,
+            "class": "ToricVectorBundleKlyachko",
+            "structured_certificate_provenance": "macaulay2_toricvectorbundles_validated_P2_rank2_bundle",
+            "one_dimensional_cone_filtrations": {"rho0": [[0, 2]], "rho1": [[0, 2]], "rho2": [[0, 2]]},
+            "chart_weights": {"sigma0": [[0, 0], [0, 0]], "sigma1": [[0, 0], [0, 0]], "sigma2": [[0, 0], [0, 0]]},
+            "transition_matrices": {"sigma0_sigma1": [[1, 0], [0, 1]]},
+            "cech_cocycle_checks": {"sigma0_sigma1_sigma2": True},
+            "chart_overlap_checks": {"sigma0_sigma1": True},
+            "cohomology_summary": {"H0_dimension": 2, "H1_dimension": 0, "H2_dimension": 0, "euler_chi": 2},
+        },
+    }
+    cert_path = tmp_path / "cert.json"
+    cert_path.write_text(json.dumps(cert, indent=2), encoding="utf-8")
+    out = tmp_path / "bundle_report"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "render_toric_vector_bundle_report.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--certificate-json",
+            str(cert_path),
+            "--output-dir",
+            str(out),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout
+    html = (out / "index.html").read_text(encoding="utf-8")
+    assert "Toric Vector Bundle / Sheaf Report" in html
+    assert "One-Dimensional Cones And Maximal Cones" in html
+    assert "Transition Matrices And Cech Cocycle" in html
+    assert "Cohomology Summary" in html

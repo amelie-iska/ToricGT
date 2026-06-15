@@ -531,6 +531,7 @@ def cyclic_stanley_reisner_resolution_certificate(num_vertices: int) -> dict[str
             "kind": "cyclic_one_skeleton_flag_fan",
             "vertices": list(range(n)),
             "rays": [f"rho_{index}" for index in range(n)],
+            "one_dimensional_cones": [f"rho_{index}" for index in range(n)],
             "maximal_cones": [
                 {
                     "mask": int((1 << index) | (1 << ((index + 1) % n))),

@@ -22,12 +22,12 @@ The scheme-theoretic viewpoint strengthens this.  Giansiracusa and Giansiracusa 
 
 ### Toric vector bundles
 
-An equivariant vector bundle on a toric variety is a locally free sheaf with a compatible torus action.  Klyachko's classification says that a toric vector bundle can be described by a finite-dimensional vector space \(E\) and a decreasing filtration \(E^\rho(i)\) for every ray \(\rho\) of the fan, subject to a cone compatibility condition: on each cone \(\sigma\), the filtrations for rays in \(\sigma\) must come from a common weight decomposition of \(E\).  Sam Payne's moduli paper gives a useful formulation for computation: fixed Chern data leads to rank conditions inside products of partial flag varieties.  Kaveh and Manon repackage Klyachko data as piecewise-linear maps to valuations, valuations with values in piecewise-linear functions, and points in tropical linear ideals.  This last viewpoint is especially aligned with ToricGT because it places vector bundles directly in tropical geometry.
+An equivariant vector bundle on a toric variety is a locally free sheaf with a compatible torus action.  Klyachko's classification says that a toric vector bundle can be described by a finite-dimensional vector space \(E\) and a decreasing filtration \(E^\rho(i)\) for every one-dimensional cone \(\rho\) of the fan, subject to a cone compatibility condition: on each cone \(\sigma\), the filtrations for one-dimensional cones in \(\sigma\) must come from a common weight decomposition of \(E\).  Sam Payne's moduli paper gives a useful formulation for computation: fixed Chern data leads to rank conditions inside products of partial flag varieties.  Kaveh and Manon repackage Klyachko data as piecewise-linear maps to valuations, valuations with values in piecewise-linear functions, and points in tropical linear ideals.  This last viewpoint is especially aligned with ToricGT because it places vector bundles directly in tropical geometry.
 
 This suggests a training interpretation:
 
 - the hidden state at a token is a vector in a learned fiber;
-- a tropical active ray or toric boundary stratum chooses a Klyachko filtration;
+- a tropical active one-dimensional cone or toric boundary stratum chooses a Klyachko filtration;
 - membership in a filtration says which fiber coordinates should remain available near that boundary;
 - compatibility over cones means the hidden fiber should split in a stable chartwise basis;
 - chart transitions and Cech gluing measure whether local hidden sections agree on overlaps.
@@ -44,13 +44,13 @@ File: `src/toricgt/toric_vector_bundles.py`
 
 The new `ToricVectorBundleProbe` builds a deterministic finite Klyachko certificate:
 
-- cyclic fan rays in a two-dimensional lattice shadow,
-- adjacent-ray cones,
-- nested coordinate-subspace filtrations for every ray,
+- cyclic fan one-dimensional cones in a two-dimensional lattice shadow,
+- adjacent one-dimensional-cone spans,
+- nested coordinate-subspace filtrations for every one-dimensional cone,
 - orthogonal chart frames,
 - adjacent chart overlaps.
 
-For each hidden state, the probe maps the model hidden vector to a learned rank-\(r\) fiber and predicts a toric boundary ray and a filtration level.  A target ray is derived score-safely from the public random-order target position; a target level is derived from the target token or position.  The filtration residual penalizes fiber mass outside the selected exact subspace.
+For each hidden state, the probe maps the model hidden vector to a learned rank-\(r\) fiber and predicts a toric boundary one-dimensional cone and a filtration level.  A target one-dimensional cone is derived score-safely from the public random-order target position; a target level is derived from the target token or position.  The filtration residual penalizes fiber mass outside the selected exact subspace.
 
 Metric/loss keys:
 
@@ -82,7 +82,7 @@ Metric keys:
 
 The module exposes two finite algebraic checks:
 
-- `klyachko_nesting_residual`: verifies that each ray filtration is decreasing.
+- `klyachko_nesting_residual`: verifies that each one-dimensional-cone filtration is decreasing.
 - `cech_cocycle_residual`: verifies that chart transitions satisfy the cocycle identity \(T_{ac}=T_{bc}T_{ab}\).
 
 These are exact properties of the fixed certificate.  They are logged as metrics and tested.  If a future CAS-generated certificate is loaded, these checks become the hard gate before training uses it.
@@ -138,13 +138,13 @@ Implemented now:
 Next CAS upgrade:
 
 1. Generate nontrivial Klyachko or Kaneyama vector-bundle certificates in M2, not only the trivial rank-2 smoke object.
-2. Export parsed ray filtrations, chart weights, transition matrices, `isVectorBundle`, Euler characteristic, and cohomology summaries.
+2. Export parsed one-dimensional-cone filtrations, chart weights, transition matrices, `isVectorBundle`, Euler characteristic, and cohomology summaries.
 3. Load those JSON certificates into `ToricVectorBundleProbe` instead of the deterministic built-in certificate.
 4. Add hard tests that compare PyTorch certificate residuals with M2 `isVectorBundle` and available transition/cocycle checks.
 
 ## Why This Is Relevant to Training
 
-Poor BPB is ultimately a language-modeling issue, so vector-bundle losses must not dominate early.  Their purpose is representation organization: hidden states should have stable fiber coordinates attached to toric/tropical boundary strata.  If this works, the model should generalize better on graph-structured reasoning, algebraic continuations, and long-context analogy because chart-local computations can transfer across cones and rays instead of being relearned as unrelated dense directions.
+Poor BPB is ultimately a language-modeling issue, so vector-bundle losses must not dominate early.  Their purpose is representation organization: hidden states should have stable fiber coordinates attached to toric/tropical boundary strata.  If this works, the model should generalize better on graph-structured reasoning, algebraic continuations, and long-context analogy because chart-local computations can transfer across cones and one-dimensional cones instead of being relearned as unrelated dense directions.
 
 The most important guardrail is empirical: the vector-bundle loss earns nonzero weight only if BPB does not regress and if the new metrics correlate with better reasoning slices.  The metrics are still visible from step 0 so the watcher can detect whether the hidden representation is already organizing around toric boundary strata before any optimization pressure is applied.
 

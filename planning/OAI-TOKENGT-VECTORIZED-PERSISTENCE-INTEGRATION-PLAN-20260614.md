@@ -2,6 +2,12 @@
 
 Date: 2026-06-14
 
+Current completion ledger: see
+[`planning/EXACTNESS-PH-TORICGT-COMPLETE-IMPLEMENTATION-PLAN-20260615.md`](EXACTNESS-PH-TORICGT-COMPLETE-IMPLEMENTATION-PLAN-20260615.md).
+That pass adds strict TokenGT graph-data validation reports, W&B-ready graph
+mask/causal/utilization metrics, exact GUDHI PH feature dashboards, optional
+inference PH feature artifacts, and PH-signature retrieval panels.
+
 ## Purpose
 
 The OAI Parameter-Golf adapter must stop treating graph structure as only a

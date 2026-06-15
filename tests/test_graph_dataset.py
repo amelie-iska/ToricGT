@@ -1,5 +1,8 @@
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import torch
@@ -213,3 +216,75 @@ def test_path_type_interleaving_places_fineweb_bins_early():
     assert ordered[1].suffix == ".bin"
     assert ordered[2].suffix == ".parquet"
     assert ordered[3].suffix == ".bin"
+
+
+def test_validate_tokengt_graph_data_report(tmp_path):
+    jsonl_path = tmp_path / "records.jsonl"
+    graph_payload = {
+        "dataset": "unit_graphs",
+        "task_family": "proof_graph",
+        "record_id": "dag_0",
+        "nodes": [
+            {"id": "root", "type": "problem", "text": "prove it"},
+            {"id": "left", "type": "reasoning_step", "text": "case left"},
+            {"id": "right", "type": "reasoning_step", "text": "case right"},
+            {"id": "join", "type": "reasoning_step", "text": "join"},
+            {"id": "answer", "type": "answer", "text": "done"},
+        ],
+        "edges": [
+            {"source": "root", "target": "left", "type": "branch_left"},
+            {"source": "root", "target": "right", "type": "branch_right"},
+            {"source": "left", "target": "join", "type": "merge_candidate"},
+            {"source": "right", "target": "join", "type": "merge_candidate"},
+            {"source": "join", "target": "answer", "type": "supports_answer"},
+        ],
+    }
+    rows = [
+        {"record_id": "dag_0", "graph_json": json.dumps(graph_payload)},
+        {"record_id": "text_0", "dataset": "unit_text", "task_family": "got", "text": "Start. Branch left. Branch right. Merge. Finish."},
+    ]
+    jsonl_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    output_dir = tmp_path / "graph_validation"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"src{os.pathsep}."
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/validate_tokengt_graph_data.py",
+            "--input",
+            str(jsonl_path),
+            "--output-dir",
+            str(output_dir),
+            "--max-records",
+            "8",
+            "--max-nodes",
+            "16",
+            "--max-edges",
+            "32",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        check=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/validate_analysis_exactness.py",
+            str(output_dir),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        check=True,
+    )
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    records = json.loads((output_dir / "records.json").read_text(encoding="utf-8"))
+    html = (output_dir / "index.html").read_text(encoding="utf-8")
+
+    assert summary["schema"] == "toricgt.tokengt_graph_data_validation.v1"
+    assert summary["records"] == 2
+    assert summary["all_masks_and_endpoints_valid"] is True
+    assert summary["wandb_metrics"]["tokengt_graph_data/node_mask_valid_fraction"] == 1.0
+    assert summary["wandb_metrics"]["tokengt_graph_data/edge_endpoint_valid_fraction"] == 1.0
+    assert summary["wandb_metrics"]["tokengt_graph_data/graph_token_utilization"] > 0.0
+    assert any(record["causal_rank_kind"] == "topological_dag" for record in records)
+    assert "TokenGT Graph Data Validation" in html

@@ -21,9 +21,14 @@ import torch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 GEOMETRY_SCRIPT = ROOT / "scripts" / "evaluate_tokengt_reasoning_geometry_suite.py"
 GUDHI_SCRIPT = ROOT / "scripts" / "run_gudhi_persistence_audit.py"
 CAS_SIDECAR_SCRIPT = ROOT / "scripts" / "run_embedding_cas_sidecar.py"
+
+from toricgt.music import TorusMusicConfig, generate_wav  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,6 +109,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gudhi-num-radii", type=int, default=5)
     parser.add_argument("--gudhi-num-levels", type=int, default=5)
     parser.add_argument(
+        "--emit-ph-feature-visualizations",
+        dest="emit_ph_feature_visualizations",
+        action="store_true",
+        default=True,
+        help="When GUDHI persistence is enabled, render PH feature dashboards for landscapes, images, silhouettes, entropy vectors, Betti curves, and lifetimes.",
+    )
+    parser.add_argument(
+        "--no-emit-ph-feature-visualizations",
+        dest="emit_ph_feature_visualizations",
+        action="store_false",
+        help="When GUDHI persistence is enabled, skip PH feature dashboard rendering while keeping exact JSON/NPZ feature artifacts.",
+    )
+    parser.add_argument(
         "--emit-cas-sidecar",
         action="store_true",
         help="Run exact Sage/Macaulay2 toric audits from the saved embedding payloads.",
@@ -113,6 +131,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cas-sidecar-max-points", type=int, default=12)
     parser.add_argument("--cas-sidecar-exponent-dim", type=int, default=2)
     parser.add_argument("--cas-sidecar-quantization-scale", type=int, default=12)
+    parser.add_argument(
+        "--emit-slepian-music",
+        action="store_true",
+        help="Export optional Slepian/Pollak prolate torus music WAV and JSON metadata for this inference bundle.",
+    )
+    parser.add_argument("--slepian-music-output-dir", default="")
+    parser.add_argument("--slepian-music-seconds", type=float, default=6.0)
+    parser.add_argument("--slepian-music-bpm", type=float, default=112.0)
+    parser.add_argument("--slepian-music-sample-rate", type=int, default=22050)
+    parser.add_argument("--slepian-music-modes", type=int, default=6)
+    parser.add_argument("--slepian-music-bandwidth", type=float, default=0.075)
     return parser.parse_args()
 
 
@@ -233,14 +262,16 @@ def write_inference_index(output_dir: Path, manifest: dict[str, Any]) -> Path:
     if manifest.get("gudhi_persistence_index_html"):
         add_card(
             "GUDHI / Macaulay2 Persistence",
-            "Exact simplex-tree persistence, vectorized PH, F2[x_level,y_radius] modules, and Macaulay2 free resolutions.",
+            "Exact simplex-tree persistence, vectorized PH dashboards, F2[x_level,y_radius] modules, and Macaulay2 free resolutions.",
             [
                 ("HTML index", _rel_link(output_dir, manifest.get("gudhi_persistence_index_html"))),
                 ("summary JSON", _rel_link(output_dir, Path(str(manifest.get("gudhi_persistence_output_dir", ""))) / "summary.json")),
+                ("PH features", _rel_link(output_dir, Path(str(manifest.get("gudhi_persistence_output_dir", ""))) / "ph_features")),
             ],
             [
                 ("records", manifest.get("gudhi_persistence_summary", {}).get("records", "n/a")),
                 ("mean H1 landscape norm", manifest.get("gudhi_persistence_summary", {}).get("mean_h1_landscape_norm", "n/a")),
+                ("PH dashboards", "on" if manifest.get("ph_feature_visualizations_enabled") else "off"),
             ],
         )
     if manifest.get("embedding_cas_sidecar_index_html"):
@@ -256,13 +287,29 @@ def write_inference_index(output_dir: Path, manifest: dict[str, Any]) -> Path:
                 ("failures", manifest.get("embedding_cas_sidecar_manifest", {}).get("failures", "n/a")),
             ],
         )
+    if manifest.get("slepian_music_wav"):
+        add_card(
+            "Slepian/Pollak Music Export",
+            "Optional inference-side WAV generated from the same finite Slepian/DPSS toric phase construction used by the visualization audits.",
+            [
+                ("WAV", _rel_link(output_dir, manifest.get("slepian_music_wav"))),
+                ("metadata JSON", _rel_link(output_dir, manifest.get("slepian_music_metadata_json"))),
+            ],
+            [
+                ("seconds", manifest.get("slepian_music_config", {}).get("seconds", "n/a")),
+                ("sample rate", manifest.get("slepian_music_config", {}).get("sample_rate", "n/a")),
+                ("modes", manifest.get("slepian_music_config", {}).get("slepian_modes", "n/a")),
+            ],
+        )
 
     badges = "".join(
         [
             _badge("geometry", bool(manifest.get("geometry_enabled"))),
             _badge("embedding payloads", bool(manifest.get("embedding_payloads_enabled"))),
             _badge("GUDHI persistence", bool(manifest.get("gudhi_persistence_enabled"))),
+            _badge("PH feature dashboards", bool(manifest.get("ph_feature_visualizations_enabled"))),
             _badge("CAS sidecar", bool(manifest.get("embedding_cas_sidecar_enabled"))),
+            _badge("Slepian music", bool(manifest.get("slepian_music_enabled"))),
         ]
     )
     index = output_dir / "index.html"
@@ -328,7 +375,7 @@ def geometry_command(args: argparse.Namespace, geometry_dir: Path) -> list[str]:
 
 
 def gudhi_command(args: argparse.Namespace, gudhi_dir: Path) -> list[str]:
-    return [
+    cmd = [
         sys.executable,
         str(GUDHI_SCRIPT),
         "--checkpoint",
@@ -344,6 +391,9 @@ def gudhi_command(args: argparse.Namespace, gudhi_dir: Path) -> list[str]:
         "--num-levels",
         str(max(2, int(args.gudhi_num_levels))),
     ]
+    if not bool(args.emit_ph_feature_visualizations):
+        cmd.append("--no-emit-ph-feature-visualizations")
+    return cmd
 
 
 def cas_sidecar_command(args: argparse.Namespace, embedding_manifest: Path, cas_dir: Path) -> list[str]:
@@ -375,6 +425,7 @@ def main() -> None:
     geometry_dir = Path(args.geometry_output_dir) if args.geometry_output_dir else output_dir / "geometry"
     gudhi_dir = Path(args.gudhi_output_dir) if args.gudhi_output_dir else output_dir / "gudhi_persistence"
     cas_dir = Path(args.cas_sidecar_output_dir) if args.cas_sidecar_output_dir else output_dir / "embedding_cas_sidecar"
+    music_dir = Path(args.slepian_music_output_dir) if args.slepian_music_output_dir else output_dir / "music"
 
     manifest: dict[str, Any] = {
         "schema": "toricgt.tokengt_inference.v1",
@@ -391,7 +442,9 @@ def main() -> None:
         "interactive_geometry_html_enabled": bool(args.emit_geometry),
         "embedding_payloads_enabled": bool(args.emit_embedding_payloads),
         "gudhi_persistence_enabled": bool(args.emit_gudhi_persistence),
+        "ph_feature_visualizations_enabled": bool(args.emit_ph_feature_visualizations),
         "embedding_cas_sidecar_enabled": bool(args.emit_cas_sidecar),
+        "slepian_music_enabled": bool(args.emit_slepian_music),
         **load_checkpoint_meta(checkpoint),
     }
 
@@ -412,6 +465,8 @@ def main() -> None:
         manifest["gudhi_persistence_output_dir"] = str(gudhi_dir)
         manifest["gudhi_persistence_index_html"] = str(gudhi_dir / "index.html")
         manifest["gudhi_persistence_summary"] = read_json(gudhi_dir / "summary.json")
+        manifest["ph_feature_output_dir"] = str(gudhi_dir / "ph_features")
+        manifest["ph_feature_artifacts"] = manifest["gudhi_persistence_summary"].get("ph_feature_artifacts", [])
 
     if args.emit_cas_sidecar:
         if not args.emit_geometry:
@@ -427,6 +482,31 @@ def main() -> None:
         manifest["embedding_cas_sidecar_output_dir"] = str(cas_dir)
         manifest["embedding_cas_sidecar_index_html"] = str(cas_dir / "index.html")
         manifest["embedding_cas_sidecar_manifest"] = read_json(cas_dir / "manifest.json")
+
+    if args.emit_slepian_music:
+        music_dir.mkdir(parents=True, exist_ok=True)
+        wav_output = music_dir / "slepian_pollak_torus_music.wav"
+        music_cfg = TorusMusicConfig(
+            seconds=max(0.25, float(args.slepian_music_seconds)),
+            bpm=max(24.0, float(args.slepian_music_bpm)),
+            sample_rate=max(8000, int(args.slepian_music_sample_rate)),
+            seed=int(args.seed),
+            use_slepian=True,
+            slepian_bandwidth=float(args.slepian_music_bandwidth),
+            slepian_modes=max(1, int(args.slepian_music_modes)),
+        )
+        wav_path, metadata_path, events = generate_wav(wav_output, music_cfg)
+        manifest["slepian_music_output_dir"] = str(music_dir)
+        manifest["slepian_music_wav"] = str(wav_path)
+        manifest["slepian_music_metadata_json"] = str(metadata_path)
+        manifest["slepian_music_events"] = int(len(events))
+        manifest["slepian_music_config"] = {
+            "seconds": float(music_cfg.seconds),
+            "bpm": float(music_cfg.bpm),
+            "sample_rate": int(music_cfg.sample_rate),
+            "slepian_modes": int(music_cfg.slepian_modes),
+            "slepian_bandwidth": float(music_cfg.slepian_bandwidth),
+        }
 
     output_path = output_dir / "inference_output.json"
     output_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")

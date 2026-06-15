@@ -621,7 +621,7 @@ appears across adjacent windows or matched seeds.
 ### Stanley-Reisner Complex
 
 Let `Delta` be the cyclic fan complex on chamber labels. Vertices are chambers,
-edges connect adjacent fan rays, and nonfaces are chamber pairs that should not
+edges connect adjacent fan one-dimensional cones, and nonfaces are chamber pairs that should not
 coactivate in the same local toric chart.
 
 The Stanley-Reisner ideal is

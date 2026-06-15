@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
+import html
 import json
 import math
 import sys
@@ -26,6 +27,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -51,6 +54,7 @@ from toricgt.derived_category_metrics import (  # noqa: E402
 from toricgt.got_trajectory import got_dag_metrics  # noqa: E402
 from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items  # noqa: E402
 from toricgt.graph_tokenizer import GraphBatch  # noqa: E402
+from toricgt.gudhi_persistence import GudhiPersistenceConfig, vectorized_point_cloud_signature  # noqa: E402
 from toricgt.metrics import masked_mse  # noqa: E402
 from toricgt.model import ToricTokenGT  # noqa: E402
 from toricgt.reasoning_geometry import (  # noqa: E402
@@ -62,6 +66,7 @@ from toricgt.reasoning_geometry import (  # noqa: E402
     simplex_record,
     triangle_grid,
 )
+from toricgt.slepian_torus import ToricSlepianConfig, toric_slepian_audit  # noqa: E402
 from toricgt.topological_reasoning import ReasoningTopologyConfig, directed_step_filtration_stats_np  # noqa: E402
 from toricgt.visualization import (  # noqa: E402
     plot_energy_landscape,
@@ -106,6 +111,12 @@ TRIANGLE_SPECS = {
     },
 }
 
+ANALOGY_RETRIEVAL_THRESHOLDS = {
+    "ph_signature_cosine": 0.45,
+    "simplicial_edge_valid_fraction": 0.55,
+    "trajectory_tree_map_score": 0.20,
+}
+
 
 PLOT_FAMILY_REGISTRY = [
     {
@@ -143,6 +154,33 @@ PLOT_FAMILY_REGISTRY = [
         "interactive_pattern": "trajectories/record_*_complex_pca_nll_3d.html",
         "interactive_required": True,
         "description": "Reasoning-step filtered simplicial complexes as trajectory vertices, colored by mean NLL and sized by simplicial mass, with local-complex thought bubbles.",
+    },
+    {
+        "family": "reasoning_step_simplex_tree_3d",
+        "introduced": "staircase_simplextree_slepian_20260615",
+        "dimension": "3D PCA filtered simplex trees",
+        "static_pattern": "",
+        "interactive_pattern": "trajectories/record_*_reasoning_step_simplex_tree_3d.html",
+        "interactive_required": True,
+        "description": "Token embedding subcollections per reasoning step, slider-controlled Rips simplex trees, NLL colors, and decode-order half-arrows.",
+    },
+    {
+        "family": "analogical_simplex_maps_3d",
+        "introduced": "staircase_simplextree_slepian_20260615",
+        "dimension": "3D PCA analogical maps",
+        "static_pattern": "",
+        "interactive_pattern": "analogical/record_*_analogical_simplex_maps_3d.html",
+        "interactive_required": True,
+        "description": "Simplicial maps between reasoning-step simplex trees, vectorized persistence comparisons, and full-trajectory filtered-complex maps.",
+    },
+    {
+        "family": "slepian_torus_surface",
+        "introduced": "staircase_simplextree_slepian_20260615",
+        "dimension": "3D foliated torus",
+        "static_pattern": "",
+        "interactive_pattern": "trajectories/record_*_slepian_torus_surface.html",
+        "interactive_required": True,
+        "description": "Slepian/Pollak DPSS reconstruction and envelope colormap on the finite irrational torus foliation.",
     },
     {
         "family": "topology_heatmaps",
@@ -774,6 +812,1233 @@ def reasoning_step_complexes(
     )
 
 
+def reasoning_level_step_groups(
+    hidden: np.ndarray,
+    nll: np.ndarray,
+    edges: np.ndarray,
+    *,
+    causal_rank: np.ndarray | None = None,
+    max_levels: int = 8,
+    max_branches: int = 3,
+) -> tuple[list[dict[str, Any]], np.ndarray]:
+    """Group token embeddings into readable graph-of-thought reasoning steps.
+
+    The grouping is deterministic and uses actual trajectory information:
+    causal/order rank gives the reasoning level, and embedding-space PC2
+    quantiles split each level into branch lanes.  Actual graph edges crossing
+    groups define branch/merge edges when present; decode-order edges are kept
+    separately by the interactive plot.
+    """
+
+    emb = np.asarray(hidden, dtype=np.float64)
+    n = int(emb.shape[0])
+    if n <= 0:
+        return [], np.zeros((0, 2), dtype=np.int64)
+    values = np.asarray(nll, dtype=np.float64).reshape(-1)
+    if values.shape[0] < n:
+        values = np.pad(values, (0, n - values.shape[0]), constant_values=0.0)
+    if causal_rank is None or np.asarray(causal_rank).reshape(-1).shape[0] < n:
+        order_key = np.arange(n, dtype=np.float64)
+    else:
+        raw_rank = np.asarray(causal_rank, dtype=np.float64).reshape(-1)[:n]
+        finite = np.isfinite(raw_rank)
+        if not finite.any():
+            order_key = np.arange(n, dtype=np.float64)
+        else:
+            replacement = float(np.nanmax(raw_rank[finite]) + 1.0)
+            order_key = np.where(finite, raw_rank, replacement)
+    sorted_idx = np.lexsort((np.arange(n), order_key))
+    levels = max(1, min(int(max_levels), n))
+    bins = np.array_split(sorted_idx, levels)
+    proj = pca_project(emb, dims=3)
+    rows: list[dict[str, Any]] = []
+    vertex_to_group: dict[int, int] = {}
+    for level_idx, bin_vertices in enumerate(bins):
+        vertices = [int(v) for v in bin_vertices.tolist()]
+        if not vertices:
+            continue
+        branch_count = max(1, min(int(max_branches), len(vertices)))
+        branch_key = proj[vertices, 1] if len(vertices) > 1 else np.zeros((len(vertices),), dtype=np.float64)
+        branch_order = [vertices[i] for i in np.argsort(branch_key)]
+        branch_bins = np.array_split(np.asarray(branch_order, dtype=np.int64), branch_count)
+        for branch_idx, branch_vertices_raw in enumerate(branch_bins):
+            branch_vertices = [int(v) for v in branch_vertices_raw.tolist()]
+            if not branch_vertices:
+                continue
+            group_id = len(rows)
+            for vertex in branch_vertices:
+                vertex_to_group[vertex] = group_id
+            local_points = pca_project(emb[branch_vertices], dims=3)
+            local_dist = np.linalg.norm(local_points[:, None, :] - local_points[None, :, :], axis=-1)
+            local_positive = local_dist[local_dist > 1e-8]
+            local_radius = float(np.quantile(local_positive, 0.55)) if local_positive.size else 0.0
+            local_edges, local_triangles, components, cycle_rank = _rips_edges_triangles(local_points, local_radius)
+            rows.append(
+                {
+                    "step_id": int(group_id),
+                    "level": int(level_idx),
+                    "branch": int(branch_idx),
+                    "vertices": branch_vertices,
+                    "vertex_count": int(len(branch_vertices)),
+                    "mean_nll": float(np.mean(values[branch_vertices])) if branch_vertices else 0.0,
+                    "max_nll": float(np.max(values[branch_vertices])) if branch_vertices else 0.0,
+                    "local_edges": [[int(a), int(b)] for a, b in local_edges],
+                    "local_edge_count": int(len(local_edges)),
+                    "triangle_count": int(len(local_triangles)),
+                    "component_count": int(components),
+                    "cycle_rank": int(cycle_rank),
+                    "local_points": local_points.astype(float).round(6).tolist(),
+                    "local_nll": np.asarray(values[branch_vertices], dtype=np.float64).round(6).tolist(),
+                }
+            )
+    dag_edges: set[tuple[int, int]] = set()
+    for src_raw, dst_raw in np.asarray(edges, dtype=np.int64).reshape(-1, 2):
+        src = int(src_raw)
+        dst = int(dst_raw)
+        if src in vertex_to_group and dst in vertex_to_group:
+            gs = vertex_to_group[src]
+            gd = vertex_to_group[dst]
+            if gs != gd and rows[gs]["level"] <= rows[gd]["level"]:
+                dag_edges.add((gs, gd))
+    return rows, np.asarray(sorted(dag_edges), dtype=np.int64).reshape(-1, 2)
+
+
+def _radius_schedule_from_points(points: np.ndarray, *, levels: int = 6) -> np.ndarray:
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    if pts.shape[0] < 2:
+        return np.asarray([0.0], dtype=np.float64)
+    dist = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=-1)
+    positive = dist[dist > 1e-8]
+    if positive.size == 0:
+        return np.asarray([0.0], dtype=np.float64)
+    lo = float(np.quantile(positive, 0.10))
+    hi = float(np.quantile(positive, 0.82))
+    if hi <= lo:
+        hi = float(np.max(positive))
+    return np.linspace(0.0, max(hi, lo, 1e-6), num=max(2, int(levels)))
+
+
+def _rips_edges_triangles(points: np.ndarray, radius: float) -> tuple[list[tuple[int, int]], list[tuple[int, int, int]], int, int]:
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    n = int(pts.shape[0])
+    if n <= 0:
+        return [], [], 0, 0
+    dist = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=-1)
+    edges = [(i, j) for i in range(n) for j in range(i + 1, n) if dist[i, j] <= float(radius)]
+    edge_set = set(edges)
+    triangles: list[tuple[int, int, int]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if (i, j) not in edge_set:
+                continue
+            for k in range(j + 1, n):
+                if (i, k) in edge_set and (j, k) in edge_set:
+                    triangles.append((i, j, k))
+    components = connected_components_count(n, edges)
+    cycle_rank = max(0, len(edges) - n + components)
+    return edges, triangles, components, cycle_rank
+
+
+def _rips_edges_triangles_any(points: np.ndarray, radius: float) -> tuple[list[tuple[int, int]], list[tuple[int, int, int]], int, int]:
+    pts = np.asarray(points, dtype=np.float64)
+    if pts.ndim != 2:
+        pts = pts.reshape(-1, 1)
+    n = int(pts.shape[0])
+    if n <= 0:
+        return [], [], 0, 0
+    dist = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=-1)
+    edges = [(i, j) for i in range(n) for j in range(i + 1, n) if dist[i, j] <= float(radius)]
+    edge_set = set(edges)
+    triangles: list[tuple[int, int, int]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if (i, j) not in edge_set:
+                continue
+            for k in range(j + 1, n):
+                if (i, k) in edge_set and (j, k) in edge_set:
+                    triangles.append((i, j, k))
+    components = connected_components_count(n, edges)
+    cycle_rank = max(0, len(edges) - n + components)
+    return edges, triangles, components, cycle_rank
+
+
+def _standardize_embedding_points(points: np.ndarray) -> np.ndarray:
+    x = np.asarray(points, dtype=np.float64)
+    if x.ndim != 2:
+        x = x.reshape(-1, 1)
+    if x.shape[0] == 0:
+        return np.zeros((0, max(1, x.shape[1] if x.ndim == 2 else 1)), dtype=np.float64)
+    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    x = x - np.mean(x, axis=0, keepdims=True)
+    scale = np.std(x, axis=0, keepdims=True)
+    x = x / np.maximum(scale, 1e-8)
+    row_norm = np.linalg.norm(x, axis=1, keepdims=True)
+    return x / np.maximum(row_norm.mean(), 1e-8)
+
+
+def _radius_schedule_from_embeddings(points: np.ndarray, *, levels: int = 6) -> np.ndarray:
+    pts = _standardize_embedding_points(points)
+    if pts.shape[0] < 2:
+        return np.asarray([0.0], dtype=np.float64)
+    dist = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=-1)
+    positive = dist[dist > 1e-8]
+    if positive.size == 0:
+        return np.asarray([0.0], dtype=np.float64)
+    return np.linspace(0.0, float(np.quantile(positive, 0.72)), num=max(2, int(levels)))
+
+
+def _level_prefix_sizes(n: int, *, levels: int = 6) -> list[int]:
+    if n <= 0:
+        return [0]
+    return sorted({max(1, min(n, int(math.ceil(n * frac)))) for frac in np.linspace(1.0 / max(1, levels), 1.0, max(1, levels))})
+
+
+def _step_rows_to_centroids(projected: np.ndarray, rows: list[dict[str, Any]]) -> np.ndarray:
+    pts = np.asarray(projected, dtype=np.float64).reshape(-1, 3)
+    centroids: list[np.ndarray] = []
+    for row in rows:
+        vertices = [int(v) for v in row.get("vertices", []) if 0 <= int(v) < pts.shape[0]]
+        if vertices:
+            centroids.append(np.mean(pts[vertices], axis=0))
+    if not centroids:
+        return np.zeros((0, 3), dtype=np.float64)
+    return np.stack(centroids, axis=0).astype(np.float64)
+
+
+def _dotted_3d_segments(points: np.ndarray, edges: list[tuple[int, int]], *, dash_parts: int = 10) -> tuple[list[float], list[float], list[float]]:
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    for src, dst in edges:
+        if not (0 <= src < pts.shape[0] and 0 <= dst < pts.shape[0]):
+            continue
+        a = pts[src]
+        b = pts[dst]
+        for part in range(max(2, dash_parts)):
+            if part % 2:
+                continue
+            t0 = part / max(1, dash_parts)
+            t1 = min(1.0, (part + 0.58) / max(1, dash_parts))
+            p0 = a * (1.0 - t0) + b * t0
+            p1 = a * (1.0 - t1) + b * t1
+            xs.extend([float(p0[0]), float(p1[0]), None])
+            ys.extend([float(p0[1]), float(p1[1]), None])
+            zs.extend([float(p0[2]), float(p1[2]), None])
+    return xs, ys, zs
+
+
+def _edge_line_xyz(points: np.ndarray, edges: list[tuple[int, int]]) -> tuple[list[float], list[float], list[float]]:
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    for src, dst in edges:
+        if 0 <= src < pts.shape[0] and 0 <= dst < pts.shape[0]:
+            a, b = pts[src], pts[dst]
+            xs.extend([float(a[0]), float(b[0]), None])
+            ys.extend([float(a[1]), float(b[1]), None])
+            zs.extend([float(a[2]), float(b[2]), None])
+    return xs, ys, zs
+
+
+def _cone_trace_for_edges(points: np.ndarray, edges: list[tuple[int, int]], *, color: str, name: str, visible: bool) -> go.Cone:
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    locs: list[np.ndarray] = []
+    vecs: list[np.ndarray] = []
+    for src, dst in edges:
+        if 0 <= src < pts.shape[0] and 0 <= dst < pts.shape[0]:
+            a, b = pts[src], pts[dst]
+            v = b - a
+            norm = float(np.linalg.norm(v))
+            if norm <= 1e-9:
+                continue
+            locs.append(a + 0.55 * v)
+            vecs.append(v / norm)
+    if not locs:
+        locs = [np.zeros(3, dtype=np.float64)]
+        vecs = [np.zeros(3, dtype=np.float64)]
+    xyz = np.stack(locs, axis=0)
+    uvw = np.stack(vecs, axis=0)
+    return go.Cone(
+        x=xyz[:, 0],
+        y=xyz[:, 1],
+        z=xyz[:, 2],
+        u=uvw[:, 0],
+        v=uvw[:, 1],
+        w=uvw[:, 2],
+        sizemode="absolute",
+        sizeref=0.08,
+        anchor="tail",
+        colorscale=[[0, color], [1, color]],
+        showscale=False,
+        name=name,
+        visible=visible,
+        opacity=0.48,
+        hoverinfo="skip",
+    )
+
+
+def _token_color_values(nll: np.ndarray, available: bool) -> tuple[np.ndarray, str, str]:
+    values = np.asarray(nll, dtype=np.float64).reshape(-1)
+    if not bool(available):
+        return np.zeros_like(values), "NLL unavailable", "Greys"
+    values = np.nan_to_num(values, nan=float(np.nanmean(values)) if np.isfinite(np.nanmean(values)) else 0.0)
+    return values, "node NLL", "Turbo"
+
+
+def write_interactive_reasoning_step_simplex_tree_3d(
+    projected: np.ndarray,
+    nll: np.ndarray,
+    rows: list[dict[str, Any]],
+    out: Path,
+    *,
+    nll_available: bool,
+    nll_source: str,
+    step_edges: np.ndarray | None = None,
+) -> None:
+    """Render token subcollections and per-step filtered simplex trees in 3D PCA.
+
+    The simplicial computations are performed on the per-step token subcollections.
+    PCA is only the visual coordinate system.  Two independent controls expose
+    the filtration: reasoning level selects a prefix of the graph-of-thought
+    trajectory, and radius selects the Vietoris-Rips scale inside each step.
+    """
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    points = np.asarray(projected, dtype=np.float64).reshape(-1, 3)
+    if points.shape[0] == 0:
+        points = np.zeros((1, 3), dtype=np.float64)
+    if not rows:
+        rows = [
+            {
+                "step_id": 0,
+                "level": 0,
+                "branch": 0,
+                "vertices": [int(i) for i in range(points.shape[0])],
+                "mean_nll": 0.0,
+                "max_nll": 0.0,
+            }
+        ]
+    values, color_label, colorscale = _token_color_values(nll, bool(nll_available))
+    if values.shape[0] < points.shape[0]:
+        values = np.pad(values, (0, points.shape[0] - values.shape[0]), constant_values=0.0)
+    centroids = _step_rows_to_centroids(points, rows)
+    if centroids.shape[0] == 0:
+        centroids = points[:1].copy()
+    raw_step_edges = np.asarray(step_edges if step_edges is not None else np.zeros((0, 2)), dtype=np.int64).reshape(-1, 2)
+    levels = sorted({int(row.get("level", idx)) for idx, row in enumerate(rows)})
+    if not levels:
+        levels = [0]
+    max_level = max(levels)
+    radius_schedule = _radius_schedule_from_points(points, levels=6)
+    fig = go.Figure()
+    pair_trace_indices: dict[str, list[int]] = {}
+    all_step_payload: dict[str, Any] = {
+        "schema": "toricgt.reasoning_step_simplex_tree_3d.v1",
+        "filtration": "two_parameter_reasoning_level_and_radius",
+        "nll_source": str(nll_source),
+        "nll_available": bool(nll_available),
+        "reasoning_levels": [int(v) for v in levels],
+        "radius_schedule": [float(v) for v in radius_schedule],
+        "steps": [],
+    }
+
+    for level_idx, level in enumerate(levels):
+        active_step_indices = [
+            idx for idx, row in enumerate(rows[: centroids.shape[0]]) if int(row.get("level", idx)) <= int(level)
+        ]
+        active_vertex_set: set[int] = set()
+        for idx in active_step_indices:
+            active_vertex_set.update(int(v) for v in rows[idx].get("vertices", []) if 0 <= int(v) < points.shape[0])
+        active_vertices = sorted(active_vertex_set)
+        for radius_idx, radius in enumerate(radius_schedule):
+            visible = level_idx == 0 and radius_idx == 0
+            start_idx = len(fig.data)
+            local_edges_global: set[tuple[int, int]] = set()
+            local_summaries: list[dict[str, Any]] = []
+            for step_idx in active_step_indices:
+                row = rows[step_idx]
+                vertices = [int(v) for v in row.get("vertices", []) if 0 <= int(v) < points.shape[0]]
+                if not vertices:
+                    continue
+                local_points = points[vertices]
+                local_edges, triangles, components, cycle_rank = _rips_edges_triangles(local_points, float(radius))
+                for src, dst in local_edges:
+                    local_edges_global.add(tuple(sorted((vertices[src], vertices[dst]))))
+                local_summaries.append(
+                    {
+                        "reasoning_step": int(step_idx),
+                        "level": int(row.get("level", step_idx)),
+                        "branch": int(row.get("branch", 0)),
+                        "vertices": vertices,
+                        "radius": float(radius),
+                        "simplex_tree": {
+                            "num_vertices": int(len(vertices)),
+                            "num_edges": int(len(local_edges)),
+                            "num_triangles": int(len(triangles)),
+                            "component_count": int(components),
+                            "cycle_rank": int(cycle_rank),
+                        },
+                        "mean_nll": float(np.mean(values[vertices])) if bool(nll_available) and vertices else None,
+                    }
+                )
+            if level_idx == 0 and radius_idx == 0:
+                all_step_payload["steps"] = local_summaries
+
+            token_xyz = points[active_vertices] if active_vertices else np.zeros((0, 3), dtype=np.float64)
+            token_values = values[active_vertices] if active_vertices else np.zeros((0,), dtype=np.float64)
+            token_custom = [
+                [int(vertex), "unavailable" if not bool(nll_available) else f"{float(values[vertex]):.6g}"]
+                for vertex in active_vertices
+            ]
+            edge_xyz = _edge_line_xyz(points, sorted(local_edges_global))
+
+            active_set = set(active_step_indices)
+            actual_edges = [
+                (int(src), int(dst))
+                for src, dst in raw_step_edges.tolist()
+                if int(src) in active_set and int(dst) in active_set and 0 <= int(src) < centroids.shape[0] and 0 <= int(dst) < centroids.shape[0]
+            ]
+            actual_xyz = _edge_line_xyz(centroids, actual_edges)
+            decode_edges = [
+                (active_step_indices[idx], active_step_indices[idx + 1])
+                for idx in range(max(0, len(active_step_indices) - 1))
+                if int(level) > min(levels)
+            ]
+            dotted_xyz = _dotted_3d_segments(centroids, decode_edges)
+            centroid_values = []
+            centroid_custom = []
+            centroid_text = []
+            for step_idx in active_step_indices:
+                row = rows[step_idx]
+                vertices = [int(v) for v in row.get("vertices", []) if 0 <= int(v) < values.shape[0]]
+                step_value = float(np.mean(values[vertices])) if bool(nll_available) and vertices else 0.0
+                summary = next((item for item in local_summaries if int(item["reasoning_step"]) == int(step_idx)), {})
+                centroid_values.append(step_value)
+                centroid_text.append(f"L{int(row.get('level', step_idx))}:B{int(row.get('branch', 0))}")
+                centroid_custom.append(
+                    [
+                        int(step_idx),
+                        int(row.get("level", step_idx)),
+                        int(row.get("branch", 0)),
+                        "unavailable" if not bool(nll_available) else f"{step_value:.6g}",
+                        json.dumps(summary, sort_keys=True),
+                    ]
+                )
+
+            fig.add_trace(
+                go.Scatter3d(
+                    x=token_xyz[:, 0] if token_xyz.size else [],
+                    y=token_xyz[:, 1] if token_xyz.size else [],
+                    z=token_xyz[:, 2] if token_xyz.size else [],
+                    mode="markers",
+                    marker={
+                        "size": 5,
+                        "color": token_values,
+                        "colorscale": colorscale,
+                        "showscale": visible,
+                        "colorbar": {"title": color_label},
+                    },
+                    name="active token embedding vectors",
+                    visible=visible,
+                    customdata=token_custom,
+                    hovertemplate="token %{customdata[0]}<br>NLL %{customdata[1]}<br>x=%{x:.3f}<br>y=%{y:.3f}<br>z=%{z:.3f}<extra></extra>",
+                )
+            )
+            fig.add_trace(
+                go.Scatter3d(
+                    x=edge_xyz[0],
+                    y=edge_xyz[1],
+                    z=edge_xyz[2],
+                    mode="lines",
+                    line={"color": "rgba(55,232,255,0.34)", "width": 2},
+                    name="radius-controlled local simplex-tree edges",
+                    visible=visible,
+                    hoverinfo="skip",
+                )
+            )
+            active_centroids = centroids[active_step_indices] if active_step_indices else np.zeros((0, 3), dtype=np.float64)
+            fig.add_trace(
+                go.Scatter3d(
+                    x=active_centroids[:, 0] if active_centroids.size else [],
+                    y=active_centroids[:, 1] if active_centroids.size else [],
+                    z=active_centroids[:, 2] if active_centroids.size else [],
+                    mode="markers+text",
+                    marker={"size": 10, "color": centroid_values, "colorscale": colorscale, "line": {"color": "#e8fbff", "width": 1}},
+                    text=centroid_text,
+                    textposition="top center",
+                    name="reasoning-step simplex-tree nodes",
+                    visible=visible,
+                    customdata=centroid_custom,
+                    hovertemplate="step %{customdata[0]} L%{customdata[1]} B%{customdata[2]}<br>NLL %{customdata[3]}<br>simplex_tree_payload=%{customdata[4]}<extra></extra>",
+                )
+            )
+            fig.add_trace(
+                go.Scatter3d(
+                    x=actual_xyz[0],
+                    y=actual_xyz[1],
+                    z=actual_xyz[2],
+                    mode="lines",
+                    line={"color": "rgba(140,255,106,0.45)", "width": 4},
+                    name="graph-of-thought branch/merge edges",
+                    visible=visible,
+                    hoverinfo="skip",
+                )
+            )
+            fig.add_trace(
+                go.Scatter3d(
+                    x=dotted_xyz[0],
+                    y=dotted_xyz[1],
+                    z=dotted_xyz[2],
+                    mode="lines",
+                    line={"color": "rgba(255,211,155,0.50)", "width": 3},
+                    name="reasoning-level slider dotted decode order",
+                    visible=visible and bool(decode_edges),
+                    hoverinfo="skip",
+                )
+            )
+            fig.add_trace(
+                _cone_trace_for_edges(
+                    centroids,
+                    decode_edges,
+                    color="#ffd39b",
+                    name="half-arrows appear after reasoning level advances",
+                    visible=visible and bool(decode_edges),
+                )
+            )
+            pair_trace_indices[f"{level_idx}|{radius_idx}"] = list(range(start_idx, len(fig.data)))
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#030712",
+        plot_bgcolor="#07111f",
+        title="Reasoning Trajectory Simplex Trees In 3D PCA",
+        scene={"xaxis_title": "PC1", "yaxis_title": "PC2", "zaxis_title": "PC3"},
+        margin={"l": 0, "r": 0, "t": 54, "b": 0},
+        height=760,
+    )
+    payload = json.dumps(all_step_payload, sort_keys=True)
+    pair_payload = json.dumps(pair_trace_indices, sort_keys=True)
+    radii_payload = json.dumps([float(v) for v in radius_schedule])
+    levels_payload = json.dumps([int(v) for v in levels])
+    html_text = fig.to_html(include_plotlyjs="cdn", full_html=True, div_id="reasoning_step_simplex_tree_3d")
+    click_panel = f"""
+<section style="max-width:1180px;margin:0 auto 24px;padding:16px;background:#07111f;border:1px solid rgba(55,232,255,.26);border-radius:8px;color:#e8fbff;font-family:Inter,Arial,sans-serif">
+  <h2 style="margin:0 0 8px;font-size:18px">Two-Parameter Simplex Tree Payload</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0">
+    <label>reasoning level <strong id="reasoning_level_label">0</strong><br>
+      <input id="reasoning_level_slider" type="range" min="0" max="{max(0, len(levels) - 1)}" value="0" step="1" style="width:100%">
+    </label>
+    <label>radius <strong id="radius_label">{float(radius_schedule[0]):.4f}</strong><br>
+      <input id="radius_slider" type="range" min="0" max="{max(0, len(radius_schedule) - 1)}" value="0" step="1" style="width:100%">
+    </label>
+  </div>
+  <p style="color:#91a8b7">The reasoning-level slider reveals prefix levels of the graph-of-thought trajectory. Dotted decode-order edges and half-arrows appear only after the level advances. The radius slider adds Rips edges inside each step subcollection.</p>
+  <pre id="simplex_tree_payload" style="white-space:pre-wrap;color:#c8f7ff;background:#020713;padding:12px;border-radius:6px;max-height:280px;overflow:auto">{html.escape(payload)}</pre>
+</section>
+<script type="application/json" id="simplex_tree_trace_index">{html.escape(pair_payload)}</script>
+<script type="application/json" id="simplex_tree_levels">{html.escape(levels_payload)}</script>
+<script type="application/json" id="simplex_tree_radii">{html.escape(radii_payload)}</script>
+<script>
+const gd = document.getElementById('reasoning_step_simplex_tree_3d');
+const traceIndex = JSON.parse(document.getElementById('simplex_tree_trace_index').textContent);
+const levels = JSON.parse(document.getElementById('simplex_tree_levels').textContent);
+const radii = JSON.parse(document.getElementById('simplex_tree_radii').textContent);
+function setSimplexTreeScene() {{
+  const l = Number(document.getElementById('reasoning_level_slider').value);
+  const r = Number(document.getElementById('radius_slider').value);
+  document.getElementById('reasoning_level_label').textContent = levels[l];
+  document.getElementById('radius_label').textContent = Number(radii[r]).toFixed(4);
+  const n = gd ? gd.data.length : 0;
+  const visible = Array(n).fill(false);
+  const active = traceIndex[`${{l}}|${{r}}`] || [];
+  active.forEach((idx) => {{ if (idx >= 0 && idx < visible.length) visible[idx] = true; }});
+  if (gd) Plotly.restyle(gd, {{visible: visible}}, Array.from({{length:n}}, (_, i) => i));
+}}
+document.getElementById('reasoning_level_slider').addEventListener('input', setSimplexTreeScene);
+document.getElementById('radius_slider').addEventListener('input', setSimplexTreeScene);
+if (gd) {{
+  gd.on('plotly_click', function(data) {{
+    const point = data.points && data.points[0];
+    const cd = point && point.customdata;
+    const panel = document.getElementById('simplex_tree_payload');
+    if (panel && cd) {{
+      panel.textContent = Array.isArray(cd) && cd.length > 2 ? cd[2] : JSON.stringify(cd, null, 2);
+    }}
+  }});
+}}
+</script>
+"""
+    out.write_text(html_text.replace("</body>", click_panel + "</body>"), encoding="utf-8")
+
+
+def _step_persistence_vector(points: np.ndarray, radii: np.ndarray) -> np.ndarray:
+    values: list[float] = []
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    for radius in radii:
+        edges, triangles, components, cycle_rank = _rips_edges_triangles(pts, float(radius))
+        n = max(1, pts.shape[0])
+        values.extend(
+            [
+                float(pts.shape[0]),
+                float(len(edges)),
+                float(len(triangles)),
+                float(components),
+                float(cycle_rank),
+                float(len(edges)) / max(1, n * (n - 1) / 2),
+            ]
+        )
+    return np.asarray(values, dtype=np.float64)
+
+
+def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    x = np.asarray(a, dtype=np.float64).reshape(-1)
+    y = np.asarray(b, dtype=np.float64).reshape(-1)
+    if x.shape[0] != y.shape[0]:
+        size = min(x.shape[0], y.shape[0])
+        x = x[:size]
+        y = y[:size]
+    denom = float(np.linalg.norm(x) * np.linalg.norm(y))
+    if denom <= 1e-12:
+        return 0.0
+    return float(np.dot(x, y) / denom)
+
+
+def _joint_standardize_pair(source: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    src = np.asarray(source, dtype=np.float64)
+    dst = np.asarray(target, dtype=np.float64)
+    if src.ndim != 2 or dst.ndim != 2:
+        raise ValueError("source and target embeddings must be 2D")
+    if src.shape[1] != dst.shape[1]:
+        dim = min(src.shape[1], dst.shape[1])
+        src = src[:, :dim]
+        dst = dst[:, :dim]
+    joined = np.concatenate([src, dst], axis=0)
+    joined = np.nan_to_num(joined, nan=0.0, posinf=0.0, neginf=0.0)
+    joined = joined - joined.mean(axis=0, keepdims=True)
+    scale = joined.std(axis=0, keepdims=True)
+    joined = joined / np.maximum(scale, 1e-8)
+    return joined[: src.shape[0]], joined[src.shape[0] :]
+
+
+def _trajectory_ph_signature(hidden: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
+    points = np.asarray(hidden, dtype=np.float64)
+    if points.ndim != 2 or points.shape[0] < 2:
+        return np.zeros((1,), dtype=np.float32), {
+            "backend_gudhi": 0.0,
+            "points": float(points.shape[0] if points.ndim == 2 else 0),
+            "vector_norm": 0.0,
+        }
+    cfg = GudhiPersistenceConfig(
+        max_points=max(2, min(32, int(points.shape[0]))),
+        max_dimension=2,
+        landscape_resolution=24,
+        landscape_layers=3,
+        image_resolution=8,
+        macaulay2_resolutions=False,
+    )
+    return vectorized_point_cloud_signature(points, cfg)
+
+
+def _radius_schedule_from_pair(source: np.ndarray, target: np.ndarray, *, levels: int = 6) -> np.ndarray:
+    src, dst = _joint_standardize_pair(source, target)
+    joined = np.concatenate([src, dst], axis=0)
+    if joined.shape[0] < 2:
+        return np.asarray([0.0], dtype=np.float64)
+    dist = np.linalg.norm(joined[:, None, :] - joined[None, :, :], axis=-1)
+    positive = dist[dist > 1e-8]
+    if positive.size == 0:
+        return np.asarray([0.0], dtype=np.float64)
+    return np.linspace(0.0, float(np.quantile(positive, 0.72)), num=max(2, int(levels)))
+
+
+def _nearest_vertex_map(source: np.ndarray, target: np.ndarray) -> np.ndarray:
+    if source.shape[0] == 0 or target.shape[0] == 0:
+        return np.zeros((source.shape[0],), dtype=np.int64)
+    dist = np.linalg.norm(source[:, None, :] - target[None, :, :], axis=-1)
+    return np.argmin(dist, axis=1).astype(np.int64)
+
+
+def _full_trajectory_simplicial_map_audit(
+    source_hidden: np.ndarray,
+    target_hidden: np.ndarray,
+    *,
+    levels: int = 6,
+    radii: int = 6,
+) -> dict[str, Any]:
+    """Audit nearest-neighbor maps between full filtered trajectory complexes."""
+
+    src_all, dst_all = _joint_standardize_pair(source_hidden, target_hidden)
+    src_levels = _level_prefix_sizes(src_all.shape[0], levels=levels)
+    dst_levels = _level_prefix_sizes(dst_all.shape[0], levels=levels)
+    radius_grid = _radius_schedule_from_pair(source_hidden, target_hidden, levels=radii)
+    edge_scores: list[float] = []
+    triangle_scores: list[float] = []
+    coverage_scores: list[float] = []
+    rows: list[dict[str, Any]] = []
+    for level_idx, (src_count, dst_count) in enumerate(zip(src_levels, dst_levels)):
+        src = src_all[:src_count]
+        dst = dst_all[:dst_count]
+        vertex_map = _nearest_vertex_map(src, dst)
+        for radius_idx, radius in enumerate(radius_grid):
+            src_edges, src_triangles, _, _ = _rips_edges_triangles_any(src, float(radius))
+            dst_edges, dst_triangles, _, _ = _rips_edges_triangles_any(dst, float(radius))
+            dst_edge_set = {tuple(sorted(edge)) for edge in dst_edges}
+            dst_triangle_set = {tuple(sorted(tri)) for tri in dst_triangles}
+            valid_edges = 0
+            for src_i, src_j in src_edges:
+                mapped = tuple(sorted((int(vertex_map[src_i]), int(vertex_map[src_j]))))
+                if mapped[0] == mapped[1] or mapped in dst_edge_set:
+                    valid_edges += 1
+            valid_triangles = 0
+            for src_i, src_j, src_k in src_triangles:
+                mapped_vertices = sorted({int(vertex_map[src_i]), int(vertex_map[src_j]), int(vertex_map[src_k])})
+                if len(mapped_vertices) < 3 or tuple(mapped_vertices) in dst_triangle_set:
+                    valid_triangles += 1
+            edge_fraction = float(valid_edges / len(src_edges)) if src_edges else 1.0
+            triangle_fraction = float(valid_triangles / len(src_triangles)) if src_triangles else 1.0
+            coverage = float(len(set(int(v) for v in vertex_map.tolist())) / max(1, dst.shape[0]))
+            if src_edges:
+                edge_scores.append(edge_fraction)
+            if src_triangles:
+                triangle_scores.append(triangle_fraction)
+            coverage_scores.append(coverage)
+            rows.append(
+                {
+                    "level_index": int(level_idx),
+                    "source_prefix_vertices": int(src_count),
+                    "target_prefix_vertices": int(dst_count),
+                    "radius_index": int(radius_idx),
+                    "radius": float(radius),
+                    "source_edges": int(len(src_edges)),
+                    "target_edges": int(len(dst_edges)),
+                    "source_triangles": int(len(src_triangles)),
+                    "target_triangles": int(len(dst_triangles)),
+                    "edge_valid_fraction": edge_fraction,
+                    "triangle_valid_fraction": triangle_fraction,
+                    "target_vertex_coverage": coverage,
+                }
+            )
+    edge_mean = float(np.mean(edge_scores)) if edge_scores else 0.0
+    triangle_mean = float(np.mean(triangle_scores)) if triangle_scores else 0.0
+    coverage_mean = float(np.mean(coverage_scores)) if coverage_scores else 0.0
+    score = float(0.45 * edge_mean + 0.25 * triangle_mean + 0.30 * coverage_mean)
+    return {
+        "simplicial_edge_valid_fraction": edge_mean,
+        "simplicial_triangle_valid_fraction": triangle_mean,
+        "target_vertex_coverage": coverage_mean,
+        "full_filtered_complex_map_score": score,
+        "radius_schedule": [float(v) for v in radius_grid],
+        "level_radius_rows": rows,
+    }
+
+
+def _step_tree_map_audit(source: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    src_rows = list(source.get("step_rows", []))
+    dst_rows = list(target.get("step_rows", []))
+    src_hidden = np.asarray(source.get("hidden", np.zeros((0, 1))), dtype=np.float64)
+    dst_hidden = np.asarray(target.get("hidden", np.zeros((0, 1))), dtype=np.float64)
+    if not src_rows or not dst_rows:
+        return {"trajectory_tree_map_score": 0.0, "step_edge_valid_fraction": 0.0, "step_vertex_coverage": 0.0, "step_map_pairs": []}
+
+    def hidden_centroids(hidden: np.ndarray, rows: list[dict[str, Any]]) -> np.ndarray:
+        centroids: list[np.ndarray] = []
+        for row in rows:
+            vertices = [int(v) for v in row.get("vertices", []) if 0 <= int(v) < hidden.shape[0]]
+            if vertices:
+                centroids.append(np.mean(hidden[vertices], axis=0))
+        return np.stack(centroids, axis=0) if centroids else np.zeros((0, hidden.shape[1] if hidden.ndim == 2 else 1))
+
+    src_centroids_raw = hidden_centroids(src_hidden, src_rows)
+    dst_centroids_raw = hidden_centroids(dst_hidden, dst_rows)
+    src_centroids, dst_centroids = _joint_standardize_pair(src_centroids_raw, dst_centroids_raw)
+    step_map = _nearest_vertex_map(src_centroids, dst_centroids)
+    src_edges = np.asarray(source.get("step_edges", np.zeros((0, 2))), dtype=np.int64).reshape(-1, 2)
+    dst_edges = np.asarray(target.get("step_edges", np.zeros((0, 2))), dtype=np.int64).reshape(-1, 2)
+    if src_edges.size == 0 and src_centroids.shape[0] > 1:
+        src_edges = np.asarray([[idx, idx + 1] for idx in range(src_centroids.shape[0] - 1)], dtype=np.int64)
+    if dst_edges.size == 0 and dst_centroids.shape[0] > 1:
+        dst_edges = np.asarray([[idx, idx + 1] for idx in range(dst_centroids.shape[0] - 1)], dtype=np.int64)
+    dst_edge_set = {tuple(sorted((int(src), int(dst)))) for src, dst in dst_edges.tolist() if int(src) != int(dst)}
+    valid = 0
+    total = 0
+    mapped_edges: list[dict[str, Any]] = []
+    for src_step, dst_step in src_edges.tolist():
+        if not (0 <= int(src_step) < step_map.shape[0] and 0 <= int(dst_step) < step_map.shape[0]):
+            continue
+        mapped = (int(step_map[int(src_step)]), int(step_map[int(dst_step)]))
+        mapped_simplex_edge = tuple(sorted(mapped))
+        ok = mapped[0] == mapped[1] or mapped_simplex_edge in dst_edge_set
+        valid += int(ok)
+        total += 1
+        mapped_edges.append({"source_edge": [int(src_step), int(dst_step)], "mapped_target_edge": list(mapped), "valid": bool(ok)})
+    edge_fraction = float(valid / total) if total else 0.0
+    coverage = float(len(set(int(v) for v in step_map.tolist())) / max(1, dst_centroids.shape[0]))
+    score = float(0.70 * edge_fraction + 0.30 * coverage)
+    return {
+        "trajectory_tree_map_score": score,
+        "step_edge_valid_fraction": edge_fraction,
+        "step_vertex_coverage": coverage,
+        "step_map_pairs": [[int(i), int(v)] for i, v in enumerate(step_map.tolist())],
+        "mapped_step_edges": mapped_edges,
+    }
+
+
+def compare_analogy_candidate(source: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    source_signature = np.asarray(source.get("ph_signature"), dtype=np.float64)
+    target_signature = np.asarray(target.get("ph_signature"), dtype=np.float64)
+    ph_cosine = _cosine_similarity(source_signature, target_signature)
+    simplicial = _full_trajectory_simplicial_map_audit(source["hidden"], target["hidden"])
+    step_tree = _step_tree_map_audit(source, target)
+    metrics: dict[str, Any] = {
+        "source_record_id": int(source["record_id"]),
+        "target_record_id": int(target["record_id"]),
+        "ph_signature_cosine": float(ph_cosine),
+        **simplicial,
+        **step_tree,
+        "thresholds": dict(ANALOGY_RETRIEVAL_THRESHOLDS),
+    }
+    accepted = (
+        metrics["ph_signature_cosine"] >= ANALOGY_RETRIEVAL_THRESHOLDS["ph_signature_cosine"]
+        and metrics["simplicial_edge_valid_fraction"] >= ANALOGY_RETRIEVAL_THRESHOLDS["simplicial_edge_valid_fraction"]
+        and metrics["trajectory_tree_map_score"] >= ANALOGY_RETRIEVAL_THRESHOLDS["trajectory_tree_map_score"]
+    )
+    metrics["accepted_analogy"] = bool(accepted)
+    metrics["rejection_reasons"] = [
+        name
+        for name, threshold in ANALOGY_RETRIEVAL_THRESHOLDS.items()
+        if float(metrics.get(name, 0.0)) < float(threshold)
+    ]
+    return metrics
+
+
+def _active_vertices_for_level(rows: list[dict[str, Any]], level: int, n: int) -> list[int]:
+    vertices: set[int] = set()
+    for row in rows:
+        if int(row.get("level", 0)) <= int(level):
+            vertices.update(int(v) for v in row.get("vertices", []) if 0 <= int(v) < n)
+    return sorted(vertices)
+
+
+def write_interactive_analogical_simplex_maps_3d(
+    source: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    out: Path,
+) -> None:
+    """Render gated analogical maps between full reasoning trajectory simplex trees."""
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    accepted = [candidate for candidate in candidates if bool(candidate.get("accepted_analogy"))]
+    selected = max(
+        accepted,
+        key=lambda item: (
+            float(item.get("ph_signature_cosine", 0.0)),
+            float(item.get("full_filtered_complex_map_score", 0.0)),
+            float(item.get("trajectory_tree_map_score", 0.0)),
+        ),
+        default=None,
+    )
+    browser_candidates = [
+        {key: value for key, value in candidate.items() if key != "target_payload"}
+        for candidate in candidates
+    ]
+    payload = {
+        "schema": "toricgt.analogical_simplex_maps_3d.v2",
+        "retrieval_rule": "emit analogy only when PH signature, full filtered-complex map, and reasoning-step tree-map gates all pass",
+        "source_record_id": int(source["record_id"]),
+        "thresholds": dict(ANALOGY_RETRIEVAL_THRESHOLDS),
+        "candidate_count": int(len(candidates)),
+        "accepted_candidate_count": int(len(accepted)),
+        "candidates": browser_candidates,
+        "selected_target_record_id": None if selected is None else int(selected["target_record_id"]),
+    }
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        specs=[[{"type": "scene"}, {"type": "xy"}]],
+        column_widths=[0.68, 0.32],
+        subplot_titles=("Full reasoning-trajectory simplex-tree map in 3D PCA", "Retrieval gates"),
+    )
+    metric_names = ["ph_signature_cosine", "simplicial_edge_valid_fraction", "trajectory_tree_map_score"]
+    if selected is None:
+        fig.add_trace(
+            go.Scatter3d(
+                x=[0],
+                y=[0],
+                z=[0],
+                mode="markers+text",
+                marker={"size": 10, "color": ["#ff6b6b"]},
+                text=["No analogy emitted"],
+                textposition="top center",
+                name="No analogy emitted",
+                hovertemplate="No candidate satisfied all analogical retrieval gates.<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Bar(
+                x=metric_names,
+                y=[ANALOGY_RETRIEVAL_THRESHOLDS[name] for name in metric_names],
+                marker={"color": ["#ffd166", "#ffd166", "#ffd166"]},
+                name="thresholds",
+                hovertemplate="%{x}<br>threshold=%{y:.3f}<extra></extra>",
+            ),
+            row=1,
+            col=2,
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="#030712",
+            plot_bgcolor="#07111f",
+            title="Analogical Reasoning Maps Between Full Simplex Trees",
+            annotations=[
+                {
+                    "text": "No analogy emitted: at least one required gate failed.",
+                    "xref": "paper",
+                    "yref": "paper",
+                    "x": 0.36,
+                    "y": 0.95,
+                    "showarrow": False,
+                    "font": {"color": "#ffb4a8", "size": 14},
+                }
+            ],
+            height=760,
+            margin={"l": 20, "r": 20, "t": 70, "b": 45},
+        )
+        fig.update_scenes(xaxis_title="PC1", yaxis_title="PC2", zaxis_title="PC3")
+        payload_text = json.dumps(payload, sort_keys=True)
+        html_text = fig.to_html(include_plotlyjs="cdn", full_html=True, div_id="analogical_simplex_maps_3d")
+        html_text = html_text.replace(
+            "</body>",
+            f'<script type="application/json" id="vectorized_persistence_comparisons">{html.escape(payload_text)}</script></body>',
+        )
+        out.write_text(html_text, encoding="utf-8")
+        return
+
+    target_payload = selected["target_payload"]
+    src_projected = np.asarray(source["projected"], dtype=np.float64).reshape(-1, 3)
+    dst_projected = np.asarray(target_payload["projected"], dtype=np.float64).reshape(-1, 3)
+    src_values, color_label, colorscale = _token_color_values(source.get("nll", np.zeros((src_projected.shape[0],))), bool(source.get("nll_available", False)))
+    dst_values, _, _ = _token_color_values(target_payload.get("nll", np.zeros((dst_projected.shape[0],))), bool(target_payload.get("nll_available", False)))
+    offset = float(max(np.ptp(src_projected[:, 0]) if src_projected.size else 1.0, np.ptp(dst_projected[:, 0]) if dst_projected.size else 1.0, 1.0) + 1.5)
+    src_vis = src_projected.copy()
+    dst_vis = dst_projected.copy()
+    src_vis[:, 0] -= offset
+    dst_vis[:, 0] += offset
+    src_rows = list(source.get("step_rows", []))
+    dst_rows = list(target_payload.get("step_rows", []))
+    src_levels = sorted({int(row.get("level", 0)) for row in src_rows}) or [0]
+    dst_levels = sorted({int(row.get("level", 0)) for row in dst_rows}) or [0]
+    level_count = max(len(src_levels), len(dst_levels))
+    level_labels = list(range(level_count))
+    radius_schedule = [float(v) for v in selected.get("radius_schedule", _radius_schedule_from_pair(source["hidden"], target_payload["hidden"]))]
+    src_centroids = _step_rows_to_centroids(src_vis, src_rows)
+    dst_centroids = _step_rows_to_centroids(dst_vis, dst_rows)
+    step_map_pairs = [(int(a), int(b)) for a, b in selected.get("step_map_pairs", [])]
+    pair_trace_indices: dict[str, list[int]] = {}
+    for level_idx, _level_label in enumerate(level_labels):
+        src_level = src_levels[min(level_idx, len(src_levels) - 1)]
+        dst_level = dst_levels[min(level_idx, len(dst_levels) - 1)]
+        src_vertices = _active_vertices_for_level(src_rows, int(src_level), src_vis.shape[0])
+        dst_vertices = _active_vertices_for_level(dst_rows, int(dst_level), dst_vis.shape[0])
+        src_active_steps = [idx for idx, row in enumerate(src_rows[: src_centroids.shape[0]]) if int(row.get("level", 0)) <= int(src_level)]
+        dst_active_steps = [idx for idx, row in enumerate(dst_rows[: dst_centroids.shape[0]]) if int(row.get("level", 0)) <= int(dst_level)]
+        for radius_idx, radius in enumerate(radius_schedule):
+            visible = level_idx == 0 and radius_idx == 0
+            start_idx = len(fig.data)
+            src_local_edges, _, _, _ = _rips_edges_triangles(src_vis[src_vertices] if src_vertices else np.zeros((0, 3)), float(radius))
+            dst_local_edges, _, _, _ = _rips_edges_triangles(dst_vis[dst_vertices] if dst_vertices else np.zeros((0, 3)), float(radius))
+            src_edges_global = [(src_vertices[a], src_vertices[b]) for a, b in src_local_edges]
+            dst_edges_global = [(dst_vertices[a], dst_vertices[b]) for a, b in dst_local_edges]
+            src_edge_xyz = _edge_line_xyz(src_vis, src_edges_global)
+            dst_edge_xyz = _edge_line_xyz(dst_vis, dst_edges_global)
+            map_edges = [
+                (src_idx, dst_idx)
+                for src_idx, dst_idx in step_map_pairs
+                if src_idx in set(src_active_steps) and dst_idx in set(dst_active_steps) and 0 <= src_idx < src_centroids.shape[0] and 0 <= dst_idx < dst_centroids.shape[0]
+            ]
+            map_x: list[float] = []
+            map_y: list[float] = []
+            map_z: list[float] = []
+            for src_idx, dst_idx in map_edges:
+                a = src_centroids[src_idx]
+                b = dst_centroids[dst_idx]
+                map_x.extend([float(a[0]), float(b[0]), None])
+                map_y.extend([float(a[1]), float(b[1]), None])
+                map_z.extend([float(a[2]), float(b[2]), None])
+            fig.add_trace(
+                go.Scatter3d(
+                    x=src_vis[src_vertices, 0] if src_vertices else [],
+                    y=src_vis[src_vertices, 1] if src_vertices else [],
+                    z=src_vis[src_vertices, 2] if src_vertices else [],
+                    mode="markers",
+                    marker={"size": 4, "color": src_values[src_vertices] if src_vertices else [], "colorscale": colorscale, "showscale": visible, "colorbar": {"title": color_label}},
+                    name="source trajectory token vectors",
+                    visible=visible,
+                    hovertemplate="source token %{text}<extra></extra>",
+                    text=[str(v) for v in src_vertices],
+                ),
+                row=1,
+                col=1,
+            )
+            fig.add_trace(
+                go.Scatter3d(
+                    x=dst_vis[dst_vertices, 0] if dst_vertices else [],
+                    y=dst_vis[dst_vertices, 1] if dst_vertices else [],
+                    z=dst_vis[dst_vertices, 2] if dst_vertices else [],
+                    mode="markers",
+                    marker={"size": 4, "color": dst_values[dst_vertices] if dst_vertices else [], "colorscale": colorscale, "showscale": False},
+                    name="target memory token vectors",
+                    visible=visible,
+                    hovertemplate="target token %{text}<extra></extra>",
+                    text=[str(v) for v in dst_vertices],
+                ),
+                row=1,
+                col=1,
+            )
+            fig.add_trace(go.Scatter3d(x=src_edge_xyz[0], y=src_edge_xyz[1], z=src_edge_xyz[2], mode="lines", line={"color": "rgba(55,232,255,0.28)", "width": 2}, name="source radius complex", visible=visible, hoverinfo="skip"), row=1, col=1)
+            fig.add_trace(go.Scatter3d(x=dst_edge_xyz[0], y=dst_edge_xyz[1], z=dst_edge_xyz[2], mode="lines", line={"color": "rgba(255,211,155,0.28)", "width": 2}, name="target radius complex", visible=visible, hoverinfo="skip"), row=1, col=1)
+            fig.add_trace(
+                go.Scatter3d(
+                    x=src_centroids[src_active_steps, 0] if src_active_steps else [],
+                    y=src_centroids[src_active_steps, 1] if src_active_steps else [],
+                    z=src_centroids[src_active_steps, 2] if src_active_steps else [],
+                    mode="markers+text",
+                    marker={"size": 9, "color": "#38e8ff", "line": {"color": "#e8fbff", "width": 1}},
+                    text=[f"S{idx}" for idx in src_active_steps],
+                    name="source simplex-tree step nodes",
+                    visible=visible,
+                    hovertemplate="source step %{text}<extra></extra>",
+                ),
+                row=1,
+                col=1,
+            )
+            fig.add_trace(
+                go.Scatter3d(
+                    x=dst_centroids[dst_active_steps, 0] if dst_active_steps else [],
+                    y=dst_centroids[dst_active_steps, 1] if dst_active_steps else [],
+                    z=dst_centroids[dst_active_steps, 2] if dst_active_steps else [],
+                    mode="markers+text",
+                    marker={"size": 9, "color": "#ffd39b", "line": {"color": "#e8fbff", "width": 1}},
+                    text=[f"T{idx}" for idx in dst_active_steps],
+                    name="target memory simplex-tree step nodes",
+                    visible=visible,
+                    hovertemplate="target step %{text}<extra></extra>",
+                ),
+                row=1,
+                col=1,
+            )
+            fig.add_trace(
+                go.Scatter3d(
+                    x=map_x,
+                    y=map_y,
+                    z=map_z,
+                    mode="lines",
+                    line={"color": "rgba(140,255,106,0.72)", "width": 5},
+                    name="accepted full_reasoning_trajectory_simplex_tree_map",
+                    visible=visible,
+                    hovertemplate="accepted_analogy simplicial map<extra></extra>",
+                ),
+                row=1,
+                col=1,
+            )
+            pair_trace_indices[f"{level_idx}|{radius_idx}"] = list(range(start_idx, len(fig.data)))
+    gate_values = [float(selected.get(name, 0.0)) for name in metric_names]
+    gate_thresholds = [float(ANALOGY_RETRIEVAL_THRESHOLDS[name]) for name in metric_names]
+    fig.add_trace(
+        go.Bar(
+            x=metric_names,
+            y=gate_values,
+            marker={"color": ["#38e8ff", "#8cff6a", "#ffd39b"]},
+            name="accepted candidate metrics",
+            customdata=[json.dumps({name: float(selected.get(name, 0.0)), "threshold": float(ANALOGY_RETRIEVAL_THRESHOLDS[name])}, sort_keys=True) for name in metric_names],
+            hovertemplate="%{x}<br>value=%{y:.3f}<br>analogical_simplex_map=%{customdata}<extra></extra>",
+        ),
+        row=1,
+        col=2,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=metric_names,
+            y=gate_thresholds,
+            mode="markers",
+            marker={"size": 12, "symbol": "line-ew", "color": "#ff6b6b"},
+            name="gate thresholds",
+            hovertemplate="%{x}<br>threshold=%{y:.3f}<extra></extra>",
+        ),
+        row=1,
+        col=2,
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#030712",
+        plot_bgcolor="#07111f",
+        title="Analogical Reasoning Maps Between Full Simplex Trees",
+        height=760,
+        margin={"l": 20, "r": 20, "t": 70, "b": 45},
+    )
+    fig.update_scenes(xaxis_title="PC1", yaxis_title="PC2", zaxis_title="PC3")
+    fig.update_yaxes(title_text="gate value", row=1, col=2, range=[0.0, 1.05])
+    payload_text = json.dumps(payload, sort_keys=True)
+    pair_payload = json.dumps(pair_trace_indices, sort_keys=True)
+    radii_payload = json.dumps(radius_schedule)
+    levels_payload = json.dumps(level_labels)
+    html_text = fig.to_html(include_plotlyjs="cdn", full_html=True, div_id="analogical_simplex_maps_3d")
+    control_panel = f"""
+<section style="max-width:1180px;margin:0 auto 24px;padding:16px;background:#07111f;border:1px solid rgba(140,255,106,.28);border-radius:8px;color:#e8fbff;font-family:Inter,Arial,sans-serif">
+  <h2 style="margin:0 0 8px;font-size:18px">Accepted Analogical Memory Map</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0">
+    <label>reasoning level <strong id="analogical_reasoning_level_label">0</strong><br>
+      <input id="reasoning_level_slider" type="range" min="0" max="{max(0, len(level_labels) - 1)}" value="0" step="1" style="width:100%">
+    </label>
+    <label>radius <strong id="analogical_radius_label">{float(radius_schedule[0]):.4f}</strong><br>
+      <input id="radius_slider" type="range" min="0" max="{max(0, len(radius_schedule) - 1)}" value="0" step="1" style="width:100%">
+    </label>
+  </div>
+  <p style="color:#91a8b7">The retrieval head should use these same gates: full-trajectory simplex-tree map, filtered-complex simplicial map, and vectorized PH similarity. PCA is used only for this rendering.</p>
+  <pre style="white-space:pre-wrap;color:#c8f7ff;background:#020713;padding:12px;border-radius:6px;max-height:280px;overflow:auto">accepted_analogy {html.escape(payload_text)}</pre>
+</section>
+<script type="application/json" id="vectorized_persistence_comparisons">{html.escape(payload_text)}</script>
+<script type="application/json" id="analogical_trace_index">{html.escape(pair_payload)}</script>
+<script type="application/json" id="analogical_levels">{html.escape(levels_payload)}</script>
+<script type="application/json" id="analogical_radii">{html.escape(radii_payload)}</script>
+<script>
+const analogicalGd = document.getElementById('analogical_simplex_maps_3d');
+const analogicalTraceIndex = JSON.parse(document.getElementById('analogical_trace_index').textContent);
+const analogicalLevels = JSON.parse(document.getElementById('analogical_levels').textContent);
+const analogicalRadii = JSON.parse(document.getElementById('analogical_radii').textContent);
+function setAnalogicalScene() {{
+  const l = Number(document.getElementById('reasoning_level_slider').value);
+  const r = Number(document.getElementById('radius_slider').value);
+  document.getElementById('analogical_reasoning_level_label').textContent = analogicalLevels[l];
+  document.getElementById('analogical_radius_label').textContent = Number(analogicalRadii[r]).toFixed(4);
+  const metricTraces = 2;
+  const n = analogicalGd ? analogicalGd.data.length : 0;
+  const visible = Array(n).fill(false);
+  const active = analogicalTraceIndex[`${{l}}|${{r}}`] || [];
+  active.forEach((idx) => {{ if (idx >= 0 && idx < n) visible[idx] = true; }});
+  for (let i = Math.max(0, n - metricTraces); i < n; i++) visible[i] = true;
+  if (analogicalGd) Plotly.restyle(analogicalGd, {{visible: visible}}, Array.from({{length:n}}, (_, i) => i));
+}}
+document.getElementById('reasoning_level_slider').addEventListener('input', setAnalogicalScene);
+document.getElementById('radius_slider').addEventListener('input', setAnalogicalScene);
+</script>
+"""
+    out.write_text(html_text.replace("</body>", control_panel + "</body>"), encoding="utf-8")
+
+
+def write_interactive_slepian_torus_surface(
+    nll: np.ndarray,
+    out: Path,
+    *,
+    nll_available: bool,
+) -> None:
+    """Render a finite Slepian/Pollak signal as a color field on T^2."""
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    length = max(16, int(np.asarray(nll).reshape(-1).shape[0]))
+    cfg = ToricSlepianConfig()
+    idx = np.arange(length, dtype=np.float64)
+    phase_u = (idx * cfg.theta) % 1.0
+    phase_v = (idx * cfg.beta) % 1.0
+    energy = np.asarray(nll, dtype=np.float64).reshape(-1)
+    if not bool(nll_available) or energy.shape[0] != length:
+        energy = None
+    audit = toric_slepian_audit(phase_u, phase_v, energy=energy, config=cfg)
+    reconstruction = np.asarray(audit["slepian_reconstruction"], dtype=np.float64).reshape(-1)
+    envelope = np.asarray(audit["slepian_envelope"], dtype=np.float64).reshape(-1)
+    if reconstruction.shape[0] < length:
+        reconstruction = np.pad(reconstruction, (0, length - reconstruction.shape[0]), constant_values=0.0)
+    if envelope.shape[0] < length:
+        envelope = np.pad(envelope, (0, length - envelope.shape[0]), constant_values=1.0)
+    grid = 54
+    u = np.linspace(0.0, 2.0 * np.pi, grid)
+    v = np.linspace(0.0, 2.0 * np.pi, grid)
+    uu, vv = np.meshgrid(u, v)
+    major, minor = 2.4, 0.72
+    x = (major + minor * np.cos(vv)) * np.cos(uu)
+    y = (major + minor * np.cos(vv)) * np.sin(uu)
+    z = minor * np.sin(vv)
+    surface_color = np.zeros_like(uu)
+    for r in range(grid):
+        for c in range(grid):
+            du = np.minimum(np.abs((uu[r, c] / (2.0 * np.pi)) - phase_u), 1.0 - np.abs((uu[r, c] / (2.0 * np.pi)) - phase_u))
+            dv = np.minimum(np.abs((vv[r, c] / (2.0 * np.pi)) - phase_v), 1.0 - np.abs((vv[r, c] / (2.0 * np.pi)) - phase_v))
+            weight = np.exp(-(du * du + dv * dv) / 0.010)
+            surface_color[r, c] = float(np.sum(weight * reconstruction[:length]) / max(np.sum(weight), 1e-12))
+    path_x = (major + minor * np.cos(2.0 * np.pi * phase_v)) * np.cos(2.0 * np.pi * phase_u)
+    path_y = (major + minor * np.cos(2.0 * np.pi * phase_v)) * np.sin(2.0 * np.pi * phase_u)
+    path_z = minor * np.sin(2.0 * np.pi * phase_v)
+    custom = [
+        [
+            int(i),
+            float(phase_u[i]),
+            float(phase_v[i]),
+            float(reconstruction[i]),
+            float(envelope[i]),
+            None if energy is None else float(energy[i]),
+        ]
+        for i in range(length)
+    ]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Surface(
+            x=x,
+            y=y,
+            z=z,
+            surfacecolor=surface_color,
+            colorscale="Turbo",
+            opacity=0.92,
+            colorbar={"title": "Slepian value"},
+            name="slepian_torus_surface",
+            hovertemplate="torus surface<br>Slepian value=%{surfacecolor:.4f}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=path_x,
+            y=path_y,
+            z=path_z,
+            mode="lines+markers",
+            line={"color": "#e8fbff", "width": 4},
+            marker={"size": 4, "color": envelope[:length], "colorscale": "Viridis", "line": {"color": "#020713", "width": 0.5}},
+            name="irrational phase foliation",
+            customdata=custom,
+            hovertemplate=(
+                "trajectory index %{customdata[0]}<br>u=%{customdata[1]:.4f}<br>v=%{customdata[2]:.4f}"
+                "<br>Slepian=%{customdata[3]:.4f}<br>envelope=%{customdata[4]:.4f}<br>local NLL/energy=%{customdata[5]}<extra></extra>"
+            ),
+        )
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#030712",
+        plot_bgcolor="#07111f",
+        title=(
+            "Slepian/Pollak Prolate Signal On A Foliated Torus "
+            f"(concentration {float(audit['slepian_concentration']):.3f})"
+        ),
+        scene={"xaxis_title": "torus x", "yaxis_title": "torus y", "zaxis_title": "torus z"},
+        height=760,
+        margin={"l": 0, "r": 0, "t": 58, "b": 0},
+    )
+    payload = json.dumps(
+        {
+            "schema": "toricgt.slepian_torus_surface.v1",
+            "slepian_customdata": custom,
+            "slepian_concentration": float(audit["slepian_concentration"]),
+            "slepian_leakage": float(audit["slepian_leakage"]),
+            "slepian_bandwidth": float(audit["slepian_bandwidth"]),
+        },
+        sort_keys=True,
+    )
+    html_text = fig.to_html(include_plotlyjs="cdn", full_html=True, div_id="slepian_torus_surface")
+    html_text = html_text.replace("</body>", f'<script type="application/json" id="slepian_torus_payload">{html.escape(payload)}</script></body>')
+    out.write_text(html_text, encoding="utf-8")
+
+
 def per_node_mse(out_node: torch.Tensor, target: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
     err = (out_node.float() - target.float()).pow(2).mean(dim=-1)
     return torch.where(node_mask, err, torch.zeros_like(err))
@@ -1062,6 +2327,7 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
     objects: list[dict[str, Any]] = []
     rich_records: list[dict[str, Any]] = []
     embedding_payloads: list[dict[str, Any]] = []
+    analogical_payloads: list[dict[str, Any]] = []
     topology_cfg = ReasoningTopologyConfig(
         max_points=max(4, int(args.topology_max_points)),
         max_windows=max(1, int(args.topology_max_windows)),
@@ -1127,6 +2393,17 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                     nll,
                     edges,
                     max_vertices=min(11, max(3, n)),
+                )
+                causal_rank = None
+                if batch.node_causal_rank is not None:
+                    causal_rank = batch.node_causal_rank[sample_index, :n].detach().float().cpu().numpy()
+                step_rows, step_edges = reasoning_level_step_groups(
+                    hidden,
+                    nll,
+                    edges,
+                    causal_rank=causal_rank,
+                    max_levels=min(8, max(2, n)),
+                    max_branches=3,
                 )
                 record_id = len(records)
                 topology = directed_step_filtration_stats_np(hidden, config=topology_cfg)
@@ -1243,6 +2520,34 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
                     edges=complex_edges,
                     complex_rows=complex_rows,
                 )
+                write_interactive_reasoning_step_simplex_tree_3d(
+                    projected,
+                    nll,
+                    step_rows,
+                    traj_dir / f"{prefix}_reasoning_step_simplex_tree_3d.html",
+                    nll_available=bool(node_nll_available),
+                    nll_source=nll_source,
+                    step_edges=step_edges,
+                )
+                ph_signature, ph_metrics = _trajectory_ph_signature(hidden)
+                analogical_payloads.append(
+                    {
+                        "record_id": int(record_id),
+                        "hidden": hidden.astype(np.float32),
+                        "projected": projected.astype(np.float32),
+                        "nll": nll.astype(np.float32),
+                        "nll_available": bool(node_nll_available),
+                        "step_rows": step_rows,
+                        "step_edges": step_edges.astype(np.int64),
+                        "ph_signature": ph_signature.astype(np.float32),
+                        "ph_metrics": ph_metrics,
+                    }
+                )
+                write_interactive_slepian_torus_surface(
+                    nll,
+                    traj_dir / f"{prefix}_slepian_torus_surface.html",
+                    nll_available=bool(node_nll_available),
+                )
                 plot_topology_heatmap(topology, topo_dir / f"{prefix}_topology_heatmaps.png")
             if len(records) >= int(args.records):
                 break
@@ -1259,6 +2564,21 @@ def evaluate_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], li
         (embedding_dir / "manifest.json").write_text(
             json.dumps(embedding_manifest, indent=2, sort_keys=True),
             encoding="utf-8",
+        )
+    analogical_dir = out_dir / "analogical"
+    analogical_dir.mkdir(parents=True, exist_ok=True)
+    for source in analogical_payloads:
+        render_candidates: list[dict[str, Any]] = []
+        for target_payload in analogical_payloads:
+            if int(target_payload["record_id"]) == int(source["record_id"]):
+                continue
+            comparison = compare_analogy_candidate(source, target_payload)
+            comparison["target_payload"] = target_payload
+            render_candidates.append(comparison)
+        write_interactive_analogical_simplex_maps_3d(
+            source,
+            render_candidates,
+            analogical_dir / f"record_{int(source['record_id']):03d}_analogical_simplex_maps_3d.html",
         )
     return records, objects, rich_records
 
@@ -1330,7 +2650,11 @@ def build_plot_family_manifest(out_dir: Path) -> dict[str, Any]:
         "schema": "toricgt.geometry_plot_family_manifest.v1",
         "families": families,
         "previous_families": sorted(item["family"] for item in families if item["introduced"] == "previous"),
-        "current_new_families": sorted(item["family"] for item in families if item["introduced"] == "current"),
+        "current_new_families": sorted(
+            item["family"]
+            for item in families
+            if item["introduced"] == "current" or str(item["introduced"]).startswith("staircase_simplextree_slepian_")
+        ),
         "union_families": sorted(item["family"] for item in families),
         "interactive_3d4d_complete": all(item["status"] == "ok" for item in required_3d4d),
         "missing_required_interactive": [

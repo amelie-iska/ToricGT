@@ -237,7 +237,33 @@ def test_exact_sage_normal_fan_if_installed() -> None:
     payload = cert.with_hash()
     assert payload["provenance"] == "exact_cas/sage"
     assert payload["toric"]["num_rays"] > 0
+    assert payload["toric"]["num_one_dimensional_cones"] == payload["toric"]["num_rays"]
+    assert payload["toric"]["fan_one_dimensional_cones"] == payload["toric"]["fan_rays"]
+    assert payload["toric"]["fan_properties"]["is_complete"] is True
+    assert "is_simplicial" in payload["toric"]["fan_properties"]
+    assert "is_smooth" in payload["toric"]["fan_properties"]
+    assert payload["toric"]["cone_containment_checks"]["all_maximal_indices_are_one_dimensional_cones"] is True
+    assert payload["toric"]["fan_refinement_checks"]["self_refinement_valid"] is True
+    assert len(payload["toric"]["orbit_strata"]) == len(payload["toric"]["maximal_cones"])
+    assert isinstance(payload["toric"]["face_incidence"], list)
     assert validate_certificate_payload(payload) == []
+
+
+def test_exact_sage_normal_fan_validator_rejects_missing_fields() -> None:
+    payload = {
+        "kind": "sage_normal_fan_certificate",
+        "input_hash": "unit",
+        "provenance": "exact_cas/sage",
+        "created_at_utc": "2026-01-01T00:00:00Z",
+        "source": {},
+        "cas": {},
+        "toric": {"num_rays": 2, "fan_rays": [[1, 0], [0, 1]]},
+    }
+
+    errors = validate_certificate_payload(payload)
+
+    assert any("num_one_dimensional_cones" in error for error in errors)
+    assert any("cone_containment_checks" in error for error in errors)
 
 
 def test_exact_macaulay2_smoke_if_installed() -> None:
@@ -303,8 +329,18 @@ def test_exact_macaulay2_toric_vector_bundle_certificate_if_installed() -> None:
     assert payload["kind"] == "macaulay2_toric_vector_bundle_certificate"
     assert payload["toric"]["ambient"] == "P2"
     assert payload["toric"]["rank"] == 2
+    assert len(payload["toric"]["one_dimensional_cones"]) == 3
+    assert payload["toric"]["maximal_cones"] == [[0, 1], [1, 2], [2, 0]]
     assert payload["commutative_algebra"]["is_vector_bundle"] is True
     assert "ToricVectorBundleKlyachko" in payload["commutative_algebra"]["class"]
+    algebra = payload["commutative_algebra"]
+    assert algebra["structured_certificate_provenance"] == "macaulay2_toricvectorbundles_validated_P2_rank2_bundle"
+    assert algebra["one_dimensional_cone_filtrations"]
+    assert algebra["chart_weights"]
+    assert algebra["transition_matrices"]["sigma0_sigma1"] == [[1, 0], [0, 1]]
+    assert all(algebra["cech_cocycle_checks"].values())
+    assert all(algebra["chart_overlap_checks"].values())
+    assert algebra["cohomology_summary"]["H0_dimension"] == 2
     assert validate_certificate_payload(payload) == []
 
 

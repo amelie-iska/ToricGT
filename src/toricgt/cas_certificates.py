@@ -166,6 +166,62 @@ def validate_certificate_payload(payload: dict[str, Any]) -> list[str]:
         actual = stable_hash(copied)
         if claimed != actual:
             errors.append(f"certificate_hash mismatch: claimed {claimed}, actual {actual}")
+    if payload.get("kind") == "sage_normal_fan_certificate" and provenance == "exact_cas/sage":
+        toric = payload.get("toric", {})
+        if not isinstance(toric, dict):
+            errors.append("sage_normal_fan_certificate missing toric payload")
+        else:
+            for key in (
+                "num_one_dimensional_cones",
+                "fan_one_dimensional_cones",
+                "maximal_cones",
+                "cone_dimensions",
+                "face_incidence",
+                "orbit_strata",
+                "fan_properties",
+                "cone_containment_checks",
+                "fan_refinement_checks",
+            ):
+                if key not in toric:
+                    errors.append(f"sage_normal_fan_certificate missing toric.{key}")
+            if toric.get("num_one_dimensional_cones") != toric.get("num_rays"):
+                errors.append("sage_normal_fan_certificate one-dimensional cone count differs from compatibility ray count")
+            if toric.get("fan_one_dimensional_cones") != toric.get("fan_rays"):
+                errors.append("sage_normal_fan_certificate one-dimensional cone list differs from compatibility ray list")
+            containment = toric.get("cone_containment_checks", {})
+            if isinstance(containment, dict) and containment.get("all_maximal_indices_are_one_dimensional_cones") is not True:
+                errors.append("sage_normal_fan_certificate cone containment check failed")
+            properties = toric.get("fan_properties", {})
+            if isinstance(properties, dict) and properties.get("is_complete") is not True:
+                errors.append("sage_normal_fan_certificate normal fan is not complete")
+    if payload.get("kind") == "macaulay2_toric_vector_bundle_certificate" and provenance == "exact_cas/macaulay2":
+        toric = payload.get("toric", {})
+        algebra = payload.get("commutative_algebra", {})
+        if not isinstance(toric, dict):
+            errors.append("macaulay2_toric_vector_bundle_certificate missing toric payload")
+            toric = {}
+        if not isinstance(algebra, dict):
+            errors.append("macaulay2_toric_vector_bundle_certificate missing commutative_algebra payload")
+            algebra = {}
+        if algebra.get("is_vector_bundle") is not True:
+            errors.append("macaulay2_toric_vector_bundle_certificate is_vector_bundle check failed")
+        for key in ("one_dimensional_cones", "maximal_cones"):
+            if key not in toric:
+                errors.append(f"macaulay2_toric_vector_bundle_certificate missing toric.{key}")
+        for key in (
+            "structured_certificate_provenance",
+            "one_dimensional_cone_filtrations",
+            "chart_weights",
+            "transition_matrices",
+            "cech_cocycle_checks",
+            "chart_overlap_checks",
+            "cohomology_summary",
+        ):
+            if key not in algebra:
+                errors.append(f"macaulay2_toric_vector_bundle_certificate missing commutative_algebra.{key}")
+        cocycles = algebra.get("cech_cocycle_checks", {})
+        if isinstance(cocycles, dict) and any(value is not True for value in cocycles.values()):
+            errors.append("macaulay2_toric_vector_bundle_certificate Cech cocycle check failed")
     return errors
 
 

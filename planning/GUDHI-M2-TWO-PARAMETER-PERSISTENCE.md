@@ -14,6 +14,13 @@ with a symbolic algebra system.  The goal is to run an exact audit beside
 training, render it as browser-readable evidence, and expose only small
 differentiable vectorizations to the GPU objective.
 
+Current completion ledger: see
+[`planning/EXACTNESS-PH-TORICGT-COMPLETE-IMPLEMENTATION-PLAN-20260615.md`](EXACTNESS-PH-TORICGT-COMPLETE-IMPLEMENTATION-PLAN-20260615.md)
+for the implementation pass that added first-class PH feature dashboards,
+optional inference PH visualization flags, strict exactness validation,
+PH-signature retrieval panels, TokenGT graph-data validation, BGG/Category O
+reports, and vector-bundle/sheaf reports.
+
 ## External Systems Used
 
 The implementation requires real external systems for the exact audit.

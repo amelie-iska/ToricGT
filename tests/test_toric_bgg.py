@@ -1,8 +1,10 @@
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
 import torch
+import yaml
 
 from toricgt.parameter_golf_export import quantized_state_dict
 from toricgt.random_order_lm import DenseRandomOrderToricLM, RandomOrderLMConfig
@@ -14,6 +16,7 @@ from toricgt.toric_bgg import (
     gale_dual_consistency,
     koszul_linearity_residual,
     standard_filtration_leakage,
+    toric_bgg_metric_provenance,
     toy_bgg_certificate,
 )
 
@@ -105,6 +108,11 @@ def test_toric_bgg_probe_reports_finite_metrics():
     assert out["toric_bgg_standard_leakage"].isfinite()
     assert out["toric_bgg_koszul_linearity_residual"].isfinite()
     assert out["toric_bgg_gale_dual_consistency"].isfinite()
+    assert out["toric_bgg_exact_certificate_available"].item() == 1.0
+    assert out["toric_bgg_provenance_exact_finite_chain"].item() == 1.0
+    provenance = toric_bgg_metric_provenance()
+    assert provenance["toric_bgg_d2_residual"] == "exact_finite_chain_complex_boundary_square"
+    assert provenance["toric_bgg_standard_leakage"] == "exact_finite_chain_poset_standard_mask"
 
 
 def test_toric_bgg_probe_is_training_only_for_artifact_export():
@@ -129,3 +137,46 @@ def test_toric_bgg_probe_is_training_only_for_artifact_export():
     payload = quantized_state_dict(model, bits=8)
     assert any(name.startswith("toric_bgg_probe.") for name in payload["excluded"])
     assert not any(name.startswith("toric_bgg_probe.") for name in payload["tensors"])
+
+
+def test_all_phase_configs_keep_bgg_loss_late_gated() -> None:
+    root = Path(__file__).resolve().parents[1]
+    for relative in (
+        "config/train.parameter_golf_all_phases.yaml",
+        "config/train.parameter_golf_all_phases_medium_conservative.yaml",
+    ):
+        config = yaml.safe_load((root / relative).read_text(encoding="utf-8"))
+        assert float(config["training"]["toric_bgg_loss_weight"]) == 0.0
+        phases = config["phase_curriculum"]["phases"]
+        seen_category_o = False
+        for phase in phases:
+            if phase["name"] == "toric_bgg_category_o":
+                seen_category_o = True
+            if not seen_category_o:
+                assert float(phase.get("toric_bgg_loss_weight", 0.0)) == 0.0, (relative, phase["name"])
+        assert seen_category_o
+
+
+def test_render_bgg_category_o_report_writes_provenance_panels(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "render_bgg_category_o_report.py"
+    out = tmp_path / "bgg_report"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--output-dir",
+            str(out),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout
+    html = (out / "index.html").read_text(encoding="utf-8")
+    payload = yaml.safe_load((out / "bgg_category_o_report.json").read_text(encoding="utf-8"))
+    assert "Toric BGG Category O Report" in html
+    assert "exact_finite_chain_complex_boundary_square" in html
+    assert payload["metric_provenance"]["toric_bgg_standard_leakage"] == "exact_finite_chain_poset_standard_mask"
+    assert payload["gates"]["late_gate_required"] == 1.0

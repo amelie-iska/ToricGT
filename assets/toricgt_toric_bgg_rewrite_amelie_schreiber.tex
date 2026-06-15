@@ -648,6 +648,244 @@ The implemented compact objective also adds affine-Coxeter, braid, and phase-lea
 \end{equation}
 Here $\mathcal L_{\mathrm{cox}}$ reflects predicted and teacher moments across simple affine walls and compares the reflected points, $\mathcal L_{\mathrm{br}}$ compares the two length-three braid paths $s_1s_2s_1$ and $s_2s_1s_2$, and $\mathcal L_{\mathrm{leaf}}$ compares successive projected phase increments with the irrational rotation increments determined by $(\theta,\beta)$.  The probe is low-rank and fake-quantized during training, so it tests whether the main hidden state contains a compact toric chart rather than adding a large explanation module.  The evaluation suite separately builds empirical toric shadows from hidden states alone: occupied fan cells, active-face margins, bend magnitudes, fitted-slope residuals, and branch-wise phase-leaf residuals.  Thus old checkpoints can be audited even when they were trained before the probe existed.
 
+\subsection{Embedding tropical ring attention into toric varieties}\label{subsec:tropical-ring-attention-toric-embedding}
+
+The preceding toric diagnostics used Newton polytopes and normal fans.  The stronger and more reproducible construction is to embed each rationalized tropical attention head into a toric variety and run the geometric audits there.  This is the point at which TropicalGT and ToricGT become one project.  The statement is intentionally local and finite: a Transformer is not a toric variety in general, and a full neural checkpoint is not a scheme.  Instead, a checkpoint, layer, head, token window, and low-rank tropical probe determine a finite Laurent-polynomial or toric-ideal sidecar.  That sidecar lives in an algebraic torus, its tropicalization is controlled by initial degenerations, and a fan refining the relevant active or Groebner decomposition gives an ambient toric variety.  Toric tools are applied to this sidecar and to its orbit-stratified closure, not to the entire neural network.
+
+Let $K$ be a nonarchimedean field with value group containing $\Q$; for implementation one may use Puiseux series with uniformizer $\tau$ and $\operatorname{val}(\tau)=1$.  Let
+\begin{equation}
+  N\simeq \Z^r,\qquad M=\operatorname{Hom}(N,\Z),
+  \qquad T_N=\operatorname{Spec}K[M]
+\end{equation}
+be the cocharacter lattice, character lattice, and algebraic torus.  A tropical head or audit probe supplies, after rational quantization, characters
+\begin{equation}
+  a_1,\ldots,a_R\in M
+\end{equation}
+and affine candidate scores
+\begin{equation}
+  \ell_r(u)=\ip{a_r}{u}+b_r,\qquad u=P h\in N_\R,\quad b_r\in\Q,
+\end{equation}
+where $P$ is the learned or fixed projection from hidden state to the toric chart.  For a raw tropical attention head, the candidates are $S_{ij}+V_{jc}$; for the toric sidecar we use either an exact affine probe for those candidates or the certified local linearization on the bounded audit window.  Clearing denominators makes $a_r$ and $b_r$ integral after a common scaling.
+
+Define the Laurent polynomial
+\begin{equation}
+  f=\sum_{r=1}^R \tau^{-b_r}\chi^{a_r}\in K[M].
+\end{equation}
+For $u\in N_\R$, use the initial form convention
+\begin{equation}
+  \operatorname{in}_{-u}(f)
+  =
+  \sum_{\substack{r:\\
+    \operatorname{val}(\tau^{-b_r})+\ip{-u}{a_r}
+    =\min_s(\operatorname{val}(\tau^{-b_s})+\ip{-u}{a_s})}}
+    \overline{\tau^{-b_r}\chi^{a_r}}.
+\end{equation}
+Since
+\begin{equation}
+  \operatorname{val}(\tau^{-b_r})+\ip{-u}{a_r}
+  =
+  -b_r-\ip{a_r}{u}
+  =
+  -\ell_r(u),
+\end{equation}
+the minimum in the initial form is achieved exactly by the maximum in tropical attention.
+
+\begin{proposition}[Tropical attention provenance as an initial degeneration]\label{prop:attention-initial-degeneration}
+With the max-plus convention above,
+\begin{equation}
+  A(u)=\argmax_r \ell_r(u)
+\end{equation}
+is exactly the exponent support of $\operatorname{in}_{-u}(f)$.  The tropical hypersurface of $f$ is the tie locus where $\abs{A(u)}\ge2$, while the full attention provenance partition is the normal-cell decomposition recording $A(u)$ also on the unique-max chambers.
+\end{proposition}
+
+\begin{proof}
+The initial form keeps precisely the monomials whose values
+\begin{equation}
+  -b_r-\ip{a_r}{u}
+\end{equation}
+are minimal.  Multiplying by $-1$ converts this condition to maximality of $\ip{a_r}{u}+b_r$.  Thus the retained monomials are exactly the active attention candidates.  The tropical hypersurface is the usual corner locus, where the initial form has at least two terms.  Tropical attention also records the open chambers where the initial form is monomial, because unique maximizers are reasoning decisions rather than failures of the tropical polynomial to be differentiable.
+\end{proof}
+
+For multiple output coordinates, heads, or graph tokens, we use a finite family
+\begin{equation}
+  \mathcal F_H=\{f_\alpha:\alpha\in\mathcal A_H\}\subset K[M]
+\end{equation}
+and the ideal $I_H=\langle \mathcal F_H\rangle$.  Its tropical variety is
+\begin{equation}
+  \operatorname{Trop}(Y_H)
+  =
+  \{u\in N_\R:\operatorname{in}_{-u}(I_H)\text{ contains no monomial}\},
+  \qquad Y_H=V(I_H)\cap T_N,
+\end{equation}
+with the sign convention inherited from the max-plus attention head.  In practice, most attention states lie in chambers outside this tropical variety; the variety itself is the wall complex where candidate decisions tie.  The useful object for training is therefore the pair
+\begin{equation}
+  \bigl(\operatorname{Trop}(Y_H),\,\mathcal N_H\bigr),
+\end{equation}
+where $\mathcal N_H$ is the active normal or Groebner chamber complex.  The first gives balanced tropical cycles and Chow classes when the hypotheses hold; the second gives the decision strata used by the neural model.
+
+Choose a rational fan $\Sigma$ in $N_\R$ refining all normal fans of the lifted Newton polytopes
+\begin{equation}
+  \Conv\{(a_r,b_r):r\le R\}
+\end{equation}
+and, when $I_H$ is used, refining the finite Groebner fan on the audited support.  The fan determines a toric variety $X_\Sigma$ with dense torus $T_N$.  On every cone $\sigma\in\Sigma$, the initial ideal $\operatorname{in}_{-u}(I_H)$ and every active set $A_\alpha(u)$ are constant for $u$ in the relative interior of $\sigma$, after sufficient refinement.
+
+\begin{theorem}[Toric sidecar for tropical ring attention]\label{thm:tropical-attention-toric-sidecar}
+Let $\Sigma$ be a rational fan refining the active normal complex of a finite tropical attention sidecar $\mathcal F_H$, and let $\overline Y_H$ be the closure of $Y_H=V(I_H)\cap T_N$ in $X_\Sigma$ when an ideal sidecar is present.  Then:
+\begin{enumerate}[leftmargin=2em]
+  \item every cone of $\Sigma$ labels a constant initial-form and attention-provenance regime;
+  \item the torus orbit $O(\sigma)\subset X_\Sigma$ records the degeneration class indexed by $\sigma$;
+  \item if $\abs{\Sigma}=\operatorname{Trop}(Y_H)$ and the multiplication map
+  \begin{equation}
+    T_N\times \overline Y_H\longrightarrow X_\Sigma
+  \end{equation}
+  is flat and surjective, then $\overline Y_H\subset X_\Sigma$ is a tropical compactification of $Y_H$; if the multiplication map is smooth and surjective, it is a schon tropical compactification;
+  \item in the finite training regime, even when the global compactification hypotheses are not certified, $\Sigma$ still provides a reproducible toric audit object for active faces, orbit incidence, divisor bends, monomial initial ideals, and local free resolutions.
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+The first claim is the defining property of a common refinement of the normal and Groebner decompositions.  Initial forms and active supports are locally constant on relative interiors of cones in such a refinement.  The second claim is the standard orbit-cone correspondence for toric varieties: cones $\sigma\in\Sigma$ correspond to torus orbits $O(\sigma)$, with orbit closures ordered by face relations.  The third claim is Tevelev's tropical compactification criterion, stated here in the sign convention used by the attention sidecar.  The fourth claim follows because the data needed by the audits are finite combinatorial and commutative-algebraic data attached to $\Sigma$, $I_H$, and their initial ideals; those data remain well defined whether or not the closure is globally proper or smooth.
+\end{proof}
+
+This theorem is the mathematical guardrail for implementation.  ToricGT does not say that all hidden-state geometry is algebraic.  It says that when a head is used through max-plus candidates with rational exponents, the resulting finite tropical computation has a canonical toric envelope.  That envelope supplies exact algebraic measurements.
+
+\paragraph{Divisors, Chow classes, and intersection metrics.}
+The max-plus function
+\begin{equation}
+  \psi(u)=\max_r(\ip{a_r}{u}+b_r)
+\end{equation}
+is an integral piecewise-linear support function on a sufficiently refined fan after denominator clearing.  Hence it determines a torus-invariant Cartier divisor $D_\psi$ on $X_\Sigma$ when the usual Cartier compatibility condition holds.  If $\sigma$ and $\sigma'$ are adjacent maximal cones sharing a codimension-one cone $\tau$, and $m_\sigma,m_{\sigma'}\in M$ are the slopes of $\psi$ on them, the bend
+\begin{equation}
+  B_\psi(\tau)=\ip{m_\sigma-m_{\sigma'}}{u_{\sigma/\tau}}
+\end{equation}
+is the toric intersection of $D_\psi$ with the invariant curve associated to $\tau$, up to the standard primitive-normal convention.  Thus the empirical bend audit is not just a visualization: it is the finite neural analogue of a toric divisor intersection number.
+
+When the tropical wall complex carries multiplicities $\omega(\sigma)$ on its maximal cones, balancedness is the condition that for every codimension-one cone $\tau$
+\begin{equation}
+  \sum_{\sigma\supset\tau}\omega(\sigma)u_{\sigma/\tau}=0
+  \quad\text{in }N/N_\tau.
+\end{equation}
+The training-side residual is
+\begin{equation}
+  \mathcal L_{\mathrm{bal}}
+  =
+  \sum_{\tau}
+  \left\|
+    \sum_{\sigma\supset\tau}\widehat\omega(\sigma)u_{\sigma/\tau}
+  \right\|_2^2.
+\end{equation}
+By Fulton-Sturmfels and the tropical intersection viewpoint, a balanced codimension-$c$ fan defines a Minkowski weight, hence a class in $A^c(X_\Sigma)$ \cite{fultonsturmfels1994intersection,katz2009tropicalintersection}.  The corresponding Chow-class metric compares predicted and certified Minkowski weights:
+\begin{equation}
+  \mathcal L_{\mathrm{Chow}}
+  =
+  \sum_{\sigma\in\Sigma(c)}
+  \abs{\widehat\omega(\sigma)-\omega^\star(\sigma)}^2.
+\end{equation}
+Maclagan and Rincon's theorem that varieties of tropical ideals are balanced justifies this class when the sidecar is a tropical ideal or the tropicalization of a classical ideal \cite{maclaganrincon2018tropicalideals,maclaganrincon2020balanced}.
+
+\paragraph{Toric ideals and Miller-Sturmfels staircases.}
+Let $A=[a_1,\ldots,a_R]$ be the exponent matrix.  The monomial map
+\begin{equation}
+  \varphi_A:K[x_1,\ldots,x_R]\to K[M],
+  \qquad x_r\mapsto \chi^{a_r}
+\end{equation}
+has toric ideal
+\begin{equation}
+  I_A=\ker\varphi_A
+  =
+  \langle x^\alpha-x^\beta:A\alpha=A\beta\rangle.
+\end{equation}
+This is the exact commutative-algebra object behind the binomial consistency loss.  For two-parameter local persistence or two-coordinate attention slices, a monomial initial ideal
+\begin{equation}
+  J=\langle x^{a_1}y^{b_1},\ldots,x^{a_s}y^{b_s}\rangle,
+  \qquad a_1>\cdots>a_s,\quad b_1<\cdots<b_s,
+\end{equation}
+is represented by the Miller-Sturmfels staircase: lattice points outside $J$ form the monomial basis of $K[x,y]/J$, and the boundary staircase is the interface between retained and killed monomials.  The minimal first syzygies in the generic two-variable case come from adjacent generators rather than all pairs:
+\begin{equation}
+  0\longrightarrow
+  \bigoplus_{i=1}^{s-1}K[x,y](-\operatorname{lcm}(m_i,m_{i+1}))
+  \longrightarrow
+  \bigoplus_{i=1}^{s}K[x,y](-m_i)
+  \longrightarrow
+  J
+  \longrightarrow 0.
+\end{equation}
+This is the correct visualization for grid modules in ToricGT: not a Pareto frontier, but stacked staircase layers, with small height offsets for reasoning level, filtration radius, or internal degree.  The Hilbert numerator, Betti table, and staircase area become exact sidecar metrics for two-parameter persistence modules and local initial ideals \cite{millersturmfels2005cca}.
+
+\paragraph{Vector bundles, sheaves, and Klyachko losses.}
+Toric vector bundles add a higher-rank version of the same control mechanism.  A toric vector bundle on $X_\Sigma$ is classified by a finite-dimensional vector space $E$ and decreasing filtrations
+\begin{equation}
+  \cdots\supseteq E^\rho(i)\supseteq E^\rho(i+1)\supseteq\cdots
+\end{equation}
+for every one-dimensional cone $\rho\in\Sigma(1)$, satisfying Klyachko compatibility: for every cone $\sigma\in\Sigma$ there is a decomposition
+\begin{equation}
+  E=\bigoplus_{m\in M}E_m^\sigma
+\end{equation}
+such that, for every one-dimensional cone $\rho\preceq\sigma$ with primitive generator $u_\rho$,
+\begin{equation}
+  E^\rho(i)=
+  \bigoplus_{\ip{m}{u_\rho}\ge i}E_m^\sigma.
+\end{equation}
+ToricGT can treat hidden channels inside a head as the fiber $E$ and use attention gates or GraphCG axes as learned filtrations.  The Klyachko residual is
+\begin{equation}
+  \mathcal L_{\mathrm{Kly}}
+  =
+  \sum_{\sigma}\sum_{\rho\preceq\sigma}\sum_i
+  \left\|
+    \Pi^\rho_i
+    -
+    \sum_{\ip{m}{u_\rho}\ge i}\Pi_m^\sigma
+  \right\|_F^2
+  +
+  \lambda_{\mathrm{flag}}
+  \sum_{\rho,i}\norm{\Pi^\rho_{i+1}\Pi^\rho_i-\Pi^\rho_{i+1}}_F^2,
+\end{equation}
+where $\Pi^\rho_i$ and $\Pi_m^\sigma$ are predicted projection matrices.  The first term checks compatibility with local weight decompositions; the second checks that the filtration is nested.  Recent tropical vector-bundle work gives two additional views: tropical toric vector bundles can be encoded by valuated matroids and flats over tropical toric bases, and toric vector bundles can be described as tropical or valuation-valued objects whose positivity becomes convexity of a piecewise-linear map \cite{khanmaclagan2024tropicalbundles,junminchevatolliver2023tropicalschemes,kavehmanon2023toricbundles}.  These are natural late-phase losses for representation organization, not early BPB objectives.
+
+For sheaves and Cox coordinates, the fan gives the Cox ring
+\begin{equation}
+  S_\Sigma=K[x_\rho:\rho\in\Sigma(1)]
+\end{equation}
+and irrelevant ideal
+\begin{equation}
+  B_\Sigma=
+  \left\langle
+    \prod_{\rho\not\preceq\sigma}x_\rho:\sigma\in\Sigma
+  \right\rangle.
+\end{equation}
+Equivariant sheaves become graded $S_\Sigma$-modules modulo the irrelevant locus.  This is the natural bridge from tropical attention sidecars to BGG/Tate supervision: Macaulay2 can compute free resolutions, Betti tables, local cohomology, Fitting ideals, and Buchsbaum-Eisenbud rank/minor checks for the finite graded modules emitted by a checkpoint.
+
+\paragraph{CAS-reproducible audit contract.}
+The exact audit path is:
+\begin{enumerate}[leftmargin=2em]
+  \item export a sidecar JSON containing the rational exponent table $A$, biases $b$, head/layer ids, active sets, projected hidden coordinates, and any ideal generators;
+  \item use Sage, polymake, or Normaliz-compatible routines to build Newton polytopes, normal fans, orbit incidence, divisor support functions, and one-dimensional-cone divisor data;
+  \item use Macaulay2 with \texttt{Tropical}, Gfan, and Polymake integration to compute tropical varieties, cones, multiplicities, balancing, initial ideals, and min/max-convention checks \cite{m2tropical2019};
+  \item use Macaulay2 or Sage for toric ideals, Groebner bases, Hilbert series, Betti tables, free resolutions, Fitting ideals, and monomial-staircase diagrams;
+  \item use toric-vector-bundle or explicit Klyachko sidecars to compute filtration compatibility, Chern-class proxies, parliament-of-polytopes summaries, and convexity/global-generation checks where available;
+  \item cache every certified object by a hash of $(A,b,\Sigma,I_H,\text{conventions})$ and send only compact tensors back to the GPU.
+\end{enumerate}
+There should be no silent proxy for these exact audits.  If a CAS computation is unavailable, too large, or fails its convention check, the metric is marked unavailable for that batch and excluded from the training loss.  Differentiable neural losses are allowed only after the exact small-window CAS audit has validated their target on representative examples.
+
+The resulting late-phase toric objective refines the earlier compact loss:
+\begin{equation}
+\begin{split}
+  \mathcal L_{\mathrm{toric\text{-}embed}}
+  ={}&
+  \lambda_{\mathrm{init}}\mathcal L_{\mathrm{initial}}
+  +\lambda_{\mathrm{fan}}\mathcal L_{\mathrm{fan}}
+  +\lambda_{\mathrm{bend}}\mathcal L_{\mathrm{bend}}
+  +\lambda_{\mathrm{bal}}\mathcal L_{\mathrm{bal}}
+  +\lambda_{\mathrm{Chow}}\mathcal L_{\mathrm{Chow}}\\
+  &+
+  \lambda_{\mathrm{binom}}\mathcal L_{\mathrm{binom}}
+  +\lambda_{\mathrm{res}}\mathcal L_{\mathrm{resolution}}
+  +\lambda_{\mathrm{Kly}}\mathcal L_{\mathrm{Kly}}
+  +\lambda_{\mathrm{sheaf}}\mathcal L_{\mathrm{sheaf}}.
+\end{split}
+\end{equation}
+Here $\mathcal L_{\mathrm{initial}}$ aligns predicted active supports with CAS-certified initial forms, $\mathcal L_{\mathrm{resolution}}$ compares predicted and certified Betti or differential data, and $\mathcal L_{\mathrm{sheaf}}$ covers Cox-module cohomology or Fitting-rank residuals.  These weights remain zero through early language-model training and are activated only in the audit-gated late phases described in \cref{subsec:checkpoint-triage}.  The BPB rule remains unchanged: a toric sidecar earns deployable bytes only if it improves score-after-export or a predeclared reasoning metric without a BPB regression.
+
 
 \section{Toric BGG structure as trainable supervision}\label{sec:toric-bgg}
 
@@ -1612,7 +1850,7 @@ Polar cache residual & $\norm{K-\widehat K}$, $\norm{V-\widehat V}$, argmax pres
   \label{fig:viz-dashboard}
 \end{figure}
 
-The analysis suite implements this contract with interactive 3D diagnostics.  For each sampled graph-of-thought branch it plots focused hidden-state coordinates, local Vietoris--Rips 1/2-complexes, toric active-face colors, chamber-crossing markers, empirical normal-fan rays, convex chamber-polytopes for occupied active faces, fitted wall sheets at observed tropical/toric crossings, and a small Newton-polytope shadow built from the pseudo-exponents used by the empirical fan audit.  The energy-landscape companion lifts local NLL to the vertical axis and overlays the same chamber and wall geometry.  Sparse/default/dense controls adjust the local simplicial radius; Plotly legend toggles isolate branches, complexes, chambers, walls, and polytopes.
+The analysis suite implements this contract with interactive 3D diagnostics.  For each sampled graph-of-thought branch it plots focused hidden-state coordinates, local Vietoris--Rips 1/2-complexes, toric active-face colors, chamber-crossing markers, empirical normal-fan one-dimensional cones, convex chamber-polytopes for occupied active faces, fitted wall sheets at observed tropical/toric crossings, and a small Newton-polytope shadow built from the pseudo-exponents used by the empirical fan audit.  The energy-landscape companion lifts local NLL to the vertical axis and overlays the same chamber and wall geometry.  Sparse/default/dense controls adjust the local simplicial radius; Plotly legend toggles isolate branches, complexes, chambers, walls, and polytopes.
 
 \begin{proposition}[Visualization invariance]
 Suppose diagnostic functions are defined from graph-invariant quantities or equivariant token quantities followed by canonical graph rendering.  Then relabeling the input graph changes only node/edge labels in the visualization, not the diagnostic values.
@@ -3173,9 +3411,9 @@ The next data pass should add explicit toric-geometric tasks alongside the exist
   \item \textbf{Cartier-divisor bend tasks}: sample rational fans and support functions; predict slope vectors $m_\sigma$, wall bends $\ip{m_\sigma-m_{\sigma'}}{u_\tau}$, and consistency of repeated walls.
   \item \textbf{Toric ideal and binomial relation tasks}: sample exponent matrices and integer kernel relations; predict whether two monomial paths represent the same character and verify binomial constraints.
   \item \textbf{ReLU fan realization tasks}: sample shallow and low-depth rational ReLU networks, construct their canonical polyhedral complexes, and predict whether a given finitely piecewise-linear function satisfies the equal-bend criterion for shallow unbiased realization.
-  \item \textbf{Toric graph-of-thought tasks}: serialize the above objects as typed graphs with cone, ray, face, divisor, monomial, and wall nodes, so the same graph-token machinery handles polyhedral geometry and ordinary reasoning records.
+  \item \textbf{Toric graph-of-thought tasks}: serialize the above objects as typed graphs with cone, one-dimensional-cone, face, divisor, monomial, and wall nodes, so the same graph-token machinery handles polyhedral geometry and ordinary reasoning records.
 \end{enumerate}
-These tasks should be held out by fan combinatorial type, number of rays, Newton-polytope dimension, relation-rank, and wall-equivalence class.  Random example-level splits are especially weak here because adjacent points in a normal fan can share almost all combinatorial data.
+These tasks should be held out by fan combinatorial type, number of one-dimensional cones, Newton-polytope dimension, relation-rank, and wall-equivalence class.  Random example-level splits are especially weak here because adjacent points in a normal fan can share almost all combinatorial data.
 
 \subsection{Affine toric charts and Koszul persistence modules}
 
@@ -3835,6 +4073,61 @@ Konstantinos Fotopoulos, Petros Maragos, and Panagiotis Misiakos.
 David A. Cox, John B. Little, and Henry K. Schenck.
 \newblock \emph{Toric Varieties}.
 \newblock Graduate Studies in Mathematics 124. American Mathematical Society, 2011.
+
+\bibitem{maclagan2012intro}
+Diane Maclagan.
+\newblock Introduction to tropical algebraic geometry.
+\newblock arXiv:1207.1925, 2012.
+
+\bibitem{maclaganrincon2018tropicalideals}
+Diane Maclagan and Felipe Rinc\'on.
+\newblock Tropical ideals.
+\newblock \emph{Compositio Mathematica}, 154(3):640--670, 2018. arXiv:1609.03838.
+
+\bibitem{maclaganrincon2020balanced}
+Diane Maclagan and Felipe Rinc\'on.
+\newblock Varieties of tropical ideals are balanced.
+\newblock arXiv:2009.14557, 2020.
+
+\bibitem{m2tropical2019}
+Carlos Am\'endola, Kathl\'en Kohn, Sara Lamboglia, Diane Maclagan, Ben Smith, Jeff Sommars, Paolo Tripoli, and Magdalena Zajaczkowska.
+\newblock Computing tropical varieties in Macaulay2.
+\newblock arXiv:1710.10651, 2019.
+
+\bibitem{khanmaclagan2024tropicalbundles}
+Bivas Khan and Diane Maclagan.
+\newblock Tropical vector bundles.
+\newblock arXiv:2405.03505, 2024.
+
+\bibitem{junminchevatolliver2023tropicalschemes}
+Jaiung Jun, Kalina Mincheva, and Jeffrey Tolliver.
+\newblock Vector bundles on tropical schemes.
+\newblock arXiv:2009.03030, 2023.
+
+\bibitem{kavehmanon2023toricbundles}
+Kiumars Kaveh and Christopher Manon.
+\newblock Toric vector bundles, valuations and tropical geometry.
+\newblock arXiv:2304.11211, 2023.
+
+\bibitem{schock2024quasilinear}
+Nolan Schock.
+\newblock Quasilinear tropical compactifications.
+\newblock arXiv:2112.02062, 2024.
+
+\bibitem{fultonsturmfels1994intersection}
+William Fulton and Bernd Sturmfels.
+\newblock Intersection theory on toric varieties.
+\newblock arXiv:alg-geom/9403002, 1994.
+
+\bibitem{katz2009tropicalintersection}
+Eric Katz.
+\newblock Tropical intersection theory from toric varieties.
+\newblock arXiv:0907.2488, 2009.
+
+\bibitem{millersturmfels2005cca}
+Ezra Miller and Bernd Sturmfels.
+\newblock \emph{Combinatorial Commutative Algebra}.
+\newblock Graduate Texts in Mathematics 227. Springer, 2005.
 
 \bibitem{schreiber2022multiparameter}
 Amelie Schreiber.

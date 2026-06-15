@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import wave
+from pathlib import Path
 
 from toricgt.music import TorusMusicConfig, compose_torus_music, generate_wav
 from toricgt.slepian_torus import dpss_basis, toric_slepian_audit
@@ -55,3 +58,18 @@ def test_generate_wav_and_metadata(tmp_path) -> None:
     assert "slepian_concentration" in metadata["slepian_audit"]
     assert "slepian_weight" in metadata["events"][0]
     assert metadata["events"][0]["role"] in {"lead", "torus_pad"}
+
+
+def test_inference_cli_exposes_optional_slepian_music_export() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/infer_tokengt_with_geometry.py", "--help"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
+    )
+
+    assert "--emit-slepian-music" in result.stdout
+    assert "--slepian-music-output-dir" in result.stdout
+    assert "--slepian-music-modes" in result.stdout

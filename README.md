@@ -83,6 +83,71 @@ finite exponent polytope derived from the actual hidden embeddings and
 Macaulay2 on the corresponding toric ideal, writing
 `embedding_cas_sidecar/index.html` plus JSON certificates.
 
+Render the exact tropical-to-toric embedding visualization report from any
+existing sidecar bundle with:
+
+```bash
+PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/render_toric_embedding_report.py \
+  --sidecar-dir outputs/<run>/embedding_cas_sidecar \
+  --output-dir outputs/toric_embedding_visual_report_manual \
+  --build-vector-bundle-certificate
+```
+
+The report visualizes Newton and lifted Newton polytopes, initial-degeneration
+chambers, the normal fan with one-dimensional cones, orbit-stratum incidence,
+toric ideal relations, free resolutions, Miller-Sturmfels staircase layers,
+and optional Klyachko vector-bundle filtrations from Macaulay2
+`ToricVectorBundles`.  It consumes exact SageMath/Macaulay2 sidecar fields and
+marks missing balance, Chow, or multiplicity certificates as unavailable
+rather than filling them with heuristics.  Screenshots can be generated with:
+
+```bash
+PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/render_html_screenshots.py \
+  --source-dir outputs/toric_embedding_visual_report_manual \
+  --output-dir outputs/toric_embedding_visual_report_manual/html_screenshots
+```
+
+The latest local rendering from an old checkpoint sidecar is linked at
+`outputs/latest_toric_embedding_visual_report/index.html`, with screenshots in
+`outputs/latest_toric_embedding_visual_report/html_screenshots/`.
+When `--emit-gudhi-persistence` is active, vectorized persistent-homology
+feature visualizations are emitted by default.  Use
+`--no-emit-ph-feature-visualizations` to suppress those browser artifacts, or
+`--emit-ph-feature-visualizations` to make the choice explicit in automation.
+The inference manifest records the PH feature directory and per-record JSON/NPZ
+artifacts so downstream retrieval or report tooling can consume the same exact
+GUDHI vectorizations.
+
+The TokenGT-native HTML bundle now includes `reasoning_step_simplex_tree_3d`
+pages, where each reasoning step is an actual subcollection of token embedding
+vectors with a slider-controlled Rips simplex tree, NLL-aware coloring, and
+decode-order half-arrows that appear as the radius level advances.  The
+`analogical_simplex_maps_3d` pages compare adjacent reasoning-step simplex
+trees and the full trajectory filtered complex through vectorized persistence
+signatures.  The `slepian_torus_surface` pages render the finite
+Slepian/Pollak DPSS reconstruction and envelope as a colormap on the foliated
+torus used by the phase audit.  If a graph checkpoint does not expose true
+language-token NLL, these pages mark NLL as unavailable rather than relabeling
+graph reconstruction energy as NLL.
+
+Optional inference-side music export is available with:
+
+```bash
+PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/infer_tokengt_with_geometry.py \
+  --checkpoint checkpoints/<run>/toricgt_step_00023250.pt \
+  --config config/train.full_tokengt_got_fineweb_derived.yaml \
+  --output-dir outputs/tokengt_inference/<run>/step-00023250 \
+  --records 1 \
+  --device cpu \
+  --precision fp32 \
+  --emit-slepian-music \
+  --slepian-music-seconds 6
+```
+
+This writes `music/slepian_pollak_torus_music.wav` plus JSON metadata linked
+from the inference root index.  The waveform uses the same deterministic
+Slepian/DPSS toric phase construction as the visual audit.
+
 **Local analysis fixtures**
 
 When the full curated shards are unavailable, generate a small deterministic
@@ -132,13 +197,23 @@ The current smoke-generated pages are:
 
 - `outputs/analysis_fixture_gudhi_points_latest/index.html`: GUDHI/Macaulay2
   two-parameter persistence with Miller-Sturmfels-style
-  `F2[x_level,y_radius]` xy-grid module views.  The per-record pages now also
-  show exact `GF(2)` chain audits (`d_1 d_2=0`, exactness at `C_1`,
+  `F2[x_level,y_radius]` staircase module views: shifted positive orthants for
+  monomial generators, quotient lattice points, adjacent lcm corners, and
+  small layered height offsets for `C_0`, `C_1`, `C_2`, and syzygy markers.
+  The per-record pages now also show a readable resolution strip and
+  differential heatmaps before the raw Macaulay2 payload, plus exact `GF(2)`
+  chain audits (`d_1 d_2=0`, exactness at `C_1`,
   Buchsbaum-Eisenbud rank residuals), simplicial-map validity for the
   reasoning/radius structure maps, minimal xy-grid inner corners, adjacent
   lcm outer corners, adjacent monomial syzygies, and Macaulay2-derived
   identity chain maps, mapping cones, Ext modules, and Tor modules for the
-  `F2[x_level,y_radius]` persistence complex.
+  `F2[x_level,y_radius]` persistence complex.  Each record also persists
+  exact GUDHI vectorized PH feature artifacts under `ph_features/` and renders
+  landscapes, persistence images, silhouettes, entropy vectors, Betti curves,
+  interval lifetime histograms, and vector-norm summaries in a browser
+  dashboard.  The record pages now also include PH-signature retrieval panels,
+  exact simplicial-map validity in candidate scoring, and derived map panels
+  showing the two-parameter inclusion structure and identity-cone acyclicity.
 - `outputs/analysis_fixture_tokengt_inference_latest/index.html`: root
   dark-mode browser entrypoint linking the run manifest, reasoning geometry,
   exact GUDHI/Macaulay2 persistence, and embedding CAS sidecar.
@@ -159,15 +234,76 @@ is mirrored to W&B under both compact and explicit namespaces, including
 `gudhi_persistence/mean_finite_field_exact_at_c1`,
 `gudhi_persistence/mean_be_rank_residual_c1`,
 `gudhi_persistence/mean_macaulay2_identity_cone_acyclic`,
+`persistent_homology/h1/landscape_norm`,
+`persistent_homology/h1/persistence_image_norm`,
+`persistent_homology/h1/silhouette_norm`,
+`persistent_homology/h1/entropy_vector_norm`,
 `topology/exact_gudhi/simplicial_map_valid_fraction`, and
 `bgg_category_o/persistence/gf2_exact_at_c1`.  These are analysis metrics:
 they are emitted without starting, stopping, or restarting training unless the
 operator launches a supervisor with explicit training-start/restart flags.
 
 Rendered screenshot audits of the fixture HTML reports are written under
-`outputs/latest_rendered_html_screenshots` when Playwright capture is run.  The
-current review and implementation plan for the generated pages is tracked in
-`planning/RENDERED-HTML-AUDIT-AND-IMPLEMENTATION-PLAN-20260614.md`.
+`outputs/latest_rendered_html_screenshots` when Playwright capture is run.
+The reusable strict renderer is:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src:. \
+  python scripts/render_html_screenshots.py \
+  --source-dir outputs/analysis_fixture_tokengt_inference_latest \
+  --output-dir outputs/rendered_html_screenshots_manual
+```
+
+Exactness/provenance validation is explicit and fails on missing exact GUDHI,
+PH feature, Sage, Macaulay2, or graph-token validation payloads:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src:. \
+  python scripts/validate_analysis_exactness.py \
+  outputs/analysis_fixture_tokengt_inference_latest/inference_output.json
+```
+
+Validate that data entering the TokenGT path is actually graph structured, has
+valid node/edge masks, exposes causal directed ranks where possible, and emits
+W&B-ready graph-token metrics:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src:. \
+  python scripts/validate_tokengt_graph_data.py \
+  --input data/analysis_fixtures/toricgt_analysis_fixture.parquet \
+  --output-dir outputs/tokengt_graph_data_validation \
+  --max-records 32 \
+  --max-nodes 256 \
+  --max-edges 1024
+
+conda run --no-capture-output -n tokengt env PYTHONPATH=src:. \
+  python scripts/validate_analysis_exactness.py outputs/tokengt_graph_data_validation
+```
+
+Render strict standalone reports for finite Toric BGG / Category O metrics and
+for exact Macaulay2 toric vector-bundle/sheaf certificates:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src:. \
+  python scripts/render_bgg_category_o_report.py \
+  --output-dir outputs/bgg_category_o_report
+
+conda run --no-capture-output -n tokengt env PYTHONPATH=src:. \
+  python scripts/render_toric_vector_bundle_report.py \
+  --output-dir outputs/toric_vector_bundle_report
+```
+
+For read-only process/status inspection without starting or stopping anything:
+
+```bash
+conda run --no-capture-output -n tokengt env PYTHONPATH=src:. \
+  python scripts/toricgt_status.py --json
+```
+
+The current review and implementation plan for generated pages is tracked in
+`planning/RENDERED-HTML-AUDIT-AND-IMPLEMENTATION-PLAN-20260614.md`.  The
+current exactness/PH completion checklist is
+`planning/EXACTNESS-PH-TORICGT-COMPLETE-IMPLEMENTATION-PLAN-20260615.md`.
 
 **OpenAI competition baseline model**
 
@@ -427,7 +563,7 @@ Local implementation:
 - `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves used by the geometry audit suite.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, Slepian envelopes, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
-- `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.
+- `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.  Important analysis-only entrypoints include `validate_tokengt_graph_data.py`, `validate_analysis_exactness.py`, `render_html_screenshots.py`, `render_bgg_category_o_report.py`, `render_toric_vector_bundle_report.py`, and `toricgt_status.py`.
 - `assets/toricgt_torus_reasoning_dark.gif`: README animation for toric phase, tropical active-face, Soft-MoE, and GFlowNet flow intuition.
 - `assets/toricgt_paper_pg_softmoe_final.tex`: research paper source.
 - `assets/toricgt_paper_pg_softmoe_final.pdf`: compiled paper.
@@ -437,6 +573,7 @@ Local implementation:
 - `planning/TROPICAL-TORIC-CAS-IMPLEMENTATION.md`: CAS-backed plan for embedding tropical attention/fan diagnostics into toric varieties and using SageMath/Macaulay2 certificates for exact algebraic metrics, losses, and audits.
 - `planning/GUDHI-M2-TWO-PARAMETER-PERSISTENCE.md`: exact GUDHI plus Macaulay2 plan for 2-parameter reasoning/radius persistence modules over `F2[x_level,y_radius]`, including simplex maps, vectorized PH metrics, free resolutions, HTML reports, and periodic/inference integration.
 - `planning/TORIC-VECTOR-BUNDLES-SHEAVES-TRAINING.md`: research and implementation plan for Klyachko toric vector bundles, equivariant sheaves, Cech gluing, and their training use once tropical varieties are embedded into toric varieties.
+- `planning/EXACTNESS-PH-TORICGT-COMPLETE-IMPLEMENTATION-PLAN-20260615.md`: current completion ledger for exact PH feature visualizations, optional inference PH artifacts, strict analysis validation, TokenGT graph-data validation, BGG/Category O panels, and vector-bundle/sheaf panels.
 - `docs/PARAMETER_GOLF.md`: dense random-order Parameter-Golf adaptation notes.
 - `docs/HYBRID_BYTE_TOKENGT_BPB.md`: official byte-BPB plus TokenGT-style internal graph objective notes and pseudocode.
 
@@ -542,6 +679,13 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
   --emit-gudhi-persistence
 ```
 
+Add `--no-emit-ph-feature-visualizations` when the exact JSON/NPZ feature
+artifacts are needed but the browser dashboards are not.  Leave the default on
+for periodic audits: those dashboards expose every vectorized PH feature used
+by the analogical-memory retrieval signature, including landscapes,
+persistence images, silhouettes, entropy vectors, Betti curves, and lifetime
+histograms.
+
 The embedding-CAS sidecar is optional at inference time and requires embedding
 payload output:
 
@@ -575,6 +719,10 @@ still uses differentiable Torch landscape/image vectorizers over explicit
 birth/death tensors because GUDHI's simplex-tree persistence is not
 differentiable, but saved memory indices and inference/audit traces carry
 `persistence_backend_gudhi=1.0` when exact PH was used.
+The exact GUDHI audit additionally computes PH-similarity retrieval candidates
+from the persisted vectorized signatures and exact simplicial-map validity, so
+retrieval panels show whether topology-aware helper ranking is aligned with the
+finite simplex-tree maps.
 
 ## Setup
 
@@ -1484,7 +1632,7 @@ irrational rotation-algebra phase path onto a torus, overlays local
 Vietoris-Rips edges, and draws the soft analogical maps between reasoning
 windows. The companion `*_projected_simplicial_toric_geometry.html` hidden-space
 plot adds actual step-level Vietoris-Rips 1/2-simplices, toric active-face
-coloring, chamber crossings, empirical normal-fan rays, translucent chamber
+coloring, chamber crossings, empirical normal-fan one-dimensional cones, translucent chamber
 polytopes, fitted tropical/toric wall sheets, and an inset Newton-polytope
 shadow from the same pseudo-exponents used by the fan audit. The interactive
 HTML plots include sparse/default/dense buttons for the radius-quantile
@@ -1525,9 +1673,10 @@ without increasing deploy bytes. W&B reports `train/toric_geometry_loss`,
 `train/toric_braid_loss`, and `train/toric_leaf_residual`.
 
 The same tropical-to-toric embedding now has a Klyachko vector-bundle/sheaf
-probe.  Once tropical active rays are treated as boundary rays in an ambient
-toric fan, hidden states can be read as vectors in a small learned fiber.  The
-probe attaches exact finite ray filtrations, affine chart frames, and chart
+probe.  Once tropical active one-dimensional cones are treated as boundary
+one-dimensional cones in an ambient toric fan, hidden states can be read as
+vectors in a small learned fiber.  The probe attaches exact finite
+one-dimensional-cone filtrations, affine chart frames, and chart
 transition maps, then measures whether the hidden fiber lies in the expected
 Klyachko subspace, splits coherently over cones, and glues across chart
 overlaps like a local sheaf section.  The all-phases config instantiates this

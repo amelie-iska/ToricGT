@@ -2144,7 +2144,7 @@ def _projected_chamber_traces(
                 "z": ray_z,
                 "line": {"color": "#ff4fd8", "width": 3},
                 "opacity": 0.50,
-                "name": f"{name_prefix} empirical normal-fan rays",
+                "name": f"{name_prefix} empirical normal-fan one-dimensional cones",
                 "hoverinfo": "skip",
             }
         )
@@ -2247,8 +2247,8 @@ def write_interactive_projected_simplicial_toric_geometry(
     keeps the actual model trajectory in the PCA projection used by the static
     graph-of-thought plots, then overlays the local Vietoris-Rips 1/2-complex
     built from the same reasoning-step embeddings.  Toric active faces color
-    the vertices; chamber transitions and normal-fan rays expose where tropical
-    or toric geometry changes along the trajectory.
+    the vertices; chamber transitions and normal-fan one-dimensional cones
+    expose where tropical or toric geometry changes along the trajectory.
     """
 
     usable = [

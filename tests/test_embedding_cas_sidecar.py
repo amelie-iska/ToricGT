@@ -85,6 +85,13 @@ def test_embedding_cas_sidecar_runs_sage_and_macaulay2(tmp_path: Path) -> None:
     record_path = out / summary["record_pages"][0]["json"]
     record = json.loads(record_path.read_text(encoding="utf-8"))
     assert record["sage_normal_fan"]["provenance"] == "exact_cas/sage"
+    assert record["sage_normal_fan"]["toric"]["num_one_dimensional_cones"] == record["sage_normal_fan"]["toric"]["num_rays"]
+    assert record["sage_normal_fan"]["toric"]["fan_one_dimensional_cones"] == record["sage_normal_fan"]["toric"]["fan_rays"]
+    assert record["sage_normal_fan"]["toric"]["fan_properties"]["is_complete"] is True
+    assert record["sage_normal_fan"]["toric"]["cone_containment_checks"]["all_maximal_indices_are_one_dimensional_cones"] is True
+    assert record["sage_normal_fan"]["toric"]["fan_refinement_checks"]["self_refinement_valid"] is True
+    assert record["sage_normal_fan"]["toric"]["orbit_strata"]
+    assert isinstance(record["sage_normal_fan"]["toric"]["face_incidence"], list)
     assert record["macaulay2_toric_ideal"]["provenance"] == "exact_cas/macaulay2"
     assert record["exponent_metadata"]["method"] == "actual_hidden_pca_rank_quantized_nonnegative_exponents"
     algebra = record["macaulay2_toric_ideal"]["commutative_algebra"]
@@ -95,4 +102,24 @@ def test_embedding_cas_sidecar_runs_sage_and_macaulay2(tmp_path: Path) -> None:
     assert "Macaulay2 Free Resolution" in html
     assert "Macaulay2 Derived Maps And Modules" in html
     assert "Identity chain map and mapping cone" in html
+    assert "Sage fan one-dimensional cones" in html
+    assert "Sage fan rays" not in html
     assert (out / "index.html").exists()
+
+    validation = subprocess.run(
+        [
+            sys.executable,
+            "scripts/validate_analysis_exactness.py",
+            str(out),
+            "--allow-missing-macaulay2",
+            "--json",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert validation.returncode == 0, validation.stdout
+    validation_payload = json.loads(validation.stdout)
+    assert validation_payload["ok"] is True
