@@ -545,6 +545,16 @@ diagram-like 0D tensors, and W&B logs `train/analogy_step_ph_landscape_loss`,
 `topology/ph_image_energy`.  Exact GUDHI and Macaulay2 values remain CPU
 analysis artifacts and are never replaced by silent Torch fallbacks.
 
+Trajectory-memory records now use the exact GUDHI vectorization path for
+offline analogical retrieval keys.  `summarize_trajectory_np` builds a real
+Vietoris-Rips simplex tree, computes PH over `GF(2)`, and concatenates GUDHI
+landscapes, persistence images, silhouettes, entropy vectors, Betti values,
+and chain-complex residuals across H0/H1/H2.  The in-training retrieval head
+still uses differentiable Torch landscape/image vectorizers over explicit
+birth/death tensors because GUDHI's simplex-tree persistence is not
+differentiable, but saved memory indices and inference/audit traces carry
+`persistence_backend_gudhi=1.0` when exact PH was used.
+
 ## Setup
 
 Use Conda only. The working environment used for this repository is `tokengt`.

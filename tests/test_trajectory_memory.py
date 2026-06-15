@@ -42,7 +42,13 @@ def test_trajectory_memory_index_roundtrip_and_search(tmp_path):
     assert loaded.records[0].topology["got_dag_merge_count"] > 0.0
     assert loaded.records[0].topology["persistence_vector_norm"] > 0.0
     assert loaded.records[0].topology["persistence_entropy"] >= 0.0
+    assert loaded.records[0].topology["persistence_backend_gudhi"] == 1.0
+    assert loaded.records[0].topology["persistence_h0_landscape_norm"] >= 0.0
+    assert loaded.records[0].topology["persistence_h1_landscape_norm"] >= 0.0
+    assert loaded.records[0].topology["persistence_h2_landscape_norm"] >= 0.0
+    assert loaded.records[0].topology["persistence_d_squared_residual"] == 0.0
     assert loaded.records[0].derived_category["chain_complex"]["betti"]["beta_1"] >= 0
+    assert loaded.records[0].derived_category["persistence_signature"]["backend"] == "gudhi"
 
 
 def test_trajectory_retrieval_head_metrics_are_finite():

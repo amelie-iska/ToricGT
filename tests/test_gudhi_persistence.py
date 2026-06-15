@@ -17,6 +17,7 @@ from toricgt.gudhi_persistence import (
     bigraded_chain_presentation,
     torch_persistence_image,
     torch_persistence_landscape,
+    vectorized_point_cloud_signature,
 )
 
 
@@ -77,6 +78,30 @@ def test_torch_persistence_vectorizers_are_differentiable() -> None:
     assert image.shape == (16, 16)
     assert diagram.grad is not None
     assert torch.isfinite(diagram.grad).all()
+
+
+def test_vectorized_point_cloud_signature_uses_exact_gudhi() -> None:
+    points = np.asarray(
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.5, 0.5]],
+        dtype=float,
+    )
+    cfg = GudhiPersistenceConfig(
+        max_points=5,
+        max_dimension=2,
+        landscape_resolution=10,
+        landscape_layers=2,
+        image_resolution=5,
+        macaulay2_resolutions=False,
+    )
+    signature, metrics = vectorized_point_cloud_signature(points, cfg)
+
+    assert signature.ndim == 1
+    assert signature.size > 0
+    assert metrics["backend_gudhi"] == 1.0
+    assert metrics["num_simplices"] > 0
+    assert metrics["h0_interval_count"] >= 0.0
+    assert metrics["h1_landscape_norm"] >= 0.0
+    assert metrics["d_squared_residual"] == 0.0
 
 
 def test_gudhi_audit_script_writes_dark_html_and_m2_script(tmp_path: Path) -> None:

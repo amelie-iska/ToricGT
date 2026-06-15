@@ -124,3 +124,19 @@ persistence images, and persistence entropy.
 - `config/train.parameter_golf_all_phases.yaml` enables graph-token fusion and
   causal graph metrics from step 0.
 - Documentation and planning notes are committed and pushed.
+
+## 2026-06-15 Exact Persistence Update
+
+The offline analogical-memory path now uses the same exact GUDHI persistence
+stack as the audit reports.  `toricgt.gudhi_persistence.vectorized_point_cloud_signature`
+constructs a Vietoris-Rips simplex tree, computes persistence over `GF(2)`,
+and vectorizes H0/H1/H2 diagrams with GUDHI landscapes, persistence images,
+silhouettes, and entropy vectors.  `summarize_trajectory_np` consumes that
+signature for saved `TrajectoryMemoryRecord` keys and records
+`persistence_backend_gudhi=1.0`, H0/H1/H2 landscape norms, Betti values, and
+`d_squared_residual`.
+
+The differentiable training head intentionally remains separate: it uses Torch
+landscape/image vectorizers over explicit birth/death tensors so gradients can
+reach the retrieval model.  That path is not an exact PH solver and is not used
+to write offline memory-index audit keys.

@@ -365,6 +365,11 @@ def _safe_gudhi_vectorizer(name: str, diagram: np.ndarray, cfg: GudhiPersistence
 def vectorized_diagram_metrics(diagram: np.ndarray, cfg: GudhiPersistenceConfig) -> dict[str, Any]:
     diag = finite_diagram(diagram)
     persistence = diag[:, 1] - diag[:, 0] if diag.size else np.zeros((0,), dtype=np.float64)
+    if persistence.size:
+        probs = persistence / max(float(persistence.sum()), 1e-12)
+        persistence_entropy = float(-(probs * np.log(probs + 1e-12)).sum() / max(math.log(max(2, probs.size)), 1e-12))
+    else:
+        persistence_entropy = 0.0
     landscape = _safe_gudhi_vectorizer("landscape", diag, cfg)
     image = _safe_gudhi_vectorizer("image", diag, cfg)
     silhouette = _safe_gudhi_vectorizer("silhouette", diag, cfg)
@@ -374,6 +379,7 @@ def vectorized_diagram_metrics(diagram: np.ndarray, cfg: GudhiPersistenceConfig)
         "total_persistence": float(persistence.sum()) if persistence.size else 0.0,
         "max_persistence": float(persistence.max()) if persistence.size else 0.0,
         "mean_persistence": float(persistence.mean()) if persistence.size else 0.0,
+        "persistence_entropy": persistence_entropy,
         "landscape": landscape.tolist(),
         "landscape_norm": float(np.linalg.norm(landscape)),
         "persistence_image": image.tolist(),
@@ -383,6 +389,81 @@ def vectorized_diagram_metrics(diagram: np.ndarray, cfg: GudhiPersistenceConfig)
         "entropy_vector": entropy_vector.tolist(),
         "entropy_vector_norm": float(np.linalg.norm(entropy_vector)),
     }
+
+
+def vectorized_point_cloud_signature(
+    points: np.ndarray,
+    cfg: GudhiPersistenceConfig | None = None,
+) -> tuple[np.ndarray, dict[str, float]]:
+    """Return an exact GUDHI-derived vector signature for a point cloud.
+
+    This is the canonical offline/analysis signature used by trajectory-memory
+    records.  It constructs a GUDHI Vietoris-Rips simplex tree over the sampled
+    standardized points, computes persistence over ``GF(2)``, then vectorizes
+    each finite diagram with GUDHI's landscape, persistence-image, silhouette,
+    and entropy representations.  It raises if GUDHI is unavailable; callers do
+    not silently substitute a hand-written topological proxy.
+    """
+
+    cfg = cfg or GudhiPersistenceConfig(macaulay2_resolutions=False)
+    x = standardize_points(sample_points(points, int(cfg.max_points)))
+    radii = radius_grid(x, cfg)
+    tree = build_rips_simplex_tree(x, float(radii[-1]), max_dimension=cfg.max_dimension)
+    diagrams = persistence_diagrams(tree, max_dimension=cfg.max_dimension)
+    chain = chain_complex_summary(tree, max_dimension=cfg.max_dimension)
+
+    parts: list[np.ndarray] = []
+    metrics: dict[str, float] = {
+        "backend_gudhi": 1.0,
+        "points": float(x.shape[0]),
+        "ambient_dimension": float(x.shape[1]),
+        "max_radius": float(radii[-1]),
+        "num_simplices": float(tree.num_simplices()),
+        "num_edges": float(chain.get("num_edges", 0)),
+        "num_triangles": float(chain.get("num_triangles", 0)),
+        "d_squared_residual": float(chain.get("d_squared_residual", 0)),
+    }
+    for dim in range(cfg.max_dimension + 1):
+        vectorized = vectorized_diagram_metrics(diagrams.get(dim, np.zeros((0, 2))), cfg)
+        landscape = np.asarray(vectorized["landscape"], dtype=np.float64)
+        image = np.asarray(vectorized["persistence_image"], dtype=np.float64)
+        silhouette = np.asarray(vectorized["silhouette"], dtype=np.float64)
+        entropy_vector = np.asarray(vectorized["entropy_vector"], dtype=np.float64)
+        stats = np.asarray(
+            [
+                float(vectorized["count"]),
+                float(vectorized["total_persistence"]),
+                float(vectorized["max_persistence"]),
+                float(vectorized["mean_persistence"]),
+                float(vectorized["persistence_entropy"]),
+                float(vectorized["landscape_norm"]),
+                float(vectorized["persistence_image_norm"]),
+                float(vectorized["silhouette_norm"]),
+                float(vectorized["entropy_vector_norm"]),
+                float(chain.get("betti", {}).get(str(dim), 0)),
+            ],
+            dtype=np.float64,
+        )
+        parts.extend([landscape.reshape(-1), image.reshape(-1), silhouette.reshape(-1), entropy_vector.reshape(-1), stats])
+        metrics[f"h{dim}_interval_count"] = float(vectorized["count"])
+        metrics[f"h{dim}_total_persistence"] = float(vectorized["total_persistence"])
+        metrics[f"h{dim}_max_persistence"] = float(vectorized["max_persistence"])
+        metrics[f"h{dim}_mean_persistence"] = float(vectorized["mean_persistence"])
+        metrics[f"h{dim}_persistence_entropy"] = float(vectorized["persistence_entropy"])
+        metrics[f"h{dim}_landscape_norm"] = float(vectorized["landscape_norm"])
+        metrics[f"h{dim}_persistence_image_norm"] = float(vectorized["persistence_image_norm"])
+        metrics[f"h{dim}_silhouette_norm"] = float(vectorized["silhouette_norm"])
+        metrics[f"h{dim}_entropy_vector_norm"] = float(vectorized["entropy_vector_norm"])
+        metrics[f"h{dim}_betti"] = float(chain.get("betti", {}).get(str(dim), 0))
+
+    signature = np.concatenate(parts).astype(np.float32) if parts else np.zeros((0,), dtype=np.float32)
+    metrics["vector_norm"] = float(np.linalg.norm(signature))
+    metrics["total_persistence"] = float(sum(metrics.get(f"h{dim}_total_persistence", 0.0) for dim in range(cfg.max_dimension + 1)))
+    metrics["max_persistence"] = float(max(metrics.get(f"h{dim}_max_persistence", 0.0) for dim in range(cfg.max_dimension + 1)))
+    metrics["persistence_entropy"] = float(
+        np.mean([metrics.get(f"h{dim}_persistence_entropy", 0.0) for dim in range(cfg.max_dimension + 1)])
+    )
+    return signature, metrics
 
 
 def gf2_rank(matrix: np.ndarray) -> int:

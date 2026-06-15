@@ -21,7 +21,12 @@ from torch import nn
 from torch.nn import functional as F
 
 from .derived_category_metrics import chain_complex_from_edges_np, derived_category_feature_summary
-from .gudhi_persistence import torch_persistence_image, torch_persistence_landscape
+from .gudhi_persistence import (
+    GudhiPersistenceConfig,
+    torch_persistence_image,
+    torch_persistence_landscape,
+    vectorized_point_cloud_signature,
+)
 from .got_trajectory import got_dag_metrics, got_dag_summary_np
 
 
@@ -65,74 +70,6 @@ def _safe_normalize_np(x: np.ndarray) -> np.ndarray:
     return x / np.maximum(denom, 1e-8)
 
 
-def _h0_mst_deaths_np(points: np.ndarray) -> np.ndarray:
-    """Exact H0 Vietoris-Rips death times: edge weights of the Euclidean MST."""
-
-    n = int(points.shape[0])
-    if n < 2:
-        return np.zeros((0,), dtype=np.float32)
-    dists = np.linalg.norm(points[:, None, :] - points[None, :, :], axis=-1)
-    tri = np.triu_indices(n, k=1)
-    weights = dists[tri]
-    order = np.argsort(weights, kind="mergesort")
-    parent = list(range(n))
-    rank = [0] * n
-
-    def find(x: int) -> int:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    deaths: list[float] = []
-    for edge_id in order.tolist():
-        src = int(tri[0][edge_id])
-        dst = int(tri[1][edge_id])
-        src_root = find(src)
-        dst_root = find(dst)
-        if src_root == dst_root:
-            continue
-        if rank[src_root] < rank[dst_root]:
-            src_root, dst_root = dst_root, src_root
-        parent[dst_root] = src_root
-        if rank[src_root] == rank[dst_root]:
-            rank[src_root] += 1
-        deaths.append(float(weights[edge_id]))
-        if len(deaths) == n - 1:
-            break
-    return np.asarray(deaths, dtype=np.float32)
-
-
-def _landscape_np(deaths: np.ndarray, *, layers: int, resolution: int, radius_max: float) -> np.ndarray:
-    layers = max(1, int(layers))
-    resolution = max(4, int(resolution))
-    if deaths.size == 0:
-        return np.zeros((layers, resolution), dtype=np.float32)
-    grid = np.linspace(0.0, max(float(radius_max), 1e-4), num=resolution, dtype=np.float32)
-    births = np.zeros((deaths.shape[0], 1), dtype=np.float32)
-    deaths_2d = deaths.reshape(-1, 1)
-    tents = np.maximum(0.0, np.minimum(grid.reshape(1, -1) - births, deaths_2d - grid.reshape(1, -1)))
-    ordered = np.sort(tents, axis=0)[::-1]
-    if ordered.shape[0] < layers:
-        ordered = np.concatenate([ordered, np.zeros((layers - ordered.shape[0], resolution), dtype=np.float32)], axis=0)
-    return ordered[:layers].astype(np.float32)
-
-
-def _persistence_image_np(deaths: np.ndarray, *, resolution: int, radius_max: float) -> np.ndarray:
-    resolution = max(4, int(resolution))
-    if deaths.size == 0:
-        return np.zeros((resolution, resolution), dtype=np.float32)
-    x_grid = np.linspace(0.0, max(float(radius_max), 1e-4), num=resolution, dtype=np.float32)
-    y_grid = x_grid.copy()
-    xx, yy = np.meshgrid(x_grid, y_grid, indexing="ij")
-    sigma = max(float(radius_max) / float(resolution), 1e-3)
-    image = np.zeros_like(xx, dtype=np.float32)
-    for death in deaths.astype(np.float32).tolist():
-        persistence = max(0.0, float(death))
-        image += persistence * np.exp(-((xx - 0.0) ** 2 + (yy - persistence) ** 2) / (2.0 * sigma * sigma))
-    return image.astype(np.float32)
-
-
 def _persistence_vector_np(
     points: np.ndarray,
     *,
@@ -140,27 +77,54 @@ def _persistence_vector_np(
     landscape_resolution: int = 16,
     image_resolution: int = 8,
 ) -> tuple[np.ndarray, dict[str, float]]:
+    """Exact GUDHI PH signature for offline trajectory-memory records.
+
+    Online training uses differentiable Torch vectorizers over supplied
+    birth/death tensors.  Offline memory records should be audit-grade, so this
+    path goes through GUDHI simplex trees and GUDHI vectorizers directly.
+    """
+
     if points.shape[0] < 2:
         vector = np.zeros((layers * landscape_resolution + image_resolution * image_resolution + 4,), dtype=np.float32)
-        return vector, {"total_persistence": 0.0, "max_persistence": 0.0, "entropy": 0.0, "vector_norm": 0.0}
-    deaths = _h0_mst_deaths_np(points)
-    positive = deaths[deaths > 1e-8]
-    scale = float(np.median(positive)) if positive.size else 1.0
-    deaths = deaths / max(scale, 1e-6)
-    radius_max = float(max(2.0, deaths.max(initial=0.0) * 1.05))
-    landscape = _landscape_np(deaths, layers=layers, resolution=landscape_resolution, radius_max=radius_max)
-    image = _persistence_image_np(deaths, resolution=image_resolution, radius_max=radius_max)
-    total = float(np.maximum(deaths, 0.0).sum())
-    probs = np.maximum(deaths, 0.0)
-    probs = probs / max(float(probs.sum()), 1e-8)
-    entropy = float(-(probs * np.log(probs + 1e-8)).sum() / max(math.log(max(2, probs.size)), 1e-8))
-    stats = np.asarray([total, float(deaths.max(initial=0.0)), entropy, float(np.linalg.norm(landscape))], dtype=np.float32)
-    vector = np.concatenate([landscape.reshape(-1), image.reshape(-1), stats], axis=0).astype(np.float32)
+        return vector, {
+            "backend_gudhi": 1.0,
+            "total_persistence": 0.0,
+            "max_persistence": 0.0,
+            "persistence_entropy": 0.0,
+            "entropy": 0.0,
+            "vector_norm": 0.0,
+        }
+    cfg = GudhiPersistenceConfig(
+        max_points=int(points.shape[0]),
+        max_dimension=2,
+        radius_quantile=0.75,
+        num_radii=4,
+        num_levels=4,
+        landscape_resolution=int(landscape_resolution),
+        landscape_layers=int(layers),
+        image_resolution=int(image_resolution),
+        macaulay2_resolutions=False,
+    )
+    vector, metrics = vectorized_point_cloud_signature(points, cfg)
+    entropy = float(metrics.get("persistence_entropy", 0.0))
+    metrics["entropy"] = entropy
     return vector, {
-        "total_persistence": total,
-        "max_persistence": float(deaths.max(initial=0.0)),
+        "backend_gudhi": float(metrics.get("backend_gudhi", 1.0)),
+        "total_persistence": float(metrics.get("total_persistence", 0.0)),
+        "max_persistence": float(metrics.get("max_persistence", 0.0)),
         "entropy": entropy,
-        "vector_norm": float(np.linalg.norm(vector)),
+        "persistence_entropy": entropy,
+        "vector_norm": float(metrics.get("vector_norm", np.linalg.norm(vector))),
+        "h0_total_persistence": float(metrics.get("h0_total_persistence", 0.0)),
+        "h1_total_persistence": float(metrics.get("h1_total_persistence", 0.0)),
+        "h2_total_persistence": float(metrics.get("h2_total_persistence", 0.0)),
+        "h0_landscape_norm": float(metrics.get("h0_landscape_norm", 0.0)),
+        "h1_landscape_norm": float(metrics.get("h1_landscape_norm", 0.0)),
+        "h2_landscape_norm": float(metrics.get("h2_landscape_norm", 0.0)),
+        "h0_betti": float(metrics.get("h0_betti", 0.0)),
+        "h1_betti": float(metrics.get("h1_betti", 0.0)),
+        "h2_betti": float(metrics.get("h2_betti", 0.0)),
+        "d_squared_residual": float(metrics.get("d_squared_residual", 0.0)),
     }
 
 
@@ -276,6 +240,17 @@ def summarize_trajectory_np(
             "persistence_max": float(persistence["max_persistence"]),
             "persistence_entropy": float(persistence["entropy"]),
             "persistence_vector_norm": float(persistence["vector_norm"]),
+            "persistence_backend_gudhi": float(persistence["backend_gudhi"]),
+            "persistence_h0_total": float(persistence.get("h0_total_persistence", 0.0)),
+            "persistence_h1_total": float(persistence.get("h1_total_persistence", 0.0)),
+            "persistence_h2_total": float(persistence.get("h2_total_persistence", 0.0)),
+            "persistence_h0_landscape_norm": float(persistence.get("h0_landscape_norm", 0.0)),
+            "persistence_h1_landscape_norm": float(persistence.get("h1_landscape_norm", 0.0)),
+            "persistence_h2_landscape_norm": float(persistence.get("h2_landscape_norm", 0.0)),
+            "persistence_h0_betti": float(persistence.get("h0_betti", 0.0)),
+            "persistence_h1_betti": float(persistence.get("h1_betti", 0.0)),
+            "persistence_h2_betti": float(persistence.get("h2_betti", 0.0)),
+            "persistence_d_squared_residual": float(persistence.get("d_squared_residual", 0.0)),
         },
         "toric": {
             "phase_u_sin": float(phase_u[0]),
@@ -293,6 +268,11 @@ def summarize_trajectory_np(
         "derived_category": {
             "kind": "got_trajectory_chain_complex_summary",
             "chain_complex": chain,
+            "persistence_signature": {
+                "backend": "gudhi",
+                "vectorization": "landscape+persistence_image+silhouette+entropy_vector",
+                "homology_dimensions": [0, 1, 2],
+            },
         },
     }
 
