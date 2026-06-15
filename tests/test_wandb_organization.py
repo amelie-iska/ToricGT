@@ -149,6 +149,20 @@ def test_tokengt_graph_objective_is_primary_and_topology_grouped() -> None:
     assert "tokengt_graph/edge_bce" not in organized
 
 
+def test_exact_gudhi_persistence_metrics_are_topology_grouped() -> None:
+    payload = {
+        "trainer/step": 250,
+        "gudhi_persistence/mean_h1_landscape_norm": 0.25,
+        "gudhi_persistence/mean_macaulay2_d_squared_zero": 1.0,
+    }
+
+    organized = organize_wandb_payload(payload)
+
+    assert organized["07_topology_geometry/gudhi_persistence/mean_h1_landscape_norm"] == 0.25
+    assert organized["07_topology_geometry/gudhi_persistence/mean_macaulay2_d_squared_zero"] == 1.0
+    assert "gudhi_persistence/mean_h1_landscape_norm" not in organized
+
+
 def test_graph_of_thought_dag_metrics_are_primary_and_grouped() -> None:
     payload = {
         "trainer/step": 32,

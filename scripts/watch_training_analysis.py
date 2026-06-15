@@ -47,6 +47,8 @@ from typing import Any
 
 import yaml
 
+from toricgt.wandb_organization import organize_wandb_payload, update_wandb_summary
+
 
 CHECKPOINT_PATTERN = re.compile(r"(?:random_order_step_|_step_)(\d+)\.pt$")
 
@@ -203,6 +205,89 @@ def run_optional_command(command: list[str], cwd: Path, log_path: Path) -> bool:
         result = subprocess.run(command, cwd=str(cwd), env=env, stdout=handle, stderr=subprocess.STDOUT, check=False)
         handle.write(f"\nexit_code={result.returncode}\n")
         return result.returncode == 0
+
+
+def finite_float(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    if out != out or out in (float("inf"), float("-inf")):
+        return default
+    return out
+
+
+def gudhi_wandb_payload(summary: dict[str, Any], *, step: int) -> dict[str, float]:
+    """Stable metric aliases for exact GUDHI/Macaulay2 periodic audits."""
+
+    fields = {
+        "records": "records",
+        "mean_points": "mean_points",
+        "mean_num_simplices": "mean_num_simplices",
+        "mean_betti0": "mean_betti0",
+        "mean_betti1": "mean_betti1",
+        "mean_h0_landscape_norm": "mean_h0_landscape_norm",
+        "mean_h1_landscape_norm": "mean_h1_landscape_norm",
+        "mean_h1_persistence_image_norm": "mean_h1_persistence_image_norm",
+        "mean_two_parameter_commutative_square_residual": "mean_two_parameter_commutative_square_residual",
+        "mean_macaulay2_homogeneous_d1": "mean_macaulay2_homogeneous_d1",
+        "mean_macaulay2_homogeneous_d2": "mean_macaulay2_homogeneous_d2",
+        "mean_macaulay2_d_squared_zero": "mean_macaulay2_d_squared_zero",
+    }
+    payload: dict[str, float] = {
+        "trainer/step": float(step),
+        "metrics_status/gudhi_persistence_audit_available": 1.0,
+        "metrics_status/macaulay2_bigraded_resolution_available": finite_float(
+            summary.get("mean_macaulay2_d_squared_zero"), 0.0
+        ),
+    }
+    for source, target in fields.items():
+        value = finite_float(summary.get(source), 0.0)
+        payload[f"gudhi_persistence/{target}"] = value
+        payload[f"topology/exact_gudhi/{target}"] = value
+    payload["bgg_category_o/persistence/exact_gudhi_betti0"] = finite_float(summary.get("mean_betti0"), 0.0)
+    payload["bgg_category_o/persistence/exact_gudhi_betti1"] = finite_float(summary.get("mean_betti1"), 0.0)
+    payload["bgg_category_o/persistence/two_parameter_square_residual"] = finite_float(
+        summary.get("mean_two_parameter_commutative_square_residual"), 0.0
+    )
+    payload["bgg_category_o/persistence/macaulay2_homogeneous_d1"] = finite_float(
+        summary.get("mean_macaulay2_homogeneous_d1"), 0.0
+    )
+    payload["bgg_category_o/persistence/macaulay2_homogeneous_d2"] = finite_float(
+        summary.get("mean_macaulay2_homogeneous_d2"), 0.0
+    )
+    payload["bgg_category_o/persistence/macaulay2_d_squared_zero"] = finite_float(
+        summary.get("mean_macaulay2_d_squared_zero"), 0.0
+    )
+    payload["analysis_control/exact_gudhi/vectorized_ph_available"] = 1.0
+    payload["analysis_control/exact_gudhi/f2_xy_module_available"] = 1.0
+    payload["analysis_control/exact_gudhi/macaulay2_resolution_ok"] = finite_float(
+        summary.get("mean_macaulay2_d_squared_zero"), 0.0
+    )
+    return payload
+
+
+def log_gudhi_summary_to_wandb(run_path: str, summary: dict[str, Any], *, step: int, output_dir: Path) -> str:
+    payload = gudhi_wandb_payload(summary, step=step)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    payload_path = output_dir / "wandb_metrics.json"
+    payload_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if not run_path:
+        return ""
+    parts = [part for part in str(run_path).split("/") if part]
+    if len(parts) != 3:
+        raise ValueError(f"--run-path must be entity/project/run_id, got {run_path!r}")
+    entity, project, run_id = parts
+    import wandb  # type: ignore
+
+    run = wandb.init(entity=entity, project=project, id=run_id, resume="allow")
+    try:
+        organized = organize_wandb_payload(payload)
+        run.log(organized, step=int(step))
+        update_wandb_summary(run, payload)
+    finally:
+        run.finish()
+    return str(payload_path)
 
 
 def pause_training_session(tmux_session: str, wait_seconds: float, log_path: Path) -> None:
@@ -928,6 +1013,20 @@ def main() -> None:
             cwd=repo,
             log_path=base / "logs" / "gudhi_persistence.log",
         )
+        gudhi_summary = load_json(base / "gudhi_persistence" / "summary.json")
+        try:
+            payload_path = log_gudhi_summary_to_wandb(
+                args.run_path,
+                gudhi_summary,
+                step=step,
+                output_dir=base / "gudhi_persistence",
+            )
+            (base / "logs" / "gudhi_wandb.log").write_text(
+                f"wrote {payload_path or (base / 'gudhi_persistence' / 'wandb_metrics.json')}\n",
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            (base / "logs" / "gudhi_wandb.log").write_text(f"gudhi W&B metric logging failed: {exc}\n", encoding="utf-8")
     if not args.skip_test_time_scaling:
         run_optional_command(
             [

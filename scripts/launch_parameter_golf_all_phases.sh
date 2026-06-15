@@ -10,6 +10,56 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+ALLOW_TRAINING_START="${TORICGT_ALLOW_TRAINING_START:-0}"
+ALLOW_TRAINING_RESTART="${TORICGT_ALLOW_TRAINING_RESTART:-0}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/launch_parameter_golf_all_phases.sh --allow-training-start [--allow-training-restart]
+
+This script creates tmux sessions and starts GPU training.  It intentionally
+refuses to run unless training start is explicitly allowed in the current
+command.  Use --allow-training-restart only when the supervisor is also allowed
+to restart a dead or stale run from the latest checkpoint.
+
+Environment equivalents:
+  TORICGT_ALLOW_TRAINING_START=1
+  TORICGT_ALLOW_TRAINING_RESTART=1
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --allow-training-start)
+      ALLOW_TRAINING_START=1
+      ;;
+    --allow-training-restart)
+      ALLOW_TRAINING_RESTART=1
+      ;;
+    --no-training-restart)
+      ALLOW_TRAINING_RESTART=0
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+case "$ALLOW_TRAINING_START" in
+  1|true|True|yes|YES) ;;
+  *)
+    echo "refusing to start training: pass --allow-training-start or set TORICGT_ALLOW_TRAINING_START=1" >&2
+    exit 2
+    ;;
+esac
+
 CONFIG="${CONFIG:-config/train.parameter_golf_all_phases.yaml}"
 CONDA_ENV="${CONDA_ENV:-tokengt}"
 CONDA_BIN="${CONDA_BIN:-}"
@@ -54,6 +104,8 @@ export BPB_MAX_REVIEW_ITERATIONS="${BPB_MAX_REVIEW_ITERATIONS:-100}"
 export BPB_LOOP_STATE="${BPB_LOOP_STATE:-outputs/${RUN_ID}_bpb_codex_loop_state.json}"
 export BPB_LOOP_STOP_FILE="${BPB_LOOP_STOP_FILE:-outputs/${RUN_ID}_bpb_codex_loop_stop}"
 export BPB_LOOP_NAME="${BPB_LOOP_NAME:-all_phases_native_toricgt}"
+export TORICGT_ALLOW_TRAINING_START="$ALLOW_TRAINING_START"
+export TORICGT_ALLOW_TRAINING_RESTART="$ALLOW_TRAINING_RESTART"
 
 mkdir -p "$LOG_DIR" "$ANALYSIS_ROOT" "$CHECKPOINT_DIR" "$CAS_TARGET_DIR"
 START_EPOCH="$(date +%s)"
@@ -115,7 +167,13 @@ SUPERVISOR_CMD=(
   --target-bpb "$BPB_TARGET"
   --gate-step "$BPB_GATE_STEP"
   --max-analysis-iterations "$BPB_MAX_REVIEW_ITERATIONS"
+  --allow-training-start
 )
+case "$ALLOW_TRAINING_RESTART" in
+  1|true|True|yes|YES)
+    SUPERVISOR_CMD+=(--allow-training-restart)
+    ;;
+esac
 if [[ "$ENABLE_CODEX_REVIEW" != "0" && "$ENABLE_CODEX_REVIEW" != "false" && "$ENABLE_CODEX_REVIEW" != "False" ]]; then
   SUPERVISOR_CMD+=(--enable-codex-review)
 fi
@@ -142,4 +200,5 @@ started supervised native ToricGT all-phases training
   CAS targets:    $CAS_TARGET_DIR
   CAS toric ideal certificate: $CAS_TORIC_IDEAL_CERT
   BPB loop:      target=$BPB_TARGET gate_step=$BPB_GATE_STEP max_reviews=$BPB_MAX_REVIEW_ITERATIONS
+  restart allow: $ALLOW_TRAINING_RESTART
 EOF

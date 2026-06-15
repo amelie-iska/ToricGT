@@ -185,3 +185,38 @@ def test_watcher_index_and_gudhi_args_are_available() -> None:
     )
     assert args.gudhi_persistence_audit is True
     assert args.gudhi_records == 2
+
+
+def test_watcher_gudhi_wandb_payload_has_exact_metric_aliases() -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "watch_training_analysis.py"
+    spec = importlib.util.spec_from_file_location("watch_training_analysis", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    payload = module.gudhi_wandb_payload(
+        {
+            "records": 2,
+            "mean_points": 5.0,
+            "mean_num_simplices": 17.0,
+            "mean_betti0": 1.0,
+            "mean_betti1": 1.0,
+            "mean_h0_landscape_norm": 0.5,
+            "mean_h1_landscape_norm": 0.25,
+            "mean_h1_persistence_image_norm": 0.125,
+            "mean_two_parameter_commutative_square_residual": 0.0,
+            "mean_macaulay2_homogeneous_d1": 1.0,
+            "mean_macaulay2_homogeneous_d2": 1.0,
+            "mean_macaulay2_d_squared_zero": 1.0,
+        },
+        step=250,
+    )
+
+    assert payload["trainer/step"] == 250.0
+    assert payload["metrics_status/gudhi_persistence_audit_available"] == 1.0
+    assert payload["gudhi_persistence/mean_h1_landscape_norm"] == 0.25
+    assert payload["topology/exact_gudhi/mean_h1_persistence_image_norm"] == 0.125
+    assert payload["bgg_category_o/persistence/two_parameter_square_residual"] == 0.0
+    assert payload["bgg_category_o/persistence/macaulay2_d_squared_zero"] == 1.0
+    assert payload["analysis_control/exact_gudhi/f2_xy_module_available"] == 1.0

@@ -3,8 +3,9 @@
 
 The supervisor is intentionally boring: it does not tune hyperparameters by
 itself and it never pauses training for analysis.  Its job is to keep exactly
-one training tmux alive, restart from the newest checkpoint when the run dies
-or stalls, and keep a non-blocking analysis/Codex-review sidecar moving.
+one training tmux alive only when explicitly allowed, restart from the newest
+checkpoint only when restart permission is explicitly granted, and keep a
+non-blocking analysis/Codex-review sidecar moving.
 """
 
 from __future__ import annotations
@@ -25,6 +26,10 @@ import yaml
 
 CHECKPOINT_RE = re.compile(r"random_order_step_(\d+)\.pt$")
 ANALYSIS_RE = re.compile(r"step-(\d+)$")
+
+
+def env_truthy(name: str, default: str = "0") -> bool:
+    return str(os.environ.get(name, default)).strip() in {"1", "true", "True", "yes", "YES", "on", "ON"}
 
 
 def utc_stamp() -> str:
@@ -84,6 +89,18 @@ def parse_args() -> argparse.Namespace:
         "--no-codex-review",
         action="store_true",
         help="Compatibility flag; Codex review subagents are disabled unless --enable-codex-review is set.",
+    )
+    parser.add_argument(
+        "--allow-training-start",
+        action="store_true",
+        default=env_truthy("TORICGT_ALLOW_TRAINING_START"),
+        help="Explicitly allow this supervisor to create the initial training tmux.",
+    )
+    parser.add_argument(
+        "--allow-training-restart",
+        action="store_true",
+        default=env_truthy("TORICGT_ALLOW_TRAINING_RESTART"),
+        help="Explicitly allow this supervisor to restart a dead or stale training tmux after the first launch.",
     )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -227,6 +244,26 @@ def most_recent_log_mtime(log_root: Path) -> float:
 
 def start_training(args: argparse.Namespace, state: dict[str, Any], checkpoint: Path | None) -> None:
     restarts = int(state.get("restarts", 0))
+    initial_start = restarts == 0
+    if initial_start and not bool(args.allow_training_start):
+        append_event(
+            state,
+            "training_start_blocked",
+            reason="missing_explicit_allow_training_start",
+            required_flag="--allow-training-start",
+            resume=str(checkpoint) if checkpoint else "",
+        )
+        return
+    if not initial_start and not bool(args.allow_training_restart):
+        append_event(
+            state,
+            "training_restart_blocked",
+            reason="missing_explicit_allow_training_restart",
+            required_flag="--allow-training-restart",
+            resume=str(checkpoint) if checkpoint else "",
+            restart_index=restarts,
+        )
+        return
     if restarts >= args.max_restarts:
         append_event(state, "restart_limit_reached", max_restarts=args.max_restarts)
         return
@@ -490,6 +527,8 @@ def main() -> None:
             "target_bpb": args.target_bpb,
             "gate_step": args.gate_step,
             "checkpoint_interval": args.checkpoint_interval,
+            "allow_training_start": bool(args.allow_training_start),
+            "allow_training_restart": bool(args.allow_training_restart),
             "gudhi_persistence": {
                 "records": args.gudhi_records,
                 "max_points": args.gudhi_max_points,

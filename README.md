@@ -1062,8 +1062,16 @@ bytes below the `16,000,000` byte Parameter-Golf artifact ceiling.
 Launch the fresh native all-phases run with supervised automated check-ins:
 
 ```bash
-scripts/launch_parameter_golf_all_phases.sh
+scripts/launch_parameter_golf_all_phases.sh \
+  --allow-training-start \
+  --allow-training-restart
 ```
+
+The launcher is deliberately guarded.  Without `--allow-training-start` or
+`TORICGT_ALLOW_TRAINING_START=1`, it exits before CAS generation, tmux
+creation, W&B setup, or GPU use.  `--allow-training-restart` is separate:
+without it, the supervisor may create the initial training tmux but will record
+`training_restart_blocked` rather than auto-resume a dead or stale run.
 
 This path uses `config/train.parameter_golf_all_phases.yaml` and trains the
 implemented stack in ordered phases: byte warmup, GraphCG/toric probes,
@@ -1084,13 +1092,15 @@ BGG probe is instantiated from the start so `train/toric_bgg_*` diagnostics are
 visible in W&B, but `toric_bgg_loss_weight` remains `0.0` until the late
 `toric_bgg_category_o` phase. The launcher now starts
 `scripts/supervise_parameter_golf_training.py`, which keeps the training tmux
-alive, restarts from the latest checkpoint if the process dies or stalls, and
-runs W&B/OAI BPB/simplex/geometry analyses as non-interrupting sidecars. Codex
-review handoffs are allowed to time out without stopping training; the BPB loop
-uses `BPB_TARGET=1.2` and a 100-analysis cap. Fresh launches use run-specific
-checkpoint and BPB-loop state paths by default, so a new step-0 run cannot
-silently resume from an old all-phases checkpoint unless `CHECKPOINT_DIR` or
-`--resume` is set explicitly.
+alive only within the explicit allow policy.  With restart permission it
+restarts from the latest checkpoint if the process dies or stalls; without
+restart permission it logs the blocked restart and leaves the decision to the
+operator.  Periodic W&B/OAI BPB/simplex/geometry/GUDHI/CAS analyses run as
+non-interrupting sidecars. Codex review handoffs are allowed to time out
+without stopping training; the BPB loop uses `BPB_TARGET=1.2` and a
+100-analysis cap. Fresh launches use run-specific checkpoint and BPB-loop state
+paths by default, so a new step-0 run cannot silently resume from an old
+all-phases checkpoint unless `CHECKPOINT_DIR` or `--resume` is set explicitly.
 
 Current `oai-advanced` OpenAI Parameter-Golf checkpoint and advanced-run status
 (2026-06-05):

@@ -350,6 +350,8 @@ def _category_alias(key: str) -> str | None:
         return f"16_status/{key}"
     if key.startswith(("topology/",)):
         return f"07_topology_geometry/{key}"
+    if key.startswith("gudhi_persistence/"):
+        return f"07_topology_geometry/{key}"
     if key.startswith((
         "toric/",
         "toric_vector_bundle/",

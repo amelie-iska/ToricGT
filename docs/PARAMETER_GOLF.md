@@ -499,22 +499,32 @@ conda run --no-capture-output -n tokengt env PYTHONPATH=src \
 Fresh native all-phases training with supervised automated Codex review handoffs:
 
 ```bash
-scripts/launch_parameter_golf_all_phases.sh
+scripts/launch_parameter_golf_all_phases.sh \
+  --allow-training-start \
+  --allow-training-restart
 ```
 
-This uses `config/train.parameter_golf_all_phases.yaml`. It keeps the early
-optimization likelihood-first, then ramps GraphCG, toric geometry, directed
-topology, Koszul persistence, trajectory memory, and finally Toric BGG Category
-O. BGG is constructed for metrics from step zero but its loss stays off until
-the late `toric_bgg_category_o` phase, so early BPB recovery is not competing
-with homological supervision. The launcher starts
+This uses `config/train.parameter_golf_all_phases.yaml`.  The launcher is
+guarded: without `--allow-training-start` or
+`TORICGT_ALLOW_TRAINING_START=1`, it exits before CAS generation, tmux creation,
+W&B setup, or GPU use.  Restart permission is separate.  Without
+`--allow-training-restart` or `TORICGT_ALLOW_TRAINING_RESTART=1`, the
+supervisor may create the initial training tmux but records
+`training_restart_blocked` instead of automatically resuming a dead or stale
+run.
+
+The run keeps the early optimization likelihood-first, then ramps GraphCG,
+toric geometry, directed topology, Koszul persistence, trajectory memory, and
+finally Toric BGG Category O. BGG is constructed for metrics from step zero but
+its loss stays off until the late `toric_bgg_category_o` phase, so early BPB
+recovery is not competing with homological supervision. The launcher starts
 `scripts/supervise_parameter_golf_training.py`; the supervisor keeps exactly one
-training tmux alive, resumes from the newest checkpoint after a crash or stale
-run, and launches `scripts/watch_training_analysis.py` only as a
-non-interrupting sidecar. W&B/OAI competition BPB, simplex, geometry,
-topological, toric, tropical, complexity, and Category O diagnostics remain on;
-Codex review handoffs run beside the trainer and time out without blocking
-restart recovery.
+training tmux alive within the explicit allow policy and launches
+`scripts/watch_training_analysis.py` only as a non-interrupting sidecar.
+W&B/OAI competition BPB, simplex, geometry, topological, toric, tropical,
+complexity, exact GUDHI persistence, Macaulay2 resolution, and Category O
+diagnostics remain on; Codex review handoffs run beside the trainer and time
+out without blocking permitted restart recovery.
 
 Replay the current `oai` valmix35 recovery from step 1000:
 
