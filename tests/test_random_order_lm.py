@@ -415,6 +415,22 @@ def test_koszul_persistence_loss_sanitizes_nonfinite_hidden():
         assert torch.isfinite(value).all(), key
 
 
+def test_koszul_persistence_loss_promotes_linalg_under_bfloat16_autocast():
+    hidden = torch.randn(1, 16, 12)
+    positions = torch.arange(16).expand(1, 16)
+
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=True):
+        out = koszul_persistence_loss(
+            hidden,
+            positions,
+            config=KoszulPersistenceConfig(max_points=8, max_windows=1, window_size=12),
+        )
+
+    assert out["koszul_persistence_loss"].isfinite()
+    assert out["koszul_fitting_rank_residual"].isfinite()
+    assert out["koszul_buchsbaum_eisenbud_rank_residual"].isfinite()
+
+
 def test_gflownet_adapter_preserves_score_before_update():
     cfg = tiny_config(use_gflownet_policy=True, gflownet_num_actions=4, gflownet_hidden_dim=16)
     model = DenseRandomOrderToricLM(cfg).eval()

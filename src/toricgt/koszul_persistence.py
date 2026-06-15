@@ -86,22 +86,25 @@ def _fixed_chart_directions(width: int, count: int, device: torch.device, dtype:
 def _soft_rank(matrix: torch.Tensor, temperature: float) -> torch.Tensor:
     if matrix.numel() == 0:
         return matrix.new_zeros(())
-    safe = torch.nan_to_num(matrix.float(), nan=0.0, posinf=0.0, neginf=0.0)
-    if safe.shape[0] <= safe.shape[1]:
-        gram = safe @ safe.transpose(0, 1)
-    else:
-        gram = safe.transpose(0, 1) @ safe
-    gram = torch.nan_to_num(gram, nan=0.0, posinf=0.0, neginf=0.0)
-    dim = gram.shape[0]
-    eye = torch.eye(dim, device=gram.device, dtype=gram.dtype)
-    scale = gram.detach().diagonal().abs().mean().clamp_min(1e-6)
-    ridge = max(float(temperature), 1e-5) * scale
-    try:
-        response = torch.linalg.solve(gram + ridge * eye, gram)
-    except RuntimeError:
-        response = gram @ torch.linalg.pinv(gram + ridge * eye)
-    rank = torch.trace(torch.nan_to_num(response, nan=0.0, posinf=0.0, neginf=0.0))
-    return rank.clamp_min(0.0).clamp_max(float(dim))
+    device_type = matrix.device.type if matrix.device.type in {"cpu", "cuda"} else "cpu"
+    with torch.autocast(device_type=device_type, enabled=False):
+        safe = torch.nan_to_num(matrix.to(torch.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        if safe.shape[0] <= safe.shape[1]:
+            gram = safe @ safe.transpose(0, 1)
+        else:
+            gram = safe.transpose(0, 1) @ safe
+        gram = torch.nan_to_num(gram, nan=0.0, posinf=0.0, neginf=0.0)
+        dim = gram.shape[0]
+        eye = torch.eye(dim, device=gram.device, dtype=torch.float32)
+        scale = gram.detach().diagonal().abs().mean().clamp_min(1e-6)
+        ridge = max(float(temperature), 1e-5) * scale
+        regularized = gram + ridge * eye
+        try:
+            response = torch.linalg.solve(regularized, gram)
+        except RuntimeError:
+            response = gram @ torch.linalg.pinv(regularized)
+        rank = torch.trace(torch.nan_to_num(response, nan=0.0, posinf=0.0, neginf=0.0))
+        return rank.clamp_min(0.0).clamp_max(float(dim))
 
 
 def _koszul_blocks(actions: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
@@ -224,31 +227,31 @@ def koszul_persistence_loss(
 
             r = len(actions)
             n = int(points.shape[0])
-            sr_d1 = _soft_rank(d1, float(cfg.rank_temperature)).to(device=points.device, dtype=points.dtype)
-            sr_d2 = _soft_rank(d2, float(cfg.rank_temperature)).to(device=points.device, dtype=points.dtype)
+            sr_d1 = _soft_rank(d1, float(cfg.rank_temperature))
+            sr_d2 = _soft_rank(d2, float(cfg.rank_temperature))
             if d3 is not None:
-                sr_d3 = _soft_rank(d3, float(cfg.rank_temperature)).to(device=points.device, dtype=points.dtype)
+                sr_d3 = _soft_rank(d3, float(cfg.rank_temperature))
                 mid_dim = float((r * (r - 1) // 2) * n)
                 be_rank = (
                     (sr_d1 + sr_d2 - float(r * n)).abs() / max(1.0, float(r * n))
                     + (sr_d2 + sr_d3 - mid_dim).abs() / max(1.0, mid_dim)
                 )
                 fitting = (
-                    F.relu(points.new_tensor(float(n)) - sr_d1) / max(1.0, float(n))
-                    + F.relu(points.new_tensor(float((r - 1) * n)) - sr_d2) / max(1.0, float((r - 1) * n))
-                    + F.relu(points.new_tensor(float(n)) - sr_d3) / max(1.0, float(n))
+                    F.relu(sr_d1.new_tensor(float(n)) - sr_d1) / max(1.0, float(n))
+                    + F.relu(sr_d1.new_tensor(float((r - 1) * n)) - sr_d2) / max(1.0, float((r - 1) * n))
+                    + F.relu(sr_d1.new_tensor(float(n)) - sr_d3) / max(1.0, float(n))
                 )
                 betti = (
-                    F.relu(points.new_tensor(float(r * n)) - sr_d1 - sr_d2) / max(1.0, float(r * n))
-                    + F.relu(points.new_tensor(mid_dim) - sr_d2 - sr_d3) / max(1.0, mid_dim)
+                    F.relu(sr_d1.new_tensor(float(r * n)) - sr_d1 - sr_d2) / max(1.0, float(r * n))
+                    + F.relu(sr_d1.new_tensor(mid_dim) - sr_d2 - sr_d3) / max(1.0, mid_dim)
                 )
             else:
                 be_rank = (sr_d1 + sr_d2 - float(r * n)).abs() / max(1.0, float(r * n))
                 fitting = (
-                    F.relu(points.new_tensor(float(n)) - sr_d1) / max(1.0, float(n))
-                    + F.relu(points.new_tensor(float(n)) - sr_d2) / max(1.0, float(n))
+                    F.relu(sr_d1.new_tensor(float(n)) - sr_d1) / max(1.0, float(n))
+                    + F.relu(sr_d1.new_tensor(float(n)) - sr_d2) / max(1.0, float(n))
                 )
-                betti = F.relu(points.new_tensor(float(r * n)) - sr_d1 - sr_d2) / max(1.0, float(r * n))
+                betti = F.relu(sr_d1.new_tensor(float(r * n)) - sr_d1 - sr_d2) / max(1.0, float(r * n))
             # In the differentiable proxy, Buchsbaum-Eisenbud multiplier failure
             # is represented by exactness plus rank-condition mismatch; exact
             # complementary-minor checks are performed in the NumPy audit path.
