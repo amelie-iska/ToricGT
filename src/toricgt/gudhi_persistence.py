@@ -214,6 +214,90 @@ def bigraded_chain_presentation(points: np.ndarray, radii: np.ndarray, *, max_di
     }
 
 
+def _generator_degree_points(presentation: dict[str, Any], chain_degree: str) -> list[tuple[int, int]]:
+    generators = presentation.get("generators", {})
+    raw = generators.get(str(chain_degree), []) if isinstance(generators, dict) else []
+    points: list[tuple[int, int]] = []
+    if not isinstance(raw, list):
+        return points
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        degree = item.get("degree", [0, 0])
+        if isinstance(degree, list) and len(degree) == 2:
+            points.append((int(degree[0]), int(degree[1])))
+    return sorted(points)
+
+
+def _pareto_minimal_bidegrees(points: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    unique = sorted(set(points))
+    out: list[tuple[int, int]] = []
+    for x, y in unique:
+        if not any((u <= x and v <= y and (u, v) != (x, y)) for u, v in unique):
+            out.append((x, y))
+    return out
+
+
+def _adjacent_lcm_syzygies(points: list[tuple[int, int]]) -> list[dict[str, Any]]:
+    ordered = sorted(set(points), key=lambda item: (item[0], -item[1]))
+    syzygies: list[dict[str, Any]] = []
+    for left, right in zip(ordered, ordered[1:]):
+        lcm = (max(left[0], right[0]), max(left[1], right[1]))
+        syzygies.append(
+            {
+                "left_generator_degree": [int(left[0]), int(left[1])],
+                "right_generator_degree": [int(right[0]), int(right[1])],
+                "outer_lcm_corner": [int(lcm[0]), int(lcm[1])],
+                "left_multiplier": [int(lcm[0] - left[0]), int(lcm[1] - left[1])],
+                "right_multiplier": [int(lcm[0] - right[0]), int(lcm[1] - right[1])],
+            }
+        )
+    return syzygies
+
+
+def xy_grid_module_summary(presentation: dict[str, Any], module: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return Miller-Sturmfels-style bivariate grid metadata.
+
+    The summary is computed from the actual bigraded chain-generator degrees
+    emitted to Macaulay2.  It records minimal degree corners and adjacent-lcm
+    syzygies for every chain degree, so rendered reports can show the
+    two-variable lattice picture instead of only raw boundary matrices.
+    """
+
+    module = module or {}
+    dim_summaries: dict[str, Any] = {}
+    all_points: list[tuple[int, int]] = []
+    for chain_degree in ("0", "1", "2"):
+        points = _generator_degree_points(presentation, chain_degree)
+        all_points.extend(points)
+        counts: dict[tuple[int, int], int] = {}
+        for point in points:
+            counts[point] = counts.get(point, 0) + 1
+        minimal = _pareto_minimal_bidegrees(points)
+        syzygies = _adjacent_lcm_syzygies(minimal)
+        dim_summaries[chain_degree] = {
+            "generator_count": int(len(points)),
+            "degree_counts": [
+                {"degree": [int(x), int(y)], "count": int(count)}
+                for (x, y), count in sorted(counts.items())
+            ],
+            "minimal_inner_corners": [[int(x), int(y)] for x, y in minimal],
+            "adjacent_lcm_outer_corners": [item["outer_lcm_corner"] for item in syzygies],
+            "adjacent_lcm_syzygies": syzygies,
+        }
+    h0 = np.asarray(module.get("hilbert_h0", []), dtype=float)
+    h1 = np.asarray(module.get("hilbert_h1", []), dtype=float)
+    x_max = max([h0.shape[0] - 1 if h0.ndim == 2 and h0.size else 0, h1.shape[0] - 1 if h1.ndim == 2 and h1.size else 0, *[p[0] for p in all_points]] or [0])
+    y_max = max([h0.shape[1] - 1 if h0.ndim == 2 and h0.size else 0, h1.shape[1] - 1 if h1.ndim == 2 and h1.size else 0, *[p[1] for p in all_points]] or [0])
+    return {
+        "kind": "miller_sturmfels_bivariate_grid_summary",
+        "ring": presentation.get("ring", "F2[x_level,y_radius]"),
+        "variables": presentation.get("variables", ["x_level", "y_radius"]),
+        "bounded_window": {"x_level_max": int(x_max), "y_radius_max": int(y_max)},
+        "chain_degrees": dim_summaries,
+    }
+
+
 def _extract_json_between_markers(text: str) -> dict[str, Any]:
     begin = "TORICGT_JSON_BEGIN"
     end = "TORICGT_JSON_END"
@@ -569,9 +653,47 @@ def chain_complex_summary(simplex_tree: Any, max_dimension: int = 2) -> dict[str
     }
 
 
+def finite_field_chain_audit(chain: dict[str, Any]) -> dict[str, Any]:
+    """Exact GF(2) audit for a finite two-step chain complex.
+
+    This is not a differentiable surrogate.  It uses the actual boundary
+    matrices built from the GUDHI simplex tree and checks the finite complex
+    identities and rank conditions over ``F_2``.
+    """
+
+    boundaries = chain.get("_boundaries", {})
+    simplices = chain.get("_simplices", {})
+    d1 = np.asarray(boundaries.get(1, np.zeros((len(simplices.get(0, [])), len(simplices.get(1, []))), dtype=np.uint8)), dtype=np.uint8) & 1
+    d2 = np.asarray(boundaries.get(2, np.zeros((len(simplices.get(1, [])), len(simplices.get(2, []))), dtype=np.uint8)), dtype=np.uint8) & 1
+    c0 = int(len(simplices.get(0, [])))
+    c1 = int(len(simplices.get(1, [])))
+    c2 = int(len(simplices.get(2, [])))
+    rank_d1 = gf2_rank(d1)
+    rank_d2 = gf2_rank(d2)
+    d1d2_residual = int(((d1 @ d2) & 1).sum()) if d1.size and d2.size else 0
+    kernel_d1_dim = int(c1 - rank_d1)
+    homology_h1_dim = int(max(0, kernel_d1_dim - rank_d2))
+    exact_at_c1 = bool(d1d2_residual == 0 and rank_d2 == kernel_d1_dim)
+    return {
+        "field": "F2",
+        "chain_dimensions": {"C0": c0, "C1": c1, "C2": c2},
+        "rank_d1": int(rank_d1),
+        "rank_d2": int(rank_d2),
+        "kernel_d1_dim": int(kernel_d1_dim),
+        "image_d2_dim": int(rank_d2),
+        "h1_dim": homology_h1_dim,
+        "d1d2_residual": int(d1d2_residual),
+        "d_squared_zero": bool(d1d2_residual == 0),
+        "exact_at_c1": exact_at_c1,
+        "buchsbaum_eisenbud_rank_condition_c1": bool(rank_d1 + rank_d2 == c1),
+        "buchsbaum_eisenbud_rank_residual_c1": int(abs((rank_d1 + rank_d2) - c1)),
+    }
+
+
 def simplex_map_audit(source: Any, target: Any, vertex_map: dict[int, int] | None = None, max_dimension: int = 2) -> dict[str, Any]:
     src = simplex_sets(source, max_dimension=max_dimension)
     tgt = simplex_sets(target, max_dimension=max_dimension)
+    tgt_sets = {dim: set(values) for dim, values in tgt.items()}
     vertex_map = vertex_map or {v[0]: v[0] for v in src.get(0, [])}
     counts: dict[str, float] = {}
     total_valid = 0
@@ -588,15 +710,15 @@ def simplex_map_audit(source: Any, target: Any, vertex_map: dict[int, int] | Non
                 dim_valid += 1
                 total_valid += 1
                 dim_collapsed += 1
-            elif target.find(list(mapped)):
+            elif mapped in tgt_sets.get(len(mapped) - 1, set()):
                 dim_valid += 1
                 total_valid += 1
         label = f"dim{dim}"
         counts[f"{label}_simplices"] = float(dim_total)
         counts[f"{label}_valid"] = float(dim_valid)
-        counts[f"{label}_valid_fraction"] = float(dim_valid / max(1, dim_total))
+        counts[f"{label}_valid_fraction"] = float(dim_valid / dim_total) if dim_total else 1.0
         counts[f"{label}_collapsed"] = float(dim_collapsed)
-    counts["simplicial_map_valid_fraction"] = float(total_valid / max(1, total))
+    counts["simplicial_map_valid_fraction"] = float(total_valid / total) if total else 1.0
     counts["simplicial_map_valid"] = bool(total_valid == total)
     return counts
 
@@ -731,12 +853,27 @@ def two_parameter_module(points: np.ndarray, cfg: GudhiPersistenceConfig) -> dic
         num_radii=len(radii),
         max_dimension=cfg.max_dimension,
     )
+    valid_fractions = [
+        float(item.get("simplicial", {}).get("simplicial_map_valid_fraction", 0.0))
+        for item in maps
+    ]
+    structure_map_summary = {
+        "map_count": int(len(maps)),
+        "all_simplicial_maps_valid": bool(all(bool(item.get("simplicial", {}).get("simplicial_map_valid", False)) for item in maps))
+        if maps
+        else True,
+        "mean_simplicial_map_valid_fraction": float(np.mean(valid_fractions)) if valid_fractions else 1.0,
+        "min_simplicial_map_valid_fraction": float(np.min(valid_fractions)) if valid_fractions else 1.0,
+        "x_level_map_count": int(sum(1 for item in maps if item.get("operator") == "x_level")),
+        "y_radius_map_count": int(sum(1 for item in maps if item.get("operator") == "y_radius")),
+    }
     return {
         "ring": "F2[x_level,y_radius]",
         "levels": [int(v) for v in levels.tolist()],
         "radii": [float(v) for v in radii.tolist()],
         "nodes": nodes,
         "structure_maps": maps,
+        "structure_map_summary": structure_map_summary,
         **square_audit,
         "hilbert_h0": [[int(summaries[(li, ri)]["betti"].get("0", 0)) for ri in range(len(radii))] for li in range(len(levels))],
         "hilbert_h1": [[int(summaries[(li, ri)]["betti"].get("1", 0)) for ri in range(len(radii))] for li in range(len(levels))],
@@ -800,6 +937,8 @@ def audit_point_cloud(points: np.ndarray, *, record_id: str, cfg: GudhiPersisten
     }
     module = two_parameter_module(x, cfg)
     bigraded_presentation = bigraded_chain_presentation(x, radii, max_dimension=cfg.max_dimension)
+    xy_grid = xy_grid_module_summary(bigraded_presentation, module)
+    finite_chain = finite_field_chain_audit(chain)
     m2_resolution = (
         macaulay2_bigraded_resolution_certificate(
             bigraded_presentation,
@@ -824,6 +963,8 @@ def audit_point_cloud(points: np.ndarray, *, record_id: str, cfg: GudhiPersisten
         "vectorizations": vectors,
         "two_parameter_module": module,
         "bigraded_chain_presentation": bigraded_presentation,
+        "xy_grid_module": xy_grid,
+        "finite_field_chain_audit": finite_chain,
         "macaulay2_resolution": m2_resolution,
     }
 
@@ -857,6 +998,10 @@ def summarize_audits(records: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_macaulay2_homogeneous_d1": mean(("macaulay2_resolution", "homogeneous_d1")),
         "mean_macaulay2_homogeneous_d2": mean(("macaulay2_resolution", "homogeneous_d2")),
         "mean_macaulay2_d_squared_zero": mean(("macaulay2_resolution", "d_squared_zero")),
+        "mean_finite_field_d_squared_zero": mean(("finite_field_chain_audit", "d_squared_zero")),
+        "mean_finite_field_exact_at_c1": mean(("finite_field_chain_audit", "exact_at_c1")),
+        "mean_be_rank_residual_c1": mean(("finite_field_chain_audit", "buchsbaum_eisenbud_rank_residual_c1")),
+        "mean_simplicial_map_valid_fraction": mean(("two_parameter_module", "structure_map_summary", "mean_simplicial_map_valid_fraction")),
         "records_detail": [
             {
                 "record_id": item.get("record_id"),
@@ -864,6 +1009,8 @@ def summarize_audits(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "max_radius": item.get("max_radius"),
                 "betti": item.get("chain_complex", {}).get("betti", {}),
                 "num_simplices": item.get("simplex_tree", {}).get("num_simplices"),
+                "finite_field_chain_audit": item.get("finite_field_chain_audit", {}),
+                "structure_map_summary": item.get("two_parameter_module", {}).get("structure_map_summary", {}),
             }
             for item in records
         ],

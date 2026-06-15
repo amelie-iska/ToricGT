@@ -233,6 +233,10 @@ def gudhi_wandb_payload(summary: dict[str, Any], *, step: int) -> dict[str, floa
         "mean_macaulay2_homogeneous_d1": "mean_macaulay2_homogeneous_d1",
         "mean_macaulay2_homogeneous_d2": "mean_macaulay2_homogeneous_d2",
         "mean_macaulay2_d_squared_zero": "mean_macaulay2_d_squared_zero",
+        "mean_finite_field_d_squared_zero": "mean_finite_field_d_squared_zero",
+        "mean_finite_field_exact_at_c1": "mean_finite_field_exact_at_c1",
+        "mean_be_rank_residual_c1": "mean_be_rank_residual_c1",
+        "mean_simplicial_map_valid_fraction": "mean_simplicial_map_valid_fraction",
     }
     payload: dict[str, float] = {
         "trainer/step": float(step),
@@ -258,6 +262,15 @@ def gudhi_wandb_payload(summary: dict[str, Any], *, step: int) -> dict[str, floa
     )
     payload["bgg_category_o/persistence/macaulay2_d_squared_zero"] = finite_float(
         summary.get("mean_macaulay2_d_squared_zero"), 0.0
+    )
+    payload["bgg_category_o/persistence/gf2_exact_at_c1"] = finite_float(
+        summary.get("mean_finite_field_exact_at_c1"), 0.0
+    )
+    payload["bgg_category_o/persistence/be_rank_residual_c1"] = finite_float(
+        summary.get("mean_be_rank_residual_c1"), 0.0
+    )
+    payload["topology/exact_gudhi/simplicial_map_valid_fraction"] = finite_float(
+        summary.get("mean_simplicial_map_valid_fraction"), 0.0
     )
     payload["analysis_control/exact_gudhi/vectorized_ph_available"] = 1.0
     payload["analysis_control/exact_gudhi/f2_xy_module_available"] = 1.0

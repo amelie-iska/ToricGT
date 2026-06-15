@@ -15,9 +15,11 @@ from toricgt.gudhi_persistence import (
     GudhiPersistenceConfig,
     audit_point_cloud,
     bigraded_chain_presentation,
+    finite_field_chain_audit,
     torch_persistence_image,
     torch_persistence_landscape,
     vectorized_point_cloud_signature,
+    xy_grid_module_summary,
 )
 
 
@@ -52,6 +54,12 @@ def test_gudhi_macaulay2_bigraded_resolution_for_small_cloud() -> None:
     assert audit["macaulay2_resolution"]["homogeneous_d2"] is True
     assert audit["macaulay2_resolution"]["d_squared_zero"] is True
     assert "H0_betti" in audit["macaulay2_resolution"]["homology_and_resolutions"]
+    assert audit["xy_grid_module"]["kind"] == "miller_sturmfels_bivariate_grid_summary"
+    assert audit["xy_grid_module"]["chain_degrees"]["1"]["generator_count"] > 0
+    assert "adjacent_lcm_syzygies" in audit["xy_grid_module"]["chain_degrees"]["1"]
+    assert audit["finite_field_chain_audit"]["field"] == "F2"
+    assert audit["finite_field_chain_audit"]["d_squared_zero"] is True
+    assert audit["two_parameter_module"]["structure_map_summary"]["mean_simplicial_map_valid_fraction"] == 1.0
 
 
 def test_bigraded_chain_presentation_has_nonnegative_boundary_monomials() -> None:
@@ -64,6 +72,24 @@ def test_bigraded_chain_presentation_has_nonnegative_boundary_monomials() -> Non
                 assert "^- " not in entry
                 assert "x_level^-" not in entry
                 assert "y_radius^-" not in entry
+
+
+def test_xy_grid_summary_reports_inner_and_outer_corners() -> None:
+    presentation = {
+        "ring": "F2[x_level,y_radius]",
+        "variables": ["x_level", "y_radius"],
+        "generators": {
+            "0": [{"degree": [0, 0]}, {"degree": [1, 0]}],
+            "1": [{"degree": [0, 2]}, {"degree": [2, 0]}, {"degree": [2, 2]}],
+            "2": [{"degree": [2, 2]}],
+        },
+    }
+    summary = xy_grid_module_summary(presentation, {"hilbert_h0": [[1, 1], [1, 0]]})
+
+    c1 = summary["chain_degrees"]["1"]
+    assert c1["minimal_inner_corners"] == [[0, 2], [2, 0]]
+    assert c1["adjacent_lcm_outer_corners"] == [[2, 2]]
+    assert c1["adjacent_lcm_syzygies"][0]["left_multiplier"] == [2, 0]
 
 
 def test_torch_persistence_vectorizers_are_differentiable() -> None:
@@ -158,6 +184,8 @@ def test_gudhi_audit_script_writes_dark_html_and_m2_script(tmp_path: Path) -> No
     assert "F2[x_level,y_radius] xy-grid module view" in record_html
     assert "M2 d1*d2=0" in record_html
     assert "Hilbert H0 grid" in record_html
+    assert "Exact Chain And Simplicial-Map Audit" in record_html
+    assert "adjacent syzygies" in record_html
     assert "<details" in record_html
     assert list((out / "macaulay2").glob("*.m2"))
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
@@ -209,6 +237,9 @@ def test_watcher_gudhi_wandb_payload_has_exact_metric_aliases() -> None:
             "mean_macaulay2_homogeneous_d1": 1.0,
             "mean_macaulay2_homogeneous_d2": 1.0,
             "mean_macaulay2_d_squared_zero": 1.0,
+            "mean_finite_field_exact_at_c1": 1.0,
+            "mean_be_rank_residual_c1": 0.0,
+            "mean_simplicial_map_valid_fraction": 1.0,
         },
         step=250,
     )
@@ -219,4 +250,7 @@ def test_watcher_gudhi_wandb_payload_has_exact_metric_aliases() -> None:
     assert payload["topology/exact_gudhi/mean_h1_persistence_image_norm"] == 0.125
     assert payload["bgg_category_o/persistence/two_parameter_square_residual"] == 0.0
     assert payload["bgg_category_o/persistence/macaulay2_d_squared_zero"] == 1.0
+    assert payload["bgg_category_o/persistence/gf2_exact_at_c1"] == 1.0
+    assert payload["bgg_category_o/persistence/be_rank_residual_c1"] == 0.0
+    assert payload["topology/exact_gudhi/simplicial_map_valid_fraction"] == 1.0
     assert payload["analysis_control/exact_gudhi/f2_xy_module_available"] == 1.0

@@ -442,12 +442,18 @@ def record_figure(record: dict[str, Any]) -> go.Figure:
 def metric_rows(record: dict[str, Any]) -> str:
     resolution = record.get("macaulay2_resolution", {})
     chain = record.get("chain_complex", {})
+    finite_chain = record.get("finite_field_chain_audit", {})
+    structure_maps = record.get("two_parameter_module", {}).get("structure_map_summary", {})
     metrics = {
         "points": record.get("points"),
         "ambient dimension": record.get("dimension"),
         "max radius": float(record.get("max_radius", 0.0)),
         "GUDHI simplices": record.get("simplex_tree", {}).get("num_simplices"),
         "Betti": chain.get("betti"),
+        "GF(2) d^2=0": finite_chain.get("d_squared_zero"),
+        "GF(2) exact at C1": finite_chain.get("exact_at_c1"),
+        "BE rank residual C1": finite_chain.get("buchsbaum_eisenbud_rank_residual_c1"),
+        "simplicial maps valid fraction": structure_maps.get("mean_simplicial_map_valid_fraction"),
         "M2 homogeneous d1": resolution.get("homogeneous_d1"),
         "M2 homogeneous d2": resolution.get("homogeneous_d2"),
         "M2 d^2=0": resolution.get("d_squared_zero"),
@@ -466,9 +472,12 @@ def metric_rows(record: dict[str, Any]) -> str:
 def module_check_badges(record: dict[str, Any]) -> str:
     resolution = record.get("macaulay2_resolution", {})
     module = record.get("two_parameter_module", {})
+    finite_chain = record.get("finite_field_chain_audit", {})
     chain_residuals = module.get("commutative_square_chain_residuals_by_dimension", {})
     return "".join(
         [
+            pass_badge("GF(2) d^2=0", finite_chain.get("d_squared_zero", False)),
+            pass_badge("GF(2) exact at C1", finite_chain.get("exact_at_c1", False)),
             pass_badge("M2 homogeneous d1", resolution.get("homogeneous_d1", False)),
             pass_badge("M2 homogeneous d2", resolution.get("homogeneous_d2", False)),
             pass_badge("M2 d1*d2=0", resolution.get("d_squared_zero", False)),
@@ -495,6 +504,32 @@ def module_tables(record: dict[str, Any]) -> str:
         if key in module:
             sections.append(f"<h3>{html.escape(title)}</h3>{matrix_table(module[key])}")
     return "".join(sections)
+
+
+def xy_grid_summary_html(record: dict[str, Any]) -> str:
+    summary = record.get("xy_grid_module", {})
+    chain_degrees = summary.get("chain_degrees", {}) if isinstance(summary, dict) else {}
+    rows: list[str] = []
+    for degree, payload in sorted(chain_degrees.items(), key=lambda item: item[0]):
+        if not isinstance(payload, dict):
+            continue
+        rows.append(
+            "<tr><td>C{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                html.escape(str(degree)),
+                html.escape(format_value(payload.get("generator_count", 0))),
+                html.escape(format_value(payload.get("minimal_inner_corners", []))),
+                html.escape(format_value(payload.get("adjacent_lcm_outer_corners", []))),
+                html.escape(format_value(len(payload.get("adjacent_lcm_syzygies", [])))),
+            )
+        )
+    if not rows:
+        return ""
+    return (
+        '<div class="tablewrap"><table>'
+        "<tr><th>chain</th><th>generators</th><th>minimal inner corners</th><th>outer lcm corners</th><th>adjacent syzygies</th></tr>"
+        + "".join(rows)
+        + "</table></div>"
+    )
 
 
 def write_record_html(record: dict[str, Any], out: Path, *, rel_json: str, rel_m2: str) -> None:
@@ -526,7 +561,17 @@ def write_record_html(record: dict[str, Any], out: Path, *, rel_json: str, rel_m
 <section class="panel card">
   <h2>F2[x_level,y_radius] xy-grid module view</h2>
   {xy_grid_svg(record)}
+  {xy_grid_summary_html(record)}
   {module_tables(record)}
+</section>
+<section class="panel card">
+  <h2>Exact Chain And Simplicial-Map Audit</h2>
+  <details open><summary>GF(2) chain exactness and Buchsbaum-Eisenbud-style rank check</summary>
+  <pre>{html.escape(json.dumps(record.get('finite_field_chain_audit', {}), indent=2, sort_keys=True))}</pre>
+  </details>
+  <details open><summary>Reasoning/radius structure-map summary</summary>
+  <pre>{html.escape(json.dumps(record.get('two_parameter_module', {}).get('structure_map_summary', {}), indent=2, sort_keys=True))}</pre>
+  </details>
 </section>
 <section class="panel plot">{fig_html}</section>
 <section class="panel card">
@@ -558,6 +603,8 @@ def write_index(output_dir: Path, summary: dict[str, Any], record_pages: list[di
                 f'<div class="metric"><span>simplices</span><span>{html.escape(format_value(page.get("num_simplices", "n/a")))}</span></div>',
                 f'<div class="metric"><span>Betti</span><span>{html.escape(format_value(page.get("betti", "n/a")))}</span></div>',
                 f'<div class="metric"><span>H1 landscape norm</span><span>{html.escape(format_value(page.get("h1_landscape_norm", "n/a")))}</span></div>',
+                f'<div class="metric"><span>GF(2) exact at C1</span><span>{html.escape(format_value(page.get("finite_field_exact_at_c1", "n/a")))}</span></div>',
+                f'<div class="metric"><span>simplicial-map validity</span><span>{html.escape(format_value(page.get("simplicial_map_valid_fraction", "n/a")))}</span></div>',
             ]
         )
         cards.append(
@@ -645,6 +692,10 @@ def main() -> None:
                 "num_simplices": audit.get("simplex_tree", {}).get("num_simplices"),
                 "betti": audit.get("chain_complex", {}).get("betti"),
                 "h1_landscape_norm": audit.get("vectorizations", {}).get("1", {}).get("landscape_norm"),
+                "finite_field_exact_at_c1": audit.get("finite_field_chain_audit", {}).get("exact_at_c1", False),
+                "simplicial_map_valid_fraction": audit.get("two_parameter_module", {})
+                .get("structure_map_summary", {})
+                .get("mean_simplicial_map_valid_fraction", "n/a"),
                 "m2_d_squared_zero": audit.get("macaulay2_resolution", {}).get("d_squared_zero", False),
                 "m2_homogeneous": bool(audit.get("macaulay2_resolution", {}).get("homogeneous_d1", False))
                 and bool(audit.get("macaulay2_resolution", {}).get("homogeneous_d2", False)),

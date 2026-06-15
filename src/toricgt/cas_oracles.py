@@ -487,6 +487,9 @@ J = ideal({equations})
 G = gens gb J
 Igens = selectInSubring(1, G)
 I = ideal Igens
+Cideal = res I
+M = coker gens I
+Cmodule = res M
 polys = flatten entries gens I
 relationRows = apply(polys, f -> (
     ee := exponents f;
@@ -504,7 +507,16 @@ out = hashTable {{
   "ideal" => toString I,
   "generator_count" => #polys,
   "relations" => relationRows,
-  "betti" => toString betti res I
+  "betti" => toString betti Cideal,
+  "resolution" => toString Cideal,
+  "resolution_length" => length Cideal,
+  "projective_dimension" => try pdim I else -1,
+  "regularity" => try regularity I else -1,
+  "module" => toString M,
+  "module_betti" => toString betti Cmodule,
+  "module_resolution" => toString Cmodule,
+  "module_projective_dimension" => try pdim M else -1,
+  "module_regularity" => try regularity M else -1
 }}
 print "TORICGT_JSON_BEGIN"
 print toJSON out
@@ -747,6 +759,15 @@ print "TORICGT_JSON_END"
             "toric_ideal_binomials": payload.get("relations", []),
             "toric_ideal_relations": relations,
             "betti_table_raw": payload.get("betti", ""),
+            "free_resolution_raw": payload.get("resolution", ""),
+            "resolution_length": payload.get("resolution_length", None),
+            "projective_dimension": payload.get("projective_dimension", None),
+            "regularity": payload.get("regularity", None),
+            "module": payload.get("module", ""),
+            "module_betti_table_raw": payload.get("module_betti", ""),
+            "module_free_resolution_raw": payload.get("module_resolution", ""),
+            "module_projective_dimension": payload.get("module_projective_dimension", None),
+            "module_regularity": payload.get("module_regularity", None),
         }
         cert = ToricTropicalCertificate(
             kind="macaulay2_toric_ideal_certificate",

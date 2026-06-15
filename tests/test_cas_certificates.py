@@ -264,6 +264,11 @@ def test_exact_macaulay2_toric_ideal_certificate_if_installed() -> None:
     assert algebra["toric_ideal_generator_count"] == 3
     assert "x_2^2-x_1*x_3" in algebra["toric_ideal"]
     assert len(algebra["toric_ideal_relations"]) == 3
+    assert algebra["resolution_length"] is not None
+    assert algebra["projective_dimension"] is not None
+    assert algebra["regularity"] is not None
+    assert "ChainComplex" in algebra["free_resolution_raw"] or "Complex" in algebra["free_resolution_raw"]
+    assert algebra["module_projective_dimension"] is not None
     assert validate_certificate_payload(payload) == []
 
     logits = torch.tensor([[3.0, 5.0, 8.0, 11.0]], requires_grad=True)

@@ -87,4 +87,8 @@ def test_embedding_cas_sidecar_runs_sage_and_macaulay2(tmp_path: Path) -> None:
     assert record["sage_normal_fan"]["provenance"] == "exact_cas/sage"
     assert record["macaulay2_toric_ideal"]["provenance"] == "exact_cas/macaulay2"
     assert record["exponent_metadata"]["method"] == "actual_hidden_pca_rank_quantized_nonnegative_exponents"
+    algebra = record["macaulay2_toric_ideal"]["commutative_algebra"]
+    assert algebra["resolution_length"] is not None
+    assert algebra["free_resolution_raw"]
+    assert "Macaulay2 Free Resolution" in (out / "records" / "record_000_cas_sidecar.html").read_text(encoding="utf-8")
     assert (out / "index.html").exists()

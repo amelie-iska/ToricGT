@@ -140,3 +140,23 @@ The differentiable training head intentionally remains separate: it uses Torch
 landscape/image vectorizers over explicit birth/death tensors so gradients can
 reach the retrieval model.  That path is not an exact PH solver and is not used
 to write offline memory-index audit keys.
+
+## 2026-06-15 Exact Audit Metadata Update
+
+The periodic exact audit now exposes the algebra needed to compare retrieval
+trajectories against the `F2[x_level,y_radius]` persistence module rather than
+only against scalar topology summaries.  Each GUDHI/Macaulay2 record includes:
+
+- exact GF(2) terminal-chain data: ranks of `d_1` and `d_2`, `ker(d_1)`,
+  `im(d_2)`, `H_1`, `d_1 d_2`, exactness at `C_1`, and the
+  Buchsbaum-Eisenbud-style rank residual;
+- simplicial-map validity for the level and radius maps between simplex trees;
+- Miller-Sturmfels-style bivariate xy-grid summaries with minimal inner
+  corners, adjacent lcm outer corners, and adjacent syzygy multipliers;
+- W&B aliases under `gudhi_persistence/*`, `topology/exact_gudhi/*`, and
+  `bgg_category_o/persistence/*`.
+
+The training retrieval head should continue to use differentiable vectorized PH
+features for gradients.  Exact GUDHI/Macaulay2 fields should be consumed by
+periodic checkins, offline memory-index audits, and checkpoint-selection
+reports, not silently substituted into the GPU loss path.

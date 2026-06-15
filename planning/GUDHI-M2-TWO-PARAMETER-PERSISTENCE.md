@@ -54,6 +54,9 @@ cloud at radius `r_j`.  The audit records:
 - simplex counts in dimensions 0, 1, and 2;
 - exact `F2` boundary matrices;
 - Betti numbers and `d_1 d_2 = 0`;
+- an exact finite-field chain audit at the terminal grid point, including
+  `rank(d_1)`, `rank(d_2)`, `ker(d_1)`, `im(d_2)`, `H_1`, exactness at `C_1`,
+  and a Buchsbaum-Eisenbud-style rank residual;
 - exact persistence diagrams from GUDHI;
 - vectorized PH features: landscape, persistence image, silhouette, entropy.
 
@@ -116,6 +119,20 @@ betti res H2
 
 The HTML pages display the M2 script, homology module strings, presentations,
 free resolutions, Betti tables, homogeneity checks, and `d1*d2 == 0`.
+They also display Miller-Sturmfels-style bivariate xy-grid summaries for the
+finite presentation: generator bidegrees by chain module, Pareto-minimal
+``inner corner'' generator bidegrees, adjacent lcm ``outer corners'', and the
+corresponding adjacent monomial syzygy multipliers.  This is the browser-level
+version of the two-variable monomial-ideal grid picture used to make module
+data inspectable.
+
+The simplicial structure maps are audited twice.  The exact chain-square audit
+checks commutativity by multiplying GF(2) inclusion matrices.  The simplex-tree
+map audit separately checks that vertex maps induced by the level/radius
+inclusions send every source edge and triangle either to a collapsed simplex or
+to a present target simplex.  Empty positive-dimensional domains are counted as
+vacuously valid, so a sparse early prefix is not reported as a failed
+simplicial map.
 
 ## Training-Time Differentiable Metrics
 
@@ -164,6 +181,24 @@ outputs/post_resume_analysis/<run>/step-*/gudhi_persistence/macaulay2/*.m2
 The top-level `index.html` is the dark-mode browser landing page linking the
 GUDHI/M2 pages, CAS audit, geometry summary, OAI BPB summary, derived-category
 report, memory trace report, and test-time-scaling report when present.
+
+The watcher mirrors the exact audit summary to W&B with explicit aliases:
+
+```text
+gudhi_persistence/mean_finite_field_d_squared_zero
+gudhi_persistence/mean_finite_field_exact_at_c1
+gudhi_persistence/mean_be_rank_residual_c1
+gudhi_persistence/mean_simplicial_map_valid_fraction
+topology/exact_gudhi/gf2_exact_at_c1
+topology/exact_gudhi/be_rank_residual_c1
+topology/exact_gudhi/simplicial_map_valid_fraction
+bgg_category_o/persistence/gf2_exact_at_c1
+bgg_category_o/persistence/be_rank_residual_c1
+```
+
+These are emitted as analysis values.  They do not by themselves authorize a
+training start, stop, or restart; the supervisor scripts require explicit
+operator flags for those actions.
 
 ## Optional Inference Output
 
