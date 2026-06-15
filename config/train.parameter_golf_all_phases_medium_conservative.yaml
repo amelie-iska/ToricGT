@@ -117,6 +117,21 @@ model:
   analogy_step_topology_step_stride: 8
   analogy_step_topology_time_bias: 0.18
 
+  use_tokengt_causal_graph: true
+  tokengt_graph_max_nodes: 128
+  tokengt_graph_neighbor_radius: 2
+  tokengt_graph_temperature: 0.25
+  tokengt_graph_edge_weight: 0.50
+  tokengt_graph_direction_weight: 0.20
+  tokengt_graph_position_weight: 0.20
+  tokengt_graph_byte_class_weight: 0.10
+  tokengt_graph_cycle_weight: 0.05
+  tokengt_graph_noncausal_policy: causal_when_possible
+  use_tokengt_graph_fusion: true
+  tokengt_graph_fusion_weight: 0.06
+  tokengt_graph_fusion_layers: 1
+  tokengt_graph_fusion_max_edges: 512
+
   use_koszul_persistence: true
   koszul_max_points: 24
   koszul_max_windows: 4
@@ -144,6 +159,11 @@ model:
   trajectory_memory_topology_weight: 0.20
   trajectory_memory_graphcg_weight: 0.30
   trajectory_memory_toric_weight: 0.20
+  trajectory_memory_persistence_weight: 0.20
+  trajectory_memory_persistence_max_points: 48
+  trajectory_memory_persistence_landscape_layers: 3
+  trajectory_memory_persistence_landscape_resolution: 24
+  trajectory_memory_persistence_image_resolution: 12
 
   # Instantiated and trained from the start with a small Category O/Koszul
   # pressure, then gently increased once OAI BPB stabilizes.
@@ -271,6 +291,7 @@ training:
   toric_bgg_loss_weight: 0.000002
   koszul_persistence_loss_weight: 0.000002
   slepian_pollak_loss_weight: 0.000006
+  tokengt_graph_loss_weight: 0.00005
   trajectory_memory_loss_weight: 0.000010
   trajectory_flow_loss_weight: 0.000020
   contrastive_loss_weight: 0.00015
@@ -361,6 +382,7 @@ phase_curriculum:
       toric_bgg_loss_weight: 0.000002
       koszul_persistence_loss_weight: 0.000002
       slepian_pollak_loss_weight: 0.000006
+      tokengt_graph_loss_weight: 0.00005
       trajectory_flow_loss_weight: 0.000020
       trajectory_memory_loss_weight: 0.000010
       contrastive_loss_weight: 0.00015
@@ -385,6 +407,7 @@ phase_curriculum:
       toric_bgg_loss_weight: 0.000018
       koszul_persistence_loss_weight: 0.000020
       slepian_pollak_loss_weight: 0.000035
+      tokengt_graph_loss_weight: 0.00006
       trajectory_flow_loss_weight: 0.00010
       trajectory_memory_loss_weight: 0.000035
       contrastive_loss_weight: 0.00070
@@ -409,6 +432,7 @@ phase_curriculum:
       toric_bgg_loss_weight: 0.000022
       koszul_persistence_loss_weight: 0.000030
       slepian_pollak_loss_weight: 0.000035
+      tokengt_graph_loss_weight: 0.00008
       trajectory_flow_loss_weight: 0.00012
       trajectory_memory_loss_weight: 0.000050
       contrastive_loss_weight: 0.001
@@ -433,6 +457,7 @@ phase_curriculum:
       toric_bgg_loss_weight: 0.000025
       koszul_persistence_loss_weight: 0.000035
       slepian_pollak_loss_weight: 0.00005
+      tokengt_graph_loss_weight: 0.00008
       trajectory_flow_loss_weight: 0.00025
       trajectory_memory_loss_weight: 0.00008
       contrastive_loss_weight: 0.0015
@@ -457,6 +482,7 @@ phase_curriculum:
       toric_bgg_loss_weight: 0.000025
       koszul_persistence_loss_weight: 0.000025
       slepian_pollak_loss_weight: 0.00005
+      tokengt_graph_loss_weight: 0.00008
       trajectory_flow_loss_weight: 0.00025
       trajectory_memory_loss_weight: 0.00010
       contrastive_loss_weight: 0.0015
@@ -481,6 +507,7 @@ phase_curriculum:
       toric_bgg_loss_weight: 0.000015
       koszul_persistence_loss_weight: 0.000020
       slepian_pollak_loss_weight: 0.00003
+      tokengt_graph_loss_weight: 0.00006
       trajectory_flow_loss_weight: 0.00020
       trajectory_memory_loss_weight: 0.00008
       contrastive_loss_weight: 0.0010

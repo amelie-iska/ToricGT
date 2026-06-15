@@ -1,4 +1,5 @@
 import torch
+import yaml
 
 from toricgt.koszul_persistence import KoszulPersistenceConfig, koszul_persistence_loss
 from toricgt.random_order_lm import (
@@ -110,6 +111,45 @@ def test_revealed_neighbor_context_uses_only_revealed_graph_neighbors():
     out_future_a = model(future_a, permutation=permutation, return_order=True)
     out_future_b = model(future_b, permutation=permutation, return_order=True)
     assert torch.allclose(out_future_a["logits"][:, 2], out_future_b["logits"][:, 2], atol=1e-6)
+
+
+def test_tokengt_graph_fusion_is_prefix_safe_and_reports_metrics():
+    cfg = tiny_config(
+        vocab_size=48,
+        use_tokengt_causal_graph=True,
+        use_tokengt_graph_fusion=True,
+        tokengt_graph_max_nodes=8,
+        tokengt_graph_neighbor_radius=1,
+        tokengt_graph_fusion_weight=0.05,
+        tokengt_graph_fusion_layers=1,
+        tokengt_graph_fusion_max_edges=32,
+    )
+    model = DenseRandomOrderToricLM(cfg).eval()
+    permutation = torch.arange(8, dtype=torch.long).view(1, 8)
+    tokens_a = torch.tensor([[4, 5, 6, 7, 8, 9, 10, 11]])
+    tokens_b = torch.tensor([[4, 5, 6, 7, 20, 21, 22, 23]])
+    out_a = model(tokens_a, permutation=permutation, return_order=True)
+    out_b = model(tokens_b, permutation=permutation, return_order=True)
+    assert torch.allclose(out_a["logits"][:, 4], out_b["logits"][:, 4], atol=1e-6)
+    assert out_a["tokengt_graph_fusion_context_norm"].isfinite()
+    assert out_a["tokengt_graph_fusion_context_norm"] > 0.0
+    assert out_a["tokengt_graph_fusion_nodes"] == 8
+    assert out_a["tokengt_graph_fusion_edges"] > 0
+    assert out_a["tokengt_graph_fusion_gate"] > 0
+
+
+def test_all_phases_config_enables_tokengt_fusion_from_step_zero():
+    with open("config/train.parameter_golf_all_phases.yaml", "r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle)
+    model = payload["model"]
+    training = payload["training"]
+    first_phase = payload["phase_curriculum"]["phases"][0]
+    assert model["use_tokengt_causal_graph"] is True
+    assert model["use_tokengt_graph_fusion"] is True
+    assert model["trajectory_memory_persistence_weight"] > 0.0
+    assert training["tokengt_graph_loss_weight"] > 0.0
+    assert first_phase["start_step"] == 0
+    assert first_phase["tokengt_graph_loss_weight"] > 0.0
 
 
 def test_dense_random_order_lm_loss_and_generation_shapes():

@@ -2402,6 +2402,10 @@ def main() -> None:
             "tokengt_graph_noncausal_policy",
             "causal_when_possible",
         ),
+        use_tokengt_graph_fusion=config_get(file_config, "model", "use_tokengt_graph_fusion", False),
+        tokengt_graph_fusion_weight=config_get(file_config, "model", "tokengt_graph_fusion_weight", 0.08),
+        tokengt_graph_fusion_layers=config_get(file_config, "model", "tokengt_graph_fusion_layers", 1),
+        tokengt_graph_fusion_max_edges=config_get(file_config, "model", "tokengt_graph_fusion_max_edges", 0),
         contrastive_temperature=config_get(file_config, "model", "contrastive_temperature", 0.2),
         trajectory_flow_viscosity=config_get(file_config, "model", "trajectory_flow_viscosity", 0.05),
         use_trajectory_memory_head=(
@@ -2425,6 +2429,36 @@ def main() -> None:
         trajectory_memory_topology_weight=config_get(file_config, "model", "trajectory_memory_topology_weight", 0.20),
         trajectory_memory_graphcg_weight=config_get(file_config, "model", "trajectory_memory_graphcg_weight", 0.30),
         trajectory_memory_toric_weight=config_get(file_config, "model", "trajectory_memory_toric_weight", 0.20),
+        trajectory_memory_persistence_weight=config_get(
+            file_config,
+            "model",
+            "trajectory_memory_persistence_weight",
+            0.20,
+        ),
+        trajectory_memory_persistence_max_points=config_get(
+            file_config,
+            "model",
+            "trajectory_memory_persistence_max_points",
+            48,
+        ),
+        trajectory_memory_persistence_landscape_layers=config_get(
+            file_config,
+            "model",
+            "trajectory_memory_persistence_landscape_layers",
+            3,
+        ),
+        trajectory_memory_persistence_landscape_resolution=config_get(
+            file_config,
+            "model",
+            "trajectory_memory_persistence_landscape_resolution",
+            24,
+        ),
+        trajectory_memory_persistence_image_resolution=config_get(
+            file_config,
+            "model",
+            "trajectory_memory_persistence_image_resolution",
+            12,
+        ),
         use_toric_bgg=config_get(file_config, "model", "use_toric_bgg", False),
         toric_bgg_num_standard_tokens=config_get(file_config, "model", "toric_bgg_num_standard_tokens", 8),
         toric_bgg_probe_rank=config_get(file_config, "model", "toric_bgg_probe_rank", 8),
@@ -3659,6 +3693,11 @@ def main() -> None:
         step_trajectory_memory_entropy = 0.0
         step_trajectory_memory_score_gap = 0.0
         step_trajectory_memory_teacher_diag_prob = 0.0
+        step_trajectory_memory_persistence_similarity = 0.0
+        step_trajectory_memory_persistence_norm = 0.0
+        step_trajectory_memory_persistence_entropy = 0.0
+        step_trajectory_memory_persistence_total = 0.0
+        step_trajectory_memory_persistence_weight = 0.0
         step_smear_temperature = 0.0
         step_revealed_neighbor_known_fraction = 0.0
         step_revealed_neighbor_context_norm = 0.0
@@ -3732,6 +3771,12 @@ def main() -> None:
         step_tokengt_graph_edge_density = 0.0
         step_tokengt_graph_causal_edge_fraction = 0.0
         step_tokengt_graph_policy_causal = 0.0
+        step_tokengt_graph_fusion_context_norm = 0.0
+        step_tokengt_graph_fusion_gate = 0.0
+        step_tokengt_graph_fusion_nodes = 0.0
+        step_tokengt_graph_fusion_edges = 0.0
+        step_tokengt_graph_fusion_token_count = 0.0
+        step_tokengt_graph_fusion_edge_density = 0.0
         step_robust_micro_loss_guard_fraction = 0.0
         step_robust_micro_loss_guard_scale = 0.0
         step_robust_micro_loss_guard_cap = 0.0
@@ -4399,6 +4444,18 @@ def main() -> None:
             step_tokengt_graph_policy_causal += float(
                 out.get("tokengt_graph_policy_causal", torch.zeros(())).detach().cpu()
             )
+            step_tokengt_graph_fusion_context_norm += float(
+                out.get("tokengt_graph_fusion_context_norm", torch.zeros(())).detach().cpu()
+            )
+            step_tokengt_graph_fusion_gate += float(out.get("tokengt_graph_fusion_gate", torch.zeros(())).detach().cpu())
+            step_tokengt_graph_fusion_nodes += float(out.get("tokengt_graph_fusion_nodes", torch.zeros(())).detach().cpu())
+            step_tokengt_graph_fusion_edges += float(out.get("tokengt_graph_fusion_edges", torch.zeros(())).detach().cpu())
+            step_tokengt_graph_fusion_token_count += float(
+                out.get("tokengt_graph_fusion_token_count", torch.zeros(())).detach().cpu()
+            )
+            step_tokengt_graph_fusion_edge_density += float(
+                out.get("tokengt_graph_fusion_edge_density", torch.zeros(())).detach().cpu()
+            )
             step_qat_loss += float(qat_loss.detach().cpu())
             step_qat_weight += float(effective_qat_loss_weight)
             step_contrastive_loss += float(contrastive_loss.detach().cpu())
@@ -4419,6 +4476,21 @@ def main() -> None:
             step_trajectory_memory_score_gap += float(out.get("trajectory_memory_score_gap", torch.zeros(())).detach().cpu())
             step_trajectory_memory_teacher_diag_prob += float(
                 out.get("trajectory_memory_teacher_diag_prob", torch.zeros(())).detach().cpu()
+            )
+            step_trajectory_memory_persistence_similarity += float(
+                out.get("trajectory_memory_persistence_similarity", torch.zeros(())).detach().cpu()
+            )
+            step_trajectory_memory_persistence_norm += float(
+                out.get("trajectory_memory_persistence_norm", torch.zeros(())).detach().cpu()
+            )
+            step_trajectory_memory_persistence_entropy += float(
+                out.get("trajectory_memory_persistence_entropy", torch.zeros(())).detach().cpu()
+            )
+            step_trajectory_memory_persistence_total += float(
+                out.get("trajectory_memory_persistence_total", torch.zeros(())).detach().cpu()
+            )
+            step_trajectory_memory_persistence_weight += float(
+                out.get("trajectory_memory_persistence_weight", torch.zeros(())).detach().cpu()
             )
             step_smear_temperature += float(out.get("smear_temperature", torch.zeros(())).detach().cpu())
             step_revealed_neighbor_known_fraction += float(
@@ -4527,6 +4599,11 @@ def main() -> None:
         step_trajectory_memory_entropy /= grad_accum
         step_trajectory_memory_score_gap /= grad_accum
         step_trajectory_memory_teacher_diag_prob /= grad_accum
+        step_trajectory_memory_persistence_similarity /= grad_accum
+        step_trajectory_memory_persistence_norm /= grad_accum
+        step_trajectory_memory_persistence_entropy /= grad_accum
+        step_trajectory_memory_persistence_total /= grad_accum
+        step_trajectory_memory_persistence_weight /= grad_accum
         step_smear_temperature /= grad_accum
         step_revealed_neighbor_known_fraction /= grad_accum
         step_revealed_neighbor_context_norm /= grad_accum
@@ -4600,6 +4677,12 @@ def main() -> None:
         step_tokengt_graph_edge_density /= grad_accum
         step_tokengt_graph_causal_edge_fraction /= grad_accum
         step_tokengt_graph_policy_causal /= grad_accum
+        step_tokengt_graph_fusion_context_norm /= grad_accum
+        step_tokengt_graph_fusion_gate /= grad_accum
+        step_tokengt_graph_fusion_nodes /= grad_accum
+        step_tokengt_graph_fusion_edges /= grad_accum
+        step_tokengt_graph_fusion_token_count /= grad_accum
+        step_tokengt_graph_fusion_edge_density /= grad_accum
         step_robust_micro_loss_guard_fraction /= grad_accum
         step_robust_micro_loss_guard_scale /= grad_accum
         step_robust_micro_loss_guard_cap /= grad_accum
@@ -4849,6 +4932,16 @@ def main() -> None:
                 "train/trajectory_memory_entropy": step_trajectory_memory_entropy,
                 "train/trajectory_memory_score_gap": step_trajectory_memory_score_gap,
                 "train/trajectory_memory_teacher_diag_prob": step_trajectory_memory_teacher_diag_prob,
+                "train/trajectory_memory_persistence_similarity": step_trajectory_memory_persistence_similarity,
+                "train/trajectory_memory_persistence_norm": step_trajectory_memory_persistence_norm,
+                "train/trajectory_memory_persistence_entropy": step_trajectory_memory_persistence_entropy,
+                "train/trajectory_memory_persistence_total": step_trajectory_memory_persistence_total,
+                "train/trajectory_memory_persistence_weight": step_trajectory_memory_persistence_weight,
+                "trajectory_memory/persistence_similarity": step_trajectory_memory_persistence_similarity,
+                "trajectory_memory/persistence_norm": step_trajectory_memory_persistence_norm,
+                "trajectory_memory/persistence_entropy": step_trajectory_memory_persistence_entropy,
+                "trajectory_memory/persistence_total": step_trajectory_memory_persistence_total,
+                "trajectory_memory/persistence_weight": step_trajectory_memory_persistence_weight,
                 "train/trajectory_memory_loss_weight": effective_trajectory_memory_loss_weight,
                 "train/smear_temperature": step_smear_temperature,
                 "train/revealed_neighbor_known_fraction": step_revealed_neighbor_known_fraction,
@@ -5013,6 +5106,14 @@ def main() -> None:
                 "tokengt_graph/edge_density": step_tokengt_graph_edge_density,
                 "tokengt_graph/causal_edge_fraction": step_tokengt_graph_causal_edge_fraction,
                 "tokengt_graph/policy_causal": step_tokengt_graph_policy_causal,
+                "tokengt_graph/fusion_context_norm": step_tokengt_graph_fusion_context_norm,
+                "tokengt_graph/fusion_gate": step_tokengt_graph_fusion_gate,
+                "tokengt_graph/fusion_nodes": step_tokengt_graph_fusion_nodes,
+                "tokengt_graph/fusion_edges": step_tokengt_graph_fusion_edges,
+                "tokengt_graph/fusion_token_count": step_tokengt_graph_fusion_token_count,
+                "tokengt_graph/fusion_edge_density": step_tokengt_graph_fusion_edge_density,
+                "train/tokengt_graph_fusion_context_norm": step_tokengt_graph_fusion_context_norm,
+                "train/tokengt_graph_fusion_gate": step_tokengt_graph_fusion_gate,
                 "artifact/initial_bytes": report.bytes_total,
                 "artifact/estimated_tensor_bytes": estimated_tensor_bytes,
                 "artifact/deployment_parameters": report.deployment_parameters,

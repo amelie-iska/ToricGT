@@ -21,6 +21,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .config import AttentionKind
+from .graph_tokenizer import GraphBatch, GraphTokenizer, attention_mask_from_token_mask
 from .koszul_persistence import KoszulPersistenceConfig, koszul_persistence_loss
 from .tropical_attention import TransformerBlock
 from .topological_reasoning import ReasoningTopologyConfig, reasoning_step_topology_loss
@@ -217,6 +218,10 @@ class RandomOrderLMConfig:
     tokengt_graph_byte_class_weight: float = 0.10
     tokengt_graph_cycle_weight: float = 0.05
     tokengt_graph_noncausal_policy: str = "causal_when_possible"
+    use_tokengt_graph_fusion: bool = False
+    tokengt_graph_fusion_weight: float = 0.08
+    tokengt_graph_fusion_layers: int = 1
+    tokengt_graph_fusion_max_edges: int = 0
     aux_mtp_offsets: int = 2
     contrastive_temperature: float = 0.2
     trajectory_flow_viscosity: float = 0.05
@@ -229,6 +234,11 @@ class RandomOrderLMConfig:
     trajectory_memory_topology_weight: float = 0.20
     trajectory_memory_graphcg_weight: float = 0.30
     trajectory_memory_toric_weight: float = 0.20
+    trajectory_memory_persistence_weight: float = 0.20
+    trajectory_memory_persistence_max_points: int = 48
+    trajectory_memory_persistence_landscape_layers: int = 3
+    trajectory_memory_persistence_landscape_resolution: int = 24
+    trajectory_memory_persistence_image_resolution: int = 12
     use_toric_bgg: bool = False
     toric_bgg_num_standard_tokens: int = 8
     toric_bgg_probe_rank: int = 8
@@ -512,6 +522,48 @@ class DenseRandomOrderToricLM(nn.Module):
             if config.use_graphcg and config.graphcg_num_directions > 1
             else None
         )
+        self._tokengt_graph_node_feature_dim = 18
+        self._tokengt_graph_edge_feature_dim = 11
+        tokengt_graph_max_edges = int(config.tokengt_graph_fusion_max_edges)
+        if tokengt_graph_max_edges <= 0:
+            tokengt_graph_max_edges = max(
+                1,
+                int(config.tokengt_graph_max_nodes) * (max(1, int(config.tokengt_graph_neighbor_radius)) + 2),
+            )
+        if config.use_tokengt_graph_fusion:
+            self.tokengt_graph_tokenizer = GraphTokenizer(
+                node_feature_dim=self._tokengt_graph_node_feature_dim,
+                edge_feature_dim=self._tokengt_graph_edge_feature_dim,
+                d_model=config.d_model,
+                max_nodes=max(1, int(config.tokengt_graph_max_nodes)),
+                max_edges=tokengt_graph_max_edges,
+                torus_rank=2,
+                theta=config.theta,
+            )
+            self.tokengt_graph_blocks = nn.ModuleList(
+                [
+                    TransformerBlock(
+                        d_model=config.d_model,
+                        num_heads=config.num_heads,
+                        ffn_multiplier=max(1, config.ffn_multiplier),
+                        attention="softmax",
+                        dropout=config.dropout,
+                        ring_block_size=config.ring_block_size,
+                        use_soft_moe=False,
+                        polarquant_kv_bits=0,
+                    )
+                    for _ in range(max(1, int(config.tokengt_graph_fusion_layers)))
+                ]
+            )
+            self.tokengt_graph_norm = nn.LayerNorm(config.d_model)
+            self.tokengt_graph_fusion_proj = nn.Linear(config.d_model, config.d_model, bias=False)
+            self.tokengt_graph_fusion_gate = nn.Parameter(torch.tensor(-2.0))
+        else:
+            self.tokengt_graph_tokenizer = None
+            self.tokengt_graph_blocks = nn.ModuleList()
+            self.tokengt_graph_norm = None
+            self.tokengt_graph_fusion_proj = None
+            self.tokengt_graph_fusion_gate = None
         if config.weight_tying:
             self.output = None
             self.output_bias = nn.Parameter(torch.zeros(config.vocab_size))
@@ -533,6 +585,11 @@ class DenseRandomOrderToricLM(nn.Module):
                     topology_weight=config.trajectory_memory_topology_weight,
                     graphcg_weight=config.trajectory_memory_graphcg_weight,
                     toric_weight=config.trajectory_memory_toric_weight,
+                    persistence_weight=config.trajectory_memory_persistence_weight,
+                    persistence_max_points=config.trajectory_memory_persistence_max_points,
+                    persistence_landscape_layers=config.trajectory_memory_persistence_landscape_layers,
+                    persistence_landscape_resolution=config.trajectory_memory_persistence_landscape_resolution,
+                    persistence_image_resolution=config.trajectory_memory_persistence_image_resolution,
                 ),
             )
             if config.use_trajectory_memory_head
@@ -709,6 +766,145 @@ class DenseRandomOrderToricLM(nn.Module):
     def _causal_mask(self, length: int, device: torch.device) -> torch.Tensor:
         mask = torch.ones(length, length, dtype=torch.bool, device=device).tril()
         return mask.view(1, 1, length, length)
+
+    @staticmethod
+    def _sample_reveal_indices(length: int, max_nodes: int, device: torch.device) -> torch.Tensor:
+        n_nodes = min(max(1, int(max_nodes)), int(length))
+        if n_nodes == int(length):
+            return torch.arange(length, device=device, dtype=torch.long)
+        index = torch.linspace(0, length - 1, steps=n_nodes, device=device).round().to(torch.long)
+        index = torch.unique_consecutive(index)
+        if index[0].item() != 0:
+            index = torch.cat([index.new_zeros((1,)), index], dim=0)
+        if index[-1].item() != length - 1 and index.numel() < n_nodes:
+            index = torch.cat([index, index.new_tensor([length - 1])], dim=0)
+        return index[:n_nodes]
+
+    def _tokengt_graph_fusion_context(
+        self,
+        hidden: torch.Tensor,
+        previous_tokens: torch.Tensor,
+        target_positions: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]] | None:
+        if not bool(self.config.use_tokengt_graph_fusion):
+            return None
+        if (
+            self.tokengt_graph_tokenizer is None
+            or self.tokengt_graph_norm is None
+            or self.tokengt_graph_fusion_proj is None
+            or self.tokengt_graph_fusion_gate is None
+        ):
+            raise RuntimeError("TokenGT graph fusion is enabled but modules are not initialized")
+        if previous_tokens.shape != target_positions.shape or hidden.shape[:2] != previous_tokens.shape:
+            raise ValueError("hidden, previous_tokens, and target_positions must agree on [batch, length]")
+        batch, length = previous_tokens.shape
+        device = previous_tokens.device
+        dtype = hidden.dtype
+        sample_index = self._sample_reveal_indices(length, int(self.config.tokengt_graph_max_nodes), device)
+        n_nodes = int(sample_index.numel())
+        sampled_positions = target_positions.index_select(1, sample_index)
+        sampled_previous = previous_tokens.index_select(1, sample_index)
+        sampled_hidden = hidden.index_select(1, sample_index)
+        pos_den = float(max(1, self.config.max_seq_len - 1))
+        rank_den = float(max(1, n_nodes - 1))
+        rank = torch.arange(n_nodes, device=device, dtype=torch.float32).view(1, n_nodes).expand(batch, -1)
+        pos_norm = sampled_positions.float() / pos_den
+        rank_norm = rank / rank_den
+        first = torch.zeros_like(rank_norm)
+        first[:, 0] = 1.0
+        last = torch.zeros_like(rank_norm)
+        last[:, -1] = 1.0
+        phase = self._phase_features(sampled_positions).to(device=device, dtype=torch.float32)
+        byte_class = self._caseops_features(sampled_previous).to(device=device, dtype=torch.float32)
+        node_features = torch.cat(
+            [pos_norm.unsqueeze(-1), rank_norm.unsqueeze(-1), first.unsqueeze(-1), last.unsqueeze(-1), phase, byte_class],
+            dim=-1,
+        )
+        if node_features.shape[-1] != self._tokengt_graph_node_feature_dim:
+            raise RuntimeError("TokenGT graph node feature dimension mismatch")
+
+        max_edges = int(self.tokengt_graph_tokenizer.max_edges)
+        edge_index = torch.zeros(batch, max_edges, 2, device=device, dtype=torch.long)
+        edge_features = torch.zeros(batch, max_edges, self._tokengt_graph_edge_feature_dim, device=device, dtype=torch.float32)
+        edge_mask = torch.zeros(batch, max_edges, device=device, dtype=torch.bool)
+        radius = max(1, int(self.config.tokengt_graph_neighbor_radius))
+        src_rank_grid = torch.arange(n_nodes, device=device).view(n_nodes, 1).expand(n_nodes, n_nodes)
+        dst_rank_grid = torch.arange(n_nodes, device=device).view(1, n_nodes).expand(n_nodes, n_nodes)
+        causal_rank_pair = src_rank_grid < dst_rank_grid
+        chain_pair = dst_rank_grid == (src_rank_grid + 1)
+        total_edges = 0
+        for bidx in range(batch):
+            pos_b = sampled_positions[bidx].to(torch.long)
+            delta_pos = pos_b.view(1, n_nodes) - pos_b.view(n_nodes, 1)
+            local_pair = delta_pos.abs() <= radius
+            selected = ((local_pair & causal_rank_pair) | chain_pair) & causal_rank_pair
+            src, dst = selected.nonzero(as_tuple=True)
+            if src.numel() == 0 and n_nodes > 1:
+                src = torch.arange(n_nodes - 1, device=device)
+                dst = src + 1
+            if src.numel() > max_edges:
+                src = src[:max_edges]
+                dst = dst[:max_edges]
+            num_edges = int(src.numel())
+            if num_edges == 0:
+                continue
+            total_edges += num_edges
+            edge_index[bidx, :num_edges, 0] = src
+            edge_index[bidx, :num_edges, 1] = dst
+            src_pos = pos_b.index_select(0, src).float()
+            dst_pos = pos_b.index_select(0, dst).float()
+            src_rank = src.float()
+            dst_rank = dst.float()
+            edge_phase = phase[bidx].index_select(0, dst) - phase[bidx].index_select(0, src)
+            edge_features[bidx, :num_edges, :] = torch.cat(
+                [
+                    ((dst_pos - src_pos) / pos_den).unsqueeze(-1),
+                    ((dst_pos - src_pos).abs() / max(1.0, float(radius))).unsqueeze(-1),
+                    ((dst_rank - src_rank) / rank_den).unsqueeze(-1),
+                    ((dst_pos - src_pos).abs() <= float(radius)).to(torch.float32).unsqueeze(-1),
+                    (dst == (src + 1)).to(torch.float32).unsqueeze(-1),
+                    (src_pos / pos_den).unsqueeze(-1),
+                    (dst_pos / pos_den).unsqueeze(-1),
+                    edge_phase,
+                ],
+                dim=-1,
+            )
+            edge_mask[bidx, :num_edges] = True
+
+        graph_batch = GraphBatch(
+            node_features=node_features.to(dtype=dtype),
+            edge_features=edge_features.to(dtype=dtype),
+            edge_index=edge_index,
+            node_mask=torch.ones(batch, n_nodes, device=device, dtype=torch.bool),
+            edge_mask=edge_mask,
+            node_causal_rank=torch.arange(n_nodes, device=device, dtype=torch.long).view(1, -1).expand(batch, -1),
+        )
+        token_batch = self.tokengt_graph_tokenizer(graph_batch)
+        graph_tokens = token_batch.tokens
+        graph_tokens = torch.cat([graph_tokens[:, :n_nodes, :] + sampled_hidden, graph_tokens[:, n_nodes:, :]], dim=1)
+        graph_mask = attention_mask_from_token_mask(token_batch.token_mask, token_batch.causal_rank)
+        for block in self.tokengt_graph_blocks:
+            graph_tokens = block(graph_tokens, mask=graph_mask, token_mask=token_batch.token_mask)
+        graph_tokens = self.tokengt_graph_norm(graph_tokens)
+        node_context = self.tokengt_graph_fusion_proj(graph_tokens[:, :n_nodes, :])
+        step_index = torch.arange(length, device=device, dtype=torch.long)
+        source_node = torch.searchsorted(sample_index, step_index, right=True).clamp_min(1) - 1
+        source_node = source_node.clamp_max(n_nodes - 1)
+        context = node_context.index_select(1, source_node)
+        gate = float(self.config.tokengt_graph_fusion_weight) * torch.sigmoid(self.tokengt_graph_fusion_gate)
+        context = gate.to(dtype=context.dtype) * context
+        avg_edges = hidden.new_tensor(float(total_edges) / float(max(1, batch)))
+        metrics = {
+            "tokengt_graph_fusion_context_norm": context.detach().float().norm(dim=-1).mean(),
+            "tokengt_graph_fusion_gate": gate.detach().float(),
+            "tokengt_graph_fusion_nodes": hidden.new_tensor(float(n_nodes)),
+            "tokengt_graph_fusion_edges": avg_edges.detach(),
+            "tokengt_graph_fusion_token_count": hidden.new_tensor(float(token_batch.tokens.shape[1])),
+            "tokengt_graph_fusion_edge_density": (
+                avg_edges / hidden.new_tensor(float(max(1, n_nodes * max(1, n_nodes - 1) / 2.0)))
+            ).detach(),
+        }
+        return context.to(dtype=dtype), metrics
 
     def _backbone_hidden(
         self,
@@ -1788,6 +1984,11 @@ class DenseRandomOrderToricLM(nn.Module):
             hidden_for_logits = hidden + self.config.gflownet_action_scale * aux["context"]
         else:
             hidden_for_logits = hidden
+        graph_fusion_metrics: dict[str, torch.Tensor] = {}
+        graph_fusion = self._tokengt_graph_fusion_context(hidden_for_logits, previous_tokens, target_positions)
+        if graph_fusion is not None:
+            graph_context, graph_fusion_metrics = graph_fusion
+            hidden_for_logits = hidden_for_logits + graph_context
         toric_memory = self._toric_memory_context(hidden_for_logits)
         toric_memory_entropy = None
         if toric_memory is not None:
@@ -1803,6 +2004,7 @@ class DenseRandomOrderToricLM(nn.Module):
             out["smear_temperature"] = smear_temperature.mean()
         if toric_memory_entropy is not None:
             out["toric_memory_entropy"] = toric_memory_entropy.float()
+        out.update(graph_fusion_metrics)
         if self.gflownet_flow is not None:
             flow_hidden = torch.nan_to_num(hidden.float(), nan=0.0, posinf=30.0, neginf=-30.0).to(dtype=hidden.dtype)
             flow_log = self.gflownet_flow(flow_hidden).squeeze(-1)
@@ -1868,6 +2070,16 @@ class DenseRandomOrderToricLM(nn.Module):
             out["smear_temperature"] = aux["smear_temperature"].float()
         if "toric_memory_entropy" in aux:
             out["toric_memory_entropy"] = aux["toric_memory_entropy"].float()
+        for key in (
+            "tokengt_graph_fusion_context_norm",
+            "tokengt_graph_fusion_gate",
+            "tokengt_graph_fusion_nodes",
+            "tokengt_graph_fusion_edges",
+            "tokengt_graph_fusion_token_count",
+            "tokengt_graph_fusion_edge_density",
+        ):
+            if key in aux:
+                out[key] = aux[key].float()
         hidden = aux.get("hidden")
         if hidden is not None:
             out.update(self._tokengt_causal_graph_losses(hidden, target_tokens, target_positions))

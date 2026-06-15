@@ -21,6 +21,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .derived_category_metrics import chain_complex_from_edges_np, derived_category_feature_summary
+from .gudhi_persistence import torch_persistence_image, torch_persistence_landscape
 from .got_trajectory import got_dag_metrics, got_dag_summary_np
 
 
@@ -37,6 +38,11 @@ class TrajectoryMemoryConfig:
     toric_weight: float = 0.20
     dag_weight: float = 0.20
     derived_weight: float = 0.20
+    persistence_weight: float = 0.20
+    persistence_max_points: int = 48
+    persistence_landscape_layers: int = 3
+    persistence_landscape_resolution: int = 24
+    persistence_image_resolution: int = 12
 
 
 @dataclass
@@ -57,6 +63,105 @@ class TrajectoryMemoryRecord:
 def _safe_normalize_np(x: np.ndarray) -> np.ndarray:
     denom = np.linalg.norm(x, axis=-1, keepdims=True)
     return x / np.maximum(denom, 1e-8)
+
+
+def _h0_mst_deaths_np(points: np.ndarray) -> np.ndarray:
+    """Exact H0 Vietoris-Rips death times: edge weights of the Euclidean MST."""
+
+    n = int(points.shape[0])
+    if n < 2:
+        return np.zeros((0,), dtype=np.float32)
+    dists = np.linalg.norm(points[:, None, :] - points[None, :, :], axis=-1)
+    tri = np.triu_indices(n, k=1)
+    weights = dists[tri]
+    order = np.argsort(weights, kind="mergesort")
+    parent = list(range(n))
+    rank = [0] * n
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    deaths: list[float] = []
+    for edge_id in order.tolist():
+        src = int(tri[0][edge_id])
+        dst = int(tri[1][edge_id])
+        src_root = find(src)
+        dst_root = find(dst)
+        if src_root == dst_root:
+            continue
+        if rank[src_root] < rank[dst_root]:
+            src_root, dst_root = dst_root, src_root
+        parent[dst_root] = src_root
+        if rank[src_root] == rank[dst_root]:
+            rank[src_root] += 1
+        deaths.append(float(weights[edge_id]))
+        if len(deaths) == n - 1:
+            break
+    return np.asarray(deaths, dtype=np.float32)
+
+
+def _landscape_np(deaths: np.ndarray, *, layers: int, resolution: int, radius_max: float) -> np.ndarray:
+    layers = max(1, int(layers))
+    resolution = max(4, int(resolution))
+    if deaths.size == 0:
+        return np.zeros((layers, resolution), dtype=np.float32)
+    grid = np.linspace(0.0, max(float(radius_max), 1e-4), num=resolution, dtype=np.float32)
+    births = np.zeros((deaths.shape[0], 1), dtype=np.float32)
+    deaths_2d = deaths.reshape(-1, 1)
+    tents = np.maximum(0.0, np.minimum(grid.reshape(1, -1) - births, deaths_2d - grid.reshape(1, -1)))
+    ordered = np.sort(tents, axis=0)[::-1]
+    if ordered.shape[0] < layers:
+        ordered = np.concatenate([ordered, np.zeros((layers - ordered.shape[0], resolution), dtype=np.float32)], axis=0)
+    return ordered[:layers].astype(np.float32)
+
+
+def _persistence_image_np(deaths: np.ndarray, *, resolution: int, radius_max: float) -> np.ndarray:
+    resolution = max(4, int(resolution))
+    if deaths.size == 0:
+        return np.zeros((resolution, resolution), dtype=np.float32)
+    x_grid = np.linspace(0.0, max(float(radius_max), 1e-4), num=resolution, dtype=np.float32)
+    y_grid = x_grid.copy()
+    xx, yy = np.meshgrid(x_grid, y_grid, indexing="ij")
+    sigma = max(float(radius_max) / float(resolution), 1e-3)
+    image = np.zeros_like(xx, dtype=np.float32)
+    for death in deaths.astype(np.float32).tolist():
+        persistence = max(0.0, float(death))
+        image += persistence * np.exp(-((xx - 0.0) ** 2 + (yy - persistence) ** 2) / (2.0 * sigma * sigma))
+    return image.astype(np.float32)
+
+
+def _persistence_vector_np(
+    points: np.ndarray,
+    *,
+    layers: int = 2,
+    landscape_resolution: int = 16,
+    image_resolution: int = 8,
+) -> tuple[np.ndarray, dict[str, float]]:
+    if points.shape[0] < 2:
+        vector = np.zeros((layers * landscape_resolution + image_resolution * image_resolution + 4,), dtype=np.float32)
+        return vector, {"total_persistence": 0.0, "max_persistence": 0.0, "entropy": 0.0, "vector_norm": 0.0}
+    deaths = _h0_mst_deaths_np(points)
+    positive = deaths[deaths > 1e-8]
+    scale = float(np.median(positive)) if positive.size else 1.0
+    deaths = deaths / max(scale, 1e-6)
+    radius_max = float(max(2.0, deaths.max(initial=0.0) * 1.05))
+    landscape = _landscape_np(deaths, layers=layers, resolution=landscape_resolution, radius_max=radius_max)
+    image = _persistence_image_np(deaths, resolution=image_resolution, radius_max=radius_max)
+    total = float(np.maximum(deaths, 0.0).sum())
+    probs = np.maximum(deaths, 0.0)
+    probs = probs / max(float(probs.sum()), 1e-8)
+    entropy = float(-(probs * np.log(probs + 1e-8)).sum() / max(math.log(max(2, probs.size)), 1e-8))
+    stats = np.asarray([total, float(deaths.max(initial=0.0)), entropy, float(np.linalg.norm(landscape))], dtype=np.float32)
+    vector = np.concatenate([landscape.reshape(-1), image.reshape(-1), stats], axis=0).astype(np.float32)
+    return vector, {
+        "total_persistence": total,
+        "max_persistence": float(deaths.max(initial=0.0)),
+        "entropy": entropy,
+        "vector_norm": float(np.linalg.norm(vector)),
+    }
 
 
 def summarize_trajectory_np(
@@ -137,6 +242,7 @@ def summarize_trajectory_np(
     )
     dag = got_dag_summary_np(unit.shape[0], edges=edges)
     chain = chain_complex_from_edges_np(unit.shape[0], edges=edges, max_vertices=min(max_points, 8))
+    persistence_vector, persistence = _persistence_vector_np(unit)
     dag_scalars = np.asarray(
         [
             float(dag.get("branch_count", 0.0)),
@@ -149,7 +255,7 @@ def summarize_trajectory_np(
         ],
         dtype=np.float32,
     )
-    key = np.concatenate([pooled, endpoint, scalars, dag_scalars], axis=0)
+    key = np.concatenate([pooled, endpoint, scalars, dag_scalars, persistence_vector], axis=0)
     return {
         "key": key.astype(float).tolist(),
         "quality": quality,
@@ -166,6 +272,10 @@ def summarize_trajectory_np(
             "got_dag_simplex_edge_density": float(dag_scalars[4]),
             "got_dag_max_out_degree": float(dag_scalars[5]),
             "got_dag_max_in_degree": float(dag_scalars[6]),
+            "persistence_total": float(persistence["total_persistence"]),
+            "persistence_max": float(persistence["max_persistence"]),
+            "persistence_entropy": float(persistence["entropy"]),
+            "persistence_vector_norm": float(persistence["vector_norm"]),
         },
         "toric": {
             "phase_u_sin": float(phase_u[0]),
@@ -276,6 +386,119 @@ class TrajectoryRetrievalHead(nn.Module):
         self.key = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, projection_dim), nn.GELU(), nn.Linear(projection_dim, projection_dim))
         self.quality_head = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, 1))
 
+    @staticmethod
+    def _h0_mst_deaths_torch(points: torch.Tensor) -> torch.Tensor:
+        n = int(points.shape[0])
+        if n < 2:
+            return points.new_zeros((0,))
+        dist = torch.cdist(points.float(), points.float(), p=2)
+        src_idx, dst_idx = torch.triu_indices(n, n, offset=1, device=points.device)
+        weights = dist[src_idx, dst_idx]
+        order = torch.argsort(weights, stable=True)
+        parent = list(range(n))
+        rank = [0] * n
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        deaths: list[torch.Tensor] = []
+        for edge_id_tensor in order.detach().cpu().tolist():
+            edge_id = int(edge_id_tensor)
+            src = int(src_idx[edge_id].detach().cpu().item())
+            dst = int(dst_idx[edge_id].detach().cpu().item())
+            src_root = find(src)
+            dst_root = find(dst)
+            if src_root == dst_root:
+                continue
+            if rank[src_root] < rank[dst_root]:
+                src_root, dst_root = dst_root, src_root
+            parent[dst_root] = src_root
+            if rank[src_root] == rank[dst_root]:
+                rank[src_root] += 1
+            deaths.append(weights[edge_id].detach())
+            if len(deaths) == n - 1:
+                break
+        return torch.stack(deaths) if deaths else points.new_zeros((0,))
+
+    def _persistence_signature(
+        self,
+        hidden: torch.Tensor,
+        node_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        batch, _, _ = hidden.shape
+        max_points = max(2, int(self.config.persistence_max_points))
+        layers = max(1, int(self.config.persistence_landscape_layers))
+        landscape_resolution = max(4, int(self.config.persistence_landscape_resolution))
+        image_resolution = max(4, int(self.config.persistence_image_resolution))
+        signature_dim = layers * landscape_resolution + image_resolution * image_resolution + 4
+        signatures: list[torch.Tensor] = []
+        stats: list[torch.Tensor] = []
+        with torch.no_grad():
+            for bidx in range(batch):
+                points = hidden[bidx, node_mask[bidx]].detach().float()
+                if points.shape[0] > max_points:
+                    index = torch.linspace(0, points.shape[0] - 1, steps=max_points, device=points.device).round().long()
+                    points = points.index_select(0, torch.unique_consecutive(index))
+                if points.shape[0] < 2:
+                    signatures.append(hidden.new_zeros((signature_dim,), dtype=torch.float32))
+                    stats.append(hidden.new_zeros((4,), dtype=torch.float32))
+                    continue
+                points = points - points.mean(dim=0, keepdim=True)
+                points = F.normalize(points, dim=-1)
+                deaths = self._h0_mst_deaths_torch(points)
+                positive = deaths[deaths > 1e-8]
+                scale = positive.median().clamp_min(1e-6) if positive.numel() else deaths.new_tensor(1.0)
+                deaths = (deaths / scale).clamp_min(0.0)
+                radius_max = torch.maximum(deaths.max() * 1.05, deaths.new_tensor(2.0)) if deaths.numel() else deaths.new_tensor(2.0)
+                grid = torch.linspace(
+                    0.0,
+                    float(radius_max.detach().cpu().item()),
+                    steps=landscape_resolution,
+                    device=hidden.device,
+                    dtype=torch.float32,
+                )
+                diagram = torch.stack([torch.zeros_like(deaths), deaths], dim=-1) if deaths.numel() else hidden.new_zeros((0, 2), dtype=torch.float32)
+                if diagram.shape[0] == 0:
+                    landscape = hidden.new_zeros((layers, landscape_resolution), dtype=torch.float32)
+                    image = hidden.new_zeros((image_resolution, image_resolution), dtype=torch.float32)
+                else:
+                    landscape = torch_persistence_landscape(diagram, grid, layers=layers)
+                    image_grid = torch.linspace(
+                        0.0,
+                        float(radius_max.detach().cpu().item()),
+                        steps=image_resolution,
+                        device=hidden.device,
+                        dtype=torch.float32,
+                    )
+                    image = torch_persistence_image(
+                        diagram,
+                        image_grid,
+                        image_grid,
+                        sigma=max(float(radius_max.detach().cpu().item()) / float(image_resolution), 1e-3),
+                    )
+                total = deaths.sum() if deaths.numel() else hidden.new_zeros((), dtype=torch.float32)
+                probs = deaths / total.clamp_min(1e-8) if deaths.numel() else deaths
+                entropy = (
+                    -(probs * probs.clamp_min(1e-8).log()).sum() / math.log(max(2, int(probs.numel())))
+                    if probs.numel()
+                    else hidden.new_zeros((), dtype=torch.float32)
+                )
+                stat = torch.stack(
+                    [
+                        total.to(device=hidden.device, dtype=torch.float32),
+                        (deaths.max() if deaths.numel() else hidden.new_zeros((), dtype=torch.float32)).to(hidden.device),
+                        entropy.to(hidden.device, dtype=torch.float32),
+                        landscape.norm(p=2).to(hidden.device, dtype=torch.float32),
+                    ]
+                )
+                vector = torch.cat([landscape.reshape(-1), image.reshape(-1), stat], dim=0)
+                signatures.append(vector.to(device=hidden.device, dtype=torch.float32))
+                stats.append(stat)
+        return torch.stack(signatures, dim=0), torch.stack(stats, dim=0)
+
     def _summary_features(
         self,
         hidden: torch.Tensor,
@@ -360,6 +583,7 @@ class TrajectoryRetrievalHead(nn.Module):
             edge_index=trajectory_edge_index,
             edge_mask=trajectory_edge_mask,
         )
+        persistence, persistence_stats = self._persistence_signature(h, node_mask)
         return {
             "summary": summary,
             "chart": chart_probs,
@@ -367,6 +591,8 @@ class TrajectoryRetrievalHead(nn.Module):
             "topology": topology,
             "dag": dag_feature,
             "derived": derived_feature,
+            "persistence": persistence,
+            "persistence_stats": persistence_stats,
         }
 
     @staticmethod
@@ -430,7 +656,11 @@ class TrajectoryRetrievalHead(nn.Module):
         )
         query = F.normalize(self.query(features["summary"].to(hidden.dtype)), dim=-1)
         key = F.normalize(self.key(features["summary"].to(hidden.dtype)), dim=-1)
-        logits = torch.matmul(query, key.transpose(0, 1)) / max(float(self.config.retrieval_temperature), 1e-4)
+        retrieval_temperature = max(float(self.config.retrieval_temperature), 1e-4)
+        persistence_feature = F.normalize(features["persistence"].float(), dim=-1)
+        persistence_sim = persistence_feature @ persistence_feature.transpose(0, 1)
+        logits = torch.matmul(query, key.transpose(0, 1)) / retrieval_temperature
+        logits = logits + float(self.config.persistence_weight) * persistence_sim.to(logits.dtype) / retrieval_temperature
         diag = torch.eye(batch, device=hidden.device, dtype=torch.bool)
         logits = logits.masked_fill(diag, -1e4)
         probs = torch.softmax(logits, dim=-1)
@@ -452,6 +682,7 @@ class TrajectoryRetrievalHead(nn.Module):
             float(self.config.graphcg_weight) * chart_sim
             + float(self.config.toric_weight) * toric_sim
             + float(self.config.topology_weight) * topo_sim
+            + float(self.config.persistence_weight) * persistence_sim
             + float(self.config.dag_weight) * dag_sim
             + float(self.config.derived_weight) * derived_sim
             + quality_z[None, :]
@@ -501,9 +732,18 @@ class TrajectoryRetrievalHead(nn.Module):
                             "graphcg_chart_similarity": self._json_float(chart_sim[query_index, candidate_index]),
                             "toric_phase_similarity": self._json_float(toric_sim[query_index, candidate_index]),
                             "topology_similarity": self._json_float(topo_sim[query_index, candidate_index]),
+                            "persistence_landscape_similarity": self._json_float(
+                                persistence_sim[query_index, candidate_index]
+                            ),
                             "dag_similarity": self._json_float(dag_sim[query_index, candidate_index]),
                             "derived_category_similarity": self._json_float(derived_sim[query_index, candidate_index]),
                             "candidate_quality_z": self._json_float(quality_z[candidate_index]),
+                            "candidate_persistence_total": self._json_float(
+                                features["persistence_stats"][candidate_index, 0]
+                            ),
+                            "candidate_persistence_entropy": self._json_float(
+                                features["persistence_stats"][candidate_index, 2]
+                            ),
                         },
                     }
                 )
@@ -519,6 +759,12 @@ class TrajectoryRetrievalHead(nn.Module):
                     "derived_category_features": dict(
                         zip(derived_fields, self._json_vector(features["derived"][query_index]), strict=True)
                     ),
+                    "persistence_features": {
+                        "total_persistence": self._json_float(features["persistence_stats"][query_index, 0]),
+                        "max_persistence": self._json_float(features["persistence_stats"][query_index, 1]),
+                        "entropy": self._json_float(features["persistence_stats"][query_index, 2]),
+                        "landscape_norm": self._json_float(features["persistence_stats"][query_index, 3]),
+                    },
                     "top_candidates": candidates,
                 }
             )
@@ -527,13 +773,14 @@ class TrajectoryRetrievalHead(nn.Module):
             "kind": "trajectory_memory_analogical_retrieval_trace",
             "enabled": True,
             "memory_source": "in_batch_branch_merge_got_trajectories",
-            "analogy_teacher": "weighted_graphcg_toric_topology_dag_derived_quality",
+            "analogy_teacher": "weighted_graphcg_toric_topology_persistence_dag_derived_quality",
             "batch_size": batch,
             "top_k": k,
             "weights": {
                 "graphcg": float(self.config.graphcg_weight),
                 "toric": float(self.config.toric_weight),
                 "topology": float(self.config.topology_weight),
+                "persistence": float(self.config.persistence_weight),
                 "dag": float(self.config.dag_weight),
                 "derived_category": float(self.config.derived_weight),
                 "quality": 1.0,
@@ -572,6 +819,11 @@ class TrajectoryRetrievalHead(nn.Module):
                 "trajectory_memory_derived_similarity": zero,
                 "trajectory_memory_derived_projective_dimension": zero,
                 "trajectory_memory_derived_regularity": zero,
+                "trajectory_memory_persistence_similarity": zero,
+                "trajectory_memory_persistence_norm": zero,
+                "trajectory_memory_persistence_entropy": zero,
+                "trajectory_memory_persistence_total": zero,
+                "trajectory_memory_persistence_weight": zero,
             }
         features = self._summary_features(
             hidden,
@@ -583,7 +835,12 @@ class TrajectoryRetrievalHead(nn.Module):
         )
         query = F.normalize(self.query(features["summary"].to(hidden.dtype)), dim=-1)
         key = F.normalize(self.key(features["summary"].to(hidden.dtype)), dim=-1)
-        logits = torch.matmul(query, key.transpose(0, 1)) / max(float(self.config.retrieval_temperature), 1e-4)
+        retrieval_temperature = max(float(self.config.retrieval_temperature), 1e-4)
+        with torch.no_grad():
+            persistence_feature = F.normalize(features["persistence"].float(), dim=-1)
+            persistence_sim = persistence_feature @ persistence_feature.transpose(0, 1)
+        logits = torch.matmul(query, key.transpose(0, 1)) / retrieval_temperature
+        logits = logits + float(self.config.persistence_weight) * persistence_sim.to(logits.dtype) / retrieval_temperature
         diag = torch.eye(batch, device=hidden.device, dtype=torch.bool)
         logits = logits.masked_fill(diag, -1e4)
 
@@ -605,6 +862,7 @@ class TrajectoryRetrievalHead(nn.Module):
                 float(self.config.graphcg_weight) * chart_sim
                 + float(self.config.toric_weight) * toric_sim
                 + float(self.config.topology_weight) * topo_sim
+                + float(self.config.persistence_weight) * persistence_sim
                 + float(self.config.dag_weight) * dag_sim
                 + float(self.config.derived_weight) * derived_sim
                 + quality_z[None, :]
@@ -637,4 +895,9 @@ class TrajectoryRetrievalHead(nn.Module):
             "trajectory_memory_derived_similarity": derived_sim.masked_fill(diag, 0.0).mean().detach(),
             "trajectory_memory_derived_projective_dimension": features["derived"][:, 7].mean().detach(),
             "trajectory_memory_derived_regularity": features["derived"][:, 8].mean().detach(),
+            "trajectory_memory_persistence_similarity": persistence_sim.masked_fill(diag, 0.0).mean().detach(),
+            "trajectory_memory_persistence_norm": features["persistence"].float().norm(dim=-1).mean().detach(),
+            "trajectory_memory_persistence_entropy": features["persistence_stats"][:, 2].mean().detach(),
+            "trajectory_memory_persistence_total": features["persistence_stats"][:, 0].mean().detach(),
+            "trajectory_memory_persistence_weight": hidden.new_tensor(float(self.config.persistence_weight)).detach(),
         }

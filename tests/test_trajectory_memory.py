@@ -40,6 +40,8 @@ def test_trajectory_memory_index_roundtrip_and_search(tmp_path):
     assert results[0][1] > 0.99
     assert loaded.records[0].topology["got_dag_branch_count"] > 0.0
     assert loaded.records[0].topology["got_dag_merge_count"] > 0.0
+    assert loaded.records[0].topology["persistence_vector_norm"] > 0.0
+    assert loaded.records[0].topology["persistence_entropy"] >= 0.0
     assert loaded.records[0].derived_category["chain_complex"]["betti"]["beta_1"] >= 0
 
 
@@ -71,6 +73,10 @@ def test_trajectory_retrieval_head_metrics_are_finite():
     assert out["trajectory_memory_derived_similarity"].isfinite()
     assert out["trajectory_memory_derived_projective_dimension"].isfinite()
     assert out["trajectory_memory_derived_regularity"].isfinite()
+    assert out["trajectory_memory_persistence_similarity"].isfinite()
+    assert out["trajectory_memory_persistence_norm"] > 0.0
+    assert out["trajectory_memory_persistence_entropy"].isfinite()
+    assert out["trajectory_memory_persistence_total"] > 0.0
 
 
 def test_trajectory_retrieval_head_trace_is_json_safe_and_branch_merge_aware():
@@ -93,13 +99,15 @@ def test_trajectory_retrieval_head_trace_is_json_safe_and_branch_merge_aware():
     json.dumps(trace)
     assert trace["enabled"]
     assert trace["memory_source"] == "in_batch_branch_merge_got_trajectories"
-    assert trace["analogy_teacher"] == "weighted_graphcg_toric_topology_dag_derived_quality"
+    assert trace["analogy_teacher"] == "weighted_graphcg_toric_topology_persistence_dag_derived_quality"
     assert len(trace["queries"]) == 4
     assert len(trace["queries"][0]["top_candidates"]) == 2
     assert trace["queries"][0]["dag_features"]["branch_count"] > 0.0
     assert trace["queries"][0]["dag_features"]["merge_count"] > 0.0
+    assert trace["queries"][0]["persistence_features"]["total_persistence"] > 0.0
     candidate = trace["queries"][0]["top_candidates"][0]
     assert "derived_category_similarity" in candidate["components"]
+    assert "persistence_landscape_similarity" in candidate["components"]
     assert "teacher_probability" in candidate
 
 

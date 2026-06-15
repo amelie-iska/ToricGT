@@ -60,6 +60,10 @@ model:
   tokengt_graph_byte_class_weight: 0.10
   tokengt_graph_cycle_weight: 0.05
   tokengt_graph_noncausal_policy: causal_when_possible
+  use_tokengt_graph_fusion: true
+  tokengt_graph_fusion_weight: 0.06
+  tokengt_graph_fusion_layers: 1
+  tokengt_graph_fusion_max_edges: 512
 
   use_graphcg: true
   graphcg_num_directions: auto
@@ -156,6 +160,11 @@ model:
   trajectory_memory_topology_weight: 0.20
   trajectory_memory_graphcg_weight: 0.30
   trajectory_memory_toric_weight: 0.20
+  trajectory_memory_persistence_weight: 0.20
+  trajectory_memory_persistence_max_points: 48
+  trajectory_memory_persistence_landscape_layers: 3
+  trajectory_memory_persistence_landscape_resolution: 24
+  trajectory_memory_persistence_image_resolution: 12
   aux_mtp_offsets: 2
   contrastive_temperature: 0.20
   trajectory_flow_viscosity: 0.05

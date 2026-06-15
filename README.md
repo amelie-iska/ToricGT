@@ -1059,9 +1059,15 @@ This path uses `config/train.parameter_golf_all_phases.yaml` and trains the
 implemented stack in ordered phases: byte warmup, GraphCG/toric probes,
 directed topology plus Koszul persistence, trajectory memory and reasoning,
 late Toric BGG Category O supervision, and final QAT/export stabilization.
-The Toric BGG probe is instantiated from the start so `train/toric_bgg_*`
-diagnostics are visible in W&B, but `toric_bgg_loss_weight` remains `0.0`
-until the late `toric_bgg_category_o` phase. The launcher now starts
+The OAI byte model now has a native TokenGT graph-token fusion path from step
+0: every random-order byte chunk is converted into a prefix-causal graph over
+reveal-step nodes and local byte-neighborhood edges, the graph is tokenized with
+node/edge/endpoint tokens, rank-causal graph attention processes those tokens,
+and node contexts are fused back into byte logits. The separate
+`tokengt_graph/*` auxiliary metrics remain active for auditability. The Toric
+BGG probe is instantiated from the start so `train/toric_bgg_*` diagnostics are
+visible in W&B, but `toric_bgg_loss_weight` remains `0.0` until the late
+`toric_bgg_category_o` phase. The launcher now starts
 `scripts/supervise_parameter_golf_training.py`, which keeps the training tmux
 alive, restarts from the latest checkpoint if the process dies or stalls, and
 runs W&B/OAI BPB/simplex/geometry analyses as non-interrupting sidecars. Codex
@@ -1485,11 +1491,13 @@ The `oai` branch now includes an optional anticipative reasoning-trajectory
 memory head. Completed graph-of-thought DAGs are summarized by pooled
 hidden states, endpoint displacement, local speed/curvature, Vietoris-Rips
 density, toric phase moments, branch/merge counts, DAG edge density,
-branch diversity, merge scatter, and trajectory quality. A compact JSONL index
+branch diversity, merge scatter, vectorized persistence landscapes/images, and
+trajectory quality. A compact JSONL index
 (`TrajectoryMemoryIndex`) supports cosine search over those keys, while the
 training head (`TrajectoryRetrievalHead`) learns in-batch retrieval targets
 using GraphCG chart similarity, toric phase similarity, topology similarity,
-DAG-structure similarity, and low local NLL. The compact OAI BPB-collapse path keeps memory out of the fragile
+DAG-structure similarity, exact H0 VR persistence-vector similarity, and low
+local NLL. The compact OAI BPB-collapse path keeps memory out of the fragile
 competition loss until the run is finite and useful enough to protect. The
 full `advanced_reasoning_memory_graphcg.yaml` curriculum enables the head,
 uses `trajectory_memory_loss_weight: 0.00002` during stabilized structural
@@ -1498,8 +1506,15 @@ phase under OAI BPB guardrails. W&B reports `train/trajectory_memory_loss`,
 `train/trajectory_memory_recall1`, `train/trajectory_memory_entropy`,
 `train/trajectory_memory_score_gap`, `train/trajectory_memory_dag_similarity`,
 `train/trajectory_memory_dag_branch_count`,
-`train/trajectory_memory_dag_merge_count`, and the CE/distillation/quality
-sub-losses. The detailed staged plan is in
+`train/trajectory_memory_dag_merge_count`,
+`train/trajectory_memory_persistence_similarity`,
+`train/trajectory_memory_persistence_norm`,
+`train/trajectory_memory_persistence_entropy`,
+`train/trajectory_memory_persistence_total`, and the
+CE/distillation/quality sub-losses. The exact GUDHI/Macaulay2/Sage sidecars
+remain the report-grade audit path; the in-training retrieval signature is the
+cheap vectorized persistence path used to choose analogical memories. The
+detailed staged plan is in
 [planning/TRAJECTORY-MEMORY-RETRIEVAL.md](/home/iska/Documents/amelie/bio/ToricGT/planning/TRAJECTORY-MEMORY-RETRIEVAL.md).
 adds `*_toric_shadow_audit.png`, showing occupied fan cells, active-face
 margins, bend magnitudes, branch fan coverage, and phase-leaf residuals.
