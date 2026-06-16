@@ -77,7 +77,7 @@ class BranchingTrajectoryConfig:
     ph_image_resolution: int = 10
     analogy_map_threshold: float = 0.80
     analogy_ph_threshold: float = 0.55
-    analogy_step_threshold: float = 0.70
+    analogy_step_threshold: float = 0.40
     analogy_weak_map_threshold: float = 0.50
     analogy_weak_ph_threshold: float = 0.15
     analogy_weak_step_threshold: float = 0.30
@@ -1031,9 +1031,9 @@ def _analogy_payload(
         analogy_status = "no_analogy"
     emitted = analogy_status != "no_analogy"
     confidence_score = float(
-        0.45 * full_map["valid_fraction"]
-        + 0.30 * step_map_mean
-        + 0.25 * max(0.0, min(1.0, ph_gate_score))
+        0.50 * full_map["valid_fraction"]
+        + 0.15 * step_map_mean
+        + 0.35 * max(0.0, min(1.0, ph_gate_score))
     )
 
     def condition(label: str, score: float, threshold: float, passed: bool, *, detail: str = "") -> dict[str, Any]:

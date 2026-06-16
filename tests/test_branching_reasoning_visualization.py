@@ -16,6 +16,7 @@ from toricgt.branching_reasoning_visualization import (
 
 
 def test_branching_reasoning_payload_has_required_topological_contract() -> None:
+    assert BranchingTrajectoryConfig().analogy_step_threshold <= 0.45
     payload = build_branching_reasoning_payload(
         BranchingTrajectoryConfig(seed=321, embedding_dim=16, radius_levels=5)
     )
@@ -63,6 +64,7 @@ def test_branching_reasoning_payload_has_required_topological_contract() -> None
         for item in analogy["decision_summary"]["strong"]["conditions"]
     )
     assert "ph_gate_threshold" in analogy["decision_rule"]["candidate"]
+    assert analogy["decision_rule"]["strong"]["step_simplicial_map_mean_threshold"] <= 0.45
     assert analogy["decision_rule"]["candidate"]["full_reasoning_trajectory_simplex_map_threshold"] <= 0.35
     assert analogy["decision_rule"]["candidate"]["vectorized_persistence_similarity_threshold"] <= 0.05
     assert len(analogy["candidate_map"]["vertex_map_distances"]) == len(analogy["candidate_map"]["vertex_map"])

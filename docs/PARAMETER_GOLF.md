@@ -250,7 +250,9 @@ report also includes label-density toggles so dense long trajectories remain
 readable without capping visible one-dimensional simplex edges. Its analogy
 decision banner is tied directly to the payload decision rule: strong, weak,
 and candidate gates are rendered as pass/fail threshold status badges, and a weak analogy
-explicitly states which strong threshold failed. The compact map summary and
+explicitly states which strong threshold failed. The strong per-step simplex-map
+gate is intentionally a loose sanity check; full-trajectory map validity and
+vectorized PH similarity carry the analogy decision. The compact map summary and
 nearby vectorized-PH summary keep the map score, step-map score, PH mean, PH
 gate, image-status counts, and threshold labels in the same visible panel.
 

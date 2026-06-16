@@ -655,14 +655,16 @@ is constructed.  Dense views are controlled by radius/reasoning sliders and
 default-off filled 2-simplex toggles.  Long views also include label-density
 toggles for the full trajectory, selected step, and analogy panels; these hide
 text labels without dropping vertices or visible one-dimensional simplices.
-The screenshot renderer has an `--interaction-audit` mode that moves the
+The strong analogy gate treats the per-step simplex-map mean as a loose local
+sanity check rather than as equally important evidence; full-trajectory
+simplicial-map validity and vectorized persistent-homology similarity dominate
+the decision.  The screenshot renderer has an `--interaction-audit` mode that moves the
 radius/reasoning/decoding sliders, enables triangle toggles, and fills
 representative reasoning-node, token, and analogy detail panels before
 capturing additional screenshots.  The analogy panel now renders the payload's
 actual decision rule as pass/fail threshold status badges for the strong,
 weak, and candidate tiers; when a `weak_analogy` is emitted, the banner states which strong gate
-failed, for example a low step simplex-map mean despite high full-trajectory
-map and vectorized-PH scores.  A compact map summary reports vertex count,
+failed.  A compact map summary reports vertex count,
 edge and 2-simplex image status counts, valid-or-collapsed fraction, and
 mean/max original-embedding map distance next to a quick vectorized-PH summary
 so the threshold labels match the displayed evidence.  The same page renders GUDHI
