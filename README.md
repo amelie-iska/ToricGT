@@ -636,6 +636,22 @@ python scripts/render_html_screenshots.py \
 python scripts/render_outputs_index.py --output-root outputs
 ```
 
+Very large branch/merge reports can also be screenshotted directly from their
+exact payload when the interactive Plotly HTML is too heavy for browser
+capture:
+
+```bash
+python scripts/render_branching_payload_static_screenshots.py \
+  --payload-json outputs/latest_branching_reasoning_trajectory_report/branching_reasoning_payload.json \
+  --output-dir outputs/latest_branching_reasoning_trajectory_report/static_screenshots
+```
+
+This static renderer preserves the full generated payload and draws deterministic
+PNG audit views for the summary, full trajectory filtered complex, selected-step
+simplex tree with token metadata, analogical memory simplex-tree map, and
+vectorized persistent-homology feature scores.  It is intended for oversized
+reports; the interactive HTML remains the canonical exploratory artifact.
+
 The standalone branching report now distinguishes `strong_analogy`,
 `weak_analogy`, `candidate_analogy`, and `no_analogy`.  Source and memory
 objects are explicit GUDHI Rips simplex trees built over the original
@@ -679,6 +695,10 @@ status no longer matches the priority rule `strong > weak > candidate > none`.
 The periodic analysis watcher enables this strict branch/merge report assertion
 by default when branch/merge screenshots are enabled; use
 `--no-assert-branching-reasoning-report` only for debugging a broken report.
+The inference wrapper does the same for optional branching-report screenshots:
+`scripts/infer_tokengt_with_geometry.py --emit-branching-reasoning-report`
+passes `--assert-branching-report` to the screenshot renderer unless
+`--no-assert-branching-reasoning-report` is explicitly set.
 The analogy panel now renders the payload's
 actual decision rule as pass/fail threshold status badges for the strong,
 weak, and candidate tiers; when a `weak_analogy` is emitted, the banner states which strong gate

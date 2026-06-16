@@ -261,7 +261,14 @@ token/analogy detail panels, or if the rendered analogy status no longer
 matches the priority rule `strong > weak > candidate > none`. The periodic
 analysis watcher passes this assertion flag by default when branch/merge
 screenshots are enabled, with `--no-assert-branching-reasoning-report` available
-only as a debugging escape hatch. The branching
+only as a debugging escape hatch. The inference wrapper follows the same
+default: `scripts/infer_tokengt_with_geometry.py --emit-branching-reasoning-report`
+asserts the generated branching HTML during screenshot capture unless
+`--no-assert-branching-reasoning-report` is set. Oversized branch/merge reports
+can additionally be screenshotted from the exact payload with
+`scripts/render_branching_payload_static_screenshots.py`; that path produces
+summary, full-trajectory, selected-step token, analogical-map, and vectorized-PH
+PNG audits without changing the interactive HTML artifact. The branching
 report also includes label-density toggles so dense long trajectories remain
 readable without capping visible one-dimensional simplex edges. Its analogy
 decision banner is tied directly to the payload decision rule: strong, weak,

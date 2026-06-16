@@ -488,3 +488,53 @@ def test_branching_reasoning_report_cli(tmp_path: Path) -> None:
     assert manifest["source_mode"] == "synthetic_long_branching_fixture"
     assert (out / "index.html").exists()
     assert (out / "branching_reasoning_trajectory.html").exists()
+
+
+def test_branching_payload_static_screenshot_cli(tmp_path: Path) -> None:
+    payload = build_branching_reasoning_payload(
+        BranchingTrajectoryConfig(
+            seed=551,
+            embedding_dim=12,
+            trajectory_levels=9,
+            branch_lanes=4,
+            side_branch_length=3,
+            radius_levels=5,
+            ph_landscape_resolution=8,
+            ph_image_resolution=5,
+            max_render_triangles=60,
+            max_map_image_records=60,
+        )
+    )
+    payload_path = tmp_path / "branching_reasoning_payload.json"
+    payload_path.write_text(json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
+    out = tmp_path / "static_screenshots"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "scripts/render_branching_payload_static_screenshots.py",
+            "--payload-json",
+            str(payload_path),
+            "--output-dir",
+            str(out),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema"] == "toricgt.branching_payload_static_screenshots.v1"
+    assert manifest["nodes"] == len(payload["nodes"])
+    assert manifest["selected_step_id"] >= 0
+    for name in [
+        "summary.png",
+        "full_trajectory_filtered_complex.png",
+        "selected_step_simplex_tree_tokens.png",
+        "analogical_memory_simplex_tree_map.png",
+        "vectorized_ph_features.png",
+        "contact_sheet.png",
+        "index.html",
+    ]:
+        assert (out / name).exists()

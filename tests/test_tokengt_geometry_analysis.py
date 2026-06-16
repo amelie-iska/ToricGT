@@ -1,12 +1,24 @@
 import json
+import importlib.util
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import torch
 
 from toricgt.config import ModelConfig, TrainConfig
 from toricgt.model import ToricTokenGT
+
+
+def _load_infer_module():
+    path = Path("scripts/infer_tokengt_with_geometry.py").resolve()
+    spec = importlib.util.spec_from_file_location("infer_tokengt_with_geometry_for_test", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_tokengt_geometry_suite_smoke(tmp_path):
@@ -128,3 +140,19 @@ def test_tokengt_geometry_suite_smoke(tmp_path):
     assert family_status["analogical_simplex_maps_3d"] == "ok"
     assert family_status["slepian_torus_surface"] == "ok"
     assert "tokengt_graph" in result.stdout
+
+
+def test_inference_branching_screenshots_assert_report_by_default() -> None:
+    infer = _load_infer_module()
+    args = infer.argparse.Namespace(assert_branching_reasoning_report=True)
+    cmd = infer.branching_screenshot_command(args, Path("branching"), Path("screens"))
+    assert "--assert-branching-report" in cmd
+    assert "--interaction-audit" in cmd
+
+
+def test_inference_branching_screenshots_allows_explicit_debug_opt_out() -> None:
+    infer = _load_infer_module()
+    args = infer.argparse.Namespace(assert_branching_reasoning_report=False)
+    cmd = infer.branching_screenshot_command(args, Path("branching"), Path("screens"))
+    assert "--assert-branching-report" not in cmd
+    assert "--interaction-audit" in cmd

@@ -148,6 +148,13 @@ def parse_args() -> argparse.Namespace:
         help="Capture Playwright screenshots for the branch/simplex report.",
     )
     parser.add_argument(
+        "--assert-branching-reasoning-report",
+        dest="assert_branching_reasoning_report",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require strict branching simplex-report DOM assertions when inference captures screenshots.",
+    )
+    parser.add_argument(
         "--emit-slepian-music",
         action="store_true",
         help="Export optional Slepian/Pollak prolate torus music WAV and JSON metadata for this inference bundle.",
@@ -492,6 +499,30 @@ def branching_reasoning_command(args: argparse.Namespace, npz: Path, metadata_js
     return cmd
 
 
+def branching_screenshot_command(args: argparse.Namespace, branching_dir: Path, screenshot_dir: Path) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(SCREENSHOT_SCRIPT),
+        "--source-dir",
+        str(branching_dir),
+        "--output-dir",
+        str(screenshot_dir),
+        "--no-full-page",
+        "--viewport-slices",
+        "8",
+        "--interaction-audit",
+        "--interaction-delay-ms",
+        "700",
+        "--wait-ms",
+        "1800",
+        "--timeout-ms",
+        "90000",
+    ]
+    if bool(getattr(args, "assert_branching_reasoning_report", True)):
+        cmd.append("--assert-branching-report")
+    return cmd
+
+
 def main() -> None:
     args = parse_args()
     checkpoint = Path(args.checkpoint)
@@ -581,28 +612,7 @@ def main() -> None:
         manifest["branching_reasoning_embedding_payload_json"] = str(json_path or "")
         if bool(args.branching_reasoning_screenshots):
             screenshot_dir = branching_dir / "html_screenshots"
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(SCREENSHOT_SCRIPT),
-                    "--source-dir",
-                    str(branching_dir),
-                    "--output-dir",
-                    str(screenshot_dir),
-                    "--no-full-page",
-                    "--viewport-slices",
-                    "8",
-                    "--interaction-audit",
-                    "--interaction-delay-ms",
-                    "700",
-                    "--wait-ms",
-                    "1800",
-                    "--timeout-ms",
-                    "90000",
-                ],
-                cwd=ROOT,
-                check=True,
-            )
+            subprocess.run(branching_screenshot_command(args, branching_dir, screenshot_dir), cwd=ROOT, check=True)
             manifest["branching_reasoning_screenshot_index_html"] = str(screenshot_dir / "index.html")
             manifest["branching_reasoning_screenshot_manifest"] = read_json(screenshot_dir / "manifest.json")
 

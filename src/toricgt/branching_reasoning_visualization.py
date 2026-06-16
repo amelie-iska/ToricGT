@@ -1624,8 +1624,8 @@ def render_branching_reasoning_report(payload: dict[str, Any], output_dir: Path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     payload_path = output_dir / "branching_reasoning_payload.json"
-    payload_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    js_payload = json.dumps(payload, separators=(",", ":"))
+    js_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    payload_path.write_text(js_payload + "\n", encoding="utf-8")
     html_path = output_dir / "branching_reasoning_trajectory.html"
     max_level = max(node["level"] for node in payload["nodes"])
     radius_default = max(0, min(len(payload["radius_values"]) - 1, len(payload["radius_values"]) // 2))
