@@ -1448,7 +1448,7 @@ def render_branching_reasoning_report(payload: dict[str, Any], output_dir: Path)
 <p class="muted">Source mode: <code>{payload.get('source_mode', 'unknown')}</code>.  The source metadata is included in the raw payload panel.</p>
 <p class="muted">Analogy tiers: <code>strong_analogy</code>, <code>weak_analogy</code>, <code>candidate_analogy</code>, and <code>no_analogy</code>.</p>
 <p><a class="pill" href="branching_reasoning_payload.json">payload JSON</a><a class="pill" href="index.html">index</a></p></section>
-<section class="grid"><div class="card"><h2>Audit Metrics</h2>{_metrics_html(payload)}</div><div class="card"><h2>Analogy Decision</h2><pre id="analogy_decision"></pre></div></section>
+<section class="grid"><div class="card"><h2>Audit Metrics</h2>{_metrics_html(payload)}</div><div class="card"><h2>Analogy Decision</h2><div id="top_analogy_decision_banner"></div><div id="top_analogy_decision_status_badges" class="status-badge-row"></div><div id="top_analogy_threshold_table"></div><details><summary class="muted">raw decision payload</summary><pre id="analogy_decision"></pre></details></div></section>
 <section class="panel"><h2>Full Reasoning Trajectory Filtered Simplicial Complex</h2>
 <div class="controls">
   <div class="control"><label>radius <span id="radius_value"></span></label><input id="radius_slider" type="range" min="0" max="{len(payload['radius_values'])-1}" step="1" value="{radius_default}"></div>
@@ -1528,6 +1528,19 @@ function updateToggleState(toggleId, stateId, onText, offText) {{
 }}
 function conditionRows(tierName, tier) {{
   return tier.conditions.map(item => '<tr><td>'+tierName+'</td><td>'+item.label+'</td><td>'+fmt(item.score)+'</td><td>>= '+fmt(item.threshold)+'</td><td>'+(item.passed ? '<span class="ok">pass</span>' : '<span class="bad">fail</span>')+'</td><td>'+(item.detail || '')+'</td></tr>').join('');
+}}
+function decisionConditionRowsHTML() {{
+  const decision = trajectory_simplex_payload.analogy.decision_summary;
+  return [
+    conditionRows('strong threshold', decision.strong),
+    conditionRows('weak threshold', decision.weak),
+    conditionRows('candidate threshold', decision.candidate)
+  ].join('');
+}}
+function decisionThresholdTableHTML() {{
+  return '<table><tr><th>tier</th><th>measure</th><th>score</th><th>threshold</th><th>result</th><th>meaning</th></tr>'+
+    decisionConditionRowsHTML()+
+    '</table>';
 }}
 function decisionStatusBadgesHTML() {{
   const analogy = trajectory_simplex_payload.analogy;
@@ -1795,6 +1808,12 @@ function analogyBannerHTML(analogy) {{
     'step-map <code>'+Number(analogy.step_simplicial_map_valid_fraction_mean).toFixed(4)+'</code>, '+
     'PH gate <code>'+Number(analogy.analogy_passed_checks.ph_gate_score).toFixed(4)+'</code>. '+narrative+'</div>';
 }}
+function renderTopDecisionPanel() {{
+  const analogy = trajectory_simplex_payload.analogy;
+  document.getElementById('top_analogy_decision_banner').innerHTML = analogyBannerHTML(analogy);
+  document.getElementById('top_analogy_decision_status_badges').innerHTML = decisionStatusBadgesHTML();
+  document.getElementById('top_analogy_threshold_table').innerHTML = decisionThresholdTableHTML();
+}}
 function renderAnalogy() {{
   const analogy = trajectory_simplex_payload.analogy;
   const sourceTree = analogy.source_simplex_tree;
@@ -1810,6 +1829,7 @@ function renderAnalogy() {{
   updateToggleState('analogy_label_toggle', 'analogy_label_state', 'labels visible', 'labels hidden');
   document.getElementById('no_analogy_banner').innerHTML = analogyBannerHTML(analogy);
   document.getElementById('analogy_decision_status_badges').innerHTML = decisionStatusBadgesHTML();
+  renderTopDecisionPanel();
   document.getElementById('analogy_map_summary').innerHTML = mapSummaryHTML();
   document.getElementById('ph_quick_summary').innerHTML = phQuickSummaryHTML();
   const sourceIds = treeNodesAtLevel(sourceTree, level).map(v => v.id);
@@ -1838,15 +1858,11 @@ function renderAnalogy() {{
 }}
 function renderValidityTable() {{
   const map = trajectory_simplex_payload.analogy.candidate_map;
-  const analogy = trajectory_simplex_payload.analogy;
-  const decision = analogy.decision_summary;
   const rows = [
     '<tr><td>map counts</td><td>vertices</td><td>'+map.vertex_map.length+'</td><td>'+map.vertex_map.length+'</td><td><span class="ok">mapped</span></td><td>nearest-neighbor vertex map in original embedding space</td></tr>',
     '<tr><td>map counts</td><td>one-dimensional simplex images</td><td>'+map.valid_edges+'</td><td>'+map.source_edges+'</td><td>'+(map.invalid_edges === 0 ? '<span class="ok">all valid/collapsed</span>' : '<span class="warn">some invalid</span>')+'</td><td>edge images must be target edges or collapsed vertices</td></tr>',
     '<tr><td>map counts</td><td>2-simplex images</td><td>'+map.valid_triangles+'</td><td>'+map.source_triangles+'</td><td>'+(map.invalid_triangles === 0 ? '<span class="ok">all valid/collapsed</span>' : '<span class="warn">some invalid</span>')+'</td><td>triangle images must be target triangles or collapsed faces</td></tr>',
-    conditionRows('strong threshold', decision.strong),
-    conditionRows('weak threshold', decision.weak),
-    conditionRows('candidate threshold', decision.candidate)
+    decisionConditionRowsHTML()
   ];
   document.getElementById('simplicial_map_validity_table').innerHTML =
     '<table><tr><th>group</th><th>measure</th><th>score/count</th><th>threshold/total</th><th>result</th><th>meaning</th></tr>'+
@@ -2071,6 +2087,7 @@ document.getElementById('step_label_toggle').addEventListener('change', () => re
 document.getElementById('analogy_label_toggle').addEventListener('change', renderAnalogy);
 function initializeToricGTReport() {{
   phTable();
+  renderTopDecisionPanel();
   renderTrajectory();
   renderStep(0);
   renderAnalogy();
