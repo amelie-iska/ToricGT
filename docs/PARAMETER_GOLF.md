@@ -233,10 +233,19 @@ The branch/merge reasoning visualization can be generated independently with
 per-step filtered simplicial complexes with radius plus reasoning/decoding
 sliders, NLL coloring, GUDHI vectorized PH feature similarities, and the
 simplex-map gate used to decide whether an analogical memory is acceptable.
+The analogy section separates three pieces of evidence: simplex-image validity,
+nearest-neighbor vertex-distance quality in the original embedding space, and
+vectorized persistent-homology similarity.  The PH table reports landscape,
+persistence-image, silhouette, and entropy-vector scores by homological
+dimension, with source/memory norms, so the retrieval evidence is visible rather
+than hidden in an aggregate score.
 For real checkpoint embedding payloads, use `--embedding-max-nodes` and
 `--embedding-node-offset` to choose the rendered point set before any simplex
 tree is built; within that selected point set, visible one-dimensional simplex
-edges are not capped or sampled away. The analogy panel now draws the
+edges are not capped or sampled away. The report stores exact edge-birth
+records for the configured radius grid by default, so long browser reports do
+not need dense distance matrices while still rendering every edge visible at
+the current radius. The analogy panel now draws the
 nearest-neighbor candidate map arrows even when the final tier is
 `no_analogy`, and overlays source/memory graph-of-thought branch/merge
 skeletons on top of the Rips edges so the view reads as a map between
@@ -245,14 +254,23 @@ be refreshed with `scripts/render_outputs_index.py --output-root outputs`.
 The screenshot renderer should be run with `--interaction-audit` for these
 branching reports; that mode moves the radius, reasoning-level, and decoding
 sliders, toggles filled 2-simplices, and exposes representative reasoning-node,
-token, and analogy detail panels in additional screenshots. The branching
+token, and analogy detail panels in additional screenshots. Add
+`--assert-branching-report` when screenshots are part of a review pass; it
+fails if the report loses threshold status badges, slider captions, or
+token/analogy detail panels, or if the rendered analogy status no longer
+matches the priority rule `strong > weak > candidate > none`. The periodic
+analysis watcher passes this assertion flag by default when branch/merge
+screenshots are enabled, with `--no-assert-branching-reasoning-report` available
+only as a debugging escape hatch. The branching
 report also includes label-density toggles so dense long trajectories remain
 readable without capping visible one-dimensional simplex edges. Its analogy
 decision banner is tied directly to the payload decision rule: strong, weak,
 and candidate gates are rendered as pass/fail threshold status badges, and a weak analogy
-explicitly states which strong threshold failed. The strong per-step simplex-map
-gate is intentionally a loose sanity check; full-trajectory map validity and
-vectorized PH similarity carry the analogy decision. The compact map summary and
+explicitly states which required strong threshold failed. The strong per-step
+simplex-map target is advisory: the strong tier requires the full-trajectory
+map threshold, the vectorized PH threshold, and a low per-step sanity floor,
+while the stricter local per-step target is rendered as an advisory warning
+rather than a demotion. The compact map summary and
 nearby vectorized-PH summary keep the map score, step-map score, PH mean, PH
 gate, image-status counts, and threshold labels in the same visible panel.
 

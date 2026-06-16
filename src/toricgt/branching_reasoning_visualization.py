@@ -12,6 +12,7 @@ Vectorized persistent-homology features are computed through GUDHI.
 
 from __future__ import annotations
 
+import heapq
 import json
 import math
 from dataclasses import dataclass
@@ -71,6 +72,7 @@ class BranchingTrajectoryConfig:
     max_render_edges: int = 0
     max_render_triangles: int = 900
     max_map_image_records: int = 900
+    compact_distance_payload: bool = True
     radius_levels: int = 7
     ph_landscape_layers: int = 3
     ph_landscape_resolution: int = 32
@@ -78,6 +80,7 @@ class BranchingTrajectoryConfig:
     analogy_map_threshold: float = 0.80
     analogy_ph_threshold: float = 0.55
     analogy_step_threshold: float = 0.40
+    analogy_strong_step_minimum: float = 0.12
     analogy_weak_map_threshold: float = 0.50
     analogy_weak_ph_threshold: float = 0.15
     analogy_weak_step_threshold: float = 0.30
@@ -107,6 +110,40 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     if denom <= 1e-12:
         return 1.0 if float(np.linalg.norm(aa - bb)) <= 1e-12 else 0.0
     return float(np.dot(aa, bb) / denom)
+
+
+def _triangle_count(n: int) -> int:
+    n = int(n)
+    if n < 3:
+        return 0
+    return int(n * (n - 1) * (n - 2) // 6)
+
+
+def _edge_births_from_distances(dist: np.ndarray, radii: np.ndarray) -> list[list[float]]:
+    """Return exact radius-birth records for all edges visible on the radius grid.
+
+    Each record is ``[i, j, birth_radius_index, birth_radius]``.  Edges whose
+    pairwise distance is larger than the largest configured radius are omitted
+    because they cannot become visible through the report's radius slider.
+    """
+
+    d = np.asarray(dist, dtype=np.float64)
+    r = np.asarray(radii, dtype=np.float64).reshape(-1)
+    if d.ndim != 2 or d.shape[0] != d.shape[1] or r.size == 0:
+        return []
+    max_radius = float(r[-1])
+    births: list[list[float]] = []
+    n = int(d.shape[0])
+    for i in range(n):
+        for j in range(i + 1, n):
+            distance = float(d[i, j])
+            if not math.isfinite(distance) or distance > max_radius:
+                continue
+            birth_index = int(np.searchsorted(r, distance, side="left"))
+            if birth_index >= r.size:
+                continue
+            births.append([int(i), int(j), int(birth_index), float(round(distance, 6))])
+    return births
 
 
 def _branch_dag() -> tuple[list[list[int]], list[tuple[int, int, str]]]:
@@ -304,7 +341,8 @@ def _generate_step_tokens(
         positive = dist[dist > 1e-10]
         max_radius = float(np.quantile(positive, 0.72)) if positive.size else 1.0
         radii = np.linspace(max_radius / max(2, cfg.radius_levels), max_radius, cfg.radius_levels)
-        triangles = _diameter_triangles(dist)
+        edge_births = _edge_births_from_distances(dist, radii)
+        triangles = _diameter_triangles(dist, limit=cfg.max_render_triangles)
         token_records = []
         for tok_idx in range(tokens.shape[0]):
             token_type = token_types[(tok_idx + int(node["id"])) % len(token_types)]
@@ -335,8 +373,11 @@ def _generate_step_tokens(
                 "label": str(node["label"]),
                 "radius_values": radii.astype(float).round(6).tolist(),
                 "tokens": token_records,
-                "distances": dist.astype(float).round(6).tolist(),
+                "distance_storage": "edge_births" if cfg.compact_distance_payload else "dense_matrix",
+                "edge_births": edge_births,
+                "distances": [] if cfg.compact_distance_payload else dist.astype(float).round(6).tolist(),
                 "triangles": triangles,
+                "triangle_count_exact": _triangle_count(dist.shape[0]),
                 "decode_edges": [[idx, idx + 1, idx + 1] for idx in range(tokens.shape[0] - 1)],
             }
         )
@@ -481,7 +522,8 @@ def _real_payload_step_tokens(
         positive = local_dist[local_dist > 1e-10]
         max_radius = float(np.quantile(positive, 0.72)) if positive.size else 1.0
         radii = np.linspace(max_radius / max(2, cfg.radius_levels), max_radius, cfg.radius_levels)
-        triangles = _diameter_triangles(local_dist)
+        edge_births = _edge_births_from_distances(local_dist, radii)
+        triangles = _diameter_triangles(local_dist, limit=cfg.max_render_triangles)
         token_records: list[dict[str, Any]] = []
         source_node = int(node["id"])
         for local_idx, source in enumerate(sources):
@@ -517,8 +559,11 @@ def _real_payload_step_tokens(
                 "label": str(node["label"]),
                 "radius_values": radii.astype(float).round(6).tolist(),
                 "tokens": token_records,
-                "distances": local_dist.astype(float).round(6).tolist(),
+                "distance_storage": "edge_births" if cfg.compact_distance_payload else "dense_matrix",
+                "edge_births": edge_births,
+                "distances": [] if cfg.compact_distance_payload else local_dist.astype(float).round(6).tolist(),
                 "triangles": triangles,
+                "triangle_count_exact": _triangle_count(local_dist.shape[0]),
                 "decode_edges": [[idx, idx + 1, idx + 1] for idx in range(len(token_records) - 1)],
                 "token_source_node_ids": [int(source) for source in sources],
             }
@@ -528,13 +573,26 @@ def _real_payload_step_tokens(
 
 def _diameter_triangles(dist: np.ndarray, *, limit: int | None = None) -> list[list[float]]:
     n = int(dist.shape[0])
+    if limit is not None and int(limit) <= 0:
+        return []
+    if limit is not None:
+        top_k = int(limit)
+        heap: list[tuple[float, int, int, int, float]] = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                for k in range(j + 1, n):
+                    diameter = float(max(dist[i, j], dist[i, k], dist[j, k]))
+                    item = (-diameter, int(i), int(j), int(k), diameter)
+                    if len(heap) < top_k:
+                        heapq.heappush(heap, item)
+                    elif diameter < -heap[0][0]:
+                        heapq.heapreplace(heap, item)
+        return [[i, j, k, float(round(diameter, 6))] for _, i, j, k, diameter in sorted(heap, key=lambda row: row[4])]
     triangles: list[list[float]] = []
     for i in range(n):
         for j in range(i + 1, n):
             for k in range(j + 1, n):
-                triangles.append([i, j, k, float(max(dist[i, j], dist[i, k], dist[j, k]))])
-    if limit is not None and len(triangles) > int(limit):
-        triangles = sorted(triangles, key=lambda row: row[3])[: int(limit)]
+                triangles.append([i, j, k, float(round(max(dist[i, j], dist[i, k], dist[j, k]), 6))])
     return triangles
 
 
@@ -577,6 +635,59 @@ def _feature_similarities(source: dict[str, np.ndarray], target: dict[str, np.nd
         family = key.split("_", 1)[1]
         grouped.setdefault(family, []).append(_cosine(source_vec, target[key]))
     return {family: float(np.mean(values)) if values else 0.0 for family, values in grouped.items()}
+
+
+def _feature_family_summary(source_bundle: dict[str, Any], target_bundle: dict[str, Any]) -> dict[str, Any]:
+    """Summarize every vectorized PH family by homological dimension.
+
+    The aggregate analogy gate uses family means, but the report should expose
+    the actual evidence used to produce those means.  This table is deliberately
+    computed from the GUDHI-derived vectorized arrays, not from the rendered PCA
+    view.
+    """
+
+    families = ("landscape", "persistence_image", "silhouette", "entropy_vector")
+    source_features: dict[str, np.ndarray] = source_bundle.get("_features", {})
+    target_features: dict[str, np.ndarray] = target_bundle.get("_features", {})
+    rows: list[dict[str, Any]] = []
+    by_family: dict[str, list[float]] = {family: [] for family in families}
+    by_dimension: dict[str, list[float]] = {f"H{dim}": [] for dim in range(3)}
+    for dim in range(3):
+        dimension = f"H{dim}"
+        for family in families:
+            key = f"h{dim}_{family}"
+            source_vec = np.asarray(source_features.get(key, np.zeros((0,), dtype=np.float64)), dtype=np.float64).reshape(-1)
+            target_vec = np.asarray(target_features.get(key, np.zeros((0,), dtype=np.float64)), dtype=np.float64).reshape(-1)
+            cosine = _cosine(source_vec, target_vec)
+            source_norm = float(np.linalg.norm(source_vec))
+            target_norm = float(np.linalg.norm(target_vec))
+            source_mass = float(np.sum(np.abs(source_vec)))
+            target_mass = float(np.sum(np.abs(target_vec)))
+            row = {
+                "dimension": dimension,
+                "family": family,
+                "cosine_similarity": float(cosine),
+                "source_norm": source_norm,
+                "memory_norm": target_norm,
+                "source_l1_mass": source_mass,
+                "memory_l1_mass": target_mass,
+                "vector_length": int(max(source_vec.size, target_vec.size)),
+            }
+            rows.append(row)
+            by_family[family].append(cosine)
+            by_dimension[dimension].append(cosine)
+    return {
+        "backend": "GUDHI vectorized_diagram_metrics",
+        "families": list(families),
+        "dimensions": [f"H{dim}" for dim in range(3)],
+        "rows": rows,
+        "family_means": {
+            family: float(np.mean(values)) if values else 0.0 for family, values in by_family.items()
+        },
+        "dimension_means": {
+            dimension: float(np.mean(values)) if values else 0.0 for dimension, values in by_dimension.items()
+        },
+    }
 
 
 def _max_lifetime(diagram: np.ndarray) -> float:
@@ -693,45 +804,39 @@ def _simplex_tree_payload(
                 "pca": display[idx].astype(float).round(6).tolist(),
             }
         )
-    edges = []
+    edge_births = []
     for edge in sets.get(1, []):
         diameter = _simplex_diameter(dist, edge)
-        edges.append(
-            {
-                "simplex": [int(edge[0]), int(edge[1])],
-                "diameter": float(diameter),
-                "birth_radius_index": birth_idx(edge),
-                "birth_radius": float(radii[birth_idx(edge)]),
-            }
-        )
-    edge_count_exact = len(edges)
-    triangles = []
+        idx = birth_idx(edge)
+        edge_births.append([int(edge[0]), int(edge[1]), int(idx), float(round(radii[idx], 6)), float(round(diameter, 6))])
+    edge_count_exact = len(edge_births)
+    triangle_births = []
     for tri in sets.get(2, []):
         diameter = _simplex_diameter(dist, tri)
-        triangles.append(
-            {
-                "simplex": [int(tri[0]), int(tri[1]), int(tri[2])],
-                "diameter": float(diameter),
-                "birth_radius_index": birth_idx(tri),
-                "birth_radius": float(radii[birth_idx(tri)]),
-            }
-        )
-    triangle_count_exact = len(triangles)
-    if len(triangles) > int(max_triangles):
-        triangles = sorted(triangles, key=lambda row: row["diameter"])[: int(max_triangles)]
+        idx = birth_idx(tri)
+        triangle_births.append([int(tri[0]), int(tri[1]), int(tri[2]), int(idx), float(round(radii[idx], 6)), float(round(diameter, 6))])
+    triangle_count_exact = len(triangle_births)
+    if len(triangle_births) > int(max_triangles):
+        triangle_births = sorted(triangle_births, key=lambda row: row[5])[: int(max_triangles)]
     return {
         "simplex_tree_backend": "gudhi.RipsComplex.create_simplex_tree",
         "radius_values": radii.astype(float).round(6).tolist(),
         "num_vertices": int(len(vertices)),
         "num_edges": int(edge_count_exact),
         "num_triangles": int(triangle_count_exact),
-        "rendered_edge_count": int(len(edges)),
-        "rendered_triangle_count": int(len(triangles)),
+        "rendered_edge_count": int(len(edge_births)),
+        "rendered_triangle_count": int(len(triangle_births)),
         "render_limits": {"visible_edges": "all", "max_triangles": int(max_triangles)},
         "visible_edge_policy": "all_visible_edges",
+        "edge_storage": "compact_edge_births",
+        "edge_birth_columns": ["source_vertex", "target_vertex", "birth_radius_index", "birth_radius", "diameter"],
+        "triangle_storage": "compact_triangle_births",
+        "triangle_birth_columns": ["v0", "v1", "v2", "birth_radius_index", "birth_radius", "diameter"],
         "vertices": vertices,
-        "edges": edges,
-        "triangles": triangles,
+        "edge_births": edge_births,
+        "triangle_births": triangle_births,
+        "edges": [],
+        "triangles": [],
     }
 
 
@@ -844,41 +949,66 @@ def _simplicial_map_payload(
     def mapped(simplex: tuple[int, ...]) -> tuple[int, ...]:
         return tuple(sorted(set(vertex_map[idx] for idx in simplex)))
 
-    edge_images = []
+    status_code = {"valid": "v", "collapsed": "c", "invalid": "i"}
+    rendered_edge_images: list[list[Any]] = []
+    edge_status_counts = {"valid": 0, "collapsed": 0, "invalid": 0}
+    source_edge_count = 0
     for edge in source_sets.get(1, []):
+        source_edge_count += 1
         image = mapped(edge)
         status = "collapsed" if len(image) <= 1 else ("valid" if image in target_edges else "invalid")
-        edge_images.append({"source": list(edge), "image": list(image), "status": status})
-    triangle_images = []
+        edge_status_counts[status] += 1
+        padded = list(image) + [-1 for _ in range(max(0, 2 - len(image)))]
+        if len(rendered_edge_images) < int(max_image_records):
+            rendered_edge_images.append([int(edge[0]), int(edge[1]), int(padded[0]), int(padded[1]), status_code[status]])
+    rendered_triangle_images: list[list[Any]] = []
+    triangle_status_counts = {"valid": 0, "collapsed": 0, "invalid": 0}
+    source_triangle_count = 0
     for tri in source_sets.get(2, []):
+        source_triangle_count += 1
         image = mapped(tri)
         status = "collapsed" if len(image) <= 2 else ("valid" if image in target_triangles else "invalid")
-        triangle_images.append({"source": list(tri), "image": list(image), "status": status})
-    valid_edges = sum(1 for item in edge_images if item["status"] in {"valid", "collapsed"})
-    valid_triangles = sum(1 for item in triangle_images if item["status"] in {"valid", "collapsed"})
-    edge_status_counts = {
-        "valid": int(sum(1 for item in edge_images if item["status"] == "valid")),
-        "collapsed": int(sum(1 for item in edge_images if item["status"] == "collapsed")),
-        "invalid": int(sum(1 for item in edge_images if item["status"] == "invalid")),
-    }
-    triangle_status_counts = {
-        "valid": int(sum(1 for item in triangle_images if item["status"] == "valid")),
-        "collapsed": int(sum(1 for item in triangle_images if item["status"] == "collapsed")),
-        "invalid": int(sum(1 for item in triangle_images if item["status"] == "invalid")),
-    }
-    total = len(edge_images) + len(triangle_images)
+        triangle_status_counts[status] += 1
+        padded = list(image) + [-1 for _ in range(max(0, 3 - len(image)))]
+        if len(rendered_triangle_images) < int(max_image_records):
+            rendered_triangle_images.append([int(tri[0]), int(tri[1]), int(tri[2]), int(padded[0]), int(padded[1]), int(padded[2]), status_code[status]])
+    valid_edges = int(edge_status_counts["valid"] + edge_status_counts["collapsed"])
+    valid_triangles = int(triangle_status_counts["valid"] + triangle_status_counts["collapsed"])
+    total = int(source_edge_count + source_triangle_count)
     valid = valid_edges + valid_triangles
     vertex_dist = np.asarray(vertex_map_distances, dtype=np.float64)
-    rendered_edge_images = edge_images[: int(max_image_records)]
-    rendered_triangle_images = triangle_images[: int(max_image_records)]
+    vertex_mean = float(vertex_dist.mean()) if vertex_dist.size else 0.0
+    vertex_max = float(vertex_dist.max()) if vertex_dist.size else 0.0
+    radius_scale = max(float(radius), 1e-8)
+    mean_distance_quality = float(max(0.0, min(1.0, 1.0 - vertex_mean / radius_scale)))
+    max_distance_quality = float(max(0.0, min(1.0, 1.0 - vertex_max / radius_scale)))
+    simplex_image_validity = float(valid / max(1, total))
+    combined_map_confidence = float(0.70 * simplex_image_validity + 0.30 * mean_distance_quality)
+    if combined_map_confidence >= 0.80:
+        confidence_tier = "high"
+    elif combined_map_confidence >= 0.55:
+        confidence_tier = "medium"
+    else:
+        confidence_tier = "low"
+    map_confidence_summary = {
+        "simplex_image_validity": simplex_image_validity,
+        "vertex_distance_mean": vertex_mean,
+        "vertex_distance_max": vertex_max,
+        "vertex_distance_quality_mean": mean_distance_quality,
+        "vertex_distance_quality_max": max_distance_quality,
+        "normalizing_radius": float(radius),
+        "combined_map_confidence": combined_map_confidence,
+        "confidence_tier": confidence_tier,
+        "interpretation": "simplex image validity is the primary gate; vertex-distance quality checks nearest-neighbor map tightness in original embedding coordinates",
+    }
     return {
         "source_simplex_tree_payload": source_tree,
         "memory_simplex_tree_payload": target_tree,
         "vertex_map": vertex_map,
         "vertex_map_distances": vertex_map_distances,
         "radius": float(radius),
-        "source_edges": len(edge_images),
-        "source_triangles": len(triangle_images),
+        "source_edges": int(source_edge_count),
+        "source_triangles": int(source_triangle_count),
         "valid_edges": int(valid_edges),
         "valid_triangles": int(valid_triangles),
         "invalid_edges": int(edge_status_counts["invalid"]),
@@ -888,13 +1018,14 @@ def _simplicial_map_payload(
         "edge_status_counts": edge_status_counts,
         "triangle_status_counts": triangle_status_counts,
         "valid_fraction": float(valid / max(1, total)),
-        "vertex_distance_mean": float(vertex_dist.mean()) if vertex_dist.size else 0.0,
-        "vertex_distance_max": float(vertex_dist.max()) if vertex_dist.size else 0.0,
+        "vertex_distance_mean": vertex_mean,
+        "vertex_distance_max": vertex_max,
+        "map_confidence_summary": map_confidence_summary,
         "map_summary": {
             "source_vertices": int(source.shape[0]),
             "target_vertices": int(target.shape[0]),
-            "source_edges": int(len(edge_images)),
-            "source_triangles": int(len(triangle_images)),
+            "source_edges": int(source_edge_count),
+            "source_triangles": int(source_triangle_count),
             "valid_edges": int(edge_status_counts["valid"]),
             "collapsed_edges": int(edge_status_counts["collapsed"]),
             "invalid_edges": int(edge_status_counts["invalid"]),
@@ -902,12 +1033,19 @@ def _simplicial_map_payload(
             "collapsed_triangles": int(triangle_status_counts["collapsed"]),
             "invalid_triangles": int(triangle_status_counts["invalid"]),
             "valid_or_collapsed_fraction": float(valid / max(1, total)),
-            "vertex_distance_mean": float(vertex_dist.mean()) if vertex_dist.size else 0.0,
-            "vertex_distance_max": float(vertex_dist.max()) if vertex_dist.size else 0.0,
+            "vertex_distance_mean": vertex_mean,
+            "vertex_distance_max": vertex_max,
+            "vertex_distance_quality_mean": mean_distance_quality,
+            "combined_map_confidence": combined_map_confidence,
+            "confidence_tier": confidence_tier,
         },
         "rendered_edge_image_count": int(len(rendered_edge_images)),
         "rendered_triangle_image_count": int(len(rendered_triangle_images)),
         "map_image_record_limit": int(max_image_records),
+        "map_image_storage": "compact_arrays",
+        "edge_image_columns": ["source_v0", "source_v1", "image_v0", "image_v1_or_minus1", "status_v_c_i"],
+        "triangle_image_columns": ["source_v0", "source_v1", "source_v2", "image_v0", "image_v1_or_minus1", "image_v2_or_minus1", "status_v_c_i"],
+        "status_code_legend": {"v": "valid", "c": "collapsed", "i": "invalid"},
         "edge_images": rendered_edge_images,
         "triangle_images": rendered_triangle_images,
     }
@@ -968,6 +1106,7 @@ def _analogy_payload(
     source_bundle = _ph_feature_bundle(step_embeddings, cfg)
     target_bundle = _ph_feature_bundle(target, cfg)
     feature_similarity = _feature_similarities(source_bundle["_features"], target_bundle["_features"])
+    feature_family_summary = _feature_family_summary(source_bundle, target_bundle)
     ph_distance_summary = _diagram_distance_summary(source_bundle, target_bundle)
     ph_cosine = float(np.mean(list(feature_similarity.values()))) if feature_similarity else 0.0
     ph_values = [float(value) for value in feature_similarity.values()]
@@ -1006,16 +1145,19 @@ def _analogy_payload(
             )["valid_fraction"]
         )
     step_map_mean = float(np.mean(step_validities)) if step_validities else 0.0
-    strong = (
+    strong_required = (
         full_map["valid_fraction"] >= cfg.analogy_map_threshold
         and ph_cosine >= cfg.analogy_ph_threshold
-        and step_map_mean >= cfg.analogy_step_threshold
+        and step_map_mean >= cfg.analogy_strong_step_minimum
     )
-    weak = (
+    strong_step_advisory_passed = step_map_mean >= cfg.analogy_step_threshold
+    strong = bool(strong_required)
+    weak_independent = (
         full_map["valid_fraction"] >= cfg.analogy_weak_map_threshold
-        and step_map_mean >= cfg.analogy_weak_step_threshold
+        and step_map_mean >= cfg.analogy_strong_step_minimum
         and (ph_cosine >= cfg.analogy_weak_ph_threshold or ph_pass_count >= 2)
     )
+    weak = bool(strong or weak_independent)
     candidate = (
         full_map["valid_fraction"] >= cfg.analogy_candidate_map_threshold
         and step_map_mean >= cfg.analogy_candidate_step_threshold
@@ -1031,17 +1173,27 @@ def _analogy_payload(
         analogy_status = "no_analogy"
     emitted = analogy_status != "no_analogy"
     confidence_score = float(
-        0.50 * full_map["valid_fraction"]
-        + 0.15 * step_map_mean
-        + 0.35 * max(0.0, min(1.0, ph_gate_score))
+        0.55 * full_map["valid_fraction"]
+        + 0.05 * step_map_mean
+        + 0.40 * max(0.0, min(1.0, ph_gate_score))
     )
 
-    def condition(label: str, score: float, threshold: float, passed: bool, *, detail: str = "") -> dict[str, Any]:
+    def condition(
+        label: str,
+        score: float,
+        threshold: float,
+        passed: bool,
+        *,
+        role: str = "required",
+        detail: str = "",
+    ) -> dict[str, Any]:
         return {
             "label": label,
             "score": float(score),
             "threshold": float(threshold),
             "passed": bool(passed),
+            "role": str(role),
+            "required": bool(role != "advisory"),
             "detail": detail,
         }
 
@@ -1051,18 +1203,30 @@ def _analogy_payload(
             float(full_map["valid_fraction"]),
             cfg.analogy_map_threshold,
             float(full_map["valid_fraction"]) >= cfg.analogy_map_threshold,
+            role="required",
         ),
         condition(
             "vectorized PH mean",
             ph_cosine,
             cfg.analogy_ph_threshold,
             ph_cosine >= cfg.analogy_ph_threshold,
+            role="required",
         ),
         condition(
-            "step simplex-map mean",
+            "step simplex-map minimum",
+            step_map_mean,
+            cfg.analogy_strong_step_minimum,
+            step_map_mean >= cfg.analogy_strong_step_minimum,
+            role="minimum",
+            detail="Low sanity floor only; the per-step score is not a primary analogy gate.",
+        ),
+        condition(
+            "step simplex-map advisory target",
             step_map_mean,
             cfg.analogy_step_threshold,
-            step_map_mean >= cfg.analogy_step_threshold,
+            strong_step_advisory_passed,
+            role="advisory",
+            detail="Advisory quality target.  Failure warns about local-step noise but does not demote a strong full-trajectory/PH analogy.",
         ),
     ]
     weak_ph_passed = bool(ph_cosine >= cfg.analogy_weak_ph_threshold or ph_pass_count >= 2)
@@ -1074,10 +1238,12 @@ def _analogy_payload(
             float(full_map["valid_fraction"]) >= cfg.analogy_weak_map_threshold,
         ),
         condition(
-            "step simplex-map mean",
+            "step simplex-map minimum",
             step_map_mean,
-            cfg.analogy_weak_step_threshold,
-            step_map_mean >= cfg.analogy_weak_step_threshold,
+            cfg.analogy_strong_step_minimum,
+            step_map_mean >= cfg.analogy_strong_step_minimum,
+            role="minimum",
+            detail="Weak tier inherits the same low local sanity floor used by the strong required gates.",
         ),
         condition(
             "weak PH evidence",
@@ -1108,12 +1274,22 @@ def _analogy_payload(
             detail="candidate tier uses PH gate = max(vectorized PH mean, best PH feature-family cosine)",
         ),
     ]
-    failed_strong = [item for item in strong_conditions if not item["passed"]]
+    failed_required_strong = [item for item in strong_conditions if item.get("required", True) and not item["passed"]]
+    failed_advisory_strong = [item for item in strong_conditions if not item.get("required", True) and not item["passed"]]
     if strong:
-        narrative = "Strong analogy emitted: all strong map, vectorized-PH, and step-map gates passed."
+        if failed_advisory_strong:
+            advisory = "; ".join(
+                f"{item['label']} {item['score']:.4f} < {item['threshold']:.4f}" for item in failed_advisory_strong
+            )
+            narrative = (
+                "Strong analogy emitted: required full-trajectory simplex-map, vectorized-PH, and minimum local sanity gates passed. "
+                f"Advisory warning: {advisory}."
+            )
+        else:
+            narrative = "Strong analogy emitted: required full-trajectory simplex-map and vectorized-PH gates passed, and the step-map advisory target also passed."
     elif weak:
         failed = "; ".join(
-            f"{item['label']} {item['score']:.4f} < {item['threshold']:.4f}" for item in failed_strong
+            f"{item['label']} {item['score']:.4f} < {item['threshold']:.4f}" for item in failed_required_strong
         )
         narrative = (
             "Weak analogy emitted: weak tier passed, but strong tier failed"
@@ -1130,12 +1306,15 @@ def _analogy_payload(
             "strong": {
                 "full_reasoning_trajectory_simplex_map_threshold": cfg.analogy_map_threshold,
                 "vectorized_persistence_similarity_threshold": cfg.analogy_ph_threshold,
-                "step_simplicial_map_mean_threshold": cfg.analogy_step_threshold,
+                "step_simplicial_map_minimum_threshold": cfg.analogy_strong_step_minimum,
+                "step_simplicial_map_advisory_target": cfg.analogy_step_threshold,
+                "step_simplicial_map_is_advisory": True,
             },
             "weak": {
                 "full_reasoning_trajectory_simplex_map_threshold": cfg.analogy_weak_map_threshold,
                 "vectorized_persistence_similarity_threshold": cfg.analogy_weak_ph_threshold,
-                "step_simplicial_map_mean_threshold": cfg.analogy_weak_step_threshold,
+                "step_simplicial_map_minimum_threshold": cfg.analogy_strong_step_minimum,
+                "strong_tier_implies_weak_tier": True,
                 "minimum_passing_ph_feature_families": 2,
             },
             "candidate": {
@@ -1150,7 +1329,12 @@ def _analogy_payload(
         "decision_summary": {
             "narrative": narrative,
             "active_status": analogy_status,
-            "strong": {"passed": bool(strong), "conditions": strong_conditions},
+            "strong": {
+                "passed": bool(strong),
+                "required_passed": bool(not failed_required_strong),
+                "advisory_warning_count": int(len(failed_advisory_strong)),
+                "conditions": strong_conditions,
+            },
             "weak": {"passed": bool(weak), "conditions": weak_conditions},
             "candidate": {"passed": bool(candidate), "conditions": candidate_conditions},
             "scoreboard": {
@@ -1175,7 +1359,9 @@ def _analogy_payload(
         "memory_simplex_tree": target_tree,
         "candidate_map": full_map,
         "full_reasoning_trajectory_simplex_tree_map": full_map,
+        "map_confidence_summary": full_map["map_confidence_summary"],
         "vectorized_persistence_comparisons": feature_similarity,
+        "vectorized_persistence_feature_family_summary": feature_family_summary,
         "vectorized_persistence_cosine_mean": ph_cosine,
         "persistence_diagram_distances": ph_distance_summary,
         "source_ph_metrics": source_bundle["metrics"],
@@ -1198,6 +1384,7 @@ def build_branching_reasoning_payload(cfg: BranchingTrajectoryConfig | None = No
     positive = step_dist[step_dist > 1e-10]
     max_radius = float(np.quantile(positive, 0.72)) if positive.size else 1.0
     radii = np.linspace(max_radius / max(2, cfg.radius_levels), max_radius, cfg.radius_levels)
+    edge_births = _edge_births_from_distances(step_dist, radii)
     payload = {
         "schema": "toricgt.branching_reasoning_trajectory.v1",
         "source_mode": "synthetic_long_branching_fixture",
@@ -1219,9 +1406,11 @@ def build_branching_reasoning_payload(cfg: BranchingTrajectoryConfig | None = No
         "dag_edges": [[src, dst, kind] for src, dst, kind in dag_edges],
         "reasoning_order_edges": [[idx, idx + 1, idx + 1] for idx in range(len(nodes) - 1)],
         "radius_values": radii.astype(float).round(6).tolist(),
-        "distances": step_dist.astype(float).round(6).tolist(),
+        "distance_storage": "edge_births" if cfg.compact_distance_payload else "dense_matrix",
+        "edge_births": edge_births,
+        "distances": [] if cfg.compact_distance_payload else step_dist.astype(float).round(6).tolist(),
         "triangles": _diameter_triangles(step_dist, limit=cfg.max_render_triangles),
-        "triangle_count_exact": int(len(_diameter_triangles(step_dist))),
+        "triangle_count_exact": _triangle_count(step_dist.shape[0]),
         "render_limits": {
             "visible_edges": "all",
             "max_render_edges": "deprecated_ignored_all_visible_edges",
@@ -1353,6 +1542,7 @@ def build_branching_reasoning_payload_from_embedding_payload(
     positive = step_dist[step_dist > 1e-10]
     max_radius = float(np.quantile(positive, 0.72)) if positive.size else 1.0
     radii = np.linspace(max_radius / max(2, cfg.radius_levels), max_radius, cfg.radius_levels)
+    edge_births = _edge_births_from_distances(step_dist, radii)
     metadata: dict[str, Any] = {}
     if metadata_json_path is not None:
         metadata_path = Path(metadata_json_path)
@@ -1383,9 +1573,11 @@ def build_branching_reasoning_payload_from_embedding_payload(
         "dag_edges": [[src, dst, kind] for src, dst, kind in dag_edges],
         "reasoning_order_edges": [[idx, idx + 1, idx + 1] for idx in range(node_count - 1)],
         "radius_values": radii.astype(float).round(6).tolist(),
-        "distances": step_dist.astype(float).round(6).tolist(),
+        "distance_storage": "edge_births" if cfg.compact_distance_payload else "dense_matrix",
+        "edge_births": edge_births,
+        "distances": [] if cfg.compact_distance_payload else step_dist.astype(float).round(6).tolist(),
         "triangles": _diameter_triangles(step_dist, limit=cfg.max_render_triangles),
-        "triangle_count_exact": int(len(_diameter_triangles(step_dist))),
+        "triangle_count_exact": _triangle_count(step_dist.shape[0]),
         "render_limits": {
             "visible_edges": "all",
             "max_render_edges": "deprecated_ignored_all_visible_edges",
@@ -1482,6 +1674,7 @@ def render_branching_reasoning_report(payload: dict[str, Any], output_dir: Path)
 <h3>Analogical Vertex Correspondence</h3><div id="analogy_vertex_map_table"></div>
 <h3>Simplicial Map Validity</h3><div id="simplicial_map_validity_table"></div>
 <h3>Vectorized Persistence Similarity</h3><div id="ph_table"></div>
+<h3>Vectorized PH Feature-Family Details</h3><div id="ph_feature_family_table"></div>
 <div id="ph_similarity_bar_plot" class="plot smallplot"></div>
 <h3>Persistence Diagram Distances</h3><div id="ph_distance_table"></div>
 <div id="persistence_diagram_plot" class="plot smallplot"></div>
@@ -1527,7 +1720,12 @@ function updateToggleState(toggleId, stateId, onText, offText) {{
   if (el && state) state.textContent = el.checked ? onText : offText;
 }}
 function conditionRows(tierName, tier) {{
-  return tier.conditions.map(item => '<tr><td>'+tierName+'</td><td>'+item.label+'</td><td>'+fmt(item.score)+'</td><td>>= '+fmt(item.threshold)+'</td><td>'+(item.passed ? '<span class="ok">pass</span>' : '<span class="bad">fail</span>')+'</td><td>'+(item.detail || '')+'</td></tr>').join('');
+  return tier.conditions.map(item => {{
+    const role = item.role || (item.required === false ? 'advisory' : 'required');
+    const cls = item.passed ? 'ok' : (role === 'advisory' ? 'warn' : 'bad');
+    const result = item.passed ? 'pass' : (role === 'advisory' ? 'advisory warning' : 'fail');
+    return '<tr><td>'+tierName+'</td><td>'+role+'</td><td>'+item.label+'</td><td>'+fmt(item.score)+'</td><td>>= '+fmt(item.threshold)+'</td><td><span class="'+cls+'">'+result+'</span></td><td>'+(item.detail || '')+'</td></tr>';
+  }}).join('');
 }}
 function decisionConditionRowsHTML() {{
   const decision = trajectory_simplex_payload.analogy.decision_summary;
@@ -1538,7 +1736,7 @@ function decisionConditionRowsHTML() {{
   ].join('');
 }}
 function decisionThresholdTableHTML() {{
-  return '<table><tr><th>tier</th><th>measure</th><th>score</th><th>threshold</th><th>result</th><th>meaning</th></tr>'+
+  return '<table><tr><th>tier</th><th>role</th><th>measure</th><th>score</th><th>threshold</th><th>result</th><th>meaning</th></tr>'+
     decisionConditionRowsHTML()+
     '</table>';
 }}
@@ -1546,8 +1744,11 @@ function decisionStatusBadgesHTML() {{
   const analogy = trajectory_simplex_payload.analogy;
   const summary = analogy.decision_summary;
   const scores = summary.scoreboard;
+  const strongDetail = summary.strong.passed
+    ? (Number(summary.strong.advisory_warning_count || 0) > 0 ? 'required gates passed; advisory warning' : 'required gates passed')
+    : 'one or more required gates failed';
   return [
-    passStatusBadge('strong tier', summary.strong.passed, summary.strong.passed ? 'all strong gates passed' : 'one or more strong gates failed'),
+    passStatusBadge('strong tier', summary.strong.passed, strongDetail),
     passStatusBadge('weak tier', summary.weak.passed, summary.weak.passed ? 'weak retrieval accepted' : 'weak gates failed'),
     passStatusBadge('candidate tier', summary.candidate.passed, summary.candidate.passed ? 'minimum evidence present' : 'minimum evidence failed'),
     infoStatusBadge('full trajectory map', fmt(scores.full_trajectory_simplex_map)),
@@ -1559,7 +1760,10 @@ function decisionStatusBadgesHTML() {{
 function mapSummaryHTML() {{
   const map = trajectory_simplex_payload.analogy.candidate_map;
   const summary = map.map_summary || {{}};
+  const confidence = map.map_confidence_summary || trajectory_simplex_payload.analogy.map_confidence_summary || {{}};
   return '<strong>Compact simplex-map summary</strong><br>'+
+    'map confidence <code>'+fmt(confidence.combined_map_confidence)+'</code> · tier <code>'+(confidence.confidence_tier || 'n/a')+'</code> · '+
+    'vertex-distance quality <code>'+fmt(confidence.vertex_distance_quality_mean)+'</code><br>'+
     'vertices <code>'+summary.source_vertices+' -> '+summary.target_vertices+'</code> · '+
     'edges valid/collapsed/invalid <code>'+summary.valid_edges+'/'+summary.collapsed_edges+'/'+summary.invalid_edges+'</code> · '+
     'triangles valid/collapsed/invalid <code>'+summary.valid_triangles+'/'+summary.collapsed_triangles+'/'+summary.invalid_triangles+'</code><br>'+
@@ -1576,6 +1780,29 @@ function phQuickSummaryHTML() {{
     'best family <code>'+fmt(analogy.analogy_passed_checks.ph_best_family_similarity)+'</code> · '+
     'weak-family pass count <code>'+analogy.analogy_passed_checks.ph_weak_family_pass_count+'</code>'+
     '<div class="status-badge-row">'+top+'</div>';
+}}
+function mapStatusLabel(code) {{
+  const legend = trajectory_simplex_payload.analogy.candidate_map.status_code_legend || {{}};
+  return legend[code] || code || 'unknown';
+}}
+function mapImageSampleRows(records, dim, limit) {{
+  if (!Array.isArray(records) || !records.length) return '<tr><td colspan="4">no compact image records</td></tr>';
+  return records.slice(0, limit).map(row => {{
+    if (dim === 1) {{
+      const image = [row[2], row[3]].filter(v => Number(v) >= 0);
+      return '<tr><td>1</td><td>('+row[0]+', '+row[1]+')</td><td>('+image.join(', ')+')</td><td>'+mapStatusLabel(row[4])+'</td></tr>';
+    }}
+    const image = [row[3], row[4], row[5]].filter(v => Number(v) >= 0);
+    return '<tr><td>2</td><td>('+row[0]+', '+row[1]+', '+row[2]+')</td><td>('+image.join(', ')+')</td><td>'+mapStatusLabel(row[6])+'</td></tr>';
+  }}).join('');
+}}
+function mapImageSampleHTML() {{
+  const map = trajectory_simplex_payload.analogy.candidate_map;
+  return '<h3>Compact Map-Image Sample</h3>'+
+    '<div class="muted">Rows decode compact array records; source/image comparisons are computed in the original embedding space.</div>'+
+    '<div class="scrollbox"><table><tr><th>dim</th><th>source simplex</th><th>image simplex</th><th>status</th></tr>'+
+    mapImageSampleRows(map.edge_images, 1, 8)+mapImageSampleRows(map.triangle_images, 2, 8)+
+    '</table></div>';
 }}
 function markerTrace(name, nodes, showLabels) {{
   return {{
@@ -1617,11 +1844,25 @@ function midpointArrowTrace(pairs, nodesById) {{
   }}
   return {{type:'scatter3d', mode:'markers', x:x, y:y, z:z, text:labels, name:'small midpoint decoding-order arrowheads', marker:{{size:3,color:'rgba(255,209,102,.82)',symbol:'diamond'}}, hovertemplate:'decode arrow %{{text}}<extra></extra>'}};
 }}
-function fullSimplicialEdges(visible, radius) {{
+function edgeBirthPairs(records, visibleSet, rIdx) {{
+  const out = [];
+  if (!Array.isArray(records)) return out;
+  for (const e of records) {{
+    if (Number(e[2]) <= rIdx && visibleSet.has(Number(e[0])) && visibleSet.has(Number(e[1]))) {{
+      out.push([Number(e[0]), Number(e[1]), Number(e[3])]);
+    }}
+  }}
+  return out;
+}}
+function fullSimplicialEdges(visible, radius, rIdx) {{
   const visibleSet = new Set(visible);
+  if (Array.isArray(trajectory_simplex_payload.edge_births) && trajectory_simplex_payload.edge_births.length) {{
+    return edgeBirthPairs(trajectory_simplex_payload.edge_births, visibleSet, rIdx);
+  }}
   let out=[];
+  if (!trajectory_simplex_payload.distances || !trajectory_simplex_payload.distances.length) return out;
   for (let i=0;i<trajectory_simplex_payload.nodes.length;i++) for (let j=i+1;j<trajectory_simplex_payload.nodes.length;j++) {{
-    if (visibleSet.has(i) && visibleSet.has(j) && trajectory_simplex_payload.distances[i][j] <= radius) out.push([i,j]);
+    if (visibleSet.has(i) && visibleSet.has(j) && trajectory_simplex_payload.distances[i][j] <= radius) out.push([i,j,Number(trajectory_simplex_payload.distances[i][j])]);
   }}
   return out;
 }}
@@ -1652,7 +1893,7 @@ function renderTrajectory() {{
   const nodesById = Object.fromEntries(nodes.map(n => [n.id, n]));
   const dagPairs = trajectory_simplex_payload.dag_edges.filter(e => visibleSet.has(e[0]) && visibleSet.has(e[1]));
   const orderPairs = dotted_decode_edges.filter(e => e[2] <= Math.max(1, visible.length-1) && visibleSet.has(e[0]) && visibleSet.has(e[1]));
-  const complexPairs = fullSimplicialEdges(visible, radius);
+  const complexPairs = fullSimplicialEdges(visible, radius, rIdx);
   const tris = showTriangles ? fullTriangles(visible, radius) : [];
   document.getElementById('trajectory_state_caption').innerHTML =
     'radius <code>'+radius.toFixed(3)+'</code> · reasoning level <code>'+level+'</code> · visible vertices <code>'+nodes.length+'</code> · visible one-dimensional simplex edges <code>'+complexPairs.length+'</code> · visible 2-simplex faces <code>'+tris.length+'</code> · label state <code>'+(showLabels ? 'visible' : 'hidden')+'</code>';
@@ -1666,10 +1907,26 @@ function renderTrajectory() {{
   ];
   Plotly.react('trajectory_plot', traces, {{template:'plotly_dark', paper_bgcolor:'#020713', plot_bgcolor:'#020713', scene:{{aspectmode:'data', xaxis:{{title:'PC1'}},yaxis:{{title:'PC2'}},zaxis:{{title:'PC3'}}}}, legend:{{x:0.01,y:0.99,bgcolor:'rgba(2,7,19,.58)'}}, margin:{{l:0,r:0,t:28,b:0}}, showlegend:true}});
 }}
+function stepSimplicialEdges(step, tokenSet, radius, rIdx) {{
+  if (Array.isArray(step.edge_births) && step.edge_births.length) {{
+    return edgeBirthPairs(step.edge_births, tokenSet, rIdx);
+  }}
+  let pairs = [];
+  if (!step.distances || !step.distances.length) return pairs;
+  for (let i=0;i<step.tokens.length;i++) for (let j=i+1;j<step.tokens.length;j++) {{
+    if (tokenSet.has(i) && tokenSet.has(j) && step.distances[i][j] <= radius) pairs.push([i,j,Number(step.distances[i][j])]);
+  }}
+  return pairs;
+}}
+function edgeBirthRadius(step, edge) {{
+  if (edge.length >= 3 && Number.isFinite(Number(edge[2]))) return Number(edge[2]);
+  if (step.distances && step.distances.length) return Number(step.distances[edge[0]][edge[1]]);
+  return NaN;
+}}
 function simplexTableHTML(step, tokens, pairs, tris) {{
   const tokenById = Object.fromEntries(step.tokens.map(t => [t.id, t]));
   const vertexRows = tokens.map(t => '<tr><td>0</td><td>('+t.id+')</td><td>0.000</td><td>'+t.text+'</td></tr>');
-  const edgeRows = pairs.map(e => '<tr><td>1</td><td>('+e[0]+', '+e[1]+')</td><td>'+Number(step.distances[e[0]][e[1]]).toFixed(3)+'</td><td>'+tokenById[e[0]].text+' -> '+tokenById[e[1]].text+'</td></tr>');
+  const edgeRows = pairs.map(e => '<tr><td>1</td><td>('+e[0]+', '+e[1]+')</td><td>'+edgeBirthRadius(step, e).toFixed(3)+'</td><td>'+tokenById[e[0]].text+' -> '+tokenById[e[1]].text+'</td></tr>');
   const triRows = tris.map(t => '<tr><td>2</td><td>('+t[0]+', '+t[1]+', '+t[2]+')</td><td>'+Number(t[3]).toFixed(3)+'</td><td>faces ('+t[0]+', '+t[1]+'), ('+t[0]+', '+t[2]+'), ('+t[1]+', '+t[2]+')</td></tr>');
   return '<strong>Selected-step simplex tree filtration</strong><br>'+
     '<span class="muted">Rows are the active simplices at the current radius and decoding-order sliders.  Edges are all visible one-dimensional simplices; no edge cap is applied.</span>'+
@@ -1693,10 +1950,7 @@ function renderStep(stepId) {{
   const showLabels = document.getElementById('step_label_toggle').checked;
   updateToggleState('step_triangle_toggle', 'step_triangle_state', 'faces visible', 'faces hidden');
   updateToggleState('step_label_toggle', 'step_label_state', 'labels visible', 'labels hidden');
-  let pairs=[];
-  for (let i=0;i<step.tokens.length;i++) for (let j=i+1;j<step.tokens.length;j++) {{
-    if (tokenSet.has(i) && tokenSet.has(j) && step.distances[i][j] <= radius) pairs.push([i,j]);
-  }}
+  const pairs = stepSimplicialEdges(step, tokenSet, radius, rIdx);
   const decodePairs = step.decode_edges.filter(e => e[2] <= order && tokenSet.has(e[0]) && tokenSet.has(e[1]));
   const activeTris = step.triangles.filter(t => tokenSet.has(t[0]) && tokenSet.has(t[1]) && tokenSet.has(t[2]) && t[3] <= radius);
   const tris = showTriangles ? activeTris : [];
@@ -1717,10 +1971,20 @@ function treeNodesAtLevel(tree, level) {{
 }}
 function treeEdgesAtRadius(tree, ids, rIdx) {{
   const visible = new Set(ids);
+  if (Array.isArray(tree.edge_births) && tree.edge_births.length) {{
+    return tree.edge_births
+      .filter(e => Number(e[2]) <= rIdx && visible.has(Number(e[0])) && visible.has(Number(e[1])))
+      .map(e => ({{simplex:[Number(e[0]), Number(e[1])], birth_radius_index:Number(e[2]), birth_radius:Number(e[3]), diameter:Number(e[4])}}));
+  }}
   return tree.edges.filter(e => e.birth_radius_index <= rIdx && visible.has(e.simplex[0]) && visible.has(e.simplex[1]));
 }}
 function treeTrianglesAtRadius(tree, ids, rIdx) {{
   const visible = new Set(ids);
+  if (Array.isArray(tree.triangle_births) && tree.triangle_births.length) {{
+    return tree.triangle_births
+      .filter(t => Number(t[3]) <= rIdx && visible.has(Number(t[0])) && visible.has(Number(t[1])) && visible.has(Number(t[2])))
+      .map(t => ({{simplex:[Number(t[0]), Number(t[1]), Number(t[2])], birth_radius_index:Number(t[3]), birth_radius:Number(t[4]), diameter:Number(t[5])}}));
+  }}
   return tree.triangles.filter(t => t.birth_radius_index <= rIdx && visible.has(t.simplex[0]) && visible.has(t.simplex[1]) && visible.has(t.simplex[2]));
 }}
 function treeMarkerTrace(tree, name, level, showLabels) {{
@@ -1840,7 +2104,7 @@ function renderAnalogy() {{
   const memoryTris = treeTrianglesAtRadius(memoryTree, memoryIds, rIdx);
   const visibleArrows = sourceIds.filter(id => analogy.candidate_map.vertex_map[id] !== undefined && memoryIds.includes(analogy.candidate_map.vertex_map[id])).length;
   document.getElementById('analogy_state_caption').innerHTML =
-    'radius <code>'+radius.toFixed(3)+'</code> · reasoning level <code>'+level+'</code> · source/memory vertices <code>'+sourceIds.length+' / '+memoryIds.length+'</code> · one-dimensional simplex edges <code>'+sourceEdges.length+' / '+memoryEdges.length+'</code> · available 2-simplex faces <code>'+sourceTris.length+' / '+memoryTris.length+'</code> · rendered map arrows <code>'+visibleArrows+'</code> · label state <code>'+(showLabels ? 'visible' : 'hidden')+'</code>';
+    'analogy radius <code>'+radius.toFixed(3)+'</code> · analogy reasoning level <code>'+level+'</code> · source/memory vertices <code>'+sourceIds.length+' / '+memoryIds.length+'</code> · one-dimensional simplex edges <code>'+sourceEdges.length+' / '+memoryEdges.length+'</code> · available 2-simplex faces <code>'+sourceTris.length+' / '+memoryTris.length+'</code> · rendered map arrows <code>'+visibleArrows+'</code> · label state <code>'+(showLabels ? 'visible' : 'hidden')+'</code>';
   const traces = [
     showTriangles ? treeMeshTrace(sourceTree, 'source simplex-tree 2-simplices', level, rIdx, '#37e8ff') : {{type:'mesh3d', x:[], y:[], z:[], i:[], j:[], k:[], name:'source simplex-tree 2-simplices hidden', opacity:0.0}},
     showTriangles ? treeMeshTrace(memoryTree, 'memory simplex-tree 2-simplices', level, rIdx, '#ff4fd8') : {{type:'mesh3d', x:[], y:[], z:[], i:[], j:[], k:[], name:'memory simplex-tree 2-simplices hidden', opacity:0.0}},
@@ -1858,16 +2122,19 @@ function renderAnalogy() {{
 }}
 function renderValidityTable() {{
   const map = trajectory_simplex_payload.analogy.candidate_map;
+  const confidence = map.map_confidence_summary || {{}};
   const rows = [
     '<tr><td>map counts</td><td>vertices</td><td>'+map.vertex_map.length+'</td><td>'+map.vertex_map.length+'</td><td><span class="ok">mapped</span></td><td>nearest-neighbor vertex map in original embedding space</td></tr>',
     '<tr><td>map counts</td><td>one-dimensional simplex images</td><td>'+map.valid_edges+'</td><td>'+map.source_edges+'</td><td>'+(map.invalid_edges === 0 ? '<span class="ok">all valid/collapsed</span>' : '<span class="warn">some invalid</span>')+'</td><td>edge images must be target edges or collapsed vertices</td></tr>',
     '<tr><td>map counts</td><td>2-simplex images</td><td>'+map.valid_triangles+'</td><td>'+map.source_triangles+'</td><td>'+(map.invalid_triangles === 0 ? '<span class="ok">all valid/collapsed</span>' : '<span class="warn">some invalid</span>')+'</td><td>triangle images must be target triangles or collapsed faces</td></tr>',
+    '<tr><td>map confidence</td><td>simplex-image validity</td><td>'+fmt(confidence.simplex_image_validity)+'</td><td>primary map evidence</td><td><span class="ok">'+(confidence.confidence_tier || 'n/a')+'</span></td><td>fraction of one-dimensional and 2-simplex images that are valid or collapsed</td></tr>',
+    '<tr><td>map confidence</td><td>vertex-distance quality</td><td>'+fmt(confidence.vertex_distance_quality_mean)+'</td><td>normalized by radius '+fmt(confidence.normalizing_radius)+'</td><td><span class="ok">'+fmt(confidence.combined_map_confidence)+'</span></td><td>nearest-neighbor map tightness in original embedding coordinates; PCA is display-only</td></tr>',
     decisionConditionRowsHTML()
   ];
   document.getElementById('simplicial_map_validity_table').innerHTML =
     '<table><tr><th>group</th><th>measure</th><th>score/count</th><th>threshold/total</th><th>result</th><th>meaning</th></tr>'+
     rows.join('')+
-    '</table>';
+    '</table>'+mapImageSampleHTML();
 }}
 function analogyVertexDetailsHTML(side, vertex) {{
   return '<strong>'+side+' analogy vertex '+vertex.id+' / '+vertex.label+'</strong><br>'+
@@ -1894,10 +2161,22 @@ function phTable() {{
   const comp = trajectory_simplex_payload.analogy.vectorized_persistence_comparisons;
   let rows = Object.keys(comp).map(k => '<tr><td>'+k+'</td><td>'+Number(comp[k]).toFixed(4)+'</td></tr>').join('');
   document.getElementById('ph_table').innerHTML = '<table><tr><th>vectorized PH feature</th><th>cosine similarity</th></tr>'+rows+'</table>';
+  renderPHFeatureFamilyTable();
   renderPHSimilarityBars();
   renderPHDistanceTable();
   document.getElementById('analogy_decision').textContent = JSON.stringify(trajectory_simplex_payload.analogy, null, 2);
   document.getElementById('raw_payload').textContent = JSON.stringify({{schema:trajectory_simplex_payload.schema, source_mode:trajectory_simplex_payload.source_mode, source_metadata:trajectory_simplex_payload.source_metadata, controls:trajectory_simplex_payload.controls, analogy:trajectory_simplex_payload.analogy, gflownet_flow:gflownet_flow}}, null, 2);
+}}
+function renderPHFeatureFamilyTable() {{
+  const summary = trajectory_simplex_payload.analogy.vectorized_persistence_feature_family_summary || {{}};
+  const rows = Array.isArray(summary.rows) ? summary.rows : [];
+  const body = rows.map(row => '<tr><td>'+row.dimension+'</td><td>'+row.family+'</td><td>'+fmt(row.cosine_similarity)+'</td><td>'+fmt(row.source_norm)+'</td><td>'+fmt(row.memory_norm)+'</td><td>'+fmt(row.source_l1_mass)+'</td><td>'+fmt(row.memory_l1_mass)+'</td><td>'+row.vector_length+'</td></tr>').join('');
+  const familyMeans = summary.family_means || {{}};
+  const meanRows = Object.keys(familyMeans).map(key => '<span class="status-badge info">'+key+' mean '+fmt(familyMeans[key])+'</span>').join('');
+  document.getElementById('ph_feature_family_table').innerHTML =
+    '<div class="muted">Rows are computed from GUDHI vectorized persistent-homology arrays in the original embedding space.  PCA is not used for these comparisons.</div>'+
+    '<div class="status-badge-row">'+meanRows+'</div>'+
+    '<div class="scrollbox"><table><tr><th>dimension</th><th>family</th><th>cosine</th><th>source norm</th><th>memory norm</th><th>source L1</th><th>memory L1</th><th>vector length</th></tr>'+body+'</table></div>';
 }}
 function renderPHSimilarityBars() {{
   const comp = trajectory_simplex_payload.analogy.vectorized_persistence_comparisons;

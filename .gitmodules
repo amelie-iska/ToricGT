@@ -1,0 +1,3 @@
+[submodule "external/gflownet"]
+	path = external/gflownet
+	url = https://github.com/amelie-iska/gflownet.git

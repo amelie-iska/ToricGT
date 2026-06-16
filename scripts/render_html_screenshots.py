@@ -81,6 +81,12 @@ def parse_args() -> argparse.Namespace:
         default=500,
         help="Delay after each interaction-audit state before taking its screenshot.",
     )
+    parser.add_argument(
+        "--assert-branching-report",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Fail when a ToricGT branching reasoning report loses required threshold, slider, or detail-panel DOM evidence.",
+    )
     return parser.parse_args()
 
 
@@ -249,6 +255,98 @@ async def _run_interaction_audit(
     return records
 
 
+async def _assert_branching_report_dom(page: Any) -> list[dict[str, Any]]:
+    """Assert the interactive branching report still exposes its audit contract."""
+
+    is_branching = bool(
+        await page.evaluate(
+            "Boolean(document.getElementById('top_analogy_decision_status_badges') && document.getElementById('trajectory_state_caption'))"
+        )
+    )
+    if not is_branching:
+        return []
+    has_hook = bool(await page.evaluate("typeof window.toricgtScreenshotAudit === 'function'"))
+    if has_hook:
+        await page.evaluate("() => window.toricgtScreenshotAudit('step_detail')")
+        await page.wait_for_timeout(100)
+        await page.evaluate("() => window.toricgtScreenshotAudit('analogy_detail')")
+        await page.wait_for_timeout(100)
+    checks = [
+        (
+            "analogy_status_matches_priority_rule",
+            """(() => {
+              const a = trajectory_simplex_payload?.analogy;
+              if (!a?.decision_summary) return false;
+              const expected = a.decision_summary.strong.passed ? 'strong_analogy'
+                : (a.decision_summary.weak.passed ? 'weak_analogy'
+                : (a.decision_summary.candidate.passed ? 'candidate_analogy' : 'no_analogy'));
+              return a.analogy_status === expected;
+            })()""",
+        ),
+        (
+            "compact_edge_birth_payload",
+            """(() => {
+              const p = trajectory_simplex_payload;
+              return p?.distance_storage === 'edge_births'
+                && Array.isArray(p.edge_births)
+                && p?.analogy?.source_simplex_tree?.edge_storage === 'compact_edge_births'
+                && Array.isArray(p.analogy.source_simplex_tree.edge_births)
+                && p?.analogy?.candidate_map?.map_image_storage === 'compact_arrays';
+            })()""",
+        ),
+        (
+            "top_analogy_status_badges",
+            "Boolean(document.getElementById('top_analogy_decision_status_badges')?.textContent.includes('tier'))",
+        ),
+        (
+            "top_threshold_table_step_gate",
+            "Boolean(document.getElementById('top_analogy_threshold_table')?.textContent.includes('step simplex-map') && document.getElementById('top_analogy_threshold_table')?.textContent.includes('advisory'))",
+        ),
+        (
+            "full_slider_caption",
+            "Boolean(document.getElementById('trajectory_state_caption')?.textContent.includes('visible one-dimensional simplex edges'))",
+        ),
+        (
+            "step_slider_caption",
+            "Boolean(document.getElementById('step_state_caption')?.textContent.includes('visible tokens'))",
+        ),
+        (
+            "analogy_slider_caption",
+            "Boolean(document.getElementById('analogy_state_caption')?.textContent.includes('analogy'))",
+        ),
+        (
+            "token_detail_panel",
+            "Boolean(document.getElementById('token_detail_panel')?.textContent.includes('Token') && document.getElementById('token_detail_panel')?.textContent.includes('NLL'))",
+        ),
+        (
+            "analogy_detail_panel",
+            "Boolean(document.getElementById('analogy_detail_panel')?.textContent.includes('analogy vertex') && document.getElementById('analogy_detail_panel')?.textContent.includes('original embedding'))",
+        ),
+        (
+            "compact_map_image_sample",
+            "Boolean(document.getElementById('simplicial_map_validity_table')?.textContent.includes('Compact Map-Image Sample'))",
+        ),
+        (
+            "map_confidence_summary",
+            "Boolean(document.getElementById('simplicial_map_validity_table')?.textContent.includes('map confidence') && document.getElementById('analogy_map_summary')?.textContent.includes('vertex-distance quality'))",
+        ),
+        (
+            "ph_feature_family_table",
+            "Boolean(document.getElementById('ph_feature_family_table')?.textContent.includes('Vectorized') || document.getElementById('ph_feature_family_table')?.textContent.includes('landscape'))",
+        ),
+    ]
+    records: list[dict[str, Any]] = []
+    for label, expression in checks:
+        try:
+            passed = bool(await page.evaluate(expression))
+            error = ""
+        except Exception as exc:
+            passed = False
+            error = repr(exc)
+        records.append({"label": label, "status": "ok" if passed else "error", "error": error})
+    return records
+
+
 async def capture_pages(
     files: list[Path],
     *,
@@ -263,6 +361,7 @@ async def capture_pages(
     viewport_slices: int,
     interaction_audit: bool,
     interaction_delay_ms: int,
+    assert_branching_report: bool,
 ) -> list[dict[str, Any]]:
     screenshots = output_dir / "screenshots"
     screenshots.mkdir(parents=True, exist_ok=True)
@@ -279,6 +378,7 @@ async def capture_pages(
             shot_height = 0
             slice_records: list[str] = []
             interaction_records: list[dict[str, Any]] = []
+            assertion_records: list[dict[str, Any]] = []
             try:
                 await page.goto(path.resolve().as_uri(), wait_until=str(wait_until), timeout=int(timeout_ms))
                 await page.wait_for_timeout(int(wait_ms))
@@ -309,6 +409,15 @@ async def capture_pages(
                         full_page=bool(full_page),
                         delay_ms=int(interaction_delay_ms),
                     )
+                if bool(assert_branching_report):
+                    assertion_records = await _assert_branching_report_dom(page)
+                    failed_assertions = [
+                        str(item.get("label", "assertion"))
+                        for item in assertion_records
+                        if item.get("status") != "ok"
+                    ]
+                    if failed_assertions:
+                        raise AssertionError("branching report assertions failed: " + ", ".join(failed_assertions))
             except Exception as exc:
                 status = "error"
                 error = repr(exc)
@@ -322,6 +431,7 @@ async def capture_pages(
                     "height": int(shot_height),
                     "slices": slice_records,
                     "interaction_screenshots": interaction_records,
+                    "assertions": assertion_records,
                 }
             )
         await browser.close()
@@ -409,6 +519,18 @@ def write_index(records: list[dict[str, Any]], *, source_dir: Path, output_dir: 
                 else:
                     items.append(f"<li><span class='err'>{label}: {status}</span></li>")
             body += "<h2>Interaction States</h2><ul>" + "".join(items) + "</ul>"
+        assertions = record.get("assertions", []) or []
+        if assertions:
+            items = []
+            for item in assertions:
+                if not isinstance(item, dict):
+                    continue
+                label = html.escape(str(item.get("label", "assertion")))
+                status = html.escape(str(item.get("status", "")))
+                cls = "err" if status != "ok" else ""
+                error = html.escape(str(item.get("error", "")))
+                items.append(f"<li class='{cls}'>{label}: <span class='pill'>{status}</span> {error}</li>")
+            body += "<h2>DOM Assertions</h2><ul>" + "".join(items) + "</ul>"
         cards.append(f"<section class='card'>{body}</section>")
     ok_count = sum(1 for record in records if record.get("status") == "ok")
     index = output_dir / "index.html"
@@ -483,6 +605,7 @@ def main() -> None:
             viewport_slices=int(args.viewport_slices),
             interaction_audit=bool(args.interaction_audit),
             interaction_delay_ms=int(args.interaction_delay_ms),
+            assert_branching_report=bool(args.assert_branching_report),
         )
     )
     contact = write_contact_sheet(records, output_dir, cols=int(args.contact_cols))
@@ -505,10 +628,20 @@ def main() -> None:
         "interaction_count": int(
             sum(len(record.get("interaction_screenshots", []) or []) for record in records)
         ),
+        "assert_branching_report": bool(args.assert_branching_report),
+        "assertion_count": int(sum(len(record.get("assertions", []) or []) for record in records)),
+        "assertion_error_count": int(
+            sum(
+                1
+                for record in records
+                for item in (record.get("assertions", []) or [])
+                if isinstance(item, dict) and item.get("status") != "ok"
+            )
+        ),
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2, sort_keys=True))
-    if manifest["error_count"]:
+    if manifest["error_count"] or manifest["assertion_error_count"]:
         raise SystemExit(1)
 
 

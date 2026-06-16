@@ -606,9 +606,9 @@ python scripts/render_toric_embedding_report.py \
 python scripts/render_branching_reasoning_trajectory_report.py \
   --output-dir outputs/latest_branching_reasoning_trajectory_report \
   --embedding-dim 20 \
-  --trajectory-levels 23 \
-  --branch-lanes 9 \
-  --side-branch-length 6 \
+  --trajectory-levels 28 \
+  --branch-lanes 12 \
+  --side-branch-length 9 \
   --token-count-min 8 \
   --token-count-max 12 \
   --radius-levels 6 \
@@ -630,7 +630,8 @@ python scripts/render_html_screenshots.py \
   --output-dir outputs/latest_branching_reasoning_trajectory_report/html_screenshots \
   --no-full-page \
   --viewport-slices 8 \
-  --interaction-audit
+  --interaction-audit \
+  --assert-branching-report
 
 python scripts/render_outputs_index.py --output-root outputs
 ```
@@ -647,27 +648,52 @@ makes the map read as a map between reasoning simplex trees rather than only
 as two dense point clouds.  The page reports full-trajectory simplex-map validity,
 per-step simplex-map validity, vectorized PH feature similarities, the PH gate
 score, exact GUDHI bottleneck distances, GUDHI Wasserstein distances when
-`POT` is installed, and the tier thresholds.  Visible one-dimensional simplex
-edges are not capped inside the selected point set; dense real checkpoint
+`POT` is installed, and the tier thresholds.  It also renders a PH
+feature-family table with per-dimension landscape, persistence-image,
+silhouette, and entropy-vector cosine scores plus source/memory vector norms,
+so the vectorized persistent-homology evidence is inspectable without opening
+the raw JSON.  Visible one-dimensional simplex
+edges are not capped inside the selected point set.  The browser payload uses
+compact exact edge-birth records for the radius grid by default, rather than
+shipping dense distance matrices; older dense payloads still render through a
+fallback path.  Dense real checkpoint
 payloads should be made browser-tractable with `--embedding-max-nodes` and
 `--embedding-node-offset`, which select the point set before any simplex tree
 is constructed.  Dense views are controlled by radius/reasoning sliders and
 default-off filled 2-simplex toggles.  Long views also include label-density
 toggles for the full trajectory, selected step, and analogy panels; these hide
 text labels without dropping vertices or visible one-dimensional simplices.
-The strong analogy gate treats the per-step simplex-map mean as a loose local
-sanity check rather than as equally important evidence; full-trajectory
-simplicial-map validity and vectorized persistent-homology similarity dominate
-the decision.  The screenshot renderer has an `--interaction-audit` mode that moves the
+The strong analogy gate now treats the per-step simplex-map mean as advisory
+rather than as an equally weighted hard gate.  A strong analogy requires the
+full-trajectory simplicial-map threshold, the vectorized persistent-homology
+threshold, and a low local sanity floor; the stricter per-step threshold is
+rendered as an advisory warning when it fails.  The threshold table therefore
+labels every row as `required`, `minimum`, or `advisory`, so a local-step warning
+cannot silently demote a globally strong analogical map.  The screenshot renderer has an `--interaction-audit` mode that moves the
 radius/reasoning/decoding sliders, enables triangle toggles, and fills
 representative reasoning-node, token, and analogy detail panels before
-capturing additional screenshots.  The analogy panel now renders the payload's
+capturing additional screenshots.  Add `--assert-branching-report` to make
+Playwright fail if the threshold table, status badges, slider captions, or
+token/analogy detail panels disappear from the rendered DOM, or if the rendered
+status no longer matches the priority rule `strong > weak > candidate > none`.
+The periodic analysis watcher enables this strict branch/merge report assertion
+by default when branch/merge screenshots are enabled; use
+`--no-assert-branching-reasoning-report` only for debugging a broken report.
+The analogy panel now renders the payload's
 actual decision rule as pass/fail threshold status badges for the strong,
 weak, and candidate tiers; when a `weak_analogy` is emitted, the banner states which strong gate
 failed.  A compact map summary reports vertex count,
 edge and 2-simplex image status counts, valid-or-collapsed fraction, and
 mean/max original-embedding map distance next to a quick vectorized-PH summary
-so the threshold labels match the displayed evidence.  The same page renders GUDHI
+so the threshold labels match the displayed evidence.  The same summary now
+separates simplex-image validity from vertex-distance quality and reports a
+combined map-confidence tier; simplex validity remains the primary analogy
+gate, while vertex-distance quality checks that the nearest-neighbor map is
+tight in the original embedding coordinates.  Source/memory simplex
+trees and candidate simplicial-map images use compact array records with
+explicit column schemas (`compact_edge_births`, `compact_triangle_births`, and
+`compact_arrays`) to keep long reports browser-tractable while preserving exact
+radius-grid one-dimensional edges.  The same page renders GUDHI
 persistence diagrams, landscapes, persistence images, silhouettes, entropy
 vectors, Betti curves, lifetime histograms, a vectorized-PH similarity bar
 chart, and an H1 source-minus-memory difference plot for the source and memory

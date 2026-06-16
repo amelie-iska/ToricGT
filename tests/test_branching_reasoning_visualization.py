@@ -9,6 +9,7 @@ import numpy as np
 
 from toricgt.branching_reasoning_visualization import (
     BranchingTrajectoryConfig,
+    _long_branch_dag,
     build_branching_reasoning_payload,
     build_branching_reasoning_payload_from_embedding_payload,
     render_branching_reasoning_report,
@@ -32,19 +33,37 @@ def test_branching_reasoning_payload_has_required_topological_contract() -> None
     assert payload["controls"]["full"] == ["radius_slider", "reasoning_level_slider"]
     assert payload["controls"]["step"] == ["step_radius_slider", "decoding_order_slider"]
     assert payload["controls"]["analogy"] == ["analogy_radius_slider", "analogy_reasoning_level_slider"]
+    assert payload["distance_storage"] == "edge_births"
+    assert payload["distances"] == []
+    assert payload["edge_births"]
+    assert payload["triangle_count_exact"] >= len(payload["triangles"])
+    assert payload["steps"][0]["distance_storage"] == "edge_births"
+    assert payload["steps"][0]["distances"] == []
+    assert payload["steps"][0]["edge_births"]
+    assert payload["steps"][0]["triangle_count_exact"] >= len(payload["steps"][0]["triangles"])
     analogy = payload["analogy"]
     assert payload["visible_edge_policy"] == "all_visible_edges"
+    assert payload["distance_storage"] == "edge_births"
+    assert payload["distances"] == []
+    assert payload["edge_births"]
     assert "full_reasoning_trajectory_simplex_tree_map" in analogy
     assert "source_simplex_tree" in analogy
     assert "memory_simplex_tree" in analogy
+    assert analogy["source_simplex_tree"]["edge_storage"] == "compact_edge_births"
+    assert analogy["source_simplex_tree"]["triangle_storage"] == "compact_triangle_births"
+    assert analogy["source_simplex_tree"]["edge_births"]
+    assert analogy["source_simplex_tree"]["edges"] == []
     assert "candidate_map" in analogy
     assert analogy["source_simplex_tree"]["simplex_tree_backend"] == "gudhi.RipsComplex.create_simplex_tree"
     assert analogy["source_simplex_tree"]["visible_edge_policy"] == "all_visible_edges"
     assert analogy["source_simplex_tree"]["rendered_edge_count"] == analogy["source_simplex_tree"]["num_edges"]
     assert analogy["memory_simplex_tree"]["num_vertices"] == analogy["source_simplex_tree"]["num_vertices"]
+    assert analogy["candidate_map"]["map_image_storage"] == "compact_arrays"
     assert "edge_images" in analogy["candidate_map"]
     assert "triangle_images" in analogy["candidate_map"]
+    assert isinstance(analogy["candidate_map"]["edge_images"][0], list)
     assert "vectorized_persistence_comparisons" in analogy
+    assert "vectorized_persistence_feature_family_summary" in analogy
     assert "persistence_diagram_distances" in analogy
     assert "by_dimension" in analogy["persistence_diagram_distances"]
     assert "bottleneck_distance" in analogy["persistence_diagram_distances"]["by_dimension"]["1"]
@@ -55,16 +74,26 @@ def test_branching_reasoning_payload_has_required_topological_contract() -> None
         "no_analogy",
     }
     assert "analogy_confidence_score" in analogy
+    assert "map_confidence_summary" in analogy
+    assert analogy["candidate_map"]["map_confidence_summary"] == analogy["map_confidence_summary"]
+    assert 0.0 <= analogy["map_confidence_summary"]["combined_map_confidence"] <= 1.0
+    assert "vertex_distance_quality_mean" in analogy["map_confidence_summary"]
     assert "analogy_passed_checks" in analogy
     assert "decision_summary" in analogy
     assert "narrative" in analogy["decision_summary"]
     assert {"strong", "weak", "candidate", "scoreboard"}.issubset(analogy["decision_summary"])
     assert any(
-        item["label"] == "step simplex-map mean"
+        item["label"].startswith("step simplex-map")
+        for item in analogy["decision_summary"]["strong"]["conditions"]
+    )
+    assert any(
+        item["role"] == "advisory" and item["required"] is False
         for item in analogy["decision_summary"]["strong"]["conditions"]
     )
     assert "ph_gate_threshold" in analogy["decision_rule"]["candidate"]
-    assert analogy["decision_rule"]["strong"]["step_simplicial_map_mean_threshold"] <= 0.45
+    assert analogy["decision_rule"]["strong"]["step_simplicial_map_is_advisory"] is True
+    assert analogy["decision_rule"]["strong"]["step_simplicial_map_advisory_target"] <= 0.45
+    assert analogy["decision_rule"]["strong"]["step_simplicial_map_minimum_threshold"] <= 0.15
     assert analogy["decision_rule"]["candidate"]["full_reasoning_trajectory_simplex_map_threshold"] <= 0.35
     assert analogy["decision_rule"]["candidate"]["vectorized_persistence_similarity_threshold"] <= 0.05
     assert len(analogy["candidate_map"]["vertex_map_distances"]) == len(analogy["candidate_map"]["vertex_map"])
@@ -82,7 +111,44 @@ def test_branching_reasoning_payload_has_required_topological_contract() -> None
     assert {"landscape", "persistence_image", "silhouette", "entropy_vector"}.issubset(
         analogy["vectorized_persistence_comparisons"]
     )
+    family_summary = analogy["vectorized_persistence_feature_family_summary"]
+    assert family_summary["backend"] == "GUDHI vectorized_diagram_metrics"
+    assert {"landscape", "persistence_image", "silhouette", "entropy_vector"}.issubset(
+        family_summary["family_means"]
+    )
+    assert {"H0", "H1", "H2"}.issubset(family_summary["dimension_means"])
+    assert len(family_summary["rows"]) == 12
+    assert all("cosine_similarity" in row and "source_norm" in row and "memory_norm" in row for row in family_summary["rows"])
     assert "gflownet_flow" in payload
+
+
+def test_strong_analogy_does_not_require_advisory_step_target() -> None:
+    payload = build_branching_reasoning_payload(
+        BranchingTrajectoryConfig(
+            seed=123,
+            embedding_dim=12,
+            trajectory_levels=9,
+            branch_lanes=4,
+            side_branch_length=3,
+            token_count_min=5,
+            token_count_max=6,
+            radius_levels=5,
+            ph_landscape_resolution=16,
+            ph_image_resolution=6,
+            analogy_map_threshold=0.0,
+            analogy_ph_threshold=0.0,
+            analogy_step_threshold=0.99,
+            analogy_strong_step_minimum=0.0,
+        )
+    )
+    analogy = payload["analogy"]
+    assert analogy["analogy_status"] == "strong_analogy"
+    assert analogy["decision_summary"]["strong"]["passed"] is True
+    assert analogy["decision_summary"]["strong"]["advisory_warning_count"] >= 1
+    advisory_rows = [
+        item for item in analogy["decision_summary"]["strong"]["conditions"] if item["role"] == "advisory"
+    ]
+    assert advisory_rows and advisory_rows[0]["passed"] is False
 
 
 def test_long_branching_reasoning_payload_has_token_metadata() -> None:
@@ -117,6 +183,37 @@ def test_long_branching_reasoning_payload_has_token_metadata() -> None:
         "rank",
     ]:
         assert key in token
+    for step in payload["steps"][:5]:
+        for token in step["tokens"][:3]:
+            assert isinstance(token["text"], str) and token["text"]
+            assert isinstance(token["token_type"], str) and token["token_type"]
+            assert int(token["source_step"]) == int(step["step_index"])
+            assert int(token["decode_order"]) >= 0
+            assert np.isfinite(float(token["nll"]))
+            assert np.isfinite(float(token["logprob"]))
+            assert np.isfinite(float(token["entropy"]))
+
+
+def test_larger_branching_fixture_exceeds_previous_report_scale() -> None:
+    cfg = BranchingTrajectoryConfig(
+        seed=555,
+        embedding_dim=16,
+        trajectory_levels=28,
+        branch_lanes=12,
+        side_branch_length=9,
+        token_count_min=4,
+        token_count_max=6,
+        radius_levels=5,
+        ph_landscape_resolution=16,
+        ph_image_resolution=6,
+        max_render_triangles=600,
+        max_map_image_records=600,
+    )
+    levels, edges = _long_branch_dag(cfg)
+    nodes = sum(len(level) for level in levels)
+
+    assert nodes > 492
+    assert len(edges) > 580
 
 
 def test_embedding_payload_builder_uses_saved_hidden_vectors(tmp_path: Path) -> None:
@@ -268,6 +365,15 @@ def test_branching_reasoning_report_contains_dual_sliders_and_payloads(tmp_path:
     required = [
         "trajectory_simplex_payload",
         "simplex_step_payload",
+        "distance_storage",
+        "edge_births",
+        "edgeBirthPairs",
+        "stepSimplicialEdges",
+        "compact_edge_births",
+        "compact_triangle_births",
+        "compact_arrays",
+        "mapImageSampleHTML",
+        "step simplex-map advisory target",
         "radius_slider",
         "reasoning_level_slider",
         "step_radius_slider",

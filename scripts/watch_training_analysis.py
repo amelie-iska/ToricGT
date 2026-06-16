@@ -162,6 +162,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Render branch/merge reasoning HTML but skip Playwright screenshots.",
     )
+    parser.add_argument(
+        "--assert-branching-reasoning-report",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="When branch/merge screenshots are enabled, fail screenshot rendering if the report DOM contract is broken.",
+    )
     parser.add_argument("--skip-test-time-scaling", action="store_true")
     parser.add_argument("--test-time-scaling-batches", type=int, default=8)
     parser.add_argument("--test-time-scaling-budgets", type=int, nargs="+", default=[1, 4, 16])
@@ -997,29 +1003,32 @@ def run_branching_reasoning_report(args: argparse.Namespace, base: Path, repo: P
         status["trajectory_html"] = str(report_dir / "branching_reasoning_trajectory.html")
     if status["report_render_ok"] and not bool(args.skip_branching_reasoning_screenshots):
         screenshot_dir = report_dir / "html_screenshots"
+        screenshot_cmd = [
+            sys.executable,
+            "scripts/render_html_screenshots.py",
+            "--source-dir",
+            str(report_dir),
+            "--output-dir",
+            str(screenshot_dir),
+            "--width",
+            "1600",
+            "--height",
+            "1000",
+            "--wait-ms",
+            "1800",
+            "--timeout-ms",
+            "90000",
+            "--no-full-page",
+            "--viewport-slices",
+            "8",
+            "--interaction-audit",
+            "--interaction-delay-ms",
+            "700",
+        ]
+        if bool(args.assert_branching_reasoning_report):
+            screenshot_cmd.append("--assert-branching-report")
         status["screenshot_render_ok"] = run_optional_command(
-            [
-                sys.executable,
-                "scripts/render_html_screenshots.py",
-                "--source-dir",
-                str(report_dir),
-                "--output-dir",
-                str(screenshot_dir),
-                "--width",
-                "1600",
-                "--height",
-                "1000",
-                "--wait-ms",
-                "1800",
-                "--timeout-ms",
-                "90000",
-                "--no-full-page",
-                "--viewport-slices",
-                "8",
-                "--interaction-audit",
-                "--interaction-delay-ms",
-                "700",
-            ],
+            screenshot_cmd,
             cwd=repo,
             log_path=base / "logs" / "branching_reasoning_screenshots.log",
         )

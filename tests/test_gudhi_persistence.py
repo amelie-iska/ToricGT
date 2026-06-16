@@ -390,6 +390,17 @@ def test_watcher_index_and_gudhi_args_are_available() -> None:
     assert args.branching_reasoning_max_nodes == 64
     assert args.branching_reasoning_node_offset == 4
     assert args.skip_branching_reasoning_screenshots is True
+    assert args.assert_branching_reasoning_report is True
+    args_no_assert = module.parse_args(
+        [
+            "--start-step",
+            "0",
+            "--target-step",
+            "250",
+            "--no-assert-branching-reasoning-report",
+        ]
+    )
+    assert args_no_assert.assert_branching_reasoning_report is False
 
 
 def test_watcher_status_and_index_include_branching_reasoning_report(tmp_path: Path) -> None:
