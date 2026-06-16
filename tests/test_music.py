@@ -73,3 +73,6 @@ def test_inference_cli_exposes_optional_slepian_music_export() -> None:
     assert "--emit-slepian-music" in result.stdout
     assert "--slepian-music-output-dir" in result.stdout
     assert "--slepian-music-modes" in result.stdout
+    assert "--emit-branching-reasoning-report" in result.stdout
+    assert "--branching-reasoning-max-nodes" in result.stdout
+    assert "--branching-reasoning-screenshots" in result.stdout

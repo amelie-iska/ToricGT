@@ -378,10 +378,56 @@ def test_watcher_index_and_gudhi_args_are_available() -> None:
             "--gudhi-persistence-audit",
             "--gudhi-records",
             "2",
+            "--branching-reasoning-max-nodes",
+            "64",
+            "--branching-reasoning-node-offset",
+            "4",
+            "--skip-branching-reasoning-screenshots",
         ]
     )
     assert args.gudhi_persistence_audit is True
     assert args.gudhi_records == 2
+    assert args.branching_reasoning_max_nodes == 64
+    assert args.branching_reasoning_node_offset == 4
+    assert args.skip_branching_reasoning_screenshots is True
+
+
+def test_watcher_status_and_index_include_branching_reasoning_report(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "watch_training_analysis.py"
+    spec = importlib.util.spec_from_file_location("watch_training_analysis", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    branch_dir = tmp_path / "branching_reasoning_report"
+    branch_dir.mkdir(parents=True)
+    (branch_dir / "branching_reasoning_trajectory.html").write_text("<html>branch</html>", encoding="utf-8")
+    (branch_dir / "status.json").write_text(
+        json.dumps(
+            {
+                "report_render_ok": True,
+                "screenshot_render_ok": False,
+                "embedding_payload_npz": "payload.npz",
+                "embedding_max_nodes": 64,
+                "embedding_node_offset": 4,
+                "report_index_html": str(branch_dir / "index.html"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checkpoint = tmp_path / "random_order_step_00000250.pt"
+    checkpoint.write_bytes(b"")
+    index = module.write_analysis_index(tmp_path, checkpoint, 250, "")
+    status = module.write_analysis_status(tmp_path, checkpoint, 250, "")
+    synopsis = module.write_synopsis(tmp_path, checkpoint, 250, "")
+
+    assert "Branching Reasoning Simplex Report" in index.read_text(encoding="utf-8")
+    payload = json.loads(status.read_text(encoding="utf-8"))
+    assert payload["availability"]["branching_reasoning_report_index"] is True
+    assert payload["branching_reasoning"]["embedding_max_nodes"] == 64
+    assert "Branching Reasoning Simplex Report" in synopsis.read_text(encoding="utf-8")
 
 
 def test_watcher_gudhi_wandb_payload_has_exact_metric_aliases() -> None:

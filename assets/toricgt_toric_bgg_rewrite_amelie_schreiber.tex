@@ -667,6 +667,14 @@ and affine candidate scores
 \end{equation}
 where $P$ is the learned or fixed projection from hidden state to the toric chart.  For a raw tropical attention head, the candidates are $S_{ij}+V_{jc}$; for the toric sidecar we use either an exact affine probe for those candidates or the certified local linearization on the bounded audit window.  Clearing denominators makes $a_r$ and $b_r$ integral after a common scaling.
 
+\begin{definition}[Finite tropical attention sidecar]
+Fix a checkpoint, layer, head, token window, projection $P$, and rationalization scale.  A finite tropical attention sidecar is the tuple
+\begin{equation}
+  \mathsf S_H=(K,N,M,A,b,P,\mathcal F_H,I_H,\Sigma,\eta),
+\end{equation}
+where $A=(a_1,\ldots,a_R)$ is the quantized exponent table, $b=(b_1,\ldots,b_R)$ is the quantized bias vector, $\mathcal F_H$ is the finite Laurent-polynomial family exported by the selected heads or output coordinates, $I_H=\langle\mathcal F_H\rangle$ when an ideal sidecar is used, $\Sigma$ is the chosen rational fan, and $\eta$ records the lattice basis, denominator-clearing scale, coefficient valuation convention, and the max-plus/min-initial sign convention.  The Laurent-polynomial sidecar audits active candidates and tie loci; the toric-ideal sidecar audits binomial relations, Groebner data, initial ideals, Hilbert/Betti data, and free resolutions.  Both sidecars are finite objects attached to this checkpoint/window only.
+\end{definition}
+
 Define the Laurent polynomial
 \begin{equation}
   f=\sum_{r=1}^R \tau^{-b_r}\chi^{a_r}\in K[M].
@@ -738,16 +746,16 @@ Let $\Sigma$ be a rational fan refining the active normal complex of a finite tr
   \begin{equation}
     T_N\times \overline Y_H\longrightarrow X_\Sigma
   \end{equation}
-  is flat and surjective, then $\overline Y_H\subset X_\Sigma$ is a tropical compactification of $Y_H$; if the multiplication map is smooth and surjective, it is a schon tropical compactification;
+  is flat and surjective, then $\overline Y_H\subset X_\Sigma$ is a tropical compactification of $Y_H$ in the sense of Tevelev \cite{tevelev2007compactifications}; if the multiplication map is smooth and surjective, it is a schon tropical compactification;
   \item in the finite training regime, even when the global compactification hypotheses are not certified, $\Sigma$ still provides a reproducible toric audit object for active faces, orbit incidence, divisor bends, monomial initial ideals, and local free resolutions.
 \end{enumerate}
 \end{theorem}
 
 \begin{proof}
-The first claim is the defining property of a common refinement of the normal and Groebner decompositions.  Initial forms and active supports are locally constant on relative interiors of cones in such a refinement.  The second claim is the standard orbit-cone correspondence for toric varieties: cones $\sigma\in\Sigma$ correspond to torus orbits $O(\sigma)$, with orbit closures ordered by face relations.  The third claim is Tevelev's tropical compactification criterion, stated here in the sign convention used by the attention sidecar.  The fourth claim follows because the data needed by the audits are finite combinatorial and commutative-algebraic data attached to $\Sigma$, $I_H$, and their initial ideals; those data remain well defined whether or not the closure is globally proper or smooth.
+The first claim is the defining property of a common refinement of the normal and Groebner decompositions.  Initial forms and active supports are locally constant on relative interiors of cones in such a refinement.  The second claim is the standard orbit-cone correspondence for toric varieties: cones $\sigma\in\Sigma$ correspond to torus orbits $O(\sigma)$, with orbit closures ordered by face relations.  The third claim is Tevelev's tropical compactification criterion \cite{tevelev2007compactifications}, stated here in the sign convention used by the attention sidecar.  The fourth claim follows because the data needed by the audits are finite combinatorial and commutative-algebraic data attached to $\Sigma$, $I_H$, and their initial ideals; those data remain well defined whether or not the closure is globally proper or smooth.
 \end{proof}
 
-This theorem is the mathematical guardrail for implementation.  ToricGT does not say that all hidden-state geometry is algebraic.  It says that when a head is used through max-plus candidates with rational exponents, the resulting finite tropical computation has a canonical toric envelope.  That envelope supplies exact algebraic measurements.
+This theorem is the mathematical guardrail for implementation.  ToricGT does not say that all hidden-state geometry is algebraic.  It says that when a head is used through max-plus candidates with rational exponents, the resulting finite tropical computation has a canonical toric envelope.  When the compactification hypotheses in item 3 are not certified, $X_\Sigma$ is called a \emph{finite toric audit envelope}.  The envelope still supplies active faces, orbit labels, one-dimensional-cone incidences, divisor-bend targets, monomial initial ideals, and local resolution data.  It does not by itself authorize claims about proper compactification, smooth boundary behavior, global Chow classes of $\overline Y_H$, or sheaf cohomology of the closure.
 
 \paragraph{Divisors, Chow classes, and intersection metrics.}
 The max-plus function
@@ -858,7 +866,7 @@ Equivariant sheaves become graded $S_\Sigma$-modules modulo the irrelevant locus
 \paragraph{CAS-reproducible audit contract.}
 The exact audit path is:
 \begin{enumerate}[leftmargin=2em]
-  \item export a sidecar JSON containing the rational exponent table $A$, biases $b$, head/layer ids, active sets, projected hidden coordinates, and any ideal generators;
+  \item export a sidecar JSON containing the rational exponent table $A$, biases $b$, lattice basis, denominator-clearing scale, coefficient valuation convention, max-plus/min-initial sign convention, head/layer ids, active sets, projected hidden coordinates, and any ideal generators;
   \item use Sage, polymake, or Normaliz-compatible routines to build Newton polytopes, normal fans, orbit incidence, divisor support functions, and one-dimensional-cone divisor data;
   \item use Macaulay2 with \texttt{Tropical}, Gfan, and Polymake integration to compute tropical varieties, cones, multiplicities, balancing, initial ideals, and min/max-convention checks \cite{m2tropical2019};
   \item use Macaulay2 or Sage for toric ideals, Groebner bases, Hilbert series, Betti tables, free resolutions, Fitting ideals, and monomial-staircase diagrams;
@@ -866,6 +874,21 @@ The exact audit path is:
   \item cache every certified object by a hash of $(A,b,\Sigma,I_H,\text{conventions})$ and send only compact tensors back to the GPU.
 \end{enumerate}
 There should be no silent proxy for these exact audits.  If a CAS computation is unavailable, too large, or fails its convention check, the metric is marked unavailable for that batch and excluded from the training loss.  Differentiable neural losses are allowed only after the exact small-window CAS audit has validated their target on representative examples.
+
+\begin{center}
+\scriptsize
+\begin{tabular}{@{}p{0.17\linewidth}p{0.29\linewidth}p{0.22\linewidth}p{0.17\linewidth}@{}}
+\toprule
+Object & Exact sidecar & Differentiable surrogate & Failure mode \\
+\midrule
+Initial forms & rational $\operatorname{in}_{-u}(\mathcal F_H)$ or $\operatorname{in}_{-u}(I_H)$ & active-set cross entropy or support distance & unavailable if sign or valuation metadata disagree \\
+Fan and bends & Sage/Normaliz fan data, primitive normals, Cartier compatibility & fan-margin and bend-matching losses & audit envelope only if refinement or Cartier data are incomplete \\
+Cycles and Chow data & balanced multiplicities or certified Minkowski weights & balance and Chow residuals & visualization only if balancing or tropical-ideal hypotheses fail \\
+Toric ideals and resolutions & Macaulay2 toric ideals, Groebner bases, Hilbert series, Betti tables, free resolutions, Fitting ideals & binomial, Betti-vector, differential, and rank/minor residuals & skip loss if the bounded window exceeds CAS limits \\
+Bundles and sheaves & Klyachko filtrations, Cox modules, local cohomology, Chern or parliament summaries when available & nestedness, cone-compatibility, gluing, and convexity proxies & late-phase only; disabled before exact toy-window certification \\
+\bottomrule
+\end{tabular}
+\end{center}
 
 The resulting late-phase toric objective refines the earlier compact loss:
 \begin{equation}
@@ -4113,6 +4136,11 @@ Kiumars Kaveh and Christopher Manon.
 Nolan Schock.
 \newblock Quasilinear tropical compactifications.
 \newblock arXiv:2112.02062, 2024.
+
+\bibitem{tevelev2007compactifications}
+Jenia Tevelev.
+\newblock Compactifications of subvarieties of tori.
+\newblock arXiv:math/0412329, 2005.
 
 \bibitem{fultonsturmfels1994intersection}
 William Fulton and Bernd Sturmfels.

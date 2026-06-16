@@ -455,7 +455,10 @@ Current validated status:
   step 0 on the full graph-structured dataset plus restricted FineWeb OAI
   Parameter-Golf validation, with tropical-ring attention, graph-of-thought
   DAG/memory losses, embedding-space GFlowNets, derived-category/CCA examples,
-  and medium-conservative advanced metrics active.  It was restarted after the
+  and advanced metrics active.  The current conservative all-phases config now
+  uses full-rank GraphCG from step 0 (`graphcg_num_directions: 384` for
+  `d_model: 384`) and the trainer raises if full-rank mode is requested with a
+  lower direction count.  The run was restarted after the
   previous run used only about 3.6 GB of RTX 4090 VRAM; the live config now uses
   `batch_size=8` and `grad_accum_steps=8`, preserving an effective batch of 64
   examples per optimizer step while raising CUDA memory use to roughly 14 GB in
@@ -563,7 +566,7 @@ Local implementation:
 - `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves used by the geometry audit suite.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, Slepian envelopes, and Soft-MoE-style routing.
 - `src/toricgt/datasets.py`: dataset manifest and leakage-controlled splitting.
-- `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.  Important analysis-only entrypoints include `validate_tokengt_graph_data.py`, `validate_analysis_exactness.py`, `render_html_screenshots.py`, `render_bgg_category_o_report.py`, `render_toric_vector_bundle_report.py`, and `toricgt_status.py`.
+- `scripts/`: curation, training, evaluation, visualization, publication, and validation entrypoints.  Important analysis-only entrypoints include `validate_tokengt_graph_data.py`, `validate_analysis_exactness.py`, `validate_cas_certificates.py --preflight`, `render_html_screenshots.py`, `render_bgg_category_o_report.py`, `render_toric_embedding_report.py`, `render_branching_reasoning_trajectory_report.py`, `render_toric_vector_bundle_report.py`, and `toricgt_status.py`.
 - `assets/toricgt_torus_reasoning_dark.gif`: README animation for toric phase, tropical active-face, Soft-MoE, and GFlowNet flow intuition.
 - `assets/toricgt_paper_pg_softmoe_final.tex`: research paper source.
 - `assets/toricgt_paper_pg_softmoe_final.pdf`: compiled paper.
@@ -594,7 +597,122 @@ python scripts/run_periodic_cas_audit.py \
   --output-dir outputs/periodic_cas_audit \
   --all-exact-cas \
   --require-cas
+
+python scripts/render_toric_embedding_report.py \
+  --sidecar-dir outputs/old_checkpoint_full_visual_audit_20260615T165947Z/embedding_cas_sidecar \
+  --output-dir outputs/latest_toric_embedding_visual_report \
+  --include-rich-staircase-demo
+
+python scripts/render_branching_reasoning_trajectory_report.py \
+  --output-dir outputs/latest_branching_reasoning_trajectory_report \
+  --embedding-dim 20 \
+  --trajectory-levels 23 \
+  --branch-lanes 9 \
+  --side-branch-length 6 \
+  --token-count-min 8 \
+  --token-count-max 12 \
+  --radius-levels 6 \
+  --ph-landscape-resolution 20 \
+  --ph-image-resolution 8
+
+python scripts/render_branching_reasoning_trajectory_report.py \
+  --output-dir outputs/branching_reasoning_embedding_payload_example \
+  --embedding-payload-npz outputs/old_checkpoint_full_visual_audit_20260615T165947Z/geometry/embeddings/record_000_embedding_payload.npz \
+  --embedding-payload-json outputs/old_checkpoint_full_visual_audit_20260615T165947Z/geometry/embeddings/record_000_embedding_payload.json \
+  --embedding-max-nodes 160 \
+  --embedding-node-offset 0 \
+  --token-count-min 6 \
+  --token-count-max 10 \
+  --radius-levels 7
+
+python scripts/render_html_screenshots.py \
+  --source-dir outputs/latest_branching_reasoning_trajectory_report \
+  --output-dir outputs/latest_branching_reasoning_trajectory_report/html_screenshots \
+  --no-full-page \
+  --viewport-slices 8 \
+  --interaction-audit
+
+python scripts/render_outputs_index.py --output-root outputs
 ```
+
+The standalone branching report now distinguishes `strong_analogy`,
+`weak_analogy`, `candidate_analogy`, and `no_analogy`.  Source and memory
+objects are explicit GUDHI Rips simplex trees built over the original
+high-dimensional embeddings; PCA is used only for 3D display.  The
+analogical-memory panel renders the nearest-neighbor candidate simplicial map
+arrows even when the final tier is `no_analogy`, so rejected maps can still be
+inspected.  It overlays source and memory graph-of-thought branch/merge
+skeletons on top of the radius-controlled one-dimensional Rips edges, which
+makes the map read as a map between reasoning simplex trees rather than only
+as two dense point clouds.  The page reports full-trajectory simplex-map validity,
+per-step simplex-map validity, vectorized PH feature similarities, the PH gate
+score, exact GUDHI bottleneck distances, GUDHI Wasserstein distances when
+`POT` is installed, and the tier thresholds.  Visible one-dimensional simplex
+edges are not capped inside the selected point set; dense real checkpoint
+payloads should be made browser-tractable with `--embedding-max-nodes` and
+`--embedding-node-offset`, which select the point set before any simplex tree
+is constructed.  Dense views are controlled by radius/reasoning sliders and
+default-off filled 2-simplex toggles.  Long views also include label-density
+toggles for the full trajectory, selected step, and analogy panels; these hide
+text labels without dropping vertices or visible one-dimensional simplices.
+The screenshot renderer has an `--interaction-audit` mode that moves the
+radius/reasoning/decoding sliders, enables triangle toggles, and fills
+representative reasoning-node, token, and analogy detail panels before
+capturing additional screenshots.  The analogy panel now renders the payload's
+actual decision rule as pass/fail threshold status badges for the strong,
+weak, and candidate tiers; when a `weak_analogy` is emitted, the banner states which strong gate
+failed, for example a low step simplex-map mean despite high full-trajectory
+map and vectorized-PH scores.  A compact map summary reports vertex count,
+edge and 2-simplex image status counts, valid-or-collapsed fraction, and
+mean/max original-embedding map distance next to a quick vectorized-PH summary
+so the threshold labels match the displayed evidence.  The same page renders GUDHI
+persistence diagrams, landscapes, persistence images, silhouettes, entropy
+vectors, Betti curves, lifetime histograms, a vectorized-PH similarity bar
+chart, and an H1 source-minus-memory difference plot for the source and memory
+trajectory.  The analogical correspondence table lists every source reasoning
+vertex, its mapped memory vertex, levels, NLL values, and original-embedding
+nearest-neighbor distance in a scrollable pane.  The long-trajectory fixture
+uses configurable lane chains, side branches, cross-lane merges, and final
+merges; each token point carries hover/click metadata for text, type, decode
+order, NLL, log probability, entropy, rank, and source reasoning step.  The
+selected-step panel also includes a simplex-tree filtration table with active
+vertices, edges, triangles, birth radii, and token/face metadata.  The central
+browser entry point `outputs/index.html` is generated by
+`scripts/render_outputs_index.py` and links the latest branching report,
+checkpoint-payload branching reports, toric embedding reports, GUDHI reports,
+and screenshot contact sheets when present.
+
+Generated output folders can be reviewed without deleting anything with:
+
+```bash
+python scripts/prune_old_outputs.py --output-root outputs --keep-latest 3
+```
+
+The cleanup command is dry-run by default and only deletes generated bundles
+when `--apply` is provided.
+
+The same renderer can now consume saved checkpoint inference payloads emitted
+by `scripts/evaluate_tokengt_reasoning_geometry_suite.py --emit-embedding-payloads`.
+Pass `--embedding-payload-npz` and the optional metadata companion
+`--embedding-payload-json`; the report source mode changes to
+`checkpoint_embedding_payload`, graph edges are read from the saved payload,
+and each reasoning-step token subcomplex is built from the corresponding node,
+its graph neighbors, and nearest original hidden vectors.  The no-edge-cap
+contract applies inside the selected rendered point set: once a point cloud is
+chosen for a view, every active visible one-dimensional simplex edge is
+included rather than sampled away.
+
+The tropical-to-toric report now renders Miller-Sturmfels staircases as
+two-variable monomial-ideal staircases: an overhead xy-grid with the ideal
+region, quotient-basis lattice points, minimal generators, and staircase
+boundary, plus close z-height module layers for `S/I`, the ideal region,
+minimal generators, and adjacent lcm corners.  Free resolutions are rendered as
+module strips, exact differential cards, and compact `d^2=0`/Ext/Tor/mapping
+cone status cards rather than token-frequency heatmaps.  Add
+`--include-rich-staircase-demo` to render a deterministic non-checkpoint demo
+sidecar with several adjacent generators, which makes the Miller-Sturmfels
+staircase shape easier to inspect while preserving the exact old-checkpoint
+sidecar separately.
 
 The closed-form cyclic Stanley-Reisner certificate is exact and always
 available. The full exact audit currently builds six certificates: the
@@ -1270,6 +1388,29 @@ without stopping training; the BPB loop uses `BPB_TARGET=1.2` and a
 100-analysis cap. Fresh launches use run-specific checkpoint and BPB-loop state
 paths by default, so a new step-0 run cannot silently resume from an old
 all-phases checkpoint unless `CHECKPOINT_DIR` or `--resume` is set explicitly.
+
+The conservative all-phases config
+`config/train.parameter_golf_all_phases_medium_conservative.yaml` now also uses
+full-rank GraphCG from step 0:
+
+```yaml
+model:
+  graphcg_require_full_rank: true
+  graphcg_num_directions: 384
+  graphcg_min_directions: 384
+  graphcg_max_directions: 384
+```
+
+Periodic analysis can now render exact tropical-to-toric reports automatically.
+`scripts/watch_training_analysis.py` asks TokenGT geometry runs to emit
+embedding payloads, then attempts a bounded Sage/Macaulay2 sidecar, renders
+`toric_embedding_report/index.html`, and screenshots the bundle unless
+`--skip-toric-embedding-report` or `--skip-toric-embedding-screenshots` is set.
+The new branch/merge reasoning visualization bundle writes
+`outputs/latest_branching_reasoning_trajectory_report/branching_reasoning_trajectory.html`;
+it includes a full graph-of-thought DAG, per-step simplex trees, radius and
+reasoning/decoding sliders for every simplicial view, node/token NLL coloring,
+and GUDHI vectorized PH similarity checks for analogical-memory acceptance.
 
 Current `oai-advanced` OpenAI Parameter-Golf checkpoint and advanced-run status
 (2026-06-05):

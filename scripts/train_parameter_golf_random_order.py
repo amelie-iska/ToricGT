@@ -2145,6 +2145,12 @@ def main() -> None:
         d_model=int(configured_d_model),
         max_codes=int(configured_graphcg_max_codes),
     )
+    if bool(config_get(file_config, "model", "graphcg_require_full_rank", False)):
+        if int(configured_graphcg_directions) != int(configured_d_model):
+            raise ValueError(
+                "GraphCG full-rank mode requires graphcg_num_directions "
+                f"({configured_graphcg_directions}) to equal d_model ({configured_d_model})"
+            )
     model_config = RandomOrderLMConfig(
         order_mode=args.order_mode if args.order_mode is not None else config_get(file_config, "model", "order_mode", "random"),
         vocab_size=config_get(file_config, "model", "vocab_size", default_vocab_size),

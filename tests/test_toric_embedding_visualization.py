@@ -6,7 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from toricgt.toric_embedding_visualization import collect_sidecar_records, render_toric_embedding_report
+from toricgt.toric_embedding_visualization import (
+    _parse_macaulay2_matrix_string,
+    collect_sidecar_records,
+    rich_staircase_demo_record,
+    render_toric_embedding_report,
+)
 
 
 def _fixture_sidecar() -> dict:
@@ -54,6 +59,10 @@ def _fixture_sidecar() -> dict:
                 "resolution_length": 1,
                 "projective_dimension": 1,
                 "regularity": 2,
+                "module_resolution_differentials": {
+                    "d1": "matrix {{x_0*x_3-x_1*x_2}}",
+                    "d2": "matrix {{x_2},{-x_3}}",
+                },
                 "module_resolution_square_zero": {"d1d2": True, "d2d3": True},
                 "module_ext_modules": {"Ext0": "module", "Ext1": "module"},
                 "module_tor_residue_modules": {"Tor0": "QQ", "Tor1": "QQ"},
@@ -137,9 +146,48 @@ def test_render_toric_embedding_report_from_exact_fixture(tmp_path: Path) -> Non
         "Cox / Sheaf / Ext / Tor / Derived-Map Summary",
     ]:
         assert heading in html
-    assert "Balance/Chow class not certified" in html
+    assert "Chow/Minkowski" in html
+    assert "Exact Facet Multiplicities" in html
+    assert "Exact Differential Cards" in html
+    assert "d^2=0 checks" in html
+    assert "mapping cone" in html
+    assert "parsed source rank" in html
+    assert "Miller-Sturmfels Overhead XY-Grid Staircase" in html
+    assert "close z-height module layers" in html
+    assert "quotient basis S/I" in html
+    assert "adjacent lcm layer" in html
+    summary = json.loads((tmp_path / "report" / "records" / "record_000_toric_embedding_summary.json").read_text(encoding="utf-8"))
+    assert "miller_sturmfels_staircase" in summary
+    assert summary["miller_sturmfels_staircase"]["adjacent_lcm_layer"]
     visible = _visible_text(page) + _visible_text(index) + _visible_text(vector_page)
     assert re.search(r"\b(ray|rays)\b", visible, flags=re.IGNORECASE) is None
+
+
+def test_rich_staircase_demo_sidecar_has_nontrivial_staircase(tmp_path: Path) -> None:
+    demo = tmp_path / "rich_demo_cas_sidecar.json"
+    demo.write_text(json.dumps(rich_staircase_demo_record(), indent=2), encoding="utf-8")
+
+    manifest = render_toric_embedding_report(sidecar_records=[demo], output_dir=tmp_path / "report")
+
+    assert manifest["record_count"] == 1
+    page = tmp_path / "report" / "records" / "rich_miller_sturmfels_staircase_demo_toric_embedding.html"
+    html = page.read_text(encoding="utf-8")
+    assert "Visualization demo sidecar" in html
+    assert "Miller-Sturmfels Overhead XY-Grid Staircase" in html
+    summary = json.loads(
+        (tmp_path / "report" / "records" / "rich_miller_sturmfels_staircase_demo_toric_embedding_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    staircase = summary["miller_sturmfels_staircase"]
+    assert summary["visualization_demo_only"] is True
+    assert len(staircase["minimal_generators"]) >= 4
+    assert len(staircase["adjacent_lcm_layer"]) >= 3
+
+
+def test_parse_macaulay2_matrix_string() -> None:
+    assert _parse_macaulay2_matrix_string("matrix {{x_0*x_3-x_1*x_2}}") == [["x_0*x_3-x_1*x_2"]]
+    assert _parse_macaulay2_matrix_string("matrix {{x_2},{-x_3}}") == [["x_2"], ["-x_3"]]
 
 
 def test_render_toric_embedding_report_cli(tmp_path: Path) -> None:

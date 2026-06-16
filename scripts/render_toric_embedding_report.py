@@ -21,6 +21,7 @@ if str(SRC) not in sys.path:
 
 from toricgt.toric_embedding_visualization import (  # noqa: E402
     collect_sidecar_records,
+    rich_staircase_demo_record,
     render_toric_embedding_report,
 )
 
@@ -46,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         help="Build an exact Macaulay2 ToricVectorBundles certificate and include Klyachko/sheaf panels.",
     )
     parser.add_argument("--macaulay2-timeout-seconds", type=int, default=180)
+    parser.add_argument(
+        "--include-rich-staircase-demo",
+        action="store_true",
+        help="Append a deterministic Miller-Sturmfels staircase demo sidecar with several adjacent generators.",
+    )
     return parser.parse_args()
 
 
@@ -55,6 +61,12 @@ def main() -> None:
         sidecar_records=[Path(path) for path in args.sidecar_record_json],
         sidecar_dir=Path(args.sidecar_dir) if args.sidecar_dir else None,
     )
+    if args.include_rich_staircase_demo:
+        generated = Path(args.output_dir) / "_generated_sidecars"
+        generated.mkdir(parents=True, exist_ok=True)
+        demo_path = generated / "rich_miller_sturmfels_staircase_demo_cas_sidecar.json"
+        demo_path.write_text(json.dumps(rich_staircase_demo_record(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        records.append(demo_path.resolve())
     manifest = render_toric_embedding_report(
         sidecar_records=records,
         output_dir=Path(args.output_dir),

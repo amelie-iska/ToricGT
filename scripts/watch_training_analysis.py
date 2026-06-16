@@ -131,6 +131,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cas-audit-macaulay2-smoke", action="store_true")
     parser.add_argument("--cas-audit-macaulay2-toric-ideal", action="store_true")
     parser.add_argument("--cas-audit-all-exact-cas", action="store_true")
+    parser.add_argument(
+        "--skip-toric-embedding-report",
+        action="store_true",
+        help="Skip exact tropical-to-toric embedding sidecar rendering and screenshots.",
+    )
+    parser.add_argument("--toric-embedding-sidecar-records", type=int, default=1)
+    parser.add_argument("--toric-embedding-sidecar-max-points", type=int, default=10)
+    parser.add_argument("--toric-embedding-exponent-dim", type=int, default=2)
+    parser.add_argument("--toric-embedding-quantization-scale", type=int, default=8)
+    parser.add_argument(
+        "--toric-embedding-build-vector-bundle",
+        action="store_true",
+        help="Ask the toric report renderer to include the exact Macaulay2 vector-bundle certificate.",
+    )
+    parser.add_argument(
+        "--skip-toric-embedding-screenshots",
+        action="store_true",
+        help="Render toric embedding HTML but skip Playwright screenshots.",
+    )
+    parser.add_argument(
+        "--skip-branching-reasoning-report",
+        action="store_true",
+        help="Skip branch/merge reasoning trajectory simplex-tree HTML sidecar rendering.",
+    )
+    parser.add_argument("--branching-reasoning-max-nodes", type=int, default=160)
+    parser.add_argument("--branching-reasoning-node-offset", type=int, default=0)
+    parser.add_argument(
+        "--skip-branching-reasoning-screenshots",
+        action="store_true",
+        help="Render branch/merge reasoning HTML but skip Playwright screenshots.",
+    )
     parser.add_argument("--skip-test-time-scaling", action="store_true")
     parser.add_argument("--test-time-scaling-batches", type=int, default=8)
     parser.add_argument("--test-time-scaling-budgets", type=int, nargs="+", default=[1, 4, 16])
@@ -532,6 +563,8 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     cas_dir = base / "cas_audit"
     gudhi_dir = base / "gudhi_persistence"
     test_time_dir = base / "test_time_scaling"
+    toric_embedding_dir = base / "toric_embedding_report"
+    branching_dir = base / "branching_reasoning_report"
     category = load_json(metrics_dir / "category_summary.json")
     geometry = load_json(geometry_dir / "reasoning_geometry_summary.json")
     simplex = load_json(simplex_dir / "reasoning_simplex_summary.json")
@@ -541,6 +574,8 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
     cas_audit = load_json(cas_dir / "cas_audit_summary.json")
     gudhi = load_json(gudhi_dir / "summary.json")
     test_time = load_json(test_time_dir / "summary.json")
+    toric_embedding = load_json(toric_embedding_dir / "status.json")
+    branching = load_json(branching_dir / "status.json")
     checkpoint_meta = load_json(metrics_dir / "checkpoint_meta.json")
     proposal = load_json(base / "training_adjustment_proposal.json")
     lines = [
@@ -619,6 +654,32 @@ def write_synopsis(base: Path, checkpoint: Path, step: int, run_path: str) -> Pa
                 f"- Mean symbolic regularity: `{derived.get('mean_symbolic_regularity', 'n/a')}`",
                 f"- Max Fitting maximal-minor count log10: `{derived.get('max_fitting_minor_count_log10', 'n/a')}`",
                 f"- Report: `{derived_dir / 'REPORT.md'}`",
+            ]
+        )
+    if toric_embedding:
+        lines.extend(
+            [
+                "",
+                "## Tropical-To-Toric Embedding Report",
+                f"- Output directory: `{toric_embedding_dir}`",
+                f"- Embedding manifest: `{toric_embedding.get('embedding_manifest', 'n/a')}`",
+                f"- CAS sidecar ok: `{toric_embedding.get('cas_sidecar_ok', 'n/a')}`",
+                f"- Report render ok: `{toric_embedding.get('report_render_ok', 'n/a')}`",
+                f"- Screenshot render ok: `{toric_embedding.get('screenshot_render_ok', 'n/a')}`",
+                f"- Report index: `{toric_embedding.get('report_index_html', 'n/a')}`",
+            ]
+        )
+    if branching:
+        lines.extend(
+            [
+                "",
+                "## Branching Reasoning Simplex Report",
+                f"- Output directory: `{branching_dir}`",
+                f"- Embedding payload: `{branching.get('embedding_payload_npz', 'n/a')}`",
+                f"- Report render ok: `{branching.get('report_render_ok', 'n/a')}`",
+                f"- Screenshot render ok: `{branching.get('screenshot_render_ok', 'n/a')}`",
+                f"- Node window: `{branching.get('embedding_node_offset', 'n/a')}` + `{branching.get('embedding_max_nodes', 'n/a')}`",
+                f"- Report index: `{branching.get('report_index_html', 'n/a')}`",
             ]
         )
     if memory:
@@ -761,6 +822,8 @@ def write_analysis_index(base: Path, checkpoint: Path, step: int, run_path: str)
     cards = [
         ("Synopsis", exists_rel(base / "SYNOPSIS.md"), "Human-readable checkpoint summary and training-control proposal."),
         ("GUDHI / M2 Persistence", exists_rel(base / "gudhi_persistence" / "index.html"), "Exact simplex trees, vectorized PH, F2[x_level,y_radius] modules, and Macaulay2 resolutions."),
+        ("Tropical-To-Toric Embedding", exists_rel(base / "toric_embedding_report" / "index.html"), "Exact sidecar report for tropical attention exponents embedded into toric geometry, with multiplicity/balance/Chow audits."),
+        ("Branching Reasoning Simplex Report", exists_rel(base / "branching_reasoning_report" / "branching_reasoning_trajectory.html"), "Branch/merge graph-of-thought trajectory, per-step simplex trees, analogical maps, and vectorized PH panels from checkpoint embeddings."),
         ("Geometry Summary", exists_rel(base / "geometry" / "reasoning_geometry_summary.json"), "Reasoning geometry, toric, tropical, topology, GraphCG, and analogical metrics."),
         ("Simplex Summary", exists_rel(base / "simplex" / "reasoning_simplex_summary.json"), "Reasoning/K/BPB triangle and tetrahedron projections."),
         ("CAS Audit", exists_rel(base / "cas_audit" / "cas_audit_summary.json"), "Exact Sage/Macaulay2/toric-toolchain certificate report."),
@@ -791,6 +854,281 @@ main{max-width:1200px;margin:0 auto;padding:32px 24px 64px}.hero,.card{backgroun
         encoding="utf-8",
     )
     return out
+
+
+def write_analysis_status(base: Path, checkpoint: Path, step: int, run_path: str) -> Path:
+    """Write a machine-readable inventory for periodic analysis artifacts."""
+
+    payload = {
+        "schema": "toricgt.periodic_analysis_status.v1",
+        "checkpoint": str(checkpoint),
+        "step": int(step),
+        "wandb_run": str(run_path or ""),
+        "paths": {
+            "index_html": str(base / "index.html"),
+            "synopsis_md": str(base / "SYNOPSIS.md"),
+            "geometry_summary": str(base / "geometry" / "reasoning_geometry_summary.json"),
+            "gudhi_persistence_index": str(base / "gudhi_persistence" / "index.html"),
+            "toric_embedding_report_index": str(base / "toric_embedding_report" / "index.html"),
+            "toric_embedding_screenshot_index": str(base / "toric_embedding_report" / "html_screenshots" / "index.html"),
+            "branching_reasoning_report_index": str(base / "branching_reasoning_report" / "branching_reasoning_trajectory.html"),
+            "branching_reasoning_screenshot_index": str(base / "branching_reasoning_report" / "html_screenshots" / "index.html"),
+            "oai_competition_summary": str(base / "oai_competition" / "summary.json"),
+            "test_time_scaling_summary": str(base / "test_time_scaling" / "summary.json"),
+        },
+        "availability": {
+            "index_html": (base / "index.html").exists(),
+            "synopsis_md": (base / "SYNOPSIS.md").exists(),
+            "geometry_summary": (base / "geometry" / "reasoning_geometry_summary.json").exists(),
+            "gudhi_persistence_index": (base / "gudhi_persistence" / "index.html").exists(),
+            "toric_embedding_report_index": (base / "toric_embedding_report" / "index.html").exists(),
+            "toric_embedding_screenshot_index": (base / "toric_embedding_report" / "html_screenshots" / "index.html").exists(),
+            "branching_reasoning_report_index": (base / "branching_reasoning_report" / "branching_reasoning_trajectory.html").exists(),
+            "branching_reasoning_screenshot_index": (base / "branching_reasoning_report" / "html_screenshots" / "index.html").exists(),
+            "oai_competition_summary": (base / "oai_competition" / "summary.json").exists(),
+            "test_time_scaling_summary": (base / "test_time_scaling" / "summary.json").exists(),
+        },
+        "toric_embedding": load_json(base / "toric_embedding_report" / "status.json"),
+        "branching_reasoning": load_json(base / "branching_reasoning_report" / "status.json"),
+    }
+    out = base / "analysis_status.json"
+    out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out
+
+
+def _resolve_embedding_payload_paths(embedding_manifest: Path) -> tuple[Path, Path | None]:
+    manifest = load_json(embedding_manifest)
+    rows = manifest.get("payloads", [])
+    if not isinstance(rows, list) or not rows:
+        raise FileNotFoundError(f"{embedding_manifest} does not contain embedding payload rows")
+    row = rows[0] if isinstance(rows[0], dict) else {}
+    candidates: list[Path] = []
+    for key in ("npz", "relative_npz"):
+        value = row.get(key)
+        if not value:
+            continue
+        path = Path(str(value))
+        candidates.extend(
+            [
+                path,
+                embedding_manifest.parent / path,
+                embedding_manifest.parent.parent / path,
+            ]
+        )
+    npz_path = next((path for path in candidates if path.exists()), None)
+    if npz_path is None:
+        raise FileNotFoundError(f"could not resolve first embedding payload NPZ from {embedding_manifest}")
+    json_candidates: list[Path] = []
+    for key in ("json", "relative_json"):
+        value = row.get(key)
+        if not value:
+            continue
+        path = Path(str(value))
+        json_candidates.extend(
+            [
+                path,
+                embedding_manifest.parent / path,
+                embedding_manifest.parent.parent / path,
+            ]
+        )
+    json_path = next((path for path in json_candidates if path.exists()), None)
+    return npz_path, json_path
+
+
+def run_branching_reasoning_report(args: argparse.Namespace, base: Path, repo: Path) -> dict[str, Any]:
+    """Render branch/merge simplex report from saved geometry embedding payloads."""
+
+    report_dir = base / "branching_reasoning_report"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    status: dict[str, Any] = {
+        "enabled": not bool(args.skip_branching_reasoning_report),
+        "embedding_manifest": str(base / "geometry" / "embeddings" / "manifest.json"),
+        "embedding_payload_npz": "",
+        "embedding_payload_json": "",
+        "embedding_max_nodes": int(args.branching_reasoning_max_nodes),
+        "embedding_node_offset": int(args.branching_reasoning_node_offset),
+        "report_output_dir": str(report_dir),
+        "report_render_ok": False,
+        "screenshot_render_ok": False,
+        "report_index_html": "",
+        "trajectory_html": "",
+        "screenshot_index_html": "",
+        "reason": "",
+    }
+    status_path = report_dir / "status.json"
+    if args.skip_branching_reasoning_report:
+        status["reason"] = "disabled_by_cli"
+        status_path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return status
+    embedding_manifest = base / "geometry" / "embeddings" / "manifest.json"
+    if not embedding_manifest.exists():
+        status["reason"] = "no geometry embeddings manifest was emitted for this checkpoint family"
+        status_path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return status
+    try:
+        npz_path, json_path = _resolve_embedding_payload_paths(embedding_manifest)
+    except Exception as exc:
+        status["reason"] = f"{type(exc).__name__}: {exc}"
+        status_path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return status
+    status["embedding_payload_npz"] = str(npz_path)
+    status["embedding_payload_json"] = str(json_path or "")
+    render_cmd = [
+        sys.executable,
+        "scripts/render_branching_reasoning_trajectory_report.py",
+        "--output-dir",
+        str(report_dir),
+        "--embedding-payload-npz",
+        str(npz_path),
+        "--embedding-max-nodes",
+        str(max(0, int(args.branching_reasoning_max_nodes))),
+        "--embedding-node-offset",
+        str(max(0, int(args.branching_reasoning_node_offset))),
+    ]
+    if json_path is not None:
+        render_cmd.extend(["--embedding-payload-json", str(json_path)])
+    status["report_render_ok"] = run_optional_command(
+        render_cmd,
+        cwd=repo,
+        log_path=base / "logs" / "branching_reasoning_report.log",
+    )
+    if status["report_render_ok"]:
+        status["report_index_html"] = str(report_dir / "index.html")
+        status["trajectory_html"] = str(report_dir / "branching_reasoning_trajectory.html")
+    if status["report_render_ok"] and not bool(args.skip_branching_reasoning_screenshots):
+        screenshot_dir = report_dir / "html_screenshots"
+        status["screenshot_render_ok"] = run_optional_command(
+            [
+                sys.executable,
+                "scripts/render_html_screenshots.py",
+                "--source-dir",
+                str(report_dir),
+                "--output-dir",
+                str(screenshot_dir),
+                "--width",
+                "1600",
+                "--height",
+                "1000",
+                "--wait-ms",
+                "1800",
+                "--timeout-ms",
+                "90000",
+                "--no-full-page",
+                "--viewport-slices",
+                "8",
+                "--interaction-audit",
+                "--interaction-delay-ms",
+                "700",
+            ],
+            cwd=repo,
+            log_path=base / "logs" / "branching_reasoning_screenshots.log",
+        )
+        if status["screenshot_render_ok"]:
+            status["screenshot_index_html"] = str(screenshot_dir / "index.html")
+    status_path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return status
+
+
+def run_toric_embedding_report(args: argparse.Namespace, base: Path, repo: Path) -> dict[str, Any]:
+    """Render exact tropical-to-toric sidecar reports for periodic analysis."""
+
+    status: dict[str, Any] = {
+        "enabled": not bool(args.skip_toric_embedding_report),
+        "embedding_manifest": "",
+        "cas_sidecar_output_dir": "",
+        "cas_sidecar_ok": False,
+        "report_output_dir": str(base / "toric_embedding_report"),
+        "report_render_ok": False,
+        "screenshot_render_ok": False,
+        "report_index_html": "",
+        "screenshot_index_html": "",
+        "reason": "",
+    }
+    report_dir = base / "toric_embedding_report"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    status_path = report_dir / "status.json"
+    if args.skip_toric_embedding_report:
+        status["reason"] = "disabled_by_cli"
+        status_path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return status
+
+    embedding_manifest = base / "geometry" / "embeddings" / "manifest.json"
+    sidecar_dir = base / "embedding_cas_sidecar"
+    if embedding_manifest.exists():
+        status["embedding_manifest"] = str(embedding_manifest)
+        status["cas_sidecar_output_dir"] = str(sidecar_dir)
+        sidecar_cmd = [
+            sys.executable,
+            "scripts/run_embedding_cas_sidecar.py",
+            "--embedding-manifest",
+            str(embedding_manifest),
+            "--output-dir",
+            str(sidecar_dir),
+            "--records",
+            str(args.toric_embedding_sidecar_records),
+            "--max-points",
+            str(args.toric_embedding_sidecar_max_points),
+            "--exponent-dim",
+            str(args.toric_embedding_exponent_dim),
+            "--quantization-scale",
+            str(args.toric_embedding_quantization_scale),
+        ]
+        status["cas_sidecar_ok"] = run_optional_command(
+            sidecar_cmd,
+            cwd=repo,
+            log_path=base / "logs" / "embedding_cas_sidecar.log",
+        )
+    else:
+        status["reason"] = "no geometry embeddings manifest was emitted for this checkpoint family"
+
+    has_records = bool(list((sidecar_dir / "records").glob("*_cas_sidecar.json"))) if sidecar_dir.exists() else False
+    if not has_records:
+        status_path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return status
+
+    render_cmd = [
+        sys.executable,
+        "scripts/render_toric_embedding_report.py",
+        "--sidecar-dir",
+        str(sidecar_dir),
+        "--output-dir",
+        str(report_dir),
+    ]
+    if bool(args.toric_embedding_build_vector_bundle):
+        render_cmd.append("--build-vector-bundle-certificate")
+    status["report_render_ok"] = run_optional_command(
+        render_cmd,
+        cwd=repo,
+        log_path=base / "logs" / "toric_embedding_report.log",
+    )
+    if status["report_render_ok"]:
+        status["report_index_html"] = str(report_dir / "index.html")
+    if status["report_render_ok"] and not bool(args.skip_toric_embedding_screenshots):
+        screenshot_dir = report_dir / "html_screenshots"
+        status["screenshot_render_ok"] = run_optional_command(
+            [
+                sys.executable,
+                "scripts/render_html_screenshots.py",
+                "--source-dir",
+                str(report_dir),
+                "--output-dir",
+                str(screenshot_dir),
+                "--width",
+                "1600",
+                "--height",
+                "1000",
+                "--wait-ms",
+                "1600",
+                "--timeout-ms",
+                "60000",
+            ],
+            cwd=repo,
+            log_path=base / "logs" / "toric_embedding_screenshots.log",
+        )
+        if status["screenshot_render_ok"]:
+            status["screenshot_index_html"] = str(screenshot_dir / "index.html")
+    status_path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return status
 
 
 def trigger_codex_review_hook(args: argparse.Namespace, base: Path, checkpoint: Path, step: int) -> None:
@@ -951,6 +1289,8 @@ def main() -> None:
             command.extend(["--data-glob", args.data_glob])
         if args.run_path:
             command.extend(["--wandb-run-path", args.run_path])
+        if not args.skip_toric_embedding_report:
+            command.append("--emit-embedding-payloads")
         run_optional_command(
             command,
             cwd=repo,
@@ -1168,6 +1508,8 @@ def main() -> None:
             cwd=repo,
             log_path=base / "logs" / "test_time_scaling.log",
         )
+    run_toric_embedding_report(args, base, repo)
+    run_branching_reasoning_report(args, base, repo)
     proposal_command = [
         sys.executable,
         "scripts/propose_training_adjustments.py",
@@ -1189,8 +1531,10 @@ def main() -> None:
     )
     synopsis = write_synopsis(base, checkpoint, step, args.run_path)
     index = write_analysis_index(base, checkpoint, step, args.run_path)
+    status = write_analysis_status(base, checkpoint, step, args.run_path)
     print(f"wrote {synopsis}", flush=True)
     print(f"wrote {index}", flush=True)
+    print(f"wrote {status}", flush=True)
     trigger_codex_review_hook(args, base, checkpoint, step)
 
 

@@ -44,12 +44,42 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=1000)
     parser.add_argument("--wait-ms", type=int, default=1200)
     parser.add_argument("--timeout-ms", type=int, default=45000)
+    parser.add_argument(
+        "--wait-until",
+        choices=["commit", "domcontentloaded", "load", "networkidle"],
+        default="networkidle",
+        help="Playwright page.goto wait condition.",
+    )
+    parser.add_argument(
+        "--full-page",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Capture full-page screenshots. Use --no-full-page for very large interactive reports.",
+    )
+    parser.add_argument(
+        "--viewport-slices",
+        type=int,
+        default=0,
+        help="When --no-full-page is used, also capture up to this many vertical viewport slices per page.",
+    )
     parser.add_argument("--contact-cols", type=int, default=3)
     parser.add_argument(
         "--link-from-source-index",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Add a screenshot/contact-sheet link block to source-dir/index.html when present.",
+    )
+    parser.add_argument(
+        "--interaction-audit",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Capture additional screenshots after moving known ToricGT sliders/toggles and revealing detail panels.",
+    )
+    parser.add_argument(
+        "--interaction-delay-ms",
+        type=int,
+        default=500,
+        help="Delay after each interaction-audit state before taking its screenshot.",
     )
     return parser.parse_args()
 
@@ -70,6 +100,155 @@ def html_files(source_dir: Path, excluded: set[str]) -> list[Path]:
     return sorted(files)
 
 
+async def _image_size(path: Path) -> tuple[int, int]:
+    with Image.open(path) as image:
+        return image.size
+
+
+async def _capture_one(
+    page: Any,
+    target: Path,
+    *,
+    output_dir: Path,
+    timeout_ms: int,
+    full_page: bool,
+) -> dict[str, Any]:
+    await page.screenshot(path=str(target), full_page=bool(full_page), timeout=int(timeout_ms))
+    width, height = await _image_size(target)
+    return {
+        "screenshot": str(target.relative_to(output_dir)),
+        "width": int(width),
+        "height": int(height),
+    }
+
+
+async def _generic_interaction(page: Any, mode: str) -> bool:
+    """Move standard ToricGT controls when a page has no custom audit hook."""
+
+    return bool(
+        await page.evaluate(
+            """(mode) => {
+              const setRange = (id, fraction) => {
+                const el = document.getElementById(id);
+                if (!el) return false;
+                const min = Number(el.min || 0);
+                const max = Number(el.max || 0);
+                const value = Math.round(min + (max - min) * fraction);
+                el.value = String(value);
+                el.dispatchEvent(new Event('input', {bubbles:true}));
+                return true;
+              };
+              const setCheck = (id, checked) => {
+                const el = document.getElementById(id);
+                if (!el) return false;
+                el.checked = Boolean(checked);
+                el.dispatchEvent(new Event('change', {bubbles:true}));
+                return true;
+              };
+              let touched = false;
+              if (mode === 'full_mid') {
+                touched = setRange('radius_slider', 0.55) || touched;
+                touched = setRange('reasoning_level_slider', 0.55) || touched;
+                document.getElementById('trajectory_plot')?.scrollIntoView({block:'center'});
+              } else if (mode === 'full_triangles') {
+                touched = setRange('radius_slider', 1.0) || touched;
+                touched = setRange('reasoning_level_slider', 1.0) || touched;
+                touched = setCheck('full_triangle_toggle', true) || touched;
+                document.getElementById('trajectory_plot')?.scrollIntoView({block:'center'});
+              } else if (mode === 'step_detail') {
+                touched = setRange('step_radius_slider', 1.0) || touched;
+                touched = setRange('decoding_order_slider', 1.0) || touched;
+                document.getElementById('step_plot')?.scrollIntoView({block:'center'});
+              } else if (mode === 'step_triangles') {
+                touched = setRange('step_radius_slider', 1.0) || touched;
+                touched = setRange('decoding_order_slider', 1.0) || touched;
+                touched = setCheck('step_triangle_toggle', true) || touched;
+                document.getElementById('step_plot')?.scrollIntoView({block:'center'});
+              } else if (mode === 'analogy_detail') {
+                touched = setRange('analogy_radius_slider', 0.65) || touched;
+                touched = setRange('analogy_reasoning_level_slider', 1.0) || touched;
+                document.getElementById('analogy_plot')?.scrollIntoView({block:'center'});
+              } else if (mode === 'analogy_triangles') {
+                touched = setRange('analogy_radius_slider', 1.0) || touched;
+                touched = setRange('analogy_reasoning_level_slider', 1.0) || touched;
+                touched = setCheck('analogy_triangle_toggle', true) || touched;
+                document.getElementById('analogy_plot')?.scrollIntoView({block:'center'});
+              }
+              return touched;
+            }""",
+            mode,
+        )
+    )
+
+
+async def _run_interaction_audit(
+    page: Any,
+    *,
+    base_target: Path,
+    output_dir: Path,
+    timeout_ms: int,
+    full_page: bool,
+    delay_ms: int,
+) -> list[dict[str, Any]]:
+    modes = [
+        "full_mid",
+        "full_triangles",
+        "step_detail",
+        "step_triangles",
+        "analogy_detail",
+        "analogy_triangles",
+    ]
+    has_hook = bool(await page.evaluate("typeof window.toricgtScreenshotAudit === 'function'"))
+    has_controls = bool(
+        await page.evaluate(
+            "Boolean(document.querySelector('#radius_slider,#step_radius_slider,#analogy_radius_slider'))"
+        )
+    )
+    if not has_hook and not has_controls:
+        return []
+    records: list[dict[str, Any]] = []
+    for idx, mode in enumerate(modes):
+        target = base_target.with_name(base_target.stem + f"__interaction_{idx:02d}_{mode}" + base_target.suffix)
+        status = "ok"
+        error = ""
+        width = 0
+        height = 0
+        screenshot = ""
+        try:
+            touched = False
+            if has_hook:
+                touched = bool(await page.evaluate("(mode) => window.toricgtScreenshotAudit(mode)", mode))
+            if not touched:
+                touched = await _generic_interaction(page, mode)
+            if not touched:
+                continue
+            await page.wait_for_timeout(max(50, int(delay_ms)))
+            captured = await _capture_one(
+                page,
+                target,
+                output_dir=output_dir,
+                timeout_ms=int(timeout_ms),
+                full_page=bool(full_page),
+            )
+            screenshot = str(captured["screenshot"])
+            width = int(captured["width"])
+            height = int(captured["height"])
+        except Exception as exc:
+            status = "error"
+            error = repr(exc)
+        records.append(
+            {
+                "label": mode,
+                "screenshot": screenshot,
+                "status": status,
+                "error": error,
+                "width": int(width),
+                "height": int(height),
+            }
+        )
+    return records
+
+
 async def capture_pages(
     files: list[Path],
     *,
@@ -79,6 +258,11 @@ async def capture_pages(
     height: int,
     wait_ms: int,
     timeout_ms: int,
+    wait_until: str,
+    full_page: bool,
+    viewport_slices: int,
+    interaction_audit: bool,
+    interaction_delay_ms: int,
 ) -> list[dict[str, Any]]:
     screenshots = output_dir / "screenshots"
     screenshots.mkdir(parents=True, exist_ok=True)
@@ -93,12 +277,38 @@ async def capture_pages(
             error = ""
             shot_width = 0
             shot_height = 0
+            slice_records: list[str] = []
+            interaction_records: list[dict[str, Any]] = []
             try:
-                await page.goto(path.resolve().as_uri(), wait_until="networkidle", timeout=int(timeout_ms))
+                await page.goto(path.resolve().as_uri(), wait_until=str(wait_until), timeout=int(timeout_ms))
                 await page.wait_for_timeout(int(wait_ms))
-                await page.screenshot(path=str(target), full_page=True, timeout=int(timeout_ms))
+                base_target = target
+                if not bool(full_page) and int(viewport_slices) > 0:
+                    scroll_height = int(await page.evaluate("document.documentElement.scrollHeight || document.body.scrollHeight || 0"))
+                    step = max(1, int(height * 0.88))
+                    starts = list(range(0, max(scroll_height, height), step))[: int(viewport_slices)]
+                    if not starts:
+                        starts = [0]
+                    for idx, scroll_y in enumerate(starts):
+                        await page.evaluate("(y) => window.scrollTo(0, y)", int(scroll_y))
+                        await page.wait_for_timeout(max(150, int(wait_ms // 4)))
+                        slice_target = target.with_name(target.stem + f"__slice_{idx:02d}" + target.suffix)
+                        await page.screenshot(path=str(slice_target), full_page=False, timeout=int(timeout_ms))
+                        slice_records.append(str(slice_target.relative_to(output_dir)))
+                    target = output_dir / slice_records[0]
+                else:
+                    await page.screenshot(path=str(target), full_page=bool(full_page), timeout=int(timeout_ms))
                 with Image.open(target) as image:
                     shot_width, shot_height = image.size
+                if bool(interaction_audit):
+                    interaction_records = await _run_interaction_audit(
+                        page,
+                        base_target=base_target,
+                        output_dir=output_dir,
+                        timeout_ms=int(timeout_ms),
+                        full_page=bool(full_page),
+                        delay_ms=int(interaction_delay_ms),
+                    )
             except Exception as exc:
                 status = "error"
                 error = repr(exc)
@@ -110,6 +320,8 @@ async def capture_pages(
                     "error": error,
                     "width": int(shot_width),
                     "height": int(shot_height),
+                    "slices": slice_records,
+                    "interaction_screenshots": interaction_records,
                 }
             )
         await browser.close()
@@ -117,7 +329,27 @@ async def capture_pages(
 
 
 def write_contact_sheet(records: list[dict[str, Any]], output_dir: Path, *, cols: int = 3) -> Path:
-    ok = [record for record in records if record.get("status") == "ok" and record.get("screenshot")]
+    ok: list[dict[str, Any]] = []
+    for record in records:
+        if record.get("status") == "ok" and record.get("screenshot"):
+            ok.append(
+                {
+                    "html": str(record.get("html", "")),
+                    "screenshot": str(record.get("screenshot", "")),
+                    "width": int(record.get("width", 0) or 0),
+                    "height": int(record.get("height", 0) or 0),
+                }
+            )
+        for interaction in record.get("interaction_screenshots", []) or []:
+            if isinstance(interaction, dict) and interaction.get("status") == "ok" and interaction.get("screenshot"):
+                ok.append(
+                    {
+                        "html": f"{record.get('html', '')} :: {interaction.get('label', 'interaction')}",
+                        "screenshot": str(interaction.get("screenshot", "")),
+                        "width": int(interaction.get("width", 0) or 0),
+                        "height": int(interaction.get("height", 0) or 0),
+                    }
+                )
     thumb_w, thumb_h = 360, 230
     pad, label_h = 18, 52
     cols = max(1, int(cols))
@@ -163,6 +395,20 @@ def write_index(records: list[dict[str, Any]], *, source_dir: Path, output_dir: 
             body += f"<p><a href='{source}'>source html</a> · <a href='{screenshot}'>screenshot png</a></p><a href='{screenshot}'><img src='{screenshot}' loading='lazy'></a>"
         if record.get("error"):
             body += f"<p class='err'>{html.escape(str(record['error']))}</p>"
+        interactions = record.get("interaction_screenshots", []) or []
+        if interactions:
+            items = []
+            for item in interactions:
+                if not isinstance(item, dict):
+                    continue
+                label = html.escape(str(item.get("label", "interaction")))
+                status = html.escape(str(item.get("status", "")))
+                shot = html.escape(str(item.get("screenshot", "")))
+                if shot:
+                    items.append(f"<li><a href='{shot}'>{label}</a> <span class='pill'>{status}</span></li>")
+                else:
+                    items.append(f"<li><span class='err'>{label}: {status}</span></li>")
+            body += "<h2>Interaction States</h2><ul>" + "".join(items) + "</ul>"
         cards.append(f"<section class='card'>{body}</section>")
     ok_count = sum(1 for record in records if record.get("status") == "ok")
     index = output_dir / "index.html"
@@ -232,6 +478,11 @@ def main() -> None:
             height=int(args.height),
             wait_ms=int(args.wait_ms),
             timeout_ms=int(args.timeout_ms),
+            wait_until=str(args.wait_until),
+            full_page=bool(args.full_page),
+            viewport_slices=int(args.viewport_slices),
+            interaction_audit=bool(args.interaction_audit),
+            interaction_delay_ms=int(args.interaction_delay_ms),
         )
     )
     contact = write_contact_sheet(records, output_dir, cols=int(args.contact_cols))
@@ -250,6 +501,10 @@ def main() -> None:
         "contact_sheet": contact.name,
         "index_html": index.name,
         "source_index_linked": bool(linked),
+        "interaction_audit": bool(args.interaction_audit),
+        "interaction_count": int(
+            sum(len(record.get("interaction_screenshots", []) or []) for record in records)
+        ),
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2, sort_keys=True))

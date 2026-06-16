@@ -27,6 +27,8 @@ if str(SRC) not in sys.path:
 GEOMETRY_SCRIPT = ROOT / "scripts" / "evaluate_tokengt_reasoning_geometry_suite.py"
 GUDHI_SCRIPT = ROOT / "scripts" / "run_gudhi_persistence_audit.py"
 CAS_SIDECAR_SCRIPT = ROOT / "scripts" / "run_embedding_cas_sidecar.py"
+BRANCHING_REASONING_SCRIPT = ROOT / "scripts" / "render_branching_reasoning_trajectory_report.py"
+SCREENSHOT_SCRIPT = ROOT / "scripts" / "render_html_screenshots.py"
 
 from toricgt.music import TorusMusicConfig, generate_wav  # noqa: E402
 
@@ -131,6 +133,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cas-sidecar-max-points", type=int, default=12)
     parser.add_argument("--cas-sidecar-exponent-dim", type=int, default=2)
     parser.add_argument("--cas-sidecar-quantization-scale", type=int, default=12)
+    parser.add_argument(
+        "--emit-branching-reasoning-report",
+        action="store_true",
+        help="Render branch/merge simplex-tree and analogical-PH report from saved embedding payloads.",
+    )
+    parser.add_argument("--branching-reasoning-output-dir", default="")
+    parser.add_argument("--branching-reasoning-max-nodes", type=int, default=160)
+    parser.add_argument("--branching-reasoning-node-offset", type=int, default=0)
+    parser.add_argument(
+        "--branching-reasoning-screenshots",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Capture Playwright screenshots for the branch/simplex report.",
+    )
     parser.add_argument(
         "--emit-slepian-music",
         action="store_true",
@@ -287,6 +303,21 @@ def write_inference_index(output_dir: Path, manifest: dict[str, Any]) -> Path:
                 ("failures", manifest.get("embedding_cas_sidecar_manifest", {}).get("failures", "n/a")),
             ],
         )
+    if manifest.get("branching_reasoning_report_html"):
+        add_card(
+            "Branching Reasoning Simplex Report",
+            "Branch/merge graph-of-thought trajectory, per-step simplex trees, analogical simplex maps, and GUDHI vectorized PH comparisons rendered from saved hidden embeddings.",
+            [
+                ("trajectory HTML", _rel_link(output_dir, manifest.get("branching_reasoning_report_html"))),
+                ("payload JSON", _rel_link(output_dir, Path(str(manifest.get("branching_reasoning_output_dir", ""))) / "branching_reasoning_payload.json")),
+                ("screenshots", _rel_link(output_dir, manifest.get("branching_reasoning_screenshot_index_html"))),
+            ],
+            [
+                ("source mode", manifest.get("branching_reasoning_manifest", {}).get("source_mode", "n/a")),
+                ("nodes", manifest.get("branching_reasoning_manifest", {}).get("nodes", "n/a")),
+                ("analogy emitted", manifest.get("branching_reasoning_manifest", {}).get("analogy_emitted", "n/a")),
+            ],
+        )
     if manifest.get("slepian_music_wav"):
         add_card(
             "Slepian/Pollak Music Export",
@@ -309,6 +340,7 @@ def write_inference_index(output_dir: Path, manifest: dict[str, Any]) -> Path:
             _badge("GUDHI persistence", bool(manifest.get("gudhi_persistence_enabled"))),
             _badge("PH feature dashboards", bool(manifest.get("ph_feature_visualizations_enabled"))),
             _badge("CAS sidecar", bool(manifest.get("embedding_cas_sidecar_enabled"))),
+            _badge("Branching simplex report", bool(manifest.get("branching_reasoning_enabled"))),
             _badge("Slepian music", bool(manifest.get("slepian_music_enabled"))),
         ]
     )
@@ -415,6 +447,51 @@ def cas_sidecar_command(args: argparse.Namespace, embedding_manifest: Path, cas_
     ]
 
 
+def resolve_first_embedding_payload(embedding_manifest: Path) -> tuple[Path, Path | None]:
+    manifest = read_json(embedding_manifest)
+    rows = manifest.get("payloads", [])
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        raise FileNotFoundError(f"{embedding_manifest} does not contain embedding payload rows")
+    row = rows[0]
+    npz_candidates: list[Path] = []
+    for key in ("npz", "relative_npz"):
+        value = row.get(key)
+        if not value:
+            continue
+        path = Path(str(value))
+        npz_candidates.extend([path, embedding_manifest.parent / path, embedding_manifest.parent.parent / path])
+    npz = next((path for path in npz_candidates if path.exists()), None)
+    if npz is None:
+        raise FileNotFoundError(f"could not resolve first embedding payload NPZ from {embedding_manifest}")
+    json_candidates: list[Path] = []
+    for key in ("json", "relative_json"):
+        value = row.get(key)
+        if not value:
+            continue
+        path = Path(str(value))
+        json_candidates.extend([path, embedding_manifest.parent / path, embedding_manifest.parent.parent / path])
+    json_path = next((path for path in json_candidates if path.exists()), None)
+    return npz, json_path
+
+
+def branching_reasoning_command(args: argparse.Namespace, npz: Path, metadata_json: Path | None, output_dir: Path) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(BRANCHING_REASONING_SCRIPT),
+        "--output-dir",
+        str(output_dir),
+        "--embedding-payload-npz",
+        str(npz),
+        "--embedding-max-nodes",
+        str(max(0, int(args.branching_reasoning_max_nodes))),
+        "--embedding-node-offset",
+        str(max(0, int(args.branching_reasoning_node_offset))),
+    ]
+    if metadata_json is not None:
+        cmd.extend(["--embedding-payload-json", str(metadata_json)])
+    return cmd
+
+
 def main() -> None:
     args = parse_args()
     checkpoint = Path(args.checkpoint)
@@ -425,6 +502,7 @@ def main() -> None:
     geometry_dir = Path(args.geometry_output_dir) if args.geometry_output_dir else output_dir / "geometry"
     gudhi_dir = Path(args.gudhi_output_dir) if args.gudhi_output_dir else output_dir / "gudhi_persistence"
     cas_dir = Path(args.cas_sidecar_output_dir) if args.cas_sidecar_output_dir else output_dir / "embedding_cas_sidecar"
+    branching_dir = Path(args.branching_reasoning_output_dir) if args.branching_reasoning_output_dir else output_dir / "branching_reasoning_report"
     music_dir = Path(args.slepian_music_output_dir) if args.slepian_music_output_dir else output_dir / "music"
 
     manifest: dict[str, Any] = {
@@ -444,6 +522,7 @@ def main() -> None:
         "gudhi_persistence_enabled": bool(args.emit_gudhi_persistence),
         "ph_feature_visualizations_enabled": bool(args.emit_ph_feature_visualizations),
         "embedding_cas_sidecar_enabled": bool(args.emit_cas_sidecar),
+        "branching_reasoning_enabled": bool(args.emit_branching_reasoning_report),
         "slepian_music_enabled": bool(args.emit_slepian_music),
         **load_checkpoint_meta(checkpoint),
     }
@@ -482,6 +561,50 @@ def main() -> None:
         manifest["embedding_cas_sidecar_output_dir"] = str(cas_dir)
         manifest["embedding_cas_sidecar_index_html"] = str(cas_dir / "index.html")
         manifest["embedding_cas_sidecar_manifest"] = read_json(cas_dir / "manifest.json")
+
+    if args.emit_branching_reasoning_report:
+        if not args.emit_geometry:
+            raise ValueError("--emit-branching-reasoning-report requires --emit-geometry so embedding payloads can be generated")
+        embedding_manifest = geometry_dir / "embeddings" / "manifest.json"
+        if not embedding_manifest.exists():
+            raise FileNotFoundError(
+                f"embedding payload manifest not found: {embedding_manifest}. "
+                "Run without --no-emit-embedding-payloads."
+            )
+        npz_path, json_path = resolve_first_embedding_payload(embedding_manifest)
+        branching_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.run(branching_reasoning_command(args, npz_path, json_path, branching_dir), cwd=ROOT, check=True)
+        manifest["branching_reasoning_output_dir"] = str(branching_dir)
+        manifest["branching_reasoning_report_html"] = str(branching_dir / "branching_reasoning_trajectory.html")
+        manifest["branching_reasoning_manifest"] = read_json(branching_dir / "manifest.json")
+        manifest["branching_reasoning_embedding_payload_npz"] = str(npz_path)
+        manifest["branching_reasoning_embedding_payload_json"] = str(json_path or "")
+        if bool(args.branching_reasoning_screenshots):
+            screenshot_dir = branching_dir / "html_screenshots"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCREENSHOT_SCRIPT),
+                    "--source-dir",
+                    str(branching_dir),
+                    "--output-dir",
+                    str(screenshot_dir),
+                    "--no-full-page",
+                    "--viewport-slices",
+                    "8",
+                    "--interaction-audit",
+                    "--interaction-delay-ms",
+                    "700",
+                    "--wait-ms",
+                    "1800",
+                    "--timeout-ms",
+                    "90000",
+                ],
+                cwd=ROOT,
+                check=True,
+            )
+            manifest["branching_reasoning_screenshot_index_html"] = str(screenshot_dir / "index.html")
+            manifest["branching_reasoning_screenshot_manifest"] = read_json(screenshot_dir / "manifest.json")
 
     if args.emit_slepian_music:
         music_dir.mkdir(parents=True, exist_ok=True)

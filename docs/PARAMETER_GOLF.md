@@ -189,12 +189,14 @@ The BPB objective and causal scoring contract remain unchanged.
 ## GraphCG And Directed Topological Analogies
 
 The `oai` branch separates GraphCG basis learning from the analogical
-reasoning mechanism. `graphcg_num_directions: auto` chooses the largest
-configured multiple of eight under a small activation-memory budget with a ten
-percent safety margin; on the current 24GB RTX 4090 this resolves to 256
-directions. Old checkpoints with no basis or a narrower basis can still resume:
-missing rows are initialized and stale optimizer moments are dropped only for
-changed parameters.
+reasoning mechanism.  The current all-phases conservative config uses
+full-rank GraphCG from step 0: `graphcg_require_full_rank: true` and
+`graphcg_num_directions: 384` for `d_model: 384`.  The trainer raises at
+startup if full-rank mode is requested and the resolved direction count is
+smaller than the hidden width.  Old checkpoints with no basis or a narrower
+basis can still resume only when the chosen config permits resizing; changed
+rows are initialized and stale optimizer moments are dropped only for changed
+parameters.
 
 GraphCG is the chart-learning part of the geometric stack. It learns a basis
 `B` whose columns act like steerable concept directions, then topology and
@@ -221,6 +223,36 @@ vectors, so `i -> j` and `j -> i` can differ. The resulting directed flag
 complex logs transitive-closure pressure, directed cycle/holonomy balance,
 directed chain-map diagnostics, asymmetry, and skew magnitude. These metrics
 should improve reasoning geometry without replacing the BPB objective.
+
+Periodic analysis now includes a bounded exact tropical-to-toric report hook.
+For TokenGT geometry checkpoints, `scripts/watch_training_analysis.py` can emit
+embedding payloads, run a tiny Sage/Macaulay2 sidecar, render
+`toric_embedding_report/index.html`, and screenshot the resulting HTML bundle.
+The branch/merge reasoning visualization can be generated independently with
+`scripts/render_branching_reasoning_trajectory_report.py`; it shows full and
+per-step filtered simplicial complexes with radius plus reasoning/decoding
+sliders, NLL coloring, GUDHI vectorized PH feature similarities, and the
+simplex-map gate used to decide whether an analogical memory is acceptable.
+For real checkpoint embedding payloads, use `--embedding-max-nodes` and
+`--embedding-node-offset` to choose the rendered point set before any simplex
+tree is built; within that selected point set, visible one-dimensional simplex
+edges are not capped or sampled away. The analogy panel now draws the
+nearest-neighbor candidate map arrows even when the final tier is
+`no_analogy`, and overlays source/memory graph-of-thought branch/merge
+skeletons on top of the Rips edges so the view reads as a map between
+reasoning simplex trees. A top-level browser index for generated artifacts can
+be refreshed with `scripts/render_outputs_index.py --output-root outputs`.
+The screenshot renderer should be run with `--interaction-audit` for these
+branching reports; that mode moves the radius, reasoning-level, and decoding
+sliders, toggles filled 2-simplices, and exposes representative reasoning-node,
+token, and analogy detail panels in additional screenshots. The branching
+report also includes label-density toggles so dense long trajectories remain
+readable without capping visible one-dimensional simplex edges. Its analogy
+decision banner is tied directly to the payload decision rule: strong, weak,
+and candidate gates are rendered as pass/fail threshold status badges, and a weak analogy
+explicitly states which strong threshold failed. The compact map summary and
+nearby vectorized-PH summary keep the map score, step-map score, PH mean, PH
+gate, image-status counts, and threshold labels in the same visible panel.
 
 The step-local topology path applies the same persistent-homology analogue to
 actual reasoning states in the GraphCG chart. For sampled graph-of-thought

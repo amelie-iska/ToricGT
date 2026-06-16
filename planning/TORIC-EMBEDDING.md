@@ -10,8 +10,6 @@ The central principle is:
 
 Do not claim that arbitrary Transformer layers are toric varieties.  The mathematically sound claim is local and finite: a chosen checkpoint, layer, head, token window, and tropical probe define a finite algebraic sidecar.  That sidecar has toric geometry.
 
-Use the terminology **one-dimensional cones** rather than “rays” in new prose unless quoting a source.
-
 ## Immediate Local Files To Read
 
 Read these first.  They contain the current project statements and the new tropical-to-toric embedding material.

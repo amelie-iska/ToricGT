@@ -30,6 +30,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from toricgt.cas_oracles import Macaulay2TropicalOracle, SageToricOracle  # noqa: E402
+from toricgt.tropical_toric_certificates import tropical_hypersurface_certificate  # noqa: E402
 
 
 CSS = """
@@ -182,6 +183,12 @@ def metric_rows(payload: dict[str, Any]) -> str:
             "projective_dimension"
         ),
         "Macaulay2 regularity": payload["macaulay2_toric_ideal"]["commutative_algebra"].get("regularity"),
+        "Tropical facets": len(payload.get("tropical_hypersurface", {}).get("tropical", {}).get("facets", [])),
+        "Tropical balanced": payload.get("tropical_hypersurface", {}).get("tropical", {}).get("balanced", "n/a"),
+        "Chow/Minkowski certified": payload.get("tropical_hypersurface", {}).get("tropical", {}).get(
+            "chow_minkowski_weight_certified",
+            "n/a",
+        ),
         "identity cone H0": cone_homology.get("H0", "n/a"),
         "identity cone H1": cone_homology.get("H1", "n/a"),
         "identity cone H2": cone_homology.get("H2", "n/a"),
@@ -210,6 +217,10 @@ def write_record_html(record: dict[str, Any], out: Path) -> None:
 <section class="grid">
   <div class="card"><h2>Exact CAS Metrics</h2>{metric_rows(record)}</div>
   <div class="card"><h2>Exponent Matrix</h2>{matrix_table(np.asarray(record['exponent_points'], dtype=int))}</div>
+</section>
+<section class="panel">
+  <h2>Exact Tropical Multiplicity, Balance, And Chow/Minkowski Audit</h2>
+  <pre>{html.escape(json.dumps(record.get('tropical_hypersurface', {}), indent=2, sort_keys=True))}</pre>
 </section>
 <section class="panel">
   <h2>Sage Normal Fan</h2>
@@ -304,6 +315,11 @@ def main() -> None:
             scale=int(args.quantization_scale),
         )
         record_id = f"record_{int(row.get('record_index', len(records))):03d}"
+        biases = [0 for _ in range(int(exponents.shape[0]))]
+        tropical_cert = tropical_hypersurface_certificate(
+            exponents.astype(int).tolist(),
+            biases,
+        )
         sage_cert = sage.normal_fan_certificate(
             exponents.astype(int).tolist(),
             timeout_seconds=max(30, int(args.sage_timeout_seconds)),
@@ -322,6 +338,8 @@ def main() -> None:
             "exponent_points": exponents.astype(int).tolist(),
             "exponent_matrix_for_macaulay2": exponents.T.astype(int).tolist(),
             "exponent_metadata": exponent_metadata,
+            "biases": biases,
+            "tropical_hypersurface": tropical_cert,
             "sage_normal_fan": sage_cert,
             "macaulay2_toric_ideal": m2_cert,
             "json": str(record_json),

@@ -72,11 +72,12 @@ model:
   toric_geometry_max_positions: 256
 
   use_graphcg: true
-  # Medium-conservative GraphCG: broad enough to shape the embedding basis, but
-  # below full rank to avoid early unstable covariance/SVD-style gradients.
-  graphcg_num_directions: 192
-  graphcg_min_directions: 192
-  graphcg_max_directions: 192
+  # Full-rank GraphCG chart from step 0: d_model is 384, so this basis spans
+  # the entire hidden space used by graph-of-thought and toric/tropical probes.
+  graphcg_require_full_rank: true
+  graphcg_num_directions: 384
+  graphcg_min_directions: 384
+  graphcg_max_directions: 384
   graphcg_memory_fraction: 0.09
   graphcg_direction_safety: 0.90
   graphcg_alpha: 0.10

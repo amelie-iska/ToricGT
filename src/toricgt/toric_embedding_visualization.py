@@ -28,6 +28,7 @@ from plotly.subplots import make_subplots
 
 from .cas_certificates import validate_certificate_payload
 from .cas_oracles import Macaulay2TropicalOracle
+from .tropical_toric_certificates import tropical_hypersurface_certificate
 
 
 CSS = """
@@ -44,13 +45,22 @@ p{color:var(--muted);line-height:1.55}
 .metric span:first-child{color:var(--muted)}.metric span:last-child{text-align:right;color:white;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .pill{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(55,232,255,.07);color:#dff9ff}
 .ok{color:var(--green)}.bad{color:var(--bad)}.warn{color:var(--amber)}
-pre{white-space:pre-wrap;overflow-x:auto;background:#020713;border:1px solid rgba(145,168,183,.18);border-radius:8px;padding:14px;color:#dff8ff}
+pre{white-space:pre-wrap;overflow:auto;max-height:520px;background:#020713;border:1px solid rgba(145,168,183,.18);border-radius:8px;padding:14px;color:#dff8ff}
 .plot{border:1px solid rgba(55,232,255,.14);border-radius:8px;overflow:hidden;background:#020713;margin:10px 0}
 .unavailable{border:1px dashed rgba(255,209,102,.45);border-radius:8px;padding:12px;background:rgba(255,209,102,.06);color:#ffe8a8}
 .diagram{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 0}
 .box{border:1px solid rgba(55,232,255,.32);background:rgba(55,232,255,.07);border-radius:8px;padding:10px 12px;min-width:110px;text-align:center}
 .arrow{color:var(--cyan);font-size:24px}
 .small{font-size:12px;color:var(--muted)}
+details{border:1px solid rgba(145,168,183,.18);border-radius:8px;margin:10px 0;background:#020713}
+summary{cursor:pointer;color:var(--cyan);padding:10px 12px}
+details pre{border:0;border-top:1px solid rgba(145,168,183,.18);border-radius:0;margin:0;max-height:520px}
+.statusgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:12px 0}
+.statuscard,.diffcard{border:1px solid rgba(55,232,255,.20);border-radius:8px;background:rgba(55,232,255,.045);padding:10px 12px}
+.statuscard strong,.diffcard strong{display:block;color:#dff9ff;margin-bottom:4px}
+.diffgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin:12px 0}
+.modulechain{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;margin:12px 0}
+.modulebox{border:1px solid rgba(255,79,216,.28);background:rgba(255,79,216,.06);border-radius:8px;padding:10px 12px;min-width:116px;text-align:center}
 """
 
 
@@ -119,6 +129,38 @@ def collect_sidecar_records(*, sidecar_records: list[Path] | None = None, sideca
     return unique
 
 
+def rich_staircase_demo_record() -> dict[str, Any]:
+    """Return a deterministic sidecar that makes the staircase geometry legible.
+
+    This is a visualization sidecar, not a checkpoint-derived measurement.  It
+    deliberately uses several incomparable two-variable monomial generators so
+    the overhead view resembles the Miller-Sturmfels staircase figure and the
+    adjacent-lcm layer is nontrivial.  CAS-dependent panels remain unavailable
+    unless exact CAS certificates are supplied separately.
+    """
+
+    return {
+        "schema": "toricgt.embedding_cas_sidecar_record.v1",
+        "record_id": "rich_miller_sturmfels_staircase_demo",
+        "visualization_demo_only": True,
+        "demo_note": "Deterministic monomial-ideal staircase demo; not a checkpoint-derived metric.",
+        "embedding_npz": "",
+        "embedding_key": "deterministic_demo",
+        "exponent_points": [
+            [10, 0],
+            [8, 2],
+            [6, 4],
+            [4, 7],
+            [2, 9],
+            [0, 12],
+            [11, 3],
+            [9, 6],
+            [5, 10],
+        ],
+        "biases": [0, 0, 0, 0, 0, 0, 1, -1, 1],
+    }
+
+
 def _record_exactness(record: dict[str, Any]) -> dict[str, bool]:
     sage = record.get("sage_normal_fan", {})
     m2 = record.get("macaulay2_toric_ideal", {})
@@ -143,6 +185,42 @@ def _biases(record: dict[str, Any], count: int) -> np.ndarray:
     if arr.size != count:
         raise ValueError(f"bias array length {arr.size} does not match exponent count {count}")
     return arr
+
+
+def _exact_tropical_payload(record: dict[str, Any]) -> dict[str, Any]:
+    """Return the sidecar tropical certificate, or derive the exact 2D one.
+
+    Older sidecars predate the explicit ``tropical_hypersurface`` JSON field.
+    When their exponent support is two-dimensional, the same exact
+    closed-form lattice certificate can be reconstructed from the stored
+    exponents and valuation biases.  This is not a surrogate path: the
+    generated payload is marked by its own certificate provenance and uses the
+    same integer arithmetic as the sidecar writer.
+    """
+
+    existing = record.get("tropical_hypersurface")
+    if isinstance(existing, dict) and existing.get("tropical"):
+        return existing
+    try:
+        points = _exponents(record)
+        if points.shape[1] != 2:
+            return {
+                "tropical": {},
+                "diagnostics": {
+                    "generated_from_record": False,
+                    "reason": "closed-form tropical hypersurface certificate requires exponent_dim == 2",
+                },
+            }
+        biases = _biases(record, points.shape[0])
+        return tropical_hypersurface_certificate(points.astype(int).tolist(), biases.astype(int).tolist())
+    except Exception as exc:
+        return {
+            "tropical": {},
+            "diagnostics": {
+                "generated_from_record": False,
+                "reason": repr(exc),
+            },
+        }
 
 
 def _convex_hull(points: np.ndarray) -> np.ndarray:
@@ -332,39 +410,230 @@ def _staircase_generators(points: np.ndarray) -> np.ndarray:
     return arr[order]
 
 
-def _staircase_plot(points: np.ndarray) -> str:
+def _staircase_metadata(points: np.ndarray) -> dict[str, Any]:
     gens = _staircase_generators(points)
     if gens.size == 0:
-        return _unavailable("Miller-Sturmfels Staircase", "Need at least one two-variable monomial generator after integer quantization.")
+        return {}
     max_x = int(gens[:, 0].max() + 4)
     max_y = int(gens[:, 1].max() + 4)
     xs = np.arange(max_x + 1)
     ys = np.arange(max_y + 1)
-    z = np.zeros((len(ys), len(xs)), dtype=int)
+    membership = np.zeros((len(ys), len(xs)), dtype=int)
+    quotient_basis: list[list[int]] = []
+    ideal_points: list[list[int]] = []
     for yi, y in enumerate(ys):
         for xi, x in enumerate(xs):
-            z[yi, xi] = int(any(x >= int(g[0]) and y >= int(g[1]) for g in gens))
-    fig = make_subplots(rows=1, cols=2, specs=[[{"type": "xy"}, {"type": "scene"}]], subplot_titles=("quotient basis vs monomial ideal", "stacked staircase layers"))
-    fig.add_trace(go.Heatmap(x=xs, y=ys, z=z, colorscale=[[0, "#061124"], [1, "#37506b"]], showscale=False, name="ideal membership"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=gens[:, 0], y=gens[:, 1], mode="markers+text", text=[f"m{i}" for i in range(len(gens))], marker={"size": 12, "color": "#ff4fd8"}, name="minimal generators"), row=1, col=1)
-    basis_x, basis_y, ideal_x, ideal_y = [], [], [], []
-    for yi, y in enumerate(ys):
-        for xi, x in enumerate(xs):
-            if z[yi, xi]:
-                ideal_x.append(x)
-                ideal_y.append(y)
+            in_ideal = int(any(x >= int(g[0]) and y >= int(g[1]) for g in gens))
+            membership[yi, xi] = in_ideal
+            if in_ideal:
+                ideal_points.append([int(x), int(y)])
             else:
-                basis_x.append(x)
-                basis_y.append(y)
-    layers = [(0, 0, 0.0, "#37e8ff"), (1, 0, 0.12, "#8cff6a"), (0, 1, 0.24, "#ffd166")]
-    for sx, sy, layer_z, color in layers:
-        bx = [x + sx for x in basis_x]
-        by = [y + sy for y in basis_y]
-        fig.add_trace(go.Scatter3d(x=bx, y=by, z=[layer_z] * len(bx), mode="markers", marker={"size": 3, "color": color, "opacity": 0.78}, name=f"basis layer shift ({sx},{sy})"), row=1, col=2)
+                quotient_basis.append([int(x), int(y)])
+    threshold_by_x: list[int] = []
+    for x in xs:
+        thresholds = [int(g[1]) for g in gens if x >= int(g[0])]
+        threshold_by_x.append(min(thresholds) if thresholds else max_y + 1)
+    adjacent_lcms: list[dict[str, Any]] = []
+    for idx, (left, right) in enumerate(zip(gens, gens[1:])):
+        lcm = [int(max(left[0], right[0])), int(max(left[1], right[1]))]
+        adjacent_lcms.append(
+            {
+                "index": int(idx),
+                "left_generator": [int(left[0]), int(left[1])],
+                "right_generator": [int(right[0]), int(right[1])],
+                "lcm_corner": lcm,
+            }
+        )
+    return {
+        "minimal_generators": gens.astype(int).tolist(),
+        "window": {"x_max": int(max_x), "y_max": int(max_y)},
+        "x_values": xs.astype(int).tolist(),
+        "y_values": ys.astype(int).tolist(),
+        "membership_grid": membership.astype(int).tolist(),
+        "quotient_basis": quotient_basis,
+        "ideal_points": ideal_points,
+        "staircase_threshold_by_x": [int(v) for v in threshold_by_x],
+        "adjacent_lcm_layer": adjacent_lcms,
+    }
+
+
+def _staircase_plot(points: np.ndarray) -> str:
+    meta = _staircase_metadata(points)
+    if not meta:
+        return _unavailable("Miller-Sturmfels Staircase", "Need at least one two-variable monomial generator after integer quantization.")
+    gens = np.asarray(meta["minimal_generators"], dtype=int)
+    xs = np.asarray(meta["x_values"], dtype=int)
+    ys = np.asarray(meta["y_values"], dtype=int)
+    membership = np.asarray(meta["membership_grid"], dtype=int)
+    basis = np.asarray(meta["quotient_basis"], dtype=int) if meta["quotient_basis"] else np.empty((0, 2), dtype=int)
+    ideal = np.asarray(meta["ideal_points"], dtype=int) if meta["ideal_points"] else np.empty((0, 2), dtype=int)
+    lcms = np.asarray([row["lcm_corner"] for row in meta["adjacent_lcm_layer"]], dtype=int) if meta["adjacent_lcm_layer"] else np.empty((0, 2), dtype=int)
+    threshold = np.asarray(meta["staircase_threshold_by_x"], dtype=int)
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        specs=[[{"type": "xy"}, {"type": "scene"}]],
+        subplot_titles=("Miller-Sturmfels Overhead XY-Grid Staircase", "close z-height module layers"),
+        horizontal_spacing=0.08,
+    )
+    fig.add_trace(
+        go.Heatmap(
+            x=xs,
+            y=ys,
+            z=membership,
+            colorscale=[[0, "#061124"], [0.49, "#061124"], [0.50, "#3f4650"], [1, "#3f4650"]],
+            showscale=False,
+            name="monomial ideal region I",
+            hovertemplate="x=%{x}<br>y=%{y}<br>in I=%{z}<extra></extra>",
+        ),
+        row=1,
+        col=1,
+    )
+    if basis.size:
+        fig.add_trace(
+            go.Scatter(
+                x=basis[:, 0],
+                y=basis[:, 1],
+                mode="markers",
+                marker={"size": 6, "color": "#e8fbff", "line": {"color": "#061124", "width": 0.7}},
+                name="quotient basis S/I",
+                hovertemplate="basis monomial x^%{x}y^%{y}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=xs,
+            y=np.minimum(threshold, int(ys.max())),
+            mode="lines",
+            line={"shape": "hv", "color": "#37e8ff", "width": 4},
+            name="staircase boundary",
+            hovertemplate="x=%{x}<br>first ideal y=%{y}<extra></extra>",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=gens[:, 0],
+            y=gens[:, 1],
+            mode="markers+text",
+            text=[f"m{i}" for i in range(len(gens))],
+            textposition="top center",
+            marker={"size": 13, "color": "#ff4fd8", "line": {"color": "#ffffff", "width": 0.8}},
+            name="minimal monomial generators",
+            hovertemplate="m=%{text}<br>x^%{x}y^%{y}<extra></extra>",
+        ),
+        row=1,
+        col=1,
+    )
+    if lcms.size:
+        fig.add_trace(
+            go.Scatter(
+                x=lcms[:, 0],
+                y=lcms[:, 1],
+                mode="markers+text",
+                text=[f"lcm{i}" for i in range(len(lcms))],
+                textposition="bottom center",
+                marker={"size": 10, "color": "#ffd166"},
+                name="adjacent lcm corners",
+            ),
+            row=1,
+            col=1,
+        )
+
+    if ideal.size:
+        fig.add_trace(
+            go.Scatter3d(
+                x=ideal[:, 0],
+                y=ideal[:, 1],
+                z=np.full(len(ideal), 0.035),
+                mode="markers",
+                marker={"size": 2.6, "color": "rgba(145,168,183,.42)"},
+                name="I lattice points layer z=0.035",
+                hovertemplate="ideal monomial x^%{x}y^%{y}<extra></extra>",
+            ),
+            row=1,
+            col=2,
+        )
+    if basis.size:
+        fig.add_trace(
+            go.Scatter3d(
+                x=basis[:, 0],
+                y=basis[:, 1],
+                z=np.zeros(len(basis)),
+                mode="markers",
+                marker={"size": 3.8, "color": "#e8fbff"},
+                name="quotient basis S/I layer z=0.000",
+                hovertemplate="S/I basis x^%{x}y^%{y}<extra></extra>",
+            ),
+            row=1,
+            col=2,
+        )
+    fig.add_trace(
+        go.Scatter3d(
+            x=gens[:, 0],
+            y=gens[:, 1],
+            z=np.full(len(gens), 0.070),
+            mode="markers+text",
+            text=[f"m{i}" for i in range(len(gens))],
+            textposition="top center",
+            marker={"size": 7, "color": "#ff4fd8"},
+            name="minimal generator layer z=0.070",
+        ),
+        row=1,
+        col=2,
+    )
+    if lcms.size:
+        fig.add_trace(
+            go.Scatter3d(
+                x=lcms[:, 0],
+                y=lcms[:, 1],
+                z=np.full(len(lcms), 0.105),
+                mode="markers+text",
+                text=[f"lcm{i}" for i in range(len(lcms))],
+                textposition="top center",
+                marker={"size": 6, "color": "#ffd166"},
+                name="adjacent lcm layer z=0.105",
+            ),
+            row=1,
+            col=2,
+        )
+        for idx, row_meta in enumerate(meta["adjacent_lcm_layer"]):
+            lcm = row_meta["lcm_corner"]
+            for gen in (row_meta["left_generator"], row_meta["right_generator"]):
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=[gen[0], lcm[0]],
+                        y=[gen[1], lcm[1]],
+                        z=[0.070, 0.105],
+                        mode="lines",
+                        line={"color": "rgba(255,209,102,.55)", "width": 3},
+                        name=f"adjacent lcm differential edge {idx}",
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=1,
+                    col=2,
+                )
     fig.update_xaxes(title_text="x exponent", row=1, col=1)
     fig.update_yaxes(title_text="y exponent", row=1, col=1)
-    fig.update_layout(title="Miller-Sturmfels Monomial-Ideal Staircase")
-    return _plot_html(fig)
+    fig.update_layout(
+        title="Miller-Sturmfels Monomial-Ideal Staircase With Close Z-Height Module Layers",
+        scene={
+            "xaxis": {"title": "x exponent"},
+            "yaxis": {"title": "y exponent"},
+            "zaxis": {"title": "module layer", "range": [-0.01, 0.14]},
+            "camera": {"eye": {"x": 1.45, "y": 1.35, "z": 0.65}},
+        },
+    )
+    meta_html = (
+        "<details open><summary>Exact staircase metadata</summary><pre>"
+        + html.escape(json.dumps({key: value for key, value in meta.items() if key != "membership_grid"}, indent=2, sort_keys=True))
+        + "</pre></details>"
+    )
+    return _plot_html(fig) + meta_html
 
 
 def _relation_graph(record: dict[str, Any]) -> str:
@@ -396,38 +665,130 @@ def _resolution_diagram(record: dict[str, Any]) -> str:
     pdim = algebra.get("projective_dimension")
     regularity = algebra.get("regularity")
     gen_count = algebra.get("toric_ideal_generator_count")
-    boxes = [
-        ("S/I", "quotient"),
-        ("F_0", f"generators: {gen_count}"),
-        ("F_1", f"pdim: {pdim}"),
-        ("F_*", f"length: {length}"),
-        ("reg", f"{regularity}"),
+    try:
+        length_int = max(0, int(length))
+    except Exception:
+        length_int = 0
+    boxes = [("S/I", "quotient module")] + [
+        (f"F_{idx}", "free module" if idx == 0 else f"d_{idx}: F_{idx}->F_{idx-1}")
+        for idx in range(length_int + 1)
     ]
-    diagram = '<div class="diagram">'
+    diagram = '<div class="modulechain" aria-label="resolution module strip">'
     for idx, (title, sub) in enumerate(boxes):
         if idx:
             diagram += '<span class="arrow">&larr;</span>'
-        diagram += f'<div class="box"><strong>{html.escape(str(title))}</strong><br><span class="small">{html.escape(str(sub))}</span></div>'
+        diagram += f'<div class="modulebox"><strong>{html.escape(str(title))}</strong><br><span class="small">{html.escape(str(sub))}</span></div>'
     diagram += "</div>"
+    status = _resolution_status_cards(algebra)
+    diff_cards = _differential_cards(algebra)
     raw = html.escape(str(algebra.get("free_resolution_raw", "")))
     module_raw = html.escape(str(algebra.get("module_free_resolution_raw", "")))
     return f"""<section class="panel"><h2>Free Resolution And Differentials</h2>
 {diagram}
-<h3>Ideal free resolution</h3><pre>{raw}</pre>
-<h3>Cokernel module free resolution</h3><pre>{module_raw}</pre>
+<p>This panel renders exact Macaulay2 resolution data as a module strip plus differential cards.  The cards preserve the raw matrix strings and keep the derived checks adjacent to the maps they audit.</p>
+{status}
+{diff_cards}
+<details><summary>Raw ideal free resolution</summary><pre>{raw}</pre></details>
+<details><summary>Raw cokernel module free resolution</summary><pre>{module_raw}</pre></details>
 </section>"""
+
+
+def _resolution_status_cards(algebra: dict[str, Any]) -> str:
+    square = algebra.get("module_resolution_square_zero", {})
+    ext = algebra.get("module_ext_modules", {})
+    tor = algebra.get("module_tor_residue_modules", {})
+    derived = algebra.get("derived_category_maps", {})
+    rows = [
+        ("projective dimension", algebra.get("projective_dimension", "n/a")),
+        ("regularity", algebra.get("regularity", "n/a")),
+        ("resolution length", algebra.get("resolution_length", "n/a")),
+        ("toric ideal generators", algebra.get("toric_ideal_generator_count", "n/a")),
+        ("d^2=0 checks", square if square else "not supplied"),
+        ("Ext modules", f"{len(ext)} supplied" if isinstance(ext, dict) else "not supplied"),
+        ("Tor modules", f"{len(tor)} supplied" if isinstance(tor, dict) else "not supplied"),
+        ("mapping cone", "supplied" if derived else "not supplied"),
+    ]
+    cards = []
+    for label, value in rows:
+        value_text = json.dumps(value, sort_keys=True) if isinstance(value, (dict, list)) else str(value)
+        cards.append(f"<div class='statuscard'><strong>{html.escape(label)}</strong><span>{html.escape(value_text)}</span></div>")
+    return "<div class='statusgrid'>" + "".join(cards) + "</div>"
+
+
+def _parse_macaulay2_matrix_string(text: str) -> list[list[str]] | None:
+    stripped = str(text).strip()
+    start = stripped.find("{{")
+    stop = stripped.rfind("}}")
+    if start < 0 or stop <= start:
+        return None
+    inner = stripped[start + 2 : stop]
+    rows_raw = re.split(r"}\s*,\s*{", inner)
+    rows: list[list[str]] = []
+    for row in rows_raw:
+        cells = [cell.strip() for cell in row.split(",")]
+        if not cells:
+            return None
+        rows.append(cells)
+    width = len(rows[0]) if rows else 0
+    if width == 0 or any(len(row) != width for row in rows):
+        return None
+    return rows
+
+
+def _matrix_table(rows: list[list[str]]) -> str:
+    rendered_rows = []
+    for row in rows:
+        rendered_rows.append("<tr>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>")
+    return "<div class='tablewrap'><table>" + "".join(rendered_rows) + "</table></div>"
+
+
+def _differential_cards(algebra: dict[str, Any]) -> str:
+    differentials = algebra.get("module_resolution_differentials", {})
+    if not isinstance(differentials, dict) or not differentials:
+        return "<div class='unavailable'><strong>Unavailable:</strong> Macaulay2 certificate contains no module_resolution_differentials.</div>"
+    cards: list[str] = []
+    for name in sorted(differentials):
+        text = str(differentials.get(name, ""))
+        matrix_like = html.escape(text[:260] + ("..." if len(text) > 260 else ""))
+        raw = html.escape(text)
+        parsed = _parse_macaulay2_matrix_string(text)
+        parsed_html = ""
+        if parsed is not None:
+            parsed_html = (
+                f"<div class='small'>parsed source rank {len(parsed[0])}, target rank {len(parsed)}</div>"
+                + _matrix_table(parsed)
+            )
+        cards.append(
+            "<div class='diffcard'>"
+            f"<strong>{html.escape(str(name))}</strong>"
+            f"<div class='small'>exact differential matrix/string</div>"
+            f"<pre>{matrix_like}</pre>"
+            f"{parsed_html}"
+            f"<details><summary>full exact {html.escape(str(name))} string</summary><pre>{raw}</pre></details>"
+            "</div>"
+        )
+    return "<h3>Exact Differential Cards</h3><div class='diffgrid'>" + "".join(cards) + "</div>"
 
 
 def _divisor_chow_panel(record: dict[str, Any]) -> str:
     toric = record.get("sage_normal_fan", {}).get("toric", {})
-    tropical = record.get("sage_normal_fan", {}).get("tropical", {})
+    tropical_cert = _exact_tropical_payload(record)
+    tropical = tropical_cert.get("tropical", {}) if isinstance(tropical_cert, dict) else {}
+    if not tropical:
+        tropical = record.get("sage_normal_fan", {}).get("tropical", {})
     has_mult = bool(tropical.get("multiplicities"))
+    balanced = tropical.get("balanced", False)
+    chow_certified = tropical.get("chow_minkowski_weight_certified", False)
     props = toric.get("fan_properties", {})
     metrics = [
         _metric("normal fan complete", props.get("is_complete", "unknown")),
         _metric("normal fan simplicial", props.get("is_simplicial", "unknown")),
         _metric("normal fan smooth", props.get("is_smooth", "unknown")),
         _metric("tropical multiplicities present", has_mult),
+        _metric("balancing stars", len(tropical.get("balancing_stars", []) or [])),
+        _metric("max balance residual L1", tropical.get("max_balance_residual_l1", "n/a")),
+        _metric("balanced", balanced),
+        _metric("Chow/Minkowski certified", chow_certified),
     ]
     if not has_mult:
         note = (
@@ -435,11 +796,46 @@ def _divisor_chow_panel(record: dict[str, Any]) -> str:
             "this sidecar has a Sage normal fan but no tropical-cycle multiplicity certificate. "
             "The report therefore does not invent a Minkowski weight or Chow class.</div>"
         )
+    elif not chow_certified:
+        note = (
+            '<div class="unavailable"><strong>Chow/Minkowski class not certified:</strong> '
+            "integer tropical multiplicities are present, but the exact balancing audit did not certify all stars.</div>"
+        )
     else:
-        note = '<p class="ok">Tropical multiplicities are present; balance and Chow comparisons can be attached.</p>'
+        note = '<p class="ok">Exact integer multiplicities pass the balancing audit; the sidecar certifies a Minkowski-weight/Chow audit state for this finite tropical hypersurface.</p>'
+    facet_table = ""
+    facets = tropical.get("facets", []) or []
+    if facets:
+        rows = []
+        for facet in facets[:32]:
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(facet.get('facet_index')))}</td>"
+                f"<td>{html.escape(str(facet.get('active_pair')))}</td>"
+                f"<td>{html.escape(str(facet.get('multiplicity')))}</td>"
+                f"<td>{html.escape(str(facet.get('primitive_normal')))}</td>"
+                f"<td>{html.escape(str(facet.get('parameter_interval', {}).get('kind')))}</td>"
+                "</tr>"
+            )
+        facet_table = (
+            "<h3>Exact Facet Multiplicities</h3><div class='tablewrap'><table>"
+            "<tr><th>facet</th><th>active pair</th><th>weight</th><th>primitive normal</th><th>wall domain</th></tr>"
+            + "".join(rows)
+            + "</table></div>"
+        )
+    star_pre = ""
+    if tropical.get("balancing_stars"):
+        star_pre = "<h3>Balancing Stars</h3><pre>" + html.escape(json.dumps(tropical.get("balancing_stars"), indent=2, sort_keys=True)) + "</pre>"
+    diagnostics = tropical_cert.get("diagnostics", {}) if isinstance(tropical_cert, dict) else {}
+    diag_html = ""
+    if diagnostics:
+        diag_html = "<h3>Certificate Diagnostics</h3><pre>" + html.escape(json.dumps(diagnostics, indent=2, sort_keys=True)) + "</pre>"
     return f"""<section class="panel"><h2>Divisor, Balance, And Chow Audit State</h2>
 {''.join(metrics)}
 {note}
+{facet_table}
+{star_pre}
+{diag_html}
 <p>The Cartier-divisor bend audit requires cone-wise support-function slopes and codimension-one adjacency.  When those fields are certified, bends are displayed as toric invariant-curve intersection data.</p>
 </section>"""
 
@@ -537,13 +933,27 @@ def _record_page(record: dict[str, Any], output_dir: Path, vector_bundle_payload
         "exponent_count": int(points.shape[0]),
         "exponent_dim": int(points.shape[1]),
         "bias_source": "record" if any(key in record for key in ("biases", "valuation_biases", "exponent_biases")) else "zero_valuation_default",
+        "visualization_demo_only": bool(record.get("visualization_demo_only", False)),
+        "miller_sturmfels_staircase": {
+            key: value
+            for key, value in _staircase_metadata(points).items()
+            if key in {"minimal_generators", "window", "quotient_basis", "staircase_threshold_by_x", "adjacent_lcm_layer"}
+        },
     }
     _write_json(json_path, summary)
     klyachko_html, _ = _klyachko_panel(vector_bundle_payload, output_dir)
+    demo_banner = (
+        "<div class='unavailable'><strong>Visualization demo sidecar:</strong> "
+        + html.escape(str(record.get("demo_note", "This record is deterministic demonstration data, not a checkpoint-derived metric.")))
+        + "</div>"
+        if record.get("visualization_demo_only")
+        else ""
+    )
     body = f"""<!doctype html><html><head><meta charset="utf-8"><title>{html.escape(record_id)} Toric Embedding</title><style>{CSS}</style></head>
 <body><main>
 <section class="hero"><h1>{html.escape(record_id)} Tropical-To-Toric Embedding Report</h1>
 <p>This page visualizes the exact finite sidecar that embeds rationalized tropical ring attention into toric geometry.  It does not claim the full Transformer is toric.</p>
+{demo_banner}
 <p><a class="pill" href="../index.html">index</a><a class="pill" href="{html.escape(json_path.name)}">summary JSON</a></p></section>
 <section class="grid">
 <div class="card"><h2>Exactness And Conventions</h2>
@@ -568,13 +978,14 @@ def _record_page(record: dict[str, Any], output_dir: Path, vector_bundle_payload
 {_divisor_chow_panel(record)}
 <section class="panel"><h2>Toric Ideal Relations</h2>{_relation_graph(record)}</section>
 {_resolution_diagram(record)}
-<section class="panel"><h2>Miller-Sturmfels Staircase</h2><p>This is the exact monomial-ideal staircase for the two-coordinate integer exponent generators in this sidecar.  It is not labeled as an initial ideal unless a separate initial-ideal certificate is present.</p>{_staircase_plot(points)}</section>
+<section class="panel"><h2>Miller-Sturmfels Staircase</h2><p>This is the exact monomial-ideal staircase for the two-coordinate integer exponent generators in this sidecar.  It is not labeled as an initial ideal unless a separate initial-ideal certificate is present.  The 3D panel uses close z-height module layers: quotient basis S/I, ideal lattice region I, minimal generator layer, and adjacent lcm layer.</p>{_staircase_plot(points)}</section>
 {klyachko_html}
 {_derived_summary(record)}
 </main></body></html>"""
     html_path.write_text(body, encoding="utf-8")
     summary["html"] = f"records/{html_path.name}"
     summary["json"] = f"records/{json_path.name}"
+    _write_json(json_path, summary)
     return html_path, summary
 
 
@@ -645,4 +1056,3 @@ def render_toric_embedding_report(
     }
     _write_json(output_dir / "manifest.json", manifest)
     return manifest
-

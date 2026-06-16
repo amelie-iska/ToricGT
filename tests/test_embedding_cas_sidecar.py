@@ -92,6 +92,10 @@ def test_embedding_cas_sidecar_runs_sage_and_macaulay2(tmp_path: Path) -> None:
     assert record["sage_normal_fan"]["toric"]["fan_refinement_checks"]["self_refinement_valid"] is True
     assert record["sage_normal_fan"]["toric"]["orbit_strata"]
     assert isinstance(record["sage_normal_fan"]["toric"]["face_incidence"], list)
+    assert record["tropical_hypersurface"]["kind"] == "closed_form_tropical_hypersurface_multiplicity_balance_certificate"
+    assert record["tropical_hypersurface"]["tropical"]["facets"]
+    assert record["tropical_hypersurface"]["tropical"]["multiplicities"]
+    assert "chow_minkowski_weight_certified" in record["tropical_hypersurface"]["tropical"]
     assert record["macaulay2_toric_ideal"]["provenance"] == "exact_cas/macaulay2"
     assert record["exponent_metadata"]["method"] == "actual_hidden_pca_rank_quantized_nonnegative_exponents"
     algebra = record["macaulay2_toric_ideal"]["commutative_algebra"]
@@ -104,6 +108,7 @@ def test_embedding_cas_sidecar_runs_sage_and_macaulay2(tmp_path: Path) -> None:
     assert "Identity chain map and mapping cone" in html
     assert "Sage fan one-dimensional cones" in html
     assert "Sage fan rays" not in html
+    assert "Exact Tropical Multiplicity, Balance, And Chow/Minkowski Audit" in html
     assert (out / "index.html").exists()
 
     validation = subprocess.run(
