@@ -8,7 +8,10 @@ trains graph/analogy/retrieval heads from the same GPT hidden states.
 from __future__ import annotations
 
 import glob
+import hashlib
+import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +29,16 @@ from .toric_vector_bundles import ToricVectorBundleConfig, ToricVectorBundleProb
 
 
 class GraphParquetTokenStream:
-    """Stream curated graph rows as SP1024 token chunks for auxiliary training."""
+    """Stream curated graph rows as SP1024 token chunks for graph LM training.
+
+    Every row is graphified before SentencePiece encoding.  Rows with a
+    ``graph_json`` payload are serialized as explicit node and edge token
+    records.  DAG-like payloads use causal topological node order and decode
+    each edge after its endpoints are visible; cyclic or edgeless payloads use a
+    deterministic random reveal order.  Rows without graph JSON are converted to
+    a linear causal text graph, so the OAI adaptation never silently falls back
+    to plain unstructured text for this stream.
+    """
 
     TEXT_COLUMNS = ("text", "question", "reasoning", "solution", "answer", "graph_json", "metadata_json")
 
@@ -41,7 +53,238 @@ class GraphParquetTokenStream:
         self.row_idx = 0
         self.rows: list[str] = []
         self.token_buffer: list[int] = []
+        self.policy_counts: dict[str, int] = {}
+        self.rows_graphified = 0
         self._load_file()
+
+    @staticmethod
+    def _stable_key(value: Any, record_id: str) -> int:
+        digest = hashlib.blake2b(f"{record_id}:{value}".encode("utf-8", errors="ignore"), digest_size=8).digest()
+        return int.from_bytes(digest, "big", signed=False)
+
+    @staticmethod
+    def _safe_attr(value: Any, *, max_chars: int = 80) -> str:
+        text = str(value if value is not None else "").strip()
+        if not text:
+            return "unknown"
+        text = re.sub(r"\s+", "_", text)
+        text = re.sub(r"[^A-Za-z0-9_.:/#@+-]", "_", text)
+        return text[:max_chars] or "unknown"
+
+    @staticmethod
+    def _payload_text(value: Any, *, max_chars: int = 420) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (str, int, float, bool)):
+            text = str(value)
+        else:
+            try:
+                text = json.dumps(value, ensure_ascii=True, sort_keys=True)
+            except Exception:
+                text = str(value)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:max_chars]
+
+    @staticmethod
+    def _first_present(row: dict[str, Any], keys: tuple[str, ...], default: Any = None) -> Any:
+        for key in keys:
+            if key in row and row[key] not in (None, ""):
+                return row[key]
+        return default
+
+    @classmethod
+    def _node_id(cls, node: Any, index: int) -> str:
+        if isinstance(node, dict):
+            raw = cls._first_present(node, ("id", "node_id", "local_id", "name", "key"), f"n{index}")
+        else:
+            raw = f"n{index}"
+        return cls._safe_attr(raw, max_chars=72)
+
+    @classmethod
+    def _normalize_nodes_edges(
+        cls,
+        payload: Any,
+        fallback_text: str,
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        nodes_raw: Any = []
+        edges_raw: Any = []
+        if isinstance(payload, dict):
+            nodes_raw = payload.get("nodes", [])
+            edges_raw = payload.get("edges", [])
+        if isinstance(nodes_raw, dict):
+            nodes_raw = [{"id": key, **(value if isinstance(value, dict) else {"text": value})} for key, value in nodes_raw.items()]
+        if not isinstance(nodes_raw, list):
+            nodes_raw = []
+        if not isinstance(edges_raw, list):
+            edges_raw = []
+
+        nodes: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for index, node in enumerate(nodes_raw):
+            node_dict = node if isinstance(node, dict) else {"text": node}
+            node_id = cls._node_id(node_dict, index)
+            if node_id in seen:
+                node_id = f"{node_id}_{index}"
+            seen.add(node_id)
+            node_type = cls._safe_attr(
+                cls._first_present(node_dict, ("type", "kind", "role", "label"), "node"),
+                max_chars=48,
+            )
+            text = cls._payload_text(
+                cls._first_present(
+                    node_dict,
+                    ("text", "payload", "content", "value", "question", "answer", "label", "name"),
+                    node_type,
+                )
+            )
+            nodes.append({"id": node_id, "type": node_type, "text": text})
+
+        edges: list[dict[str, str]] = []
+        for index, edge in enumerate(edges_raw):
+            edge_dict = edge if isinstance(edge, dict) else {}
+            src = cls._safe_attr(cls._first_present(edge_dict, ("source", "src", "from", "u", "tail"), ""))
+            dst = cls._safe_attr(cls._first_present(edge_dict, ("target", "dst", "to", "v", "head"), ""))
+            if not src or not dst or src == "unknown" or dst == "unknown":
+                continue
+            edge_id = cls._safe_attr(cls._first_present(edge_dict, ("id", "edge_id", "key"), f"e{index}"))
+            edge_type = cls._safe_attr(cls._first_present(edge_dict, ("type", "kind", "role", "label"), "edge"), max_chars=48)
+            text = cls._payload_text(cls._first_present(edge_dict, ("text", "payload", "content", "value", "label"), edge_type))
+            edges.append({"id": edge_id, "source": src, "target": dst, "type": edge_type, "text": text})
+            for endpoint in (src, dst):
+                if endpoint not in seen:
+                    seen.add(endpoint)
+                    nodes.append({"id": endpoint, "type": "inferred_endpoint", "text": endpoint})
+
+        if not nodes:
+            text = fallback_text.strip() or "empty record"
+            chunks = cls._chunk_text(text)
+            nodes = [{"id": f"n{idx}", "type": "text_span", "text": chunk} for idx, chunk in enumerate(chunks)]
+            edges = [
+                {"id": f"e{idx}", "source": f"n{idx}", "target": f"n{idx + 1}", "type": "next_text_span", "text": "next"}
+                for idx in range(max(0, len(nodes) - 1))
+            ]
+        return nodes, edges
+
+    @staticmethod
+    def _chunk_text(text: str, *, max_nodes: int = 24, chars_per_node: int = 360) -> list[str]:
+        clean = re.sub(r"\s+", " ", text).strip()
+        if not clean:
+            return ["empty record"]
+        chunks = [clean[i : i + chars_per_node].strip() for i in range(0, len(clean), chars_per_node)]
+        return [chunk for chunk in chunks[:max_nodes] if chunk] or [clean[:chars_per_node]]
+
+    @classmethod
+    def _causal_ranks(
+        cls,
+        nodes: list[dict[str, str]],
+        edges: list[dict[str, str]],
+        record_id: str,
+        *,
+        force_linear: bool = False,
+    ) -> tuple[dict[str, int], str]:
+        node_ids = [node["id"] for node in nodes]
+        if force_linear:
+            return {node_id: idx for idx, node_id in enumerate(node_ids)}, "linear_causal"
+        valid = [(edge["source"], edge["target"]) for edge in edges if edge["source"] in node_ids and edge["target"] in node_ids]
+        if not valid:
+            ordered = sorted(node_ids, key=lambda node_id: cls._stable_key(node_id, record_id))
+            return {node_id: idx for idx, node_id in enumerate(ordered)}, "random_order_no_edges"
+        adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
+        indegree: dict[str, int] = {node_id: 0 for node_id in node_ids}
+        for src, dst in valid:
+            adjacency[src].append(dst)
+            indegree[dst] += 1
+        frontier = sorted([node_id for node_id in node_ids if indegree[node_id] == 0], key=node_ids.index)
+        ordered: list[str] = []
+        while frontier:
+            node_id = frontier.pop(0)
+            ordered.append(node_id)
+            for dst in adjacency[node_id]:
+                indegree[dst] -= 1
+                if indegree[dst] == 0:
+                    frontier.append(dst)
+            frontier.sort(key=node_ids.index)
+        if len(ordered) == len(node_ids):
+            return {node_id: idx for idx, node_id in enumerate(ordered)}, "causal_topological_dag"
+        ordered = sorted(node_ids, key=lambda node_id: cls._stable_key(node_id, record_id))
+        return {node_id: idx for idx, node_id in enumerate(ordered)}, "random_order_cycle"
+
+    @classmethod
+    def _serialize_graph(
+        cls,
+        nodes: list[dict[str, str]],
+        edges: list[dict[str, str]],
+        record_id: str,
+        *,
+        force_linear: bool = False,
+    ) -> tuple[str, str]:
+        ranks, policy = cls._causal_ranks(nodes, edges, record_id, force_linear=force_linear)
+        node_lookup = {node["id"]: node for node in nodes}
+        ordered_nodes = sorted(nodes, key=lambda node: (ranks.get(node["id"], 10**9), node["id"]))
+        ordered_edges = sorted(
+            edges,
+            key=lambda edge: (
+                max(ranks.get(edge["source"], 10**9), ranks.get(edge["target"], 10**9)),
+                ranks.get(edge["source"], 10**9),
+                ranks.get(edge["target"], 10**9),
+                edge["id"],
+            ),
+        )
+        lines = [
+            (
+                f"<graph record_id={cls._safe_attr(record_id, max_chars=96)} "
+                f"decode_policy={policy} node_count={len(nodes)} edge_count={len(edges)} "
+                "edge_token_decoding=after_endpoint_nodes>"
+            )
+        ]
+        for node in ordered_nodes:
+            lines.append(
+                f"<node_token decode_rank={ranks.get(node['id'], 0)} node_id={node['id']} node_type={node['type']}> "
+                f"{node['text']} </node_token>"
+            )
+        for edge_index, edge in enumerate(ordered_edges):
+            src_rank = ranks.get(edge["source"], 0)
+            dst_rank = ranks.get(edge["target"], 0)
+            decode_rank = max(src_rank, dst_rank)
+            endpoint_text = ""
+            if edge["source"] in node_lookup and edge["target"] in node_lookup:
+                endpoint_text = f" source_type={node_lookup[edge['source']]['type']} target_type={node_lookup[edge['target']]['type']}"
+            lines.append(
+                f"<edge_token decode_rank={decode_rank} edge_order={edge_index} edge_id={edge['id']} "
+                f"source={edge['source']} target={edge['target']} edge_type={edge['type']}{endpoint_text}> "
+                f"{edge['text']} </edge_token>"
+            )
+        lines.append("</graph>")
+        return "\n".join(lines), policy
+
+    @classmethod
+    def _graphify_row(cls, row: dict[str, Any], record_id: str) -> tuple[str, str]:
+        fallback_parts = []
+        for key in ("text", "question", "reasoning", "solution", "answer", "metadata_json"):
+            value = row.get(key)
+            if value not in (None, ""):
+                fallback_parts.append(cls._payload_text(value, max_chars=2400))
+        fallback_text = "\n".join(part for part in fallback_parts if part)
+        graph_raw = row.get("graph_json")
+        if graph_raw not in (None, ""):
+            try:
+                payload = json.loads(graph_raw) if isinstance(graph_raw, str) else graph_raw
+            except Exception:
+                payload = None
+            if payload is not None:
+                nodes, edges = cls._normalize_nodes_edges(payload, fallback_text)
+                return cls._serialize_graph(nodes, edges, record_id)
+        chunks = cls._chunk_text(fallback_text)
+        nodes = [{"id": f"n{idx}", "type": "text_span", "text": chunk} for idx, chunk in enumerate(chunks)]
+        edges = [
+            {"id": f"e{idx}", "source": f"n{idx}", "target": f"n{idx + 1}", "type": "next_text_span", "text": "next"}
+            for idx in range(max(0, len(nodes) - 1))
+        ]
+        return cls._serialize_graph(nodes, edges, record_id, force_linear=True)
+
+    def describe(self) -> str:
+        policies = ",".join(f"{key}:{value}" for key, value in sorted(self.policy_counts.items()))
+        return f"files:{len(self.files)} current_rows:{len(self.rows)} graphified_rows:{self.rows_graphified} policies:{policies or 'none'}"
 
     def _load_file(self) -> None:
         import pyarrow.parquet as pq
@@ -54,16 +297,12 @@ class GraphParquetTokenStream:
         table = pq.read_table(path, columns=columns)
         rows: list[str] = []
         for idx in range(table.num_rows):
-            pieces: list[str] = []
-            for name in columns:
-                value = table[name][idx].as_py()
-                if value is None:
-                    continue
-                text = str(value).strip()
-                if text:
-                    pieces.append(text)
-            if pieces:
-                rows.append("\n".join(pieces))
+            row = {name: table[name][idx].as_py() for name in columns}
+            text, policy = self._graphify_row(row, f"{path.name}:{idx}")
+            if text.strip():
+                rows.append(text)
+                self.rows_graphified += 1
+                self.policy_counts[policy] = self.policy_counts.get(policy, 0) + 1
         if not rows:
             raise ValueError(f"Graph Parquet shard produced no text rows: {path}")
         self.rows = rows
@@ -133,6 +372,17 @@ class ToricGTSidecar(nn.Module):
         self.koszul_persistence_loss_weight = float(getattr(args, "koszul_persistence_loss_weight", 0.0))
         self.combinatorial_toric_loss_weight = float(getattr(args, "combinatorial_toric_loss_weight", 0.0))
         self.compute_all_metrics = bool(int(getattr(args, "sidecar_compute_all_metrics", 1)))
+        self.retrieval_conditioned_aux = bool(int(getattr(args, "retrieval_conditioned_aux", 1)))
+        self.retrieval_gate_min = float(getattr(args, "retrieval_gate_min", 0.20))
+        self.retrieval_gate_softness = max(float(getattr(args, "retrieval_gate_softness", 0.08)), 1e-6)
+        self.retrieval_gate_center = float(getattr(args, "retrieval_gate_center", 0.20))
+        self.uncertainty_weighting = bool(int(getattr(args, "sidecar_uncertainty_weighting", 1)))
+        self.uncertainty_alpha = float(getattr(args, "sidecar_uncertainty_alpha", 0.35))
+        self.uncertainty_center = float(getattr(args, "sidecar_uncertainty_center", 2.6))
+        self.uncertainty_scale = max(float(getattr(args, "sidecar_uncertainty_scale", 1.0)), 1e-6)
+        self.uncertainty_max = max(float(getattr(args, "sidecar_uncertainty_max", 2.0)), 0.0)
+        self.graphcg_bpb_orthogonal_weight = float(getattr(args, "graphcg_bpb_orthogonal_weight", 0.02))
+        self.graphcg_covariance_conflict_damping = float(getattr(args, "graphcg_covariance_conflict_damping", 0.50))
 
         self.toric_geometry = LowRankToricGeometryProbe(
             dim,
@@ -199,11 +449,16 @@ class ToricGTSidecar(nn.Module):
         cls = torch.where((tokens >= 128) & (tokens < 256), torch.full_like(cls, 2), cls)
         return torch.where(tokens >= 256, torch.full_like(cls, 3), cls)
 
-    def _graphcg_losses(self, hidden: Tensor) -> dict[str, Tensor]:
-        h = F.normalize(hidden.float().reshape(-1, hidden.shape[-1]), dim=-1)
+    def _graphcg_losses(self, hidden: Tensor, per_token_nll: Tensor | None = None) -> dict[str, Tensor]:
+        flat_hidden = hidden.float().reshape(-1, hidden.shape[-1])
+        flat_nll = per_token_nll.float().reshape(-1) if per_token_nll is not None else None
+        h = F.normalize(flat_hidden, dim=-1)
+        nll_sample = flat_nll
         if h.shape[0] > 256:
             idx = torch.linspace(0, h.shape[0] - 1, steps=256, device=h.device).long()
             h = h.index_select(0, idx)
+            if nll_sample is not None:
+                nll_sample = nll_sample.index_select(0, idx)
         basis = F.normalize(self.graphcg_basis.float(), dim=-1)
         coords = h @ basis.T
         eye = torch.eye(basis.shape[0], device=h.device, dtype=basis.dtype)
@@ -217,12 +472,30 @@ class ToricGTSidecar(nn.Module):
         covariance = (corr - eye).pow(2).sum() / offdiag
         axis_probs = torch.softmax(coords.abs() / 0.20, dim=-1)
         entropy = -(axis_probs * axis_probs.clamp_min(1e-8).log()).sum(dim=-1).mean() / math.log(max(2, basis.shape[0]))
-        loss = orthogonal + 0.05 * covariance + 0.01 * entropy
+        bpb_alignment = h.new_zeros(())
+        bpb_conflict = h.new_zeros(())
+        covariance_scale = h.new_tensor(1.0)
+        if nll_sample is not None and nll_sample.numel() == h.shape[0] and h.shape[0] > 1:
+            centered_nll = nll_sample.detach() - nll_sample.detach().mean()
+            weights = torch.softmax(centered_nll / 0.50, dim=0).to(h.dtype)
+            nll_direction = F.normalize((weights[:, None] * h.detach()).sum(dim=0), dim=0)
+            bpb_alignment = (basis @ nll_direction).pow(2).mean()
+            bpb_conflict = bpb_alignment.detach().clamp(0.0, 1.0)
+            covariance_scale = 1.0 / (1.0 + float(self.graphcg_covariance_conflict_damping) * bpb_conflict)
+        loss = (
+            orthogonal
+            + 0.05 * covariance_scale * covariance
+            + 0.01 * entropy
+            + float(self.graphcg_bpb_orthogonal_weight) * bpb_alignment
+        )
         return {
             "graphcg_loss": loss,
             "graphcg_orthogonal_loss": orthogonal.detach(),
             "graphcg_covariance_loss": covariance.detach(),
+            "graphcg_covariance_effective_scale": covariance_scale.detach(),
             "graphcg_axis_entropy": entropy.detach(),
+            "graphcg_bpb_alignment_loss": bpb_alignment.detach(),
+            "graphcg_bpb_conflict": bpb_conflict.detach(),
             "graphcg_chart_dim": hidden.new_tensor(float(basis.shape[0])).detach(),
         }
 
@@ -295,7 +568,7 @@ class ToricGTSidecar(nn.Module):
 
     def forward(self, hidden: Tensor, targets: Tensor, positions: Tensor, per_token_nll: Tensor) -> dict[str, Tensor]:
         out: dict[str, Tensor] = {}
-        out.update(self._graphcg_losses(hidden))
+        out.update(self._graphcg_losses(hidden, per_token_nll))
         out.update(self._analogy_losses(hidden, targets))
         out.update(self._tokengt_graph_losses(hidden, targets))
         out.update(self.memory(hidden, positions, per_token_nll, graphcg_basis=self.graphcg_basis))
@@ -311,21 +584,38 @@ class ToricGTSidecar(nn.Module):
         if run_all or self.combinatorial_toric_loss_weight != 0.0:
             out.update(combinatorial_toric_cca_topology_loss(hidden, positions, config=self.combinatorial_cfg))
         total = hidden.new_zeros(())
+        nll_mean = per_token_nll.detach().float().mean()
+        nll_p90 = per_token_nll.detach().float().flatten().quantile(0.90) if per_token_nll.numel() else nll_mean
+        uncertainty_raw = ((nll_p90 - self.uncertainty_center) / self.uncertainty_scale).clamp(0.0, self.uncertainty_max)
+        uncertainty_weight = 1.0 + float(self.uncertainty_alpha) * uncertainty_raw if self.uncertainty_weighting else hidden.new_tensor(1.0)
+        memory_gap = out.get("trajectory_memory_score_gap", total.detach()).detach()
+        memory_recall = out.get("trajectory_memory_recall1", total.detach()).detach()
+        memory_signal = 0.5 * torch.sigmoid((memory_gap - self.retrieval_gate_center) / self.retrieval_gate_softness) + 0.5 * memory_recall.clamp(0.0, 1.0)
+        retrieval_gate = self.retrieval_gate_min + (1.0 - self.retrieval_gate_min) * memory_signal
+        if not self.retrieval_conditioned_aux:
+            retrieval_gate = hidden.new_tensor(1.0)
         total = total + self.graphcg_loss_weight * out["graphcg_loss"]
-        total = total + self.analogy_loss_weight * out["analogy_lattice_loss"]
+        total = total + self.analogy_loss_weight * retrieval_gate * out["analogy_lattice_loss"]
         total = total + self.tokengt_graph_loss_weight * out["tokengt_graph_loss"]
-        total = total + self.trajectory_memory_loss_weight * out["trajectory_memory_loss"]
-        total = total + self.toric_geometry_loss_weight * out.get("toric_geometry_loss", total.new_zeros(()))
-        total = total + self.toric_vector_bundle_loss_weight * out.get(
+        total = total + self.trajectory_memory_loss_weight * retrieval_gate * out["trajectory_memory_loss"]
+        total = total + self.toric_geometry_loss_weight * uncertainty_weight * out.get("toric_geometry_loss", total.new_zeros(()))
+        total = total + self.toric_vector_bundle_loss_weight * uncertainty_weight * out.get(
             "toric_vector_bundle_1d_cone_ce_loss", total.new_zeros(())
         )
-        total = total + self.toric_bgg_loss_weight * out.get("toric_bgg_loss", total.new_zeros(()))
-        total = total + self.koszul_persistence_loss_weight * out.get(
+        total = total + self.toric_bgg_loss_weight * uncertainty_weight * out.get("toric_bgg_loss", total.new_zeros(()))
+        total = total + self.koszul_persistence_loss_weight * uncertainty_weight * out.get(
             "koszul_persistence_loss", total.new_zeros(())
         )
-        total = total + self.combinatorial_toric_loss_weight * out.get(
+        total = total + self.combinatorial_toric_loss_weight * uncertainty_weight * out.get(
             "toric_cca_topology_loss", total.new_zeros(())
         )
+        out["sidecar_nll_mean"] = nll_mean.detach()
+        out["sidecar_nll_p90"] = nll_p90.detach()
+        out["sidecar_uncertainty_weight"] = uncertainty_weight.detach()
+        out["sidecar_retrieval_gate"] = retrieval_gate.detach()
+        out["sidecar_analogy_effective_weight"] = (hidden.new_tensor(self.analogy_loss_weight) * retrieval_gate).detach()
+        out["sidecar_memory_effective_weight"] = (hidden.new_tensor(self.trajectory_memory_loss_weight) * retrieval_gate).detach()
+        out["sidecar_advanced_effective_multiplier"] = uncertainty_weight.detach()
         out["toric_geometry_active"] = total.new_tensor(float(self.toric_geometry_loss_weight != 0.0))
         out["toric_vector_bundle_1d_cone_ce_active"] = total.new_tensor(
             float(self.toric_vector_bundle_loss_weight != 0.0)

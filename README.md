@@ -44,6 +44,18 @@ embeddings.  The existing ToricGT sidecar remains available for heavier
 GraphCG, analogy, trajectory-memory, toric, topological, BGG, Koszul, and
 derived-category losses over curated graph Parquet rows.
 
+The current OAI route also uses BPB-safe TokenGT-style identifiers without
+inserting extra scored tokens into the SentencePiece stream.  Deterministic
+low-rank node identifiers, endpoint-pair features, and virtual local edge-token
+states are folded into the hidden graph representation.  For OAI FineWeb only,
+the graph-valued output is then flattened back into the original sequence order
+with a small gated score-correction adapter.  This keeps graph-in/graph-out
+training active internally while the official BPB computation still evaluates
+the terse sequential target.  General graph data remains graph structured and
+does not use this OAI-only flattening path unless explicitly configured.
+The current campaign state, gate cadence, and graphification knobs are recorded
+in [docs/CURRENT_OAI_TORICGT_STATE.md](docs/CURRENT_OAI_TORICGT_STATE.md).
+
 The native TokenGT FineWeb route is now autoregressive when
 `use_causal_graph_attention` and `use_lm_token_embeddings` are enabled.  FineWeb
 token chains receive their ordinary left-to-right reveal ranks; directed

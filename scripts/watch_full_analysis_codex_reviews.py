@@ -33,12 +33,19 @@ def parse_args() -> argparse.Namespace:
 
 def review_report(codex_bin: str, report: Path, marker: Path) -> int:
     prompt = (
-        "Review this ToricGT 5K-step full iteration analysis. Inspect the report's linked W&B metrics, "
+        "Review this ToricGT 1.5K-step threshold-gated full iteration analysis. Inspect the report's linked W&B metrics, "
         "exact GUDHI/Macaulay2 persistent-homology outputs, Sage/Macaulay2 toric embedding sidecars, "
         "toric vector-bundle/sheaf report, Toric BGG/category O report, branching reasoning visualizations, "
-        "screenshots, sidecar losses, BPB, artifact size, and next_profile_decision.json. "
-        "Write a concise but complete recommendation: continue, reduce auxiliary weights, isolate a subset, "
-        "change LR/warmdown, or stop/fix instrumentation. "
+        "screenshots, bonafide graph-LM primary metrics, scheduled graph-LM weights, teacher distillation if active, "
+        "auxiliary-gradient routing cosines/projection coefficients, retrieval-conditioned auxiliary gates, "
+        "uncertainty-weighted toric/BGG/topological multipliers, GraphCG BPB-orthogonalization metrics, sidecar losses, "
+        "BPB, train BPB, graph-LM BPB, artifact size, and next_profile_decision.json. "
+        "If BPB < 1.19 was not met by step 1500, write the restart plan and hyperparameter changes explicitly. "
+        "Develop a mathematical explanation for the observed training behavior: identify which geometric/category/topological "
+        "families are locally helping uncertain predictions, which families conflict with FineWeb BPB gradients, and which "
+        "retrieval or GraphCG signals should be amplified, gated, or annealed. Write a concise but complete recommendation: "
+        "continue, reduce auxiliary weights, isolate a subset, change LR/warmdown, adjust graph-LM curriculum, adjust routing, "
+        "or stop/fix instrumentation. "
         f"Full analysis report path: {report}"
     )
     proc = subprocess.run([codex_bin, "exec", prompt], check=False)

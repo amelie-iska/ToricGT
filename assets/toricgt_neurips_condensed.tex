@@ -263,6 +263,20 @@ and cycle penalties.  A compact version of the loss is
 \]
 Thus FineWeb is graph-structured as a sequential path graph for training, but
 the reported Parameter-Golf metric remains byte-denominated BPB.
+The live OAI-baseline adaptation refines this construction without inserting
+extra scored tokens.  FineWeb tokens remain the scored SentencePiece sequence,
+but the main model now receives deterministic low-rank TokenGT-style node
+identifiers, endpoint-pair features, local one-dimensional-edge features, and
+toric phase features.  Local causal edges are also represented internally as
+virtual edge-token states and folded back into node hidden states by a gated
+graph-output adapter.  For OAI FineWeb only, this graph-valued output is
+flattened back to the original sequence order and corrected by a small
+score-correction gate before BPB is computed.  General graph data remains
+graph-structured and is not flattened by default.  The current adaptive
+controller treats the identifier, endpoint, edge-token, virtual-edge, and
+score-correction weights as separate hyperparameters rather than a single
+``graph pressure'' knob, so later 1.5K-step restarts can determine which part
+of the graphification helps or hurts early BPB.
 The current byte-accounted hybrid config uses $d=448$, $8$ heads, seven stored
 dense blocks, and two recurrent passes; its 6-bit row-quantized LZMA artifact
 probe is $15{,}206{,}131$ bytes, leaving $793{,}869$ bytes below the

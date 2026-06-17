@@ -12,6 +12,16 @@ not the same object as byte-level BPB. The hybrid path therefore uses
 topological, toric, BGG, Koszul, Slepian-Pollak, GFlowNet, memory, and analogy
 losses to the hidden trajectory that produces those logits.
 
+The current OAI-baseline adaptation applies the same rule to the SP1024
+baseline script.  FineWeb is graphified in the primary model, but the scored
+object is still the original SentencePiece sequence.  The model receives
+TokenGT-style node identifiers, endpoint-pair features, local
+one-dimensional-edge features, toric phase features, and virtual causal
+edge-token states.  These are folded into graph hidden states and then
+flattened back to sequence order through an OAI-FineWeb-only score-correction
+adapter before BPB is computed.  This lets the model use edge-token structure
+without making the official scorer pay for verbose graph serialization.
+
 ## Graph Construction
 
 For a byte sequence `x[0:L]`, random-order autoregression samples a permutation
@@ -31,6 +41,13 @@ When a causal order is meaningful, the graph objective uses directed acyclic
 edges. When a source graph is cyclic or has no trusted causal interpretation,
 `tokengt_graph_noncausal_policy: undirected_regularizer` disables direction and
 cycle terms and keeps only undirected structural matching.
+
+For OAI FineWeb, the graph is the causal path graph induced by the original
+sequence. For general graph records, the graph remains a graph: directed
+acyclic records use their causal/topological order, and noncausal records use a
+deterministic content-independent reveal order only for autoregressive scoring
+or regularization. Only the OAI FineWeb path should set
+`OAI_FINEWEB_OUTPUT_FLATTENING=1`.
 
 ## Native TokenGT Route
 
@@ -149,6 +166,23 @@ tokengt_graph/causal_edge_fraction
 ```
 
 `00_primary/tokengt_graph_loss` is also emitted for quick dashboard review.
+
+The OAI-baseline route additionally logs:
+
+```text
+fineweb_graphify/identifier_weight
+fineweb_graphify/endpoint_weight
+fineweb_graphify/edge_token_weight
+graph_output_flattening/virtual_edge_tokens
+graph_output_flattening/edge_token_weight
+graph_output_flattening/score_correction
+graph_output_flattening/score_correction_weight
+```
+
+The adaptive 1.5K-step controller adjusts these separately from GraphCG,
+analogy, memory, toric, BGG, Koszul, vector-bundle/sheaf, and combinatorial
+toric loss weights.  A poor correlation for one family is not treated as a
+blanket rejection of graphification.
 
 ## Artifact Size
 

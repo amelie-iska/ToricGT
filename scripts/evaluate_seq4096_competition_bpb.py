@@ -70,6 +70,26 @@ class CompactSeq4096Config:
     polarquant_train_sample_tokens: int = 0
     polarquant_eval_sample_tokens: int = 0
     polarquant_seed: int = 271828
+    fineweb_graphify: bool = False
+    tokengt_first_class: bool = False
+    tokengt_graph_radius: int = 4
+    tokengt_token_class_buckets: int = 64
+    tokengt_position_buckets: int = 256
+    tokengt_structural_weight: float = 0.050
+    tokengt_edge_weight: float = 0.035
+    tokengt_torus_weight: float = 0.015
+    tokengt_identifier_dim: int = 24
+    tokengt_identifier_weight: float = 0.014
+    tokengt_endpoint_weight: float = 0.018
+    tokengt_edge_token_weight: float = 0.016
+    graph_output_flattening: bool = False
+    graph_output_edge_radius: int = 4
+    graph_output_node_weight: float = 0.05
+    graph_output_edge_weight: float = 0.05
+    graph_output_virtual_edge_tokens: bool = True
+    graph_output_edge_token_weight: float = 0.035
+    graph_output_score_correction: bool = True
+    graph_output_score_correction_weight: float = 0.024
 
 
 def parse_args() -> argparse.Namespace:
@@ -201,6 +221,26 @@ COMPACT_CONFIG_OVERRIDE_KEYS = {
     "polarquant_train_sample_tokens",
     "polarquant_eval_sample_tokens",
     "polarquant_seed",
+    "fineweb_graphify",
+    "tokengt_first_class",
+    "tokengt_graph_radius",
+    "tokengt_token_class_buckets",
+    "tokengt_position_buckets",
+    "tokengt_structural_weight",
+    "tokengt_edge_weight",
+    "tokengt_torus_weight",
+    "tokengt_identifier_dim",
+    "tokengt_identifier_weight",
+    "tokengt_endpoint_weight",
+    "tokengt_edge_token_weight",
+    "graph_output_flattening",
+    "graph_output_edge_radius",
+    "graph_output_node_weight",
+    "graph_output_edge_weight",
+    "graph_output_virtual_edge_tokens",
+    "graph_output_edge_token_weight",
+    "graph_output_score_correction",
+    "graph_output_score_correction_weight",
 }
 
 
@@ -211,6 +251,9 @@ def checkpoint_config_overrides(checkpoint_path: Path, payload: dict[str, Any]) 
     payload_config = payload.get("config")
     if isinstance(payload_config, dict):
         config.update(payload_config)
+    payload_hyperparameters = payload.get("hyperparameters")
+    if isinstance(payload_hyperparameters, dict):
+        config.update(payload_hyperparameters)
     for candidate in (
         checkpoint_path.with_suffix(checkpoint_path.suffix + ".config.json"),
         checkpoint_path.with_suffix(".config.json"),

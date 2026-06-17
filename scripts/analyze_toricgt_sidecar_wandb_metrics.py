@@ -5,7 +5,7 @@ The OAI baseline trainer logs detailed sidecar metrics under
 ``toricgt_sidecar/*``.  This script downloads the run history, exports every
 observed sidecar metric, attaches a concise mathematical description and
 weighting guidance, and computes simple trend/correlation statistics for the
-5K restart decision report.
+gate-interval restart decision report.
 """
 
 from __future__ import annotations
@@ -177,6 +177,8 @@ def metric_family(metric: str) -> str:
     name = stripped_name(metric)
     if name in {"loss", "toricgt_sidecar_loss", "lm_loss"}:
         return "sidecar_total"
+    if name.startswith("sidecar_"):
+        return "sidecar_bpb_control_gates"
     if name.startswith("graphcg_"):
         return "graphcg_full_rank_concept_chart"
     if name.startswith("analogy_"):
@@ -225,7 +227,10 @@ def description_for(metric: str) -> str:
         "graphcg_loss": "Full-rank GraphCG concept-chart objective combining basis orthogonality, coordinate covariance control, and axis entropy.",
         "graphcg_orthogonal_loss": "Squared off-diagonal Gram penalty for the learned full-rank GraphCG basis.",
         "graphcg_covariance_loss": "Decorrelation penalty for GraphCG coordinates across hidden-state samples.",
+        "graphcg_covariance_effective_scale": "Effective multiplier on GraphCG covariance pressure after BPB-conflict damping; lower values mean covariance regularization is being softened near BPB-critical directions.",
         "graphcg_axis_entropy": "Normalized entropy of concept-axis assignments; it measures whether hidden states use multiple interpretable axes.",
+        "graphcg_bpb_alignment_loss": "Penalty measuring how strongly full-rank GraphCG axes align with the high-NLL hidden-state direction; lower means the chart is less likely to steal capacity from byte-prediction-critical directions.",
+        "graphcg_bpb_conflict": "Detached BPB-conflict proxy used to damp GraphCG covariance pressure when concept axes overlap high-NLL directions.",
         "graphcg_chart_dim": "Dimension of the active GraphCG chart, expected to equal the hidden width for full-rank training.",
         "analogy_lattice_loss": "Analogical relation loss asking repeated byte-class transitions to share relation vectors and GraphCG-basis reconstructions.",
         "analogy_functor_loss": "Variance of relation vectors within repeated transition classes, used as an approximate functoriality residual.",
@@ -254,6 +259,13 @@ def description_for(metric: str) -> str:
         "trajectory_memory_derived_similarity": "Similarity of derived-category feature summaries for trajectory complexes.",
         "trajectory_memory_derived_projective_dimension": "Average projective-dimension proxy in derived-category summaries.",
         "trajectory_memory_derived_regularity": "Average regularity proxy in derived-category summaries.",
+        "sidecar_nll_mean": "Mean per-token negative log likelihood on the graph sidecar batch; it measures the local uncertainty level where auxiliary structure is applied.",
+        "sidecar_nll_p90": "Ninetieth-percentile per-token negative log likelihood on the graph sidecar batch, used as a robust high-uncertainty signal.",
+        "sidecar_uncertainty_weight": "Effective multiplier on advanced toric, vector-bundle/sheaf, BGG, Koszul, and combinatorial toric losses; it emphasizes high-NLL regions and reduces global over-regularization.",
+        "sidecar_retrieval_gate": "Batch-level gate for analogy and trajectory-memory losses derived from retrieval gap and recall; weak retrieval evidence reduces analogy/memory gradient pressure while preserving diagnostics.",
+        "sidecar_analogy_effective_weight": "Actual analogy loss weight after retrieval gating.",
+        "sidecar_memory_effective_weight": "Actual trajectory-memory loss weight after retrieval gating.",
+        "sidecar_advanced_effective_multiplier": "Shared uncertainty multiplier applied to advanced toric/BGG/topology/commutative-algebra sidecar families.",
         "toric_geometry_loss": "Low-rank toric/tropical geometry objective combining active-face, moment, bend, binomial, Coxeter, braid, and phase-leaf terms.",
         "toric_fan_loss": "Active normal-fan classification and margin loss for tropical ring attention embedded into toric geometry.",
         "toric_active_face_ce": "Cross-entropy for predicting the teacher active face of the Newton polytope.",
@@ -341,6 +353,10 @@ def weight_guidance_for(metric: str) -> str:
         return "Logged configured weight. Raising it gives this family more gradient influence; lowering it makes the family more diagnostic and less likely to interfere with BPB."
     if name.startswith("sidecar_compute_") or name.startswith("toric_bgg_provenance_") or name.endswith("_gate_required"):
         return "Status/provenance metric only. It should be reviewed for audit completeness but is not directly optimized."
+    if family == "sidecar_bpb_control_gates":
+        return "Control metric. Raise the corresponding base family weight only when retrieval gates, uncertainty localization, and train/validation BPB all support doing so; lower gate minima or uncertainty alpha if the controller amplifies noisy graph batches."
+    if name.startswith("graphcg_bpb_") or name == "graphcg_covariance_effective_scale":
+        return "GraphCG BPB-safety metric. Increase orthogonalization/damping when GraphCG correlates with worse BPB; relax it only when GraphCG axes help BPB and analogy retrieval."
     if family == "graphcg_full_rank_concept_chart":
         return "Increase `GRAPHCG_LOSS_WEIGHT` when concept axes are unstable, high-covariance, or low-rank; decrease if train/val BPB rises or axis entropy dominates."
     if family == "analogical_lattice":
@@ -459,7 +475,7 @@ def write_markdown(path: Path, meta: dict[str, Any], reviews: list[SidecarMetric
         f"- observed sidecar/related metrics: `{len(reviews)}`",
         f"- history rows: `{meta.get('history_rows')}`",
         "",
-        "This report is generated at the 5K full-analysis interval. It lists every observed `toricgt_sidecar/*` metric, plus sidecar-related organized aliases when present, so the next hyperparameter decision considers the detailed mathematical behavior rather than only the compact console subset.",
+        "This report is generated at the configured full-analysis gate interval. It lists every observed `toricgt_sidecar/*` metric, plus sidecar-related organized aliases when present, so the next hyperparameter decision considers the detailed mathematical behavior rather than only the compact console subset.",
         "",
         "## Family Summary",
         "",

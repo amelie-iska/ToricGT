@@ -43,7 +43,7 @@ done
 } >> "${log}"
 
 tmux new-session -d -s "toricgt_oai_fullanalysis_${CAMPAIGN_ID}" \
-  "cd '${REPO_ROOT}' && /home/iska/miniconda3/bin/conda run --no-capture-output -n tokengt env PYTHONPATH=src python scripts/run_oai_sidecar_bpb_campaign.py --campaign-id '${CAMPAIGN_ID}' --max-runs 25 --followup-runs-after-meta 10 --target-bpb 1.12 --steps-per-run 5000 --full-analysis --strict-analysis --analysis-retries 1 --analysis-retry-timeout-multiplier 2.0 --analysis-records 3 --analysis-cas-max-points 6 --analysis-cas-macaulay2-timeout-seconds 900 --prior-analysis-dir '${PRIOR_ANALYSIS_DIR}' --prior-log /tmp/toricgt_no_prior_train.log --codex-review > 'training_notes/${CAMPAIGN_ID}/campaign_supervisor.log' 2>&1"
+  "cd '${REPO_ROOT}' && /home/iska/miniconda3/bin/conda run --no-capture-output -n tokengt env PYTHONPATH=src python scripts/run_oai_sidecar_bpb_campaign.py --campaign-id '${CAMPAIGN_ID}' --max-runs 25 --followup-runs-after-meta 10 --target-bpb 1.19 --steps-per-run 1500 --full-analysis --strict-analysis --analysis-retries 1 --analysis-retry-timeout-multiplier 2.0 --analysis-records 3 --analysis-cas-max-points 6 --analysis-cas-macaulay2-timeout-seconds 900 --prior-analysis-dir '${PRIOR_ANALYSIS_DIR}' --prior-log /tmp/toricgt_no_prior_train.log --codex-review > 'training_notes/${CAMPAIGN_ID}/campaign_supervisor.log' 2>&1"
 
 tmux new-session -d -s "toricgt_full_analysis_codex_watch_${CAMPAIGN_ID}" \
   "cd '${REPO_ROOT}' && /home/iska/miniconda3/bin/conda run --no-capture-output -n tokengt python scripts/watch_full_analysis_codex_reviews.py --campaign-notes-dir 'training_notes/${CAMPAIGN_ID}' --poll-seconds 60 --max-reviews 35 > 'training_notes/${CAMPAIGN_ID}/full_analysis_codex_watch.log' 2>&1"

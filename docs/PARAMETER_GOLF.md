@@ -16,6 +16,15 @@ changes.
 - Order policy: content-independent random permutation per byte chunk/sample.
 - Graph projection: curated `graph_json` rows are serialized to compact
   node/edge traces and appended to the byte stream.
+- First-class FineWeb graphification: the OAI SP1024 baseline treats every
+  FineWeb token as a graph node in the primary model, with deterministic
+  TokenGT-style node identifiers, endpoint-pair features, local
+  one-dimensional-edge features, toric phase features, and virtual local
+  edge-token states.
+- OAI-only sequence flattening: graph-valued hidden output is folded back to
+  the original SentencePiece sequence with a gated score-correction adapter for
+  BPB scoring. General graph data remains graph structured and is not flattened
+  by default.
 - GFlowNet: compact prefix-visible embedding action policy with sixteen latent
   graph-of-thought actions, a trajectory-balance surrogate, entropy logging,
   and multi-sample evaluation.
@@ -94,6 +103,52 @@ Curated graph data is used by serializing `graph_json` into compact records:
 graph structure visible to the byte model while preserving the self-contained
 artifact and avoiding a second evaluator-side graph dependency.
 
+## Current OAI Baseline Adaptation
+
+The active `oai-toricgt` BPB campaign uses the OpenAI-style SP1024 baseline
+adaptation rather than the full graph research encoder. The current launch
+contract is:
+
+```text
+TRAIN_SEQ_LEN=1024
+TRAIN_BATCH_TOKENS=917504..983040
+MODEL_DIM=512
+NUM_LAYERS=9
+NUM_HEADS=8
+NUM_KV_HEADS=4
+MLP_MULT=2
+TIE_EMBEDDINGS=1
+FINEWEB_GRAPHIFY=1
+TOKENGT_FIRST_CLASS=1
+OAI_FINEWEB_OUTPUT_FLATTENING=1
+GRAPH_OUTPUT_FLATTENING=1
+GRAPH_LM_PRIMARY=1
+TORICGT_SIDECAR_COMPUTE_ALL_METRICS=1
+```
+
+The current graphification knobs are logged and swept independently:
+
+```text
+TOKENGT_IDENTIFIER_DIM=24
+TOKENGT_IDENTIFIER_WEIGHT
+TOKENGT_ENDPOINT_WEIGHT
+TOKENGT_EDGE_TOKEN_WEIGHT
+GRAPH_OUTPUT_VIRTUAL_EDGE_TOKENS=1
+GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT
+GRAPH_OUTPUT_SCORE_CORRECTION=1
+GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT
+```
+
+This is intentionally not a single "graph pressure" setting.  The 1.5K-step
+review agent should decide whether node identifiers, endpoint maps,
+virtual-edge folding, or sequence score correction helped BPB, then adjust them
+separately on the next restart.
+
+The full configured model with these graph features has about `18.09M`
+parameters before training-only sidecar heads. The hard artifact gate remains
+the exported int8/zlib or 6-bit compressed payload plus code and tokenizer
+bytes, not the raw parameter count.
+
 ## BPB Targets
 
 Lower BPB is better. Use these target bands when judging local runs before
@@ -112,6 +167,14 @@ doing official challenge-style reproduction:
 For record-quality claims, require multiple runs and enough evidence that the
 improvement is larger than run-to-run variance. Treat single-run changes below
 about `0.007 BPB` as noise unless confirmed independently.
+
+The current adaptive campaign gate is `BPB < 1.19` by step `1500`. If that gate
+is missed, the supervisor runs checkpoint-backed analyses, screenshots and
+HTML reports, sidecar/W&B metric review, and a written training note, then
+restarts from step `0` with updated hyperparameters. If validation BPB is not
+available at the gate, train BPB and graph-LM BPB are used as provisional
+evidence, with the next validation/roundtrip export treated as the deciding
+score.
 
 ## Local Wallclock Equivalence
 

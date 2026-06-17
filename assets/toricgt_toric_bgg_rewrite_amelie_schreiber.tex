@@ -3017,6 +3017,8 @@ The contest model should be a language model inspired by ToricGT, not the full g
   \item fixed toric phase features of target positions and optional PolarQuant KV perturbation audits;
   \item a compact prefix-visible GFlowNet action policy for latent graph-of-thought sampling;
   \item compact serialization of \texttt{graph\_json} node/edge records into the byte stream, so graph-structured supervision is not discarded in the contest adapter;
+  \item BPB-safe first-class TokenGT graphification for OAI FineWeb: every scored SentencePiece token is treated as a graph node with deterministic low-rank node identifiers, endpoint-pair features, local one-dimensional-edge features, toric phase features, and virtual causal edge-token states folded back into node states;
+  \item an OAI-FineWeb-only graph-output flattening and score-correction adapter, so graph-in/graph-out hidden computation is trained while official BPB is still computed on the terse sequential target;
   \item final int8 export by default, with int6/int4 packing tested only after round-trip BPB checks;
   \item optional Soft-MoE or low-rank expert adapters only as byte-accounted ablations after a dense baseline is stable.
 \end{enumerate}
@@ -3027,6 +3029,21 @@ A safe starting microarchitecture for the implemented dense track is
   L_{\mathrm{unique}}=7,\quad L_{\mathrm{effective}}=14,
 \end{equation}
 with tied embeddings, recurrent block tying, hybrid softmax/tropical-ring attention, a tiny $A=8$ action GFlowNet policy, and no stored expert bank.  In the current artifact audit this gives about $13.0$M stored scalars and an int8 compressed artifact around $12.94$MB, leaving margin below $16{,}000{,}000$ bytes for code and metadata.  If $P_{\mathrm{fp}}$ is the uncompressed scalar count, then int8 export roughly permits $P_{\mathrm{fp}}<16$M minus code overhead; int6 export roughly permits $P_{\mathrm{fp}}<21$M before entropy compression; int4 export permits more parameters but is less stable unless quantization-aware training is strong.  These are engineering estimates; the actual gate is the serialized artifact size.
+
+The active OAI-baseline adaptation uses the same principle in a wider SP1024
+model: $V=1024$, $d=512$, $H=8$, $L=9$, tied embeddings, RoPE with
+\texttt{ROPE\_BASE}=10000, sequence length $1024$, and a training-token batch
+near $10^6$ tokens to use roughly the 20GB VRAM budget.  With first-class
+FineWeb TokenGT identifiers and graph-output flattening enabled, the current
+configuration has about $18.09$M trainable parameters before sidecar heads.
+The relevant exposed knobs are
+\texttt{TOKENGT\_IDENTIFIER\_WEIGHT},
+\texttt{TOKENGT\_ENDPOINT\_WEIGHT},
+\texttt{TOKENGT\_EDGE\_TOKEN\_WEIGHT},
+\texttt{GRAPH\_OUTPUT\_EDGE\_TOKEN\_WEIGHT}, and
+\texttt{GRAPH\_OUTPUT\_SCORE\_CORRECTION\_WEIGHT}.  They are deliberately
+logged separately because BPB evidence for one graph component should not be
+treated as evidence against all graphification.
 
 For experimental triage, report BPB with matched seeds, validation byte counts, exported-artifact round-trip checks, and confidence intervals.  Single-run changes below the measured seed-to-seed variation should be treated as noise, even if the auxiliary diagnostics improve.  A Toric BGG component earns its place in the compressed model only when it improves BPB after export or produces a predeclared reasoning improvement without a BPB regression.
 
@@ -3137,7 +3154,15 @@ The conservative recovery mode is
 \end{equation}
 with tighter gradient clipping and no new deployable parameters.  Toric BGG losses are activated in the following order: $\partial^2$ residual, standard-filtration leakage, signature distillation, Gale-dual consistency, and Euler-Koszul exactness.  This order reflects numerical conditioning.  The first two losses are local and sparse; the last two require the representation to have already stabilized.
 
-The gate writes an audit record containing validation BPB, answer-span BPB, branch-search lift, graph-answer accuracy, resolution-consistency score, standard-filtration leakage, Koszul-linearity residual, Gale-dual consistency, BGG trajectory retrieval at $K$, GraphCG covariance, tropical active-face margins, and artifact bytes after round-trip export.  A run may continue with a larger Toric BGG weight only if the record shows no score-first violation and no statistically meaningful BPB regression relative to a matched seed or matched checkpoint window.
+The gate writes an audit record containing train BPB, validation BPB when
+available, answer-span BPB, branch-search lift, graph-answer accuracy,
+graph-LM BPB, graphification and flattening weights, resolution-consistency
+score, standard-filtration leakage, Koszul-linearity residual, Gale-dual
+consistency, BGG trajectory retrieval at $K$, GraphCG covariance, tropical
+active-face margins, and artifact bytes after round-trip export.  A run may
+continue with a larger Toric BGG weight only if the record shows no
+score-first violation and no statistically meaningful BPB regression relative
+to a matched seed or matched checkpoint window.
 
 In the current implementation this audit is made explicit by a BPB-transfer controller.  For each family $f$ in
 \[
@@ -3153,6 +3178,16 @@ the controller records pressure $p_f$, recent held-out BPB transfer $\Delta_f$, 
   \end{cases}
 \]
 while the BPB objective keeps weight one.  Thus attractive algebraic or topological plots are not allowed to redirect the competition optimizer unless they first show predictive transfer to validation BPB.  After a protected $\le1.2$ artifact exists, the same controller can promote these families into the graph-of-thought, GFlowNet, memory, analogical, and long-context phases.
+
+The current campaign cadence is more aggressive than the older 5K-step loop:
+each attempt runs to a 1.5K-step gate with target BPB $<1.19$.  If the target
+is missed, the supervisor runs the full analysis suite, reviews all W\&B
+metrics including the \texttt{toricgt\_sidecar} family, writes a timestamped
+report, selects adaptive environment overrides, and restarts from step $0$.
+The graph-structure controller keeps FineWeb graphification and OAI-only
+flattening on, but sweeps node-identifier, endpoint, virtual-edge, and
+score-correction weights independently of GraphCG, analogy, BGG, Koszul,
+toric, vector-bundle/sheaf, and combinatorial-commutative-algebra losses.
 \section{Datasets, synthetic families, and leakage control}
 
 \subsection{Training mixture}

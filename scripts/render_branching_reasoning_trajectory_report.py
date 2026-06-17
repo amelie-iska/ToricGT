@@ -15,7 +15,6 @@ if str(SRC) not in sys.path:
 
 from toricgt.branching_reasoning_visualization import (  # noqa: E402
     BranchingTrajectoryConfig,
-    build_branching_reasoning_payload,
     build_branching_reasoning_payload_from_embedding_payload,
     render_branching_reasoning_report,
 )
@@ -26,8 +25,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument(
         "--embedding-payload-npz",
-        default="",
-        help="Optional toricgt.embedding_payload.v1 NPZ from evaluate_tokengt_reasoning_geometry_suite.py.",
+        required=True,
+        help="Required toricgt.embedding_payload.v1 NPZ extracted from a real checkpoint/data batch.",
     )
     parser.add_argument(
         "--embedding-payload-json",
@@ -86,16 +85,13 @@ def main() -> None:
         ph_landscape_resolution=int(args.ph_landscape_resolution),
         ph_image_resolution=int(args.ph_image_resolution),
     )
-    if args.embedding_payload_npz:
-        payload = build_branching_reasoning_payload_from_embedding_payload(
-            Path(args.embedding_payload_npz),
-            metadata_json_path=Path(args.embedding_payload_json) if args.embedding_payload_json else None,
-            cfg=cfg,
-            embedding_max_nodes=int(args.embedding_max_nodes) if int(args.embedding_max_nodes) > 0 else None,
-            embedding_node_offset=int(args.embedding_node_offset),
-        )
-    else:
-        payload = build_branching_reasoning_payload(cfg)
+    payload = build_branching_reasoning_payload_from_embedding_payload(
+        Path(args.embedding_payload_npz),
+        metadata_json_path=Path(args.embedding_payload_json) if args.embedding_payload_json else None,
+        cfg=cfg,
+        embedding_max_nodes=int(args.embedding_max_nodes) if int(args.embedding_max_nodes) > 0 else None,
+        embedding_node_offset=int(args.embedding_node_offset),
+    )
     manifest = render_branching_reasoning_report(payload, Path(args.output_dir))
     print(json.dumps(manifest, indent=2, sort_keys=True))
 

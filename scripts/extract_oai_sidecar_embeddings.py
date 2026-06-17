@@ -120,6 +120,9 @@ def main() -> None:
     train_gpt = import_train_gpt(resolve(args.train_gpt_path))
     sp = spm.SentencePieceProcessor(model_file=str(resolve(args.tokenizer_path)))
     stream = GraphParquetTokenStream(args.graph_train_glob, sp, int(args.seq_len), int(args.batch_size))
+    state, checkpoint_meta = load_state(checkpoint_path)
+    has_first_class_tokengt = any(key.startswith("fineweb_tokengt.") for key in state)
+    has_graph_output_flattening = any(key.startswith("graph_output_flattening.") for key in state)
 
     device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
     model = train_gpt.GPT(
@@ -134,6 +137,26 @@ def main() -> None:
         logit_softcap=30.0,
         rope_base=10000.0,
         qk_gain_init=1.5,
+        fineweb_graphify=has_first_class_tokengt or has_graph_output_flattening,
+        tokengt_first_class=has_first_class_tokengt,
+        tokengt_graph_radius=4,
+        tokengt_token_class_buckets=64,
+        tokengt_position_buckets=256,
+        tokengt_structural_weight=0.050,
+        tokengt_edge_weight=0.035,
+        tokengt_torus_weight=0.015,
+        tokengt_identifier_dim=24,
+        tokengt_identifier_weight=0.014,
+        tokengt_endpoint_weight=0.018,
+        tokengt_edge_token_weight=0.016,
+        graph_output_flattening=has_graph_output_flattening,
+        graph_output_edge_radius=4,
+        graph_output_node_weight=0.05,
+        graph_output_edge_weight=0.05,
+        graph_output_virtual_edge_tokens=True,
+        graph_output_edge_token_weight=0.035,
+        graph_output_score_correction=True,
+        graph_output_score_correction_weight=0.024,
     ).to(device)
     if device.type == "cuda":
         model = model.bfloat16()
@@ -141,8 +164,12 @@ def main() -> None:
             if isinstance(module, train_gpt.CastedLinear):
                 module.float()
     train_gpt.restore_low_dim_params_to_fp32(model)
-    state, checkpoint_meta = load_state(checkpoint_path)
-    model.load_state_dict(state, strict=True)
+    load_result = model.load_state_dict(state, strict=False)
+    if load_result.missing_keys or load_result.unexpected_keys:
+        print(
+            "checkpoint_load_non_strict "
+            f"missing={len(load_result.missing_keys)} unexpected={len(load_result.unexpected_keys)}"
+        )
     model.eval()
 
     rows: list[dict[str, Any]] = []

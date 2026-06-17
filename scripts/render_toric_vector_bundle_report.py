@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Render exact toric vector-bundle/sheaf certificate panels.
 
-The input is an exact `macaulay2_toric_vector_bundle_certificate` JSON.  If no
-certificate is supplied, the script calls Macaulay2 through the local oracle and
-builds the P2 rank-2 ToricVectorBundles certificate.  Missing Macaulay2 or
-missing structured fields fail loudly.
+The default input is an exact `macaulay2_toric_vector_bundle_certificate` JSON
+generated from a checkpoint or embedding analysis.  A smoke certificate can be
+built only when `--allow-smoke-certificate` is passed explicitly; periodic
+training analysis should not use that path.
 """
 
 from __future__ import annotations
@@ -47,17 +47,20 @@ pre { white-space:pre-wrap; overflow-x:auto; background:#020713; border:1px soli
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--certificate-json", default="")
+    parser.add_argument("--allow-smoke-certificate", action="store_true")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--macaulay2-timeout-seconds", type=int, default=120)
     return parser.parse_args()
 
 
-def load_or_build_certificate(path: str, timeout_seconds: int) -> dict[str, Any]:
+def load_or_build_certificate(path: str, timeout_seconds: int, allow_smoke_certificate: bool) -> dict[str, Any]:
     if path:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("certificate JSON must contain an object")
         return payload
+    if not allow_smoke_certificate:
+        raise ValueError("--certificate-json is required unless --allow-smoke-certificate is passed explicitly")
     oracle = Macaulay2TropicalOracle()
     cert = oracle.vector_bundle_smoke_certificate(timeout_seconds=int(timeout_seconds))
     return cert.with_hash()
@@ -126,7 +129,11 @@ def write_report(payload: dict[str, Any], output_dir: Path) -> tuple[Path, Path]
 
 def main() -> None:
     args = parse_args()
-    payload = load_or_build_certificate(args.certificate_json, int(args.macaulay2_timeout_seconds))
+    payload = load_or_build_certificate(
+        args.certificate_json,
+        int(args.macaulay2_timeout_seconds),
+        bool(args.allow_smoke_certificate),
+    )
     html_path, certificate_json = write_report(payload, Path(args.output_dir))
     print(json.dumps({"index_html": str(html_path), "certificate_json": str(certificate_json)}, indent=2, sort_keys=True))
 

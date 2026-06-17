@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the strict full-analysis pass after one OAI-sidecar 5K attempt."""
+"""Run the strict full-analysis pass after one OAI-sidecar gate attempt."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from adaptive_bpb_annealing import build_adaptive_decision
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
@@ -23,6 +25,8 @@ VAL_RE = re.compile(r"step:(?P<step>\d+)/(?P<total>\d+) val_loss:(?P<loss>[0-9.]
 TRAIN_RE = re.compile(
     r"step:(?P<step>\d+)/(?P<total>\d+) train_loss:(?P<loss>[0-9.]+)"
     r"(?: train_bpb:(?P<train_bpb>[0-9.eE+-]+) train_bpt:(?P<train_bpt>[0-9.eE+-]+))?.*?"
+    r"(?:graph_lm_loss:(?P<graph_lm_loss>[0-9.eE+-]+) graph_lm_bpb:(?P<graph_lm_bpb>[0-9.eE+-]+) "
+    r"graph_lm_w:(?P<graph_lm_weight>[0-9.eE+-]+) )?.*?"
     r"sidecar_loss:(?P<sidecar>[0-9.eE+-]+).*?"
     r"graphcg:(?P<graphcg>[0-9.eE+-]+).*?"
     r"analogy:(?P<analogy>[0-9.eE+-]+).*?"
@@ -200,7 +204,7 @@ def spearman_corr(x: list[float], y: list[float]) -> float | None:
 
 
 def compute_metric_correlations(metrics: dict[str, Any]) -> list[dict[str, Any]]:
-    """Rank correlations among logged train metrics after one 5K attempt."""
+    """Rank correlations among logged train metrics after one gate attempt."""
 
     train_rows = [row for row in metrics.get("train_rows", []) if isinstance(row, dict)]
     numeric_keys = sorted(
@@ -275,7 +279,7 @@ def write_metric_correlation_artifacts(output_dir: Path, metrics: dict[str, Any]
     lines = [
         "# Metric/Loss Correlations",
         "",
-        "Computed from the per-step training log for this 5K attempt. `train_bpb` is actual byte-normalized train BPB when the trainer emits it; older logs only support train-loss/sidecar correlations.",
+        "Computed from the per-step training log for this gate attempt. `train_bpb` is actual byte-normalized train BPB when the trainer emits it; older logs only support train-loss/sidecar correlations.",
         "",
     ]
     if not rows:
@@ -355,37 +359,68 @@ def decide_next_profile(
     metrics: dict[str, Any],
     validation: dict[str, Any],
     sidecar_review: dict[str, Any] | None = None,
+    *,
+    run_id: str = "",
+    target_bpb: float = 1.19,
 ) -> dict[str, Any]:
+    adaptive = build_adaptive_decision(
+        metrics,
+        validation,
+        sidecar_review or {},
+        run_id=run_id,
+        target_bpb=target_bpb,
+    )
     bpb = metrics.get("selected_bpb")
     bpb = float(bpb) if isinstance(bpb, (int, float)) and math.isfinite(float(bpb)) else float("inf")
     train = metrics.get("latest_train", {})
     sidecar = float(train.get("sidecar") or 0.0) if isinstance(train, dict) else 0.0
+    train_bpb = float(train.get("train_bpb") or float("inf")) if isinstance(train, dict) else float("inf")
+    graph_lm_bpb = float(train.get("graph_lm_bpb") or float("inf")) if isinstance(train, dict) else float("inf")
+    graph_lm_weight = float(train.get("graph_lm_weight") or 0.0) if isinstance(train, dict) else 0.0
     artifact = int(metrics.get("artifact_bytes") or 0)
     exact_ok = bool(validation.get("strict_validation_passed", False))
     sidecar_review = sidecar_review or {}
     sidecar_count = int(sidecar_review.get("observed_metric_count") or 0)
     sidecar_risk = sidecar_review.get("bpb_risk_metrics_top") or []
     if not exact_ok:
-        return {
-            "next_profile_hint": "analysis_blocked_repeat_only_after_fix",
-            "reason": "strict exactness or screenshot analysis failed; do not launch the next hyperparameter profile blindly",
-            "sidecar_metric_review": sidecar_review,
-        }
-    if bpb > 1.30:
-        profile = "large_batch_low_lr_longer_warmdown"
-        reason = "BPB is still too high; reduce LR and auxiliary pressure while preserving large batch."
-    elif bpb > 1.24 and sidecar < 1e-3:
-        profile = "large_batch_modest_lr_all_metrics_light_train"
-        reason = "BPB improved and sidecar gradients are tiny; use the previously recommended modest LR bump with light advanced weights."
-    elif bpb > 1.20:
-        profile = "large_batch_modest_lr_geometry_bgg_subset"
-        reason = "BPB is in the plateau band; keep BPB-safe LR and activate a nontrivial geometry/BGG subset."
-    elif artifact and artifact > 15_850_000:
+        adaptive.update(
+            {
+                "next_profile_hint": "analysis_blocked_repeat_only_after_fix",
+                "reason": "strict exactness or screenshot analysis failed; do not launch the next hyperparameter profile blindly",
+                "sidecar_metric_review": sidecar_review,
+            }
+        )
+        return adaptive
+    if artifact and artifact > 15_850_000:
         profile = "artifact_margin_conservative_aux"
         reason = "Artifact size is close to the 16,000,000-byte cap; avoid shape changes and keep auxiliary weights light."
+    elif bpb > 1.30 or train_bpb > 1.45:
+        profile = "gate1500_fast_main_lr_light_graphcg"
+        reason = (
+            "BPB/train BPB remain high by the gate, so the next run should emphasize faster main FineWeb optimization, "
+            "lower early graph-LM pressure through the new schedule, and light GraphCG/advanced pressure with conflict-aware gradient routing."
+        )
+    elif math.isfinite(graph_lm_bpb) and graph_lm_bpb < 0.25 and graph_lm_weight >= 0.10 and bpb > 1.19:
+        profile = "gate1500_fast_main_lr_light_graphcg"
+        reason = (
+            "The graph-LM stream is already much easier than FineWeb while its fixed weight is nontrivial; use the new graph-LM curriculum "
+            "and routing so graph structure remains active without overcompeting with BPB early."
+        )
+    elif bpb > 1.24 and sidecar < 1e-3:
+        profile = "gate1500_high_batch_toric_bgg_memory"
+        reason = (
+            "Validation BPB is above target but sidecar pressure is tiny; keep high batch utilization and use routed toric/BGG/memory pressure "
+            "so useful structure can help uncertain tokens without dominating the primary BPB gradient."
+        )
+    elif bpb > 1.20:
+        profile = "gate1500_structural_toric_heavy"
+        reason = (
+            "BPB is in the near-target plateau band; test stronger first-class TokenGT graphification and toric/tropical active-face structure "
+            "while relying on uncertainty localization and PCGrad routing to protect the byte objective."
+        )
     else:
         profile = "large_batch_all_advanced_low_weight"
-        reason = "BPB is closer to target; test a broad advanced regularizer subset at low weights."
+        reason = "BPB is close to target; test a broad advanced regularizer subset at low weights while preserving all metric observability."
     if sidecar_count:
         reason = (
             f"{reason} Sidecar review observed {sidecar_count} detailed W&B metrics; "
@@ -393,11 +428,22 @@ def decide_next_profile(
         )
     else:
         reason = f"{reason} Sidecar W&B metric review did not observe detailed metrics and should be inspected."
-    return {
-        "next_profile_hint": profile,
-        "reason": reason,
-        "sidecar_metric_review": sidecar_review,
-    }
+    adaptive.update(
+        {
+            "next_profile_hint": profile,
+            "reason": f"{reason} {adaptive.get('reason', '')}",
+            "score_context": {
+                "selected_bpb": bpb,
+                "train_bpb": train_bpb,
+                "graph_lm_bpb": graph_lm_bpb,
+                "graph_lm_weight": graph_lm_weight,
+                "sidecar_loss": sidecar,
+                "artifact_bytes": artifact,
+            },
+            "sidecar_metric_review": sidecar_review,
+        }
+    )
+    return adaptive
 
 
 def write_index(output_dir: Path, results: list[CommandResult], paths: dict[str, str], metrics: dict[str, Any], decision: dict[str, Any]) -> None:
@@ -584,23 +630,6 @@ def main() -> None:
                 str(output_dir / "embedding_cas_sidecar"),
                 "--output-dir",
                 str(output_dir / "toric_embedding_report"),
-                "--build-vector-bundle-certificate",
-                "--include-rich-staircase-demo",
-            ],
-            log_dir,
-            strict=strict,
-        )
-    )
-
-    paths["toric_vector_bundle_report"] = str(output_dir / "toric_vector_bundle_report" / "index.html")
-    results.append(
-        run_command(
-            "toric_vector_bundle_report",
-            [
-                PYTHON,
-                "scripts/render_toric_vector_bundle_report.py",
-                "--output-dir",
-                str(output_dir / "toric_vector_bundle_report"),
             ],
             log_dir,
             strict=strict,
@@ -716,7 +745,7 @@ def main() -> None:
     sidecar_review: dict[str, Any] = {}
     if sidecar_review_summary_path.exists():
         sidecar_review = json.loads(sidecar_review_summary_path.read_text(encoding="utf-8"))
-    decision = decide_next_profile(metrics, validation, sidecar_review)
+    decision = decide_next_profile(metrics, validation, sidecar_review, run_id=args.run_id, target_bpb=1.19)
     write_json(output_dir / "next_profile_decision.json", decision)
 
     write_index(output_dir, results, paths, metrics, decision)
