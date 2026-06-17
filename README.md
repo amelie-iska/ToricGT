@@ -28,6 +28,22 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 tmux new-session -d -s toricgt_oai_toricgt_full_clone 'cd /home/iska/Documents/amelie/bio/ToricGT && RUN_NAME=toricgt_oai_toricgt_finewebval_metricfix_max16mb_d320l7_b16ga4_clone_$(date -u +%Y%m%dT%H%M%SZ) && WANDB_PROJECT=toricgt WANDB_RUN_NAME=$RUN_NAME PYTHONPATH=src /home/iska/miniconda3/envs/tokengt/bin/python scripts/train.py --config config/train.full_tokengt_got_fineweb_derived.yaml --checkpoint-dir checkpoints/$RUN_NAME 2>&1 | tee logs/full_tokengt_got_fineweb_derived/$RUN_NAME/train.log'
 ```
 
+**OAI Parameter-Golf baseline adaptation**
+
+The OAI SP1024 FineWeb BPB training path now graphifies FineWeb by default in
+the primary model, not only through an auxiliary sidecar.  Every FineWeb token
+is treated as a TokenGT-style graph node, with causal local one-dimensional
+edges from already revealed previous tokens.  The compact GPT input stream
+receives learned node-class, position-bucket, local-edge, and toric-phase
+structural embeddings before the transformer blocks, so the competition BPB
+objective trains through the graphified path during both training and
+validation.  Set `FINEWEB_GRAPHIFY=0` to disable all primary-stream
+graphification, or set `TOKENGT_FIRST_CLASS=0` to leave the graphification
+switch visible while disabling the learned first-class TokenGT structural
+embeddings.  The existing ToricGT sidecar remains available for heavier
+GraphCG, analogy, trajectory-memory, toric, topological, BGG, Koszul, and
+derived-category losses over curated graph Parquet rows.
+
 The native TokenGT FineWeb route is now autoregressive when
 `use_causal_graph_attention` and `use_lm_token_embeddings` are enabled.  FineWeb
 token chains receive their ordinary left-to-right reveal ranks; directed
@@ -561,7 +577,7 @@ Local implementation:
 - `src/toricgt/random_order_lm.py`: dense random-order autoregressive ToricGT adapter for the OpenAI Parameter Golf track, including compact prefix-visible GFlowNet action routing, advanced reasoning/memory special-token encoding, official-byte TokenGT-style causal graph supervision, GraphCG/analogy/topology hooks, Toric BGG/Koszul probes, and differentiable Slepian/Pollak trajectory-concentration losses.
 - `src/toricgt/gudhi_persistence.py`: exact GUDHI simplex-tree persistence audits, vectorized PH metrics, explicit `F2[x_level,y_radius]` reasoning/radius module maps, exact `GF(2)` chain-complex checks, Miller-Sturmfels-style xy-grid corner/syzygy summaries, Macaulay2 bigraded chain-complex scripts, homology modules, free resolutions, identity chain-map/mapping-cone audits, Ext/Tor modules, and Betti-table extraction.
 - `src/toricgt/toric_geometry_tasks.py`: training-only low-rank toric probes for Newton active-face, bend, binomial, affine-Coxeter, braid, and phase-foliation signals.
-- `src/toricgt/toric_vector_bundles.py`: training-only Klyachko vector-bundle and equivariant-sheaf probes over the tropical-to-toric embedding fan, with exact finite filtration nesting, chart-transition cocycle checks, cone-splitting regularizers, and Cech-style gluing metrics.
+- `src/toricgt/toric_vector_bundles.py`: training-only Klyachko vector-bundle and equivariant-sheaf probes over the tropical-to-toric embedding fan, with exact finite one-dimensional-cone filtration nesting, chart-transition cocycle checks, cone-splitting regularizers, and Cech-style gluing metrics.
 - `src/toricgt/cas_certificates.py`, `src/toricgt/cas_oracles.py`, and `src/toricgt/cas_backed_losses.py`: exact certificate schemas/cache, strict SageMath/Macaulay2 discovery and oracle wrappers, closed-form finite Stanley-Reisner certificates, toric-ideal free-resolution certificates with projective dimension, regularity, dual complexes, Ext/Tor modules, and derived identity-cone sanity checks, and differentiable losses that consume exact CAS/closed-form targets without inventing algebraic facts in Torch.
 - `src/toricgt/slepian_torus.py`: finite Slepian/DPSS phase-concentration probes for projected noncommutative torus leaves used by the geometry audit suite.
 - `src/toricgt/music.py`: dark analog-synth algorithmic music from torus orbits, tropical active faces, Slepian envelopes, and Soft-MoE-style routing.
@@ -1869,10 +1885,10 @@ one-dimensional-cone filtrations, affine chart frames, and chart
 transition maps, then measures whether the hidden fiber lies in the expected
 Klyachko subspace, splits coherently over cones, and glues across chart
 overlaps like a local sheaf section.  The all-phases config instantiates this
-probe from step 0 so W&B always reports `toric_vector_bundle/*` and
-`toric_sheaf/*`; its optimization weight is phase-controlled through
-`toric_vector_bundle_loss_weight` and remains training-only/excluded from
-Parameter-Golf export by default.
+probe from step 0 so W&B always reports `toric_vector_bundle_1d_cone_ce_*`,
+`toric_vector_bundle_1d_cone_*`, and `toric_sheaf/*`; its optimization weight
+is phase-controlled through `toric_vector_bundle_loss_weight` and remains
+training-only/excluded from Parameter-Golf export by default.
 
 The `oai` branch now includes an optional anticipative reasoning-trajectory
 memory head. Completed graph-of-thought DAGs are summarized by pooled

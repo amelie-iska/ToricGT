@@ -42,6 +42,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -273,10 +274,11 @@ DEFAULT_REQUIRED_METRIC_GROUPS: dict[str, tuple[str, ...]] = {
         "bgg_category_o/persistence/gf2_exact_at_c1",
         "bgg_category_o/persistence/be_rank_residual_c1",
     ),
-    "toric_vector_bundle": (
-        "toric_vector_bundle/loss",
-        "toric_vector_bundle/filtration_residual",
-        "toric_vector_bundle/cech_gluing_residual",
+    "toric_vector_bundle_1d_cone": (
+        "toric_vector_bundle_1d_cone/loss",
+        "toric_vector_bundle_1d_cone/ce",
+        "toric_vector_bundle_1d_cone/filtration_residual",
+        "toric_vector_bundle_1d_cone/cech_gluing_residual",
         "toric_sheaf/cocycle_residual",
     ),
 }
@@ -899,6 +901,56 @@ def write_analysis_status(base: Path, checkpoint: Path, step: int, run_path: str
     }
     out = base / "analysis_status.json"
     out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out
+
+
+def write_training_notes_mirror(base: Path, checkpoint: Path, step: int, run_path: str) -> Path:
+    """Mirror the periodic analysis synopsis into ./training_notes.
+
+    The full analysis tree remains under outputs/post_resume_analysis.  This
+    lightweight note gives the autonomous BPB loop a stable, timestamped audit
+    trail that can be scanned without opening every artifact directory.
+    """
+
+    notes_dir = Path("training_notes")
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    synopsis = base / "SYNOPSIS.md"
+    status = load_json(base / "analysis_status.json")
+    proposal = load_json(base / "training_adjustment_proposal.json")
+    body = synopsis.read_text(encoding="utf-8") if synopsis.exists() else "# ToricGT Periodic Analysis\n"
+    note = [
+        f"# ToricGT BPB Campaign Check-In {stamp}",
+        "",
+        f"- Analysis directory: `{base}`",
+        f"- Checkpoint: `{checkpoint}`",
+        f"- Step: `{step}`",
+        f"- W&B run: `{run_path or 'not requested'}`",
+        f"- Analysis index: `{base / 'index.html'}`",
+        f"- Status JSON: `{base / 'analysis_status.json'}`",
+        "",
+        "## Availability",
+    ]
+    availability = status.get("availability", {}) if isinstance(status.get("availability", {}), dict) else {}
+    if availability:
+        for key in sorted(availability):
+            note.append(f"- `{key}`: `{availability[key]}`")
+    else:
+        note.append("- Analysis status was not available when the note mirror was written.")
+    if proposal:
+        decision = proposal.get("decision", {}) if isinstance(proposal.get("decision", {}), dict) else {}
+        note.extend(
+            [
+                "",
+                "## Controller Proposal",
+                f"- Target status: `{decision.get('target_status', 'n/a')}`",
+                f"- Primary action: `{decision.get('primary_action', 'n/a')}`",
+                f"- Proposal: `{base / 'training_adjustment_proposal.md'}`",
+            ]
+        )
+    note.extend(["", "## Synopsis", "", body])
+    out = notes_dir / f"{stamp}_step_{step:08d}_bpb_campaign.md"
+    out.write_text("\n".join(note).rstrip() + "\n", encoding="utf-8")
     return out
 
 
@@ -1541,9 +1593,11 @@ def main() -> None:
     synopsis = write_synopsis(base, checkpoint, step, args.run_path)
     index = write_analysis_index(base, checkpoint, step, args.run_path)
     status = write_analysis_status(base, checkpoint, step, args.run_path)
+    note = write_training_notes_mirror(base, checkpoint, step, args.run_path)
     print(f"wrote {synopsis}", flush=True)
     print(f"wrote {index}", flush=True)
     print(f"wrote {status}", flush=True)
+    print(f"wrote {note}", flush=True)
     trigger_codex_review_hook(args, base, checkpoint, step)
 
 

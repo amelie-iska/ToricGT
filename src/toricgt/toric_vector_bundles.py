@@ -31,46 +31,74 @@ class ToricVectorBundleConfig:
     """Configuration for the finite Klyachko/sheaf probe."""
 
     rank: int = 8
-    num_rays: int = 8
+    num_one_dimensional_cones: int = 8
+    num_rays: int | None = None
     num_cones: int = 8
     filtration_levels: int = 3
     max_positions: int = 128
     temperature: float = 0.25
-    ray_weight: float = 0.20
+    one_dimensional_cone_weight: float = 0.20
+    ray_weight: float | None = None
     filtration_weight: float = 1.00
     splitting_weight: float = 0.35
     cech_weight: float = 0.25
     cocycle_weight: float = 0.05
+
+    @property
+    def effective_num_one_dimensional_cones(self) -> int:
+        return int(self.num_one_dimensional_cones if self.num_rays is None else self.num_rays)
+
+    @property
+    def effective_one_dimensional_cone_weight(self) -> float:
+        return float(self.one_dimensional_cone_weight if self.ray_weight is None else self.ray_weight)
 
 
 @dataclass(frozen=True)
 class KlyachkoBundleCertificate:
     """Finite toric vector-bundle certificate.
 
-    ``filtration_masks[r, l]`` is the basis mask for the level ``l`` subspace
+    ``filtration_masks[rho, l]`` is the basis mask for the level ``l`` subspace
     of the decreasing filtration attached to the one-dimensional cone indexed
-    by ``r``.  ``chart_frames`` are orthogonal bases for affine charts.
+    by ``rho``.  ``chart_frames`` are orthogonal bases for affine charts.
     Transition matrices derived from these frames satisfy the Cech cocycle
     identity exactly up to floating-point round off.
     """
 
-    rays: torch.Tensor
-    cone_ray_mask: torch.Tensor
+    one_dimensional_cones: torch.Tensor
+    cone_one_dimensional_cone_mask: torch.Tensor
     filtration_masks: torch.Tensor
     chart_frames: torch.Tensor
     cone_adjacency: torch.Tensor
+
+    @property
+    def rays(self) -> torch.Tensor:
+        """Deprecated alias for older tests/scripts."""
+
+        return self.one_dimensional_cones
+
+    @property
+    def cone_ray_mask(self) -> torch.Tensor:
+        """Deprecated alias for older tests/scripts."""
+
+        return self.cone_one_dimensional_cone_mask
 
     @property
     def rank(self) -> int:
         return int(self.filtration_masks.shape[-1])
 
     @property
-    def num_rays(self) -> int:
+    def num_one_dimensional_cones(self) -> int:
         return int(self.filtration_masks.shape[0])
 
     @property
+    def num_rays(self) -> int:
+        """Deprecated alias for older tests/scripts."""
+
+        return self.num_one_dimensional_cones
+
+    @property
     def num_cones(self) -> int:
-        return int(self.cone_ray_mask.shape[0])
+        return int(self.cone_one_dimensional_cone_mask.shape[0])
 
     @property
     def filtration_levels(self) -> int:
@@ -80,7 +108,8 @@ class KlyachkoBundleCertificate:
 def default_klyachko_certificate(
     *,
     rank: int = 8,
-    num_rays: int = 8,
+    num_one_dimensional_cones: int = 8,
+    num_rays: int | None = None,
     num_cones: int | None = None,
     filtration_levels: int = 3,
     device: torch.device | None = None,
@@ -95,27 +124,43 @@ def default_klyachko_certificate(
     """
 
     rank = max(2, int(rank))
-    num_rays = max(2, int(num_rays))
-    num_cones = max(1, int(num_rays if num_cones is None else num_cones))
+    num_one_dimensional_cones = max(
+        2,
+        int(num_one_dimensional_cones if num_rays is None else num_rays),
+    )
+    num_cones = max(1, int(num_one_dimensional_cones if num_cones is None else num_cones))
     filtration_levels = max(2, int(filtration_levels))
     device = device or torch.device("cpu")
 
-    angles = torch.arange(num_rays, device=device, dtype=torch.float32) * (2.0 * math.pi / float(num_rays))
-    rays = torch.stack([torch.cos(angles), torch.sin(angles)], dim=-1)
+    angles = torch.arange(num_one_dimensional_cones, device=device, dtype=torch.float32) * (
+        2.0 * math.pi / float(num_one_dimensional_cones)
+    )
+    one_dimensional_cones = torch.stack([torch.cos(angles), torch.sin(angles)], dim=-1)
 
-    cone_ray_mask = torch.zeros(num_cones, num_rays, dtype=torch.bool, device=device)
+    cone_one_dimensional_cone_mask = torch.zeros(
+        num_cones,
+        num_one_dimensional_cones,
+        dtype=torch.bool,
+        device=device,
+    )
     for cone in range(num_cones):
-        left = cone % num_rays
-        right = (cone + 1) % num_rays
-        cone_ray_mask[cone, left] = True
-        cone_ray_mask[cone, right] = True
+        left = cone % num_one_dimensional_cones
+        right = (cone + 1) % num_one_dimensional_cones
+        cone_one_dimensional_cone_mask[cone, left] = True
+        cone_one_dimensional_cone_mask[cone, right] = True
 
     coords = torch.arange(rank, device=device)
-    filtration_masks = torch.zeros(num_rays, filtration_levels, rank, dtype=torch.float32, device=device)
-    for ray in range(num_rays):
-        classes = torch.remainder(coords + ray, filtration_levels)
+    filtration_masks = torch.zeros(
+        num_one_dimensional_cones,
+        filtration_levels,
+        rank,
+        dtype=torch.float32,
+        device=device,
+    )
+    for one_dimensional_cone in range(num_one_dimensional_cones):
+        classes = torch.remainder(coords + one_dimensional_cone, filtration_levels)
         for level in range(filtration_levels):
-            filtration_masks[ray, level] = (classes >= level).to(torch.float32)
+            filtration_masks[one_dimensional_cone, level] = (classes >= level).to(torch.float32)
 
     eye = torch.eye(rank, device=device)
     frames = []
@@ -136,8 +181,8 @@ def default_klyachko_certificate(
     cone_adjacency.fill_diagonal_(False)
 
     return KlyachkoBundleCertificate(
-        rays=rays,
-        cone_ray_mask=cone_ray_mask,
+        one_dimensional_cones=one_dimensional_cones,
+        cone_one_dimensional_cone_mask=cone_one_dimensional_cone_mask,
         filtration_masks=filtration_masks,
         chart_frames=chart_frames,
         cone_adjacency=cone_adjacency,
@@ -185,19 +230,23 @@ class ToricVectorBundleProbe(nn.Module):
         super().__init__()
         self.config = config or ToricVectorBundleConfig()
         rank = max(2, int(self.config.rank))
-        rays = max(2, int(self.config.num_rays))
+        num_one_dimensional_cones = max(2, int(self.config.effective_num_one_dimensional_cones))
         levels = max(2, int(self.config.filtration_levels))
         self.fiber = nn.Linear(d_model, rank)
-        self.ray_head = nn.Linear(rank, rays)
+        self.one_dimensional_cone_head = nn.Linear(rank, num_one_dimensional_cones)
         self.level_head = nn.Linear(rank, levels)
         cert = default_klyachko_certificate(
             rank=rank,
-            num_rays=rays,
+            num_one_dimensional_cones=num_one_dimensional_cones,
             num_cones=int(self.config.num_cones),
             filtration_levels=levels,
         )
-        self.register_buffer("rays", cert.rays, persistent=False)
-        self.register_buffer("cone_ray_mask", cert.cone_ray_mask, persistent=False)
+        self.register_buffer("one_dimensional_cones", cert.one_dimensional_cones, persistent=False)
+        self.register_buffer(
+            "cone_one_dimensional_cone_mask",
+            cert.cone_one_dimensional_cone_mask,
+            persistent=False,
+        )
         self.register_buffer("filtration_masks", cert.filtration_masks, persistent=False)
         self.register_buffer("chart_frames", cert.chart_frames, persistent=False)
         self.register_buffer("cone_adjacency", cert.cone_adjacency, persistent=False)
@@ -223,54 +272,89 @@ class ToricVectorBundleProbe(nn.Module):
 
         fiber = torch.tanh(self.fiber(x))
         flat_fiber = fiber.reshape(-1, fiber.shape[-1])
-        ray_logits = self.ray_head(flat_fiber)
+        one_dimensional_cone_logits = self.one_dimensional_cone_head(flat_fiber)
         level_logits = self.level_head(flat_fiber)
-        ray_probs = F.softmax(ray_logits / max(float(self.config.temperature), 1e-4), dim=-1)
+        one_dimensional_cone_probs = F.softmax(
+            one_dimensional_cone_logits / max(float(self.config.temperature), 1e-4),
+            dim=-1,
+        )
         level_probs = F.softmax(level_logits / max(float(self.config.temperature), 1e-4), dim=-1)
 
-        ray_labels = self._ray_labels(ray_probs, target_positions)
+        one_dimensional_cone_labels = self._one_dimensional_cone_labels(
+            one_dimensional_cone_probs,
+            target_positions,
+        )
         level_labels = self._level_labels(level_probs, target_positions, target_tokens)
-        ray_ce = F.cross_entropy(ray_logits, ray_labels)
+        one_dimensional_cone_ce = F.cross_entropy(one_dimensional_cone_logits, one_dimensional_cone_labels)
         level_ce = F.cross_entropy(level_logits, level_labels)
-        filtration = self._filtration_membership(flat_fiber, ray_labels, level_labels)
-        splitting = self._cone_splitting_residual(fiber, ray_probs.view(fiber.shape[0], fiber.shape[1], -1))
-        gluing = self._cech_gluing_residual(fiber, ray_probs.view(fiber.shape[0], fiber.shape[1], -1))
+        filtration = self._filtration_membership(flat_fiber, one_dimensional_cone_labels, level_labels)
+        one_dimensional_cone_probs_view = one_dimensional_cone_probs.view(fiber.shape[0], fiber.shape[1], -1)
+        splitting = self._cone_splitting_residual(fiber, one_dimensional_cone_probs_view)
+        gluing = self._cech_gluing_residual(fiber, one_dimensional_cone_probs_view)
         nesting = klyachko_nesting_residual(self.filtration_masks)
         cocycle = cech_cocycle_residual(self.chart_frames, self.cone_adjacency)
         total = (
-            float(self.config.ray_weight) * (ray_ce + 0.25 * level_ce)
+            float(self.config.effective_one_dimensional_cone_weight) * (
+                one_dimensional_cone_ce + 0.25 * level_ce
+            )
             + float(self.config.filtration_weight) * filtration
             + float(self.config.splitting_weight) * splitting
             + float(self.config.cech_weight) * gluing
             + float(self.config.cocycle_weight) * (nesting + cocycle)
         )
-        ray_entropy = -(ray_probs.clamp_min(1e-8) * ray_probs.clamp_min(1e-8).log()).sum(dim=-1).mean()
-        ray_entropy = ray_entropy / math.log(max(2, int(self.rays.shape[0])))
-        active_ray_mass = ray_probs.max(dim=-1).values.mean()
+        one_dimensional_cone_entropy = -(
+            one_dimensional_cone_probs.clamp_min(1e-8) * one_dimensional_cone_probs.clamp_min(1e-8).log()
+        ).sum(dim=-1).mean()
+        one_dimensional_cone_entropy = one_dimensional_cone_entropy / math.log(
+            max(2, int(self.one_dimensional_cones.shape[0]))
+        )
+        active_one_dimensional_cone_mass = one_dimensional_cone_probs.max(dim=-1).values.mean()
         return {
-            "toric_vector_bundle_loss": total,
-            "toric_vector_bundle_ray_ce": ray_ce.detach(),
-            "toric_vector_bundle_level_ce": level_ce.detach(),
+            "toric_vector_bundle_1d_cone_ce_loss": total,
+            "toric_vector_bundle_1d_cone_ce": one_dimensional_cone_ce.detach(),
+            "toric_vector_bundle_filtration_level_ce": level_ce.detach(),
             "toric_vector_bundle_filtration_residual": filtration.detach(),
-            "toric_vector_bundle_klyachko_nesting_residual": nesting.detach(),
+            "toric_vector_bundle_1d_cone_klyachko_nesting_residual": nesting.detach(),
             "toric_vector_bundle_cone_splitting_residual": splitting.detach(),
             "toric_vector_bundle_cech_gluing_residual": gluing.detach(),
             "toric_sheaf_chart_gluing_residual": gluing.detach(),
             "toric_sheaf_cocycle_residual": cocycle.detach(),
-            "toric_vector_bundle_ray_entropy": ray_entropy.detach(),
-            "toric_vector_bundle_active_ray_mass": active_ray_mass.detach(),
+            "toric_vector_bundle_1d_cone_entropy": one_dimensional_cone_entropy.detach(),
+            "toric_vector_bundle_active_1d_cone_mass": active_one_dimensional_cone_mass.detach(),
             "toric_vector_bundle_rank": torch.as_tensor(float(self.filtration_masks.shape[-1]), device=hidden.device),
-            "toric_vector_bundle_num_rays": torch.as_tensor(float(self.rays.shape[0]), device=hidden.device),
+            "toric_vector_bundle_num_1d_cones": torch.as_tensor(
+                float(self.one_dimensional_cones.shape[0]),
+                device=hidden.device,
+            ),
             "toric_vector_bundle_filtration_levels": torch.as_tensor(
                 float(self.filtration_masks.shape[1]),
                 device=hidden.device,
             ),
         }
 
-    def _ray_labels(self, probs: torch.Tensor, target_positions: torch.Tensor | None) -> torch.Tensor:
-        rays = int(self.rays.shape[0])
+    @property
+    def rays(self) -> torch.Tensor:
+        """Deprecated module alias for older scripts."""
+
+        return self.one_dimensional_cones
+
+    @property
+    def cone_ray_mask(self) -> torch.Tensor:
+        """Deprecated module alias for older scripts."""
+
+        return self.cone_one_dimensional_cone_mask
+
+    def _one_dimensional_cone_labels(
+        self,
+        probs: torch.Tensor,
+        target_positions: torch.Tensor | None,
+    ) -> torch.Tensor:
+        num_one_dimensional_cones = int(self.one_dimensional_cones.shape[0])
         if target_positions is not None:
-            return torch.remainder(target_positions.reshape(-1).to(device=probs.device, dtype=torch.long), rays)
+            return torch.remainder(
+                target_positions.reshape(-1).to(device=probs.device, dtype=torch.long),
+                num_one_dimensional_cones,
+            )
         return probs.detach().argmax(dim=-1)
 
     def _level_labels(
@@ -289,22 +373,29 @@ class ToricVectorBundleProbe(nn.Module):
     def _filtration_membership(
         self,
         flat_fiber: torch.Tensor,
-        ray_labels: torch.Tensor,
+        one_dimensional_cone_labels: torch.Tensor,
         level_labels: torch.Tensor,
     ) -> torch.Tensor:
         masks = self.filtration_masks.to(device=flat_fiber.device, dtype=flat_fiber.dtype)
-        selected = masks[ray_labels, level_labels]
+        selected = masks[one_dimensional_cone_labels, level_labels]
         residual = flat_fiber * (1.0 - selected)
         denom = flat_fiber.pow(2).mean(dim=-1).clamp_min(1e-6)
         return (residual.pow(2).mean(dim=-1) / denom).mean()
 
-    def _cone_weights(self, ray_probs: torch.Tensor) -> torch.Tensor:
-        cone_mask = self.cone_ray_mask.to(device=ray_probs.device, dtype=ray_probs.dtype)
-        weights = ray_probs @ cone_mask.transpose(0, 1)
+    def _cone_weights(self, one_dimensional_cone_probs: torch.Tensor) -> torch.Tensor:
+        cone_mask = self.cone_one_dimensional_cone_mask.to(
+            device=one_dimensional_cone_probs.device,
+            dtype=one_dimensional_cone_probs.dtype,
+        )
+        weights = one_dimensional_cone_probs @ cone_mask.transpose(0, 1)
         return weights / cone_mask.sum(dim=-1).clamp_min(1.0)
 
-    def _cone_splitting_residual(self, fiber: torch.Tensor, ray_probs: torch.Tensor) -> torch.Tensor:
-        cone_weights = self._cone_weights(ray_probs)
+    def _cone_splitting_residual(
+        self,
+        fiber: torch.Tensor,
+        one_dimensional_cone_probs: torch.Tensor,
+    ) -> torch.Tensor:
+        cone_weights = self._cone_weights(one_dimensional_cone_probs)
         frames = self.chart_frames.to(device=fiber.device, dtype=fiber.dtype)
         terms = []
         flat = fiber.reshape(-1, fiber.shape[-1])
@@ -322,8 +413,12 @@ class ToricVectorBundleProbe(nn.Module):
             return fiber.float().sum() * 0.0
         return torch.stack(terms).mean()
 
-    def _cech_gluing_residual(self, fiber: torch.Tensor, ray_probs: torch.Tensor) -> torch.Tensor:
-        cone_weights = self._cone_weights(ray_probs)
+    def _cech_gluing_residual(
+        self,
+        fiber: torch.Tensor,
+        one_dimensional_cone_probs: torch.Tensor,
+    ) -> torch.Tensor:
+        cone_weights = self._cone_weights(one_dimensional_cone_probs)
         frames = self.chart_frames.to(device=fiber.device, dtype=fiber.dtype)
         adjacency = self.cone_adjacency.to(device=fiber.device)
         flat = fiber.reshape(-1, fiber.shape[-1])
@@ -357,18 +452,18 @@ class ToricVectorBundleProbe(nn.Module):
     @staticmethod
     def _zero_like(zero: torch.Tensor) -> dict[str, torch.Tensor]:
         return {
-            "toric_vector_bundle_loss": zero,
-            "toric_vector_bundle_ray_ce": zero.detach(),
-            "toric_vector_bundle_level_ce": zero.detach(),
+            "toric_vector_bundle_1d_cone_ce_loss": zero,
+            "toric_vector_bundle_1d_cone_ce": zero.detach(),
+            "toric_vector_bundle_filtration_level_ce": zero.detach(),
             "toric_vector_bundle_filtration_residual": zero.detach(),
-            "toric_vector_bundle_klyachko_nesting_residual": zero.detach(),
+            "toric_vector_bundle_1d_cone_klyachko_nesting_residual": zero.detach(),
             "toric_vector_bundle_cone_splitting_residual": zero.detach(),
             "toric_vector_bundle_cech_gluing_residual": zero.detach(),
             "toric_sheaf_chart_gluing_residual": zero.detach(),
             "toric_sheaf_cocycle_residual": zero.detach(),
-            "toric_vector_bundle_ray_entropy": zero.detach(),
-            "toric_vector_bundle_active_ray_mass": zero.detach(),
+            "toric_vector_bundle_1d_cone_entropy": zero.detach(),
+            "toric_vector_bundle_active_1d_cone_mass": zero.detach(),
             "toric_vector_bundle_rank": zero.detach(),
-            "toric_vector_bundle_num_rays": zero.detach(),
+            "toric_vector_bundle_num_1d_cones": zero.detach(),
             "toric_vector_bundle_filtration_levels": zero.detach(),
         }

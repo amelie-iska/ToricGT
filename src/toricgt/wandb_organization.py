@@ -72,7 +72,7 @@ RAW_HIDDEN_PATTERNS = (
     "topology/*",
     "tokengt_graph/*",
     "toric/*",
-    "toric_vector_bundle/*",
+    "toric_vector_bundle_1d_cone/*",
     "toric_sheaf/*",
     "tropical/*",
     "toric_tropical_exact/*",
@@ -354,7 +354,7 @@ def _category_alias(key: str) -> str | None:
         return f"07_topology_geometry/{key}"
     if key.startswith((
         "toric/",
-        "toric_vector_bundle/",
+        "toric_vector_bundle_1d_cone/",
         "toric_sheaf/",
         "tropical/",
         "toric_tropical_exact/",
@@ -452,7 +452,12 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/gflownet_loss", ("train/gflownet_loss",))
     _add_first(out, payload, "00_primary/tokengt_graph_loss", ("train/tokengt_graph_loss", "tokengt_graph/loss"))
     _add_first(out, payload, "00_primary/graphcg_loss", ("train/graphcg_loss",))
-    _add_first(out, payload, "00_primary/toric_vector_bundle_loss", ("train/toric_vector_bundle_loss",))
+    _add_first(
+        out,
+        payload,
+        "00_primary/toric_vector_bundle_1d_cone_ce_loss",
+        ("train/toric_vector_bundle_1d_cone_ce_loss", "train/toric_vector_bundle_loss"),
+    )
     _add_first(out, payload, "00_primary/toric_bgg_loss", ("train/toric_bgg_loss",))
     _add_first(out, payload, "00_primary/koszul_persistence_loss", ("train/koszul_persistence_loss",))
     _add_first(out, payload, "00_primary/toric_cca_topology_loss", ("advanced/toric_cca_topology_loss",))

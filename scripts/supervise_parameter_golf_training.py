@@ -69,10 +69,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-restarts", type=int, default=100)
     parser.add_argument("--max-analysis-iterations", type=int, default=100)
     parser.add_argument("--data-glob", default="data/curated_hf_shards/validation/*.parquet")
+    parser.add_argument("--test-data-glob", default="data/curated_hf_shards/test/*.parquet")
     parser.add_argument("--seq-len", type=int, default=1024)
     parser.add_argument("--simplex-samples", type=int, default=8)
     parser.add_argument("--geometry-records", type=int, default=4)
     parser.add_argument("--geometry-branches", type=int, default=6)
+    parser.add_argument("--branching-reasoning-max-nodes", type=int, default=160)
+    parser.add_argument("--branching-reasoning-node-offset", type=int, default=0)
     parser.add_argument("--gudhi-records", type=int, default=0)
     parser.add_argument("--gudhi-max-points", type=int, default=0)
     parser.add_argument("--gudhi-num-radii", type=int, default=0)
@@ -395,6 +398,8 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         args.config,
         "--data-glob",
         args.data_glob,
+        "--test-data-glob",
+        args.test_data_glob,
         "--seq-len",
         str(args.seq_len),
         "--simplex-samples",
@@ -403,6 +408,10 @@ def start_watcher(args: argparse.Namespace, state: dict[str, Any], target_step: 
         str(args.geometry_records),
         "--geometry-branches",
         str(args.geometry_branches),
+        "--branching-reasoning-max-nodes",
+        str(args.branching_reasoning_max_nodes),
+        "--branching-reasoning-node-offset",
+        str(args.branching_reasoning_node_offset),
         "--device",
         args.analysis_device,
         "--precision",
@@ -491,8 +500,24 @@ def main() -> None:
         args.state_path = str(Path(args.log_root) / "supervisor_state.json")
     analysis_cfg = config_get(config, "analysis", default={})
     gudhi_cfg = config_get(config, "analysis", "gudhi_persistence", default={})
+    if args.data_glob == "data/curated_hf_shards/validation/*.parquet":
+        args.data_glob = str(config_get(config, "data", "val_parquet_glob", default=args.data_glob))
+    if args.test_data_glob == "data/curated_hf_shards/test/*.parquet":
+        args.test_data_glob = str(config_get(config, "data", "test_parquet_glob", default=args.test_data_glob))
     if isinstance(analysis_cfg, dict) and int(analysis_cfg.get("periodic_interval_steps", 0) or 0) > 0:
         args.checkpoint_interval = int(analysis_cfg["periodic_interval_steps"])
+        args.seq_len = int(analysis_cfg.get("seq_len", args.seq_len) or args.seq_len)
+        args.simplex_samples = int(analysis_cfg.get("simplex_samples", args.simplex_samples) or args.simplex_samples)
+        args.geometry_records = int(analysis_cfg.get("geometry_records", args.geometry_records) or args.geometry_records)
+        args.geometry_branches = int(analysis_cfg.get("geometry_branches", args.geometry_branches) or args.geometry_branches)
+        args.branching_reasoning_max_nodes = int(
+            analysis_cfg.get("branching_reasoning_max_nodes", args.branching_reasoning_max_nodes)
+            or args.branching_reasoning_max_nodes
+        )
+        args.branching_reasoning_node_offset = int(
+            analysis_cfg.get("branching_reasoning_node_offset", args.branching_reasoning_node_offset)
+            or args.branching_reasoning_node_offset
+        )
     if isinstance(gudhi_cfg, dict):
         args.gudhi_records = args.gudhi_records or int(gudhi_cfg.get("records", 3) or 3)
         args.gudhi_max_points = args.gudhi_max_points or int(gudhi_cfg.get("max_points", 18) or 18)
@@ -527,6 +552,8 @@ def main() -> None:
             "target_bpb": args.target_bpb,
             "gate_step": args.gate_step,
             "checkpoint_interval": args.checkpoint_interval,
+            "data_glob": args.data_glob,
+            "test_data_glob": args.test_data_glob,
             "allow_training_start": bool(args.allow_training_start),
             "allow_training_restart": bool(args.allow_training_restart),
             "gudhi_persistence": {

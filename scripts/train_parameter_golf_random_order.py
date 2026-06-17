@@ -2282,7 +2282,12 @@ def main() -> None:
         ),
         use_toric_vector_bundle=config_get(file_config, "model", "use_toric_vector_bundle", True),
         toric_vector_bundle_rank=config_get(file_config, "model", "toric_vector_bundle_rank", 8),
-        toric_vector_bundle_num_rays=config_get(file_config, "model", "toric_vector_bundle_num_rays", 8),
+        toric_vector_bundle_num_one_dimensional_cones=config_get(
+            file_config,
+            "model",
+            "toric_vector_bundle_num_one_dimensional_cones",
+            config_get(file_config, "model", "toric_vector_bundle_num_rays", 8),
+        ),
         toric_vector_bundle_num_cones=config_get(file_config, "model", "toric_vector_bundle_num_cones", 8),
         toric_vector_bundle_filtration_levels=config_get(
             file_config,
@@ -2292,7 +2297,12 @@ def main() -> None:
         ),
         toric_vector_bundle_max_positions=config_get(file_config, "model", "toric_vector_bundle_max_positions", 128),
         toric_vector_bundle_temperature=config_get(file_config, "model", "toric_vector_bundle_temperature", 0.25),
-        toric_vector_bundle_ray_weight=config_get(file_config, "model", "toric_vector_bundle_ray_weight", 0.20),
+        toric_vector_bundle_one_dimensional_cone_weight=config_get(
+            file_config,
+            "model",
+            "toric_vector_bundle_one_dimensional_cone_weight",
+            config_get(file_config, "model", "toric_vector_bundle_ray_weight", 0.20),
+        ),
         toric_vector_bundle_filtration_weight=config_get(
             file_config,
             "model",
@@ -3746,17 +3756,17 @@ def main() -> None:
         step_toric_probe_rank = 0.0
         step_toric_probe_quant_bits = 0.0
         step_toric_vector_bundle_loss = 0.0
-        step_toric_vector_bundle_ray_ce = 0.0
+        step_toric_vector_bundle_1d_cone_ce = 0.0
         step_toric_vector_bundle_level_ce = 0.0
         step_toric_vector_bundle_filtration_residual = 0.0
         step_toric_vector_bundle_nesting_residual = 0.0
         step_toric_vector_bundle_splitting_residual = 0.0
         step_toric_vector_bundle_cech_gluing_residual = 0.0
         step_toric_sheaf_cocycle_residual = 0.0
-        step_toric_vector_bundle_ray_entropy = 0.0
-        step_toric_vector_bundle_active_ray_mass = 0.0
+        step_toric_vector_bundle_1d_cone_entropy = 0.0
+        step_toric_vector_bundle_active_1d_cone_mass = 0.0
         step_toric_vector_bundle_rank = 0.0
-        step_toric_vector_bundle_num_rays = 0.0
+        step_toric_vector_bundle_num_1d_cones = 0.0
         step_toric_vector_bundle_filtration_levels = 0.0
         step_toric_bgg_loss = 0.0
         step_toric_bgg_d2_residual = 0.0
@@ -4025,7 +4035,10 @@ def main() -> None:
                 graphcg_loss = out.get("graphcg_loss", torch.zeros((), device=device))
                 analogy_lattice_loss = out.get("analogy_lattice_loss", torch.zeros((), device=device))
                 toric_geometry_loss = out.get("toric_geometry_loss", torch.zeros((), device=device))
-                toric_vector_bundle_loss = out.get("toric_vector_bundle_loss", torch.zeros((), device=device))
+                toric_vector_bundle_loss = out.get(
+                    "toric_vector_bundle_1d_cone_ce_loss",
+                    torch.zeros((), device=device),
+                )
                 toric_bgg_loss = out.get("toric_bgg_loss", torch.zeros((), device=device))
                 koszul_persistence_loss = out.get("koszul_persistence_loss", torch.zeros((), device=device))
                 slepian_pollak_loss = out.get("slepian_pollak_loss", torch.zeros((), device=device))
@@ -4341,17 +4354,17 @@ def main() -> None:
                 out.get("toric_probe_quant_bits", torch.zeros(())).detach().cpu()
             )
             step_toric_vector_bundle_loss += float(toric_vector_bundle_loss.detach().cpu())
-            step_toric_vector_bundle_ray_ce += float(
-                out.get("toric_vector_bundle_ray_ce", torch.zeros(())).detach().cpu()
+            step_toric_vector_bundle_1d_cone_ce += float(
+                out.get("toric_vector_bundle_1d_cone_ce", torch.zeros(())).detach().cpu()
             )
             step_toric_vector_bundle_level_ce += float(
-                out.get("toric_vector_bundle_level_ce", torch.zeros(())).detach().cpu()
+                out.get("toric_vector_bundle_filtration_level_ce", torch.zeros(())).detach().cpu()
             )
             step_toric_vector_bundle_filtration_residual += float(
                 out.get("toric_vector_bundle_filtration_residual", torch.zeros(())).detach().cpu()
             )
             step_toric_vector_bundle_nesting_residual += float(
-                out.get("toric_vector_bundle_klyachko_nesting_residual", torch.zeros(())).detach().cpu()
+                out.get("toric_vector_bundle_1d_cone_klyachko_nesting_residual", torch.zeros(())).detach().cpu()
             )
             step_toric_vector_bundle_splitting_residual += float(
                 out.get("toric_vector_bundle_cone_splitting_residual", torch.zeros(())).detach().cpu()
@@ -4362,17 +4375,17 @@ def main() -> None:
             step_toric_sheaf_cocycle_residual += float(
                 out.get("toric_sheaf_cocycle_residual", torch.zeros(())).detach().cpu()
             )
-            step_toric_vector_bundle_ray_entropy += float(
-                out.get("toric_vector_bundle_ray_entropy", torch.zeros(())).detach().cpu()
+            step_toric_vector_bundle_1d_cone_entropy += float(
+                out.get("toric_vector_bundle_1d_cone_entropy", torch.zeros(())).detach().cpu()
             )
-            step_toric_vector_bundle_active_ray_mass += float(
-                out.get("toric_vector_bundle_active_ray_mass", torch.zeros(())).detach().cpu()
+            step_toric_vector_bundle_active_1d_cone_mass += float(
+                out.get("toric_vector_bundle_active_1d_cone_mass", torch.zeros(())).detach().cpu()
             )
             step_toric_vector_bundle_rank += float(
                 out.get("toric_vector_bundle_rank", torch.zeros(())).detach().cpu()
             )
-            step_toric_vector_bundle_num_rays += float(
-                out.get("toric_vector_bundle_num_rays", torch.zeros(())).detach().cpu()
+            step_toric_vector_bundle_num_1d_cones += float(
+                out.get("toric_vector_bundle_num_1d_cones", torch.zeros(())).detach().cpu()
             )
             step_toric_vector_bundle_filtration_levels += float(
                 out.get("toric_vector_bundle_filtration_levels", torch.zeros(())).detach().cpu()
@@ -4652,17 +4665,17 @@ def main() -> None:
         step_toric_probe_rank /= grad_accum
         step_toric_probe_quant_bits /= grad_accum
         step_toric_vector_bundle_loss /= grad_accum
-        step_toric_vector_bundle_ray_ce /= grad_accum
+        step_toric_vector_bundle_1d_cone_ce /= grad_accum
         step_toric_vector_bundle_level_ce /= grad_accum
         step_toric_vector_bundle_filtration_residual /= grad_accum
         step_toric_vector_bundle_nesting_residual /= grad_accum
         step_toric_vector_bundle_splitting_residual /= grad_accum
         step_toric_vector_bundle_cech_gluing_residual /= grad_accum
         step_toric_sheaf_cocycle_residual /= grad_accum
-        step_toric_vector_bundle_ray_entropy /= grad_accum
-        step_toric_vector_bundle_active_ray_mass /= grad_accum
+        step_toric_vector_bundle_1d_cone_entropy /= grad_accum
+        step_toric_vector_bundle_active_1d_cone_mass /= grad_accum
         step_toric_vector_bundle_rank /= grad_accum
-        step_toric_vector_bundle_num_rays /= grad_accum
+        step_toric_vector_bundle_num_1d_cones /= grad_accum
         step_toric_vector_bundle_filtration_levels /= grad_accum
         step_toric_bgg_loss /= grad_accum
         step_toric_bgg_d2_residual /= grad_accum
@@ -5020,30 +5033,32 @@ def main() -> None:
                 "tropical/active_face_entropy": step_toric_active_face_entropy,
                 "tropical/fan_loss": step_toric_fan_loss,
                 "tropical/bend_magnitude": step_toric_bend_magnitude,
-                "train/toric_vector_bundle_loss": step_toric_vector_bundle_loss,
-                "train/toric_vector_bundle_loss_weight": float(effective_toric_vector_bundle_loss_weight),
-                "train/toric_vector_bundle_ray_ce": step_toric_vector_bundle_ray_ce,
-                "train/toric_vector_bundle_level_ce": step_toric_vector_bundle_level_ce,
+                "train/toric_vector_bundle_1d_cone_ce_loss": step_toric_vector_bundle_loss,
+                "train/toric_vector_bundle_1d_cone_ce_weight": float(effective_toric_vector_bundle_loss_weight),
+                "train/toric_vector_bundle_1d_cone_ce": step_toric_vector_bundle_1d_cone_ce,
+                "train/toric_vector_bundle_filtration_level_ce": step_toric_vector_bundle_level_ce,
                 "train/toric_vector_bundle_filtration_residual": step_toric_vector_bundle_filtration_residual,
-                "train/toric_vector_bundle_klyachko_nesting_residual": step_toric_vector_bundle_nesting_residual,
+                "train/toric_vector_bundle_1d_cone_klyachko_nesting_residual": (
+                    step_toric_vector_bundle_nesting_residual
+                ),
                 "train/toric_vector_bundle_cone_splitting_residual": step_toric_vector_bundle_splitting_residual,
                 "train/toric_vector_bundle_cech_gluing_residual": step_toric_vector_bundle_cech_gluing_residual,
                 "train/toric_sheaf_cocycle_residual": step_toric_sheaf_cocycle_residual,
-                "train/toric_vector_bundle_ray_entropy": step_toric_vector_bundle_ray_entropy,
-                "train/toric_vector_bundle_active_ray_mass": step_toric_vector_bundle_active_ray_mass,
-                "toric_vector_bundle/loss": step_toric_vector_bundle_loss,
-                "toric_vector_bundle/loss_weight": float(effective_toric_vector_bundle_loss_weight),
-                "toric_vector_bundle/ray_ce": step_toric_vector_bundle_ray_ce,
-                "toric_vector_bundle/level_ce": step_toric_vector_bundle_level_ce,
-                "toric_vector_bundle/filtration_residual": step_toric_vector_bundle_filtration_residual,
-                "toric_vector_bundle/klyachko_nesting_residual": step_toric_vector_bundle_nesting_residual,
-                "toric_vector_bundle/cone_splitting_residual": step_toric_vector_bundle_splitting_residual,
-                "toric_vector_bundle/cech_gluing_residual": step_toric_vector_bundle_cech_gluing_residual,
-                "toric_vector_bundle/ray_entropy": step_toric_vector_bundle_ray_entropy,
-                "toric_vector_bundle/active_ray_mass": step_toric_vector_bundle_active_ray_mass,
-                "toric_vector_bundle/rank": step_toric_vector_bundle_rank,
-                "toric_vector_bundle/num_rays": step_toric_vector_bundle_num_rays,
-                "toric_vector_bundle/filtration_levels": step_toric_vector_bundle_filtration_levels,
+                "train/toric_vector_bundle_1d_cone_entropy": step_toric_vector_bundle_1d_cone_entropy,
+                "train/toric_vector_bundle_active_1d_cone_mass": step_toric_vector_bundle_active_1d_cone_mass,
+                "toric_vector_bundle_1d_cone/loss": step_toric_vector_bundle_loss,
+                "toric_vector_bundle_1d_cone/loss_weight": float(effective_toric_vector_bundle_loss_weight),
+                "toric_vector_bundle_1d_cone/ce": step_toric_vector_bundle_1d_cone_ce,
+                "toric_vector_bundle_1d_cone/filtration_level_ce": step_toric_vector_bundle_level_ce,
+                "toric_vector_bundle_1d_cone/filtration_residual": step_toric_vector_bundle_filtration_residual,
+                "toric_vector_bundle_1d_cone/klyachko_nesting_residual": step_toric_vector_bundle_nesting_residual,
+                "toric_vector_bundle_1d_cone/cone_splitting_residual": step_toric_vector_bundle_splitting_residual,
+                "toric_vector_bundle_1d_cone/cech_gluing_residual": step_toric_vector_bundle_cech_gluing_residual,
+                "toric_vector_bundle_1d_cone/entropy": step_toric_vector_bundle_1d_cone_entropy,
+                "toric_vector_bundle_1d_cone/active_mass": step_toric_vector_bundle_active_1d_cone_mass,
+                "toric_vector_bundle_1d_cone/rank": step_toric_vector_bundle_rank,
+                "toric_vector_bundle_1d_cone/num_1d_cones": step_toric_vector_bundle_num_1d_cones,
+                "toric_vector_bundle_1d_cone/filtration_levels": step_toric_vector_bundle_filtration_levels,
                 "toric_sheaf/chart_gluing_residual": step_toric_vector_bundle_cech_gluing_residual,
                 "toric_sheaf/cocycle_residual": step_toric_sheaf_cocycle_residual,
                 "train/toric_bgg_loss": step_toric_bgg_loss,

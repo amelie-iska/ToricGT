@@ -147,12 +147,14 @@ class RandomOrderLMConfig:
     toric_geometry_cas_toric_ideal_certificate_path: str = ""
     use_toric_vector_bundle: bool = True
     toric_vector_bundle_rank: int = 8
-    toric_vector_bundle_num_rays: int = 8
+    toric_vector_bundle_num_one_dimensional_cones: int = 8
+    toric_vector_bundle_num_rays: int | None = None
     toric_vector_bundle_num_cones: int = 8
     toric_vector_bundle_filtration_levels: int = 3
     toric_vector_bundle_max_positions: int = 128
     toric_vector_bundle_temperature: float = 0.25
-    toric_vector_bundle_ray_weight: float = 0.20
+    toric_vector_bundle_one_dimensional_cone_weight: float = 0.20
+    toric_vector_bundle_ray_weight: float | None = None
     toric_vector_bundle_filtration_weight: float = 1.00
     toric_vector_bundle_splitting_weight: float = 0.35
     toric_vector_bundle_cech_weight: float = 0.25
@@ -263,6 +265,18 @@ class RandomOrderLMConfig:
     @property
     def special_token_ids(self) -> dict[str, int]:
         return special_token_map_for_mode(self.special_token_mode)
+
+    @property
+    def effective_toric_vector_bundle_num_one_dimensional_cones(self) -> int:
+        if self.toric_vector_bundle_num_rays is not None:
+            return int(self.toric_vector_bundle_num_rays)
+        return int(self.toric_vector_bundle_num_one_dimensional_cones)
+
+    @property
+    def effective_toric_vector_bundle_one_dimensional_cone_weight(self) -> float:
+        if self.toric_vector_bundle_ray_weight is not None:
+            return float(self.toric_vector_bundle_ray_weight)
+        return float(self.toric_vector_bundle_one_dimensional_cone_weight)
 
 
 @dataclass(frozen=True)
@@ -640,12 +654,14 @@ class DenseRandomOrderToricLM(nn.Module):
                 config.d_model,
                 ToricVectorBundleConfig(
                     rank=config.toric_vector_bundle_rank,
-                    num_rays=config.toric_vector_bundle_num_rays,
+                    num_one_dimensional_cones=config.effective_toric_vector_bundle_num_one_dimensional_cones,
                     num_cones=config.toric_vector_bundle_num_cones,
                     filtration_levels=config.toric_vector_bundle_filtration_levels,
                     max_positions=config.toric_vector_bundle_max_positions,
                     temperature=config.toric_vector_bundle_temperature,
-                    ray_weight=config.toric_vector_bundle_ray_weight,
+                    one_dimensional_cone_weight=(
+                        config.effective_toric_vector_bundle_one_dimensional_cone_weight
+                    ),
                     filtration_weight=config.toric_vector_bundle_filtration_weight,
                     splitting_weight=config.toric_vector_bundle_splitting_weight,
                     cech_weight=config.toric_vector_bundle_cech_weight,

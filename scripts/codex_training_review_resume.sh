@@ -555,6 +555,24 @@ FALLBACK_CONTINUE=$CODEX_REVIEW_FALLBACK_CONTINUE
 CONDA_BIN=$(printf '%q' "$CONDA_BIN")
 
 cd "\$REPO_ROOT"
+DATA_GLOB="\$(python3 - "\$CONFIG" <<'PY'
+import sys
+from pathlib import Path
+import yaml
+
+cfg = yaml.safe_load(Path(sys.argv[1]).read_text(encoding="utf-8")) or {}
+print(((cfg.get("data") or {}).get("val_parquet_glob")) or "data/curated_hf_shards/validation/*.parquet")
+PY
+)"
+TEST_DATA_GLOB="\$(python3 - "\$CONFIG" <<'PY'
+import sys
+from pathlib import Path
+import yaml
+
+cfg = yaml.safe_load(Path(sys.argv[1]).read_text(encoding="utf-8")) or {}
+print(((cfg.get("data") or {}).get("test_parquet_glob")) or "data/curated_hf_shards/test/*.parquet")
+PY
+)"
 CODEX_EXIT=0
 timeout "\$TIMEOUT_SECONDS" "\$HOOK_LOG_DIR/codex_resume_command.sh" || CODEX_EXIT=\$?
 sleep "\$POST_EXIT_GRACE_SECONDS"
@@ -628,7 +646,7 @@ WATCH_CMD+=(python scripts/watch_training_analysis.py --checkpoint-dir "\$CHECKP
 if [[ -n "\$RUN_PATH" ]]; then
   WATCH_CMD+=(--run-path "\$RUN_PATH")
 fi
-WATCH_CMD+=(--output-root "\$ANALYSIS_ROOT" --config "\$CONFIG" --data-glob 'data/curated_hf_shards/validation/*.parquet' --seq-len 1024 --simplex-samples 8 --geometry-records 4 --geometry-branches 6 --device cpu --precision fp32 --training-tmux "\$TRAIN_SESSION" --codex-review-hook scripts/codex_training_review_resume.sh --codex-review-tmux-prefix toricgt_codex_review)
+WATCH_CMD+=(--output-root "\$ANALYSIS_ROOT" --config "\$CONFIG" --data-glob "\$DATA_GLOB" --test-data-glob "\$TEST_DATA_GLOB" --seq-len 1024 --simplex-samples 8 --geometry-records 4 --geometry-branches 6 --device cpu --precision fp32 --training-tmux "\$TRAIN_SESSION" --codex-review-hook scripts/codex_training_review_resume.sh --codex-review-tmux-prefix toricgt_codex_review)
 
 TRAIN_CMD_STR="\$(printf '%q ' "\${TRAIN_CMD[@]}")"
 WATCH_CMD_STR="\$(printf '%q ' "\${WATCH_CMD[@]}")"
