@@ -217,11 +217,15 @@ def train_corr(metrics: dict[str, Any], key: str) -> float | None:
 
 
 def sidecar_corr_from_review(sidecar_review: dict[str, Any], rule: FamilyRule) -> float | None:
+    return metric_corr_from_review(sidecar_review, rule.metric_aliases + (rule.name,))
+
+
+def metric_corr_from_review(sidecar_review: dict[str, Any], aliases: tuple[str, ...]) -> float | None:
     rows = sidecar_review.get("bpb_risk_metrics_top") or []
     if not isinstance(rows, list):
         return None
     best: float | None = None
-    aliases = tuple(alias.lower() for alias in rule.metric_aliases) + (rule.name.lower(),)
+    aliases = tuple(alias.lower() for alias in aliases)
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -301,25 +305,81 @@ def graph_lm_decision(metrics: dict[str, Any], target_bpb: float) -> tuple[dict[
     }
 
 
-def graph_structure_decision(metrics: dict[str, Any], target_bpb: float) -> tuple[dict[str, str], dict[str, Any]]:
+def graph_structure_decision(
+    metrics: dict[str, Any],
+    target_bpb: float,
+    sidecar_review: dict[str, Any] | None = None,
+    *,
+    run_id: str = "",
+) -> tuple[dict[str, str], dict[str, Any]]:
+    sidecar_review = sidecar_review or {}
     train_bpb = latest(metrics, "train_bpb", float("inf")) or float("inf")
     tokengt_corr = train_corr(metrics, "tokengt")
     train_slope = slope_per_1k(series(metrics, "train_bpb"))
+    flatten_lift = latest(metrics, "graph_output_flattening_ce_lift", None)
+    flatten_corr = metric_corr_from_review(
+        sidecar_review,
+        (
+            "graph_output_flattening/ce_lift",
+            "graph_output_flattening/calibration_loss",
+            "graph_output_flattening/ce_regression",
+            "fineweb_graphify/edge_weight",
+            "fineweb_graphify/edge_token_weight",
+        ),
+    )
+    # ``tokengt`` in the train log is a graph loss, not an activation magnitude.
+    # Positive correlation means graph loss is high when BPB is high, so pressure
+    # that lowers it may be helpful.  Negative correlation is the risky case:
+    # the graph loss is already low while BPB is high, suggesting conflict or
+    # over-regularization rather than useful structure.
+    graph_signal_risky = tokengt_corr is not None and tokengt_corr < -0.20
+    flatten_signal_helpful = (
+        (flatten_lift is not None and flatten_lift > 0.0)
+        or (flatten_corr is not None and flatten_corr < -0.10)
+    )
+    improving_fast = train_slope is not None and train_slope < -0.20
+    near_target = train_bpb <= target_bpb + 0.10
+    if train_bpb > target_bpb + 0.22 or graph_signal_risky:
+        radius = 2
+        radius_mode = "local_bpb_recovery"
+    elif improving_fast and flatten_signal_helpful and not graph_signal_risky:
+        radius = 4 if near_target else 3
+        radius_mode = "evidence_widening"
+    elif near_target and not graph_signal_risky:
+        radius = 4
+        radius_mode = "near_target_generous"
+    else:
+        radius = 3
+        radius_mode = "balanced_exploration"
+    # Deliberately explore a little, but only upward when the BPB curve is
+    # already healthy.  This makes wider graph neighborhoods a late-stage
+    # hypothesis rather than an early source of sequence-noise.
+    if near_target and improving_fast and flatten_signal_helpful:
+        jitter = deterministic_jitter(run_id or "radius", "graph_radius", 0.20)
+        if jitter > 1.10:
+            radius = min(6, radius + 1)
+            radius_mode = f"{radius_mode}_generous_jitter"
+    radius = int(clamp(float(radius), 2.0, 6.0))
     overrides = {
         "FINEWEB_GRAPHIFY": "1",
         "TOKENGT_FIRST_CLASS": "1",
         "GRAPH_OUTPUT_FLATTENING": "1",
         "OAI_FINEWEB_OUTPUT_FLATTENING": "1",
-        "GRAPH_OUTPUT_EDGE_RADIUS": "4",
-        "TOKENGT_GRAPH_RADIUS": "4",
+        "GRAPH_OUTPUT_EDGE_RADIUS": str(radius),
+        "TOKENGT_GRAPH_RADIUS": str(radius),
         "TOKENGT_IDENTIFIER_DIM": "24",
         "GRAPH_OUTPUT_VIRTUAL_EDGE_TOKENS": "1",
         "GRAPH_OUTPUT_SCORE_CORRECTION": "1",
+        "GRAPH_OUTPUT_CALIBRATION_LOSS_WEIGHT": "0.012",
+        "GRAPH_OUTPUT_CALIBRATION_MARGIN": "0.0",
+        "GRAPH_OUTPUT_CALIBRATION_EVERY": "25",
+        "GRAPH_OUTPUT_CALIBRATION_MAX_SEQUENCES": "2",
     }
     rationale: list[str] = [
-        "Keep graphification first-class and keep OAI-FineWeb flattening scoped to BPB scoring."
+        "Keep graphification first-class and keep OAI-FineWeb flattening scoped to BPB scoring.",
+        f"Adaptive graph radius selected {radius} via {radius_mode}; widen later only when BPB slope and graph/flattening evidence support it.",
     ]
-    if train_bpb > target_bpb + 0.18 and (tokengt_corr is None or tokengt_corr > 0.20):
+    if train_bpb > target_bpb + 0.18 and (tokengt_corr is None or graph_signal_risky):
         overrides.update(
             {
                 "TOKENGT_FIRST_CLASS_LR": "1.2e-4",
@@ -334,6 +394,7 @@ def graph_structure_decision(metrics: dict[str, Any], target_bpb: float) -> tupl
                 "GRAPH_OUTPUT_EDGE_WEIGHT": "0.040",
                 "GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT": "0.020",
                 "GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT": "0.014",
+                "GRAPH_OUTPUT_CALIBRATION_LOSS_WEIGHT": "0.018",
             }
         )
         rationale.append(
@@ -355,6 +416,7 @@ def graph_structure_decision(metrics: dict[str, Any], target_bpb: float) -> tupl
                 "GRAPH_OUTPUT_EDGE_WEIGHT": "0.065",
                 "GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT": "0.060",
                 "GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT": "0.045",
+                "GRAPH_OUTPUT_CALIBRATION_LOSS_WEIGHT": "0.008",
             }
         )
         rationale.append(
@@ -376,12 +438,21 @@ def graph_structure_decision(metrics: dict[str, Any], target_bpb: float) -> tupl
                 "GRAPH_OUTPUT_EDGE_WEIGHT": "0.050",
                 "GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT": "0.035",
                 "GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT": "0.024",
+                "GRAPH_OUTPUT_CALIBRATION_LOSS_WEIGHT": "0.012",
             }
         )
         rationale.append(
             "Use moderate first-class graph structure while BPB evidence is ambiguous; keep BPB-safe flattening correction active."
         )
-    return overrides, {"tokengt_corr_train_bpb": tokengt_corr, "reason": rationale}
+    return overrides, {
+        "tokengt_corr_train_bpb": tokengt_corr,
+        "flattening_lift": flatten_lift,
+        "flattening_corr_train_bpb": flatten_corr,
+        "radius": radius,
+        "radius_mode": radius_mode,
+        "radius_policy": "2-3 early, 4-6 only after BPB/flattening evidence supports wider neighborhoods",
+        "reason": rationale,
+    }
 
 
 def family_decisions(metrics: dict[str, Any], sidecar_review: dict[str, Any], run_id: str) -> tuple[dict[str, str], list[dict[str, Any]]]:
@@ -402,11 +473,12 @@ def family_decisions(metrics: dict[str, Any], sidecar_review: dict[str, Any], ru
         score = 0.0
         reasons: list[str] = []
         if corr is not None:
-            score += -0.75 * corr
+            score += 0.45 * corr
             if corr > 0.25:
-                reasons.append(f"positive train-BPB correlation {corr:.3f}; reduce pressure")
+                reasons.append(f"loss is high when BPB is high (corr {corr:.3f}); pressure may help if routed safely")
             elif corr < -0.20:
-                reasons.append(f"negative train-BPB correlation {corr:.3f}; family may help BPB")
+                score -= 0.40
+                reasons.append(f"loss is anticorrelated with BPB (corr {corr:.3f}); reduce pressure and keep as diagnostic")
             else:
                 reasons.append(f"weak train-BPB correlation {corr:.3f}; allow bounded exploration")
         else:
@@ -545,7 +617,12 @@ def build_adaptive_decision(
     selected_bpb = finite(metrics.get("selected_bpb"), float("inf")) or float("inf")
     train_bpb = latest(metrics, "train_bpb", float("inf")) or float("inf")
     graph_overrides, graph_plan = graph_lm_decision(metrics, target_bpb)
-    structure_overrides, structure_plan = graph_structure_decision(metrics, target_bpb)
+    structure_overrides, structure_plan = graph_structure_decision(
+        metrics,
+        target_bpb,
+        sidecar_review,
+        run_id=run_id,
+    )
     family_overrides, family_plan = family_decisions(metrics, sidecar_review, run_id)
     opt_overrides, opt_plan = optimizer_decision(metrics, target_bpb)
     env_overrides: dict[str, str] = {}
@@ -567,6 +644,33 @@ def build_adaptive_decision(
             "GRAPH_LM_BATCH_SIZE": "4",
         }
     )
+    if train_bpb > target_bpb + 0.25:
+        env_overrides.update(
+            {
+                "TORICGT_SIDECAR_LOSS_WEIGHT": "1.0",
+                "TORICGT_SIDECAR_LOSS_WEIGHT_START": "0.02",
+                "TORICGT_SIDECAR_WARMUP_STEPS": "750",
+                "TORICGT_SIDECAR_HOLD_STEPS": "150",
+            }
+        )
+    elif train_bpb <= target_bpb + 0.08:
+        env_overrides.update(
+            {
+                "TORICGT_SIDECAR_LOSS_WEIGHT": "1.0",
+                "TORICGT_SIDECAR_LOSS_WEIGHT_START": "0.08",
+                "TORICGT_SIDECAR_WARMUP_STEPS": "300",
+                "TORICGT_SIDECAR_HOLD_STEPS": "50",
+            }
+        )
+    else:
+        env_overrides.update(
+            {
+                "TORICGT_SIDECAR_LOSS_WEIGHT": "1.0",
+                "TORICGT_SIDECAR_LOSS_WEIGHT_START": "0.05",
+                "TORICGT_SIDECAR_WARMUP_STEPS": "500",
+                "TORICGT_SIDECAR_HOLD_STEPS": "100",
+            }
+        )
     hint = profile_hint(metrics, target_bpb, family_plan)
     if not strict_ok:
         hint = "analysis_blocked_repeat_only_after_fix"
@@ -599,6 +703,8 @@ def build_adaptive_decision(
             "artifact_bytes": metrics.get("artifact_bytes"),
             "strict_validation_passed": strict_ok,
             "sidecar_metric_count": sidecar_review.get("observed_metric_count"),
+            "adaptive_graph_radius": structure_plan.get("radius"),
+            "adaptive_graph_radius_mode": structure_plan.get("radius_mode"),
         },
         "optimizer_plan": opt_plan,
         "graph_lm_plan": graph_plan,

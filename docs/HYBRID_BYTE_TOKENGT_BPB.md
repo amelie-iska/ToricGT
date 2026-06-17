@@ -22,6 +22,14 @@ flattened back to sequence order through an OAI-FineWeb-only score-correction
 adapter before BPB is computed.  This lets the model use edge-token structure
 without making the official scorer pay for verbose graph serialization.
 
+The active adaptive policy starts graph neighborhoods conservatively and widens
+them only when evidence supports doing so.  Radius 2--3 is the default early
+BPB regime.  Later restarts may use radius 4--6 only when train BPB is falling,
+the graph/edge losses are not conflicting with BPB, and graph-output flattening
+has positive CE lift.  This keeps local sequence evidence dominant early while
+still allowing more generous graph context when the model demonstrates that it
+can use it.
+
 ## Graph Construction
 
 For a byte sequence `x[0:L]`, random-order autoregression samples a permutation
@@ -135,6 +143,19 @@ L_tokengt_graph =
 Here `phi(p)` is the model's toric phase feature map. The direction and cycle
 terms are active only under causal policies.
 
+Graph-output flattening has an explicit BPB calibration guard:
+
+```text
+L_flat_cal = max(0, CE(flattened graph output) - CE(raw graph hidden output) + margin)
+```
+
+The raw graph hidden state is detached before applying the flattening adapter,
+so this loss mainly trains the FineWeb-only flattening and score-correction
+path. It is intentionally one-sided: helpful flattening is logged as positive
+CE lift, while harmful flattening receives a small correction penalty. The
+1.5K controller uses this lift/regression signal separately from GraphCG,
+topology, toric, BGG, Koszul, memory, and graph-LM signals.
+
 ## Config
 
 Use:
@@ -177,12 +198,21 @@ graph_output_flattening/virtual_edge_tokens
 graph_output_flattening/edge_token_weight
 graph_output_flattening/score_correction
 graph_output_flattening/score_correction_weight
+graph_output_flattening/ce_lift
+graph_output_flattening/ce_regression
+graph_output_flattening/calibration_loss
 ```
 
 The adaptive 1.5K-step controller adjusts these separately from GraphCG,
 analogy, memory, toric, BGG, Koszul, vector-bundle/sheaf, and combinatorial
 toric loss weights.  A poor correlation for one family is not treated as a
 blanket rejection of graphification.
+
+Advanced sidecar pressure is also scheduled globally. Metrics and examples are
+computed from step 0, but the aggregate sidecar gradient multiplier starts
+small, holds briefly, and ramps. This keeps the mathematical audit always on
+without forcing all algebraic/topological objectives to compete with early
+FineWeb cross-entropy at full strength.
 
 ## Artifact Size
 

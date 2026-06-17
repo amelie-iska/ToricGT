@@ -53,6 +53,15 @@ with a small gated score-correction adapter.  This keeps graph-in/graph-out
 training active internally while the official BPB computation still evaluates
 the terse sequential target.  General graph data remains graph structured and
 does not use this OAI-only flattening path unless explicitly configured.
+The next gate-triggered restart uses an adaptive graph-radius policy: radius
+2--3 during fragile early BPB optimization, then radius 4--6 only when the
+1.5K analysis finds improving BPB slope, nonconflicting graph losses, and
+positive graph-output flattening CE lift.  A regression-only flattening
+calibration loss is available so the score-correction adapter is penalized only
+when flattening worsens FineWeb CE relative to the raw graph hidden state.
+Advanced ToricGT sidecar metrics remain on from step 0, while their aggregate
+gradient multiplier warm-starts small and ramps after the BPB objective has
+momentum.
 The current campaign state, gate cadence, and graphification knobs are recorded
 in [docs/CURRENT_OAI_TORICGT_STATE.md](docs/CURRENT_OAI_TORICGT_STATE.md).
 

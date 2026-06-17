@@ -37,6 +37,14 @@ GRAPH_LM_PRIMARY=1
 TORICGT_SIDECAR_COMPUTE_ALL_METRICS=1
 ```
 
+The next restart also uses the patched adaptive graph-radius and flattening
+calibration policy.  FineWeb graphification starts in a local radius-2 or
+radius-3 regime.  The 1.5K-step analysis may widen the TokenGT and
+graph-output-flattening radii to 4--6 only when the evidence says the graph path
+is helping BPB: improving train-BPB slope, nonconflicting TokenGT graph loss,
+positive graph-output flattening lift, and no strong W&B correlation indicating
+that wider graph features are making BPB worse.
+
 ## BPB-Safe FineWeb Graphification
 
 FineWeb is graphified inside the model without adding extra scored tokens to
@@ -67,10 +75,24 @@ TOKENGT_ENDPOINT_WEIGHT
 TOKENGT_EDGE_TOKEN_WEIGHT
 GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT
 GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT
+GRAPH_OUTPUT_CALIBRATION_LOSS_WEIGHT
+GRAPH_OUTPUT_CALIBRATION_EVERY
 ```
 
 The reason for separating them is empirical discipline: a bad BPB correlation
 for one graph component is not evidence that all graph features are harmful.
+The calibration loss is regression-only: it compares graph-output-flattened
+FineWeb CE against the raw graph hidden-state CE on a small subset and penalizes
+the flattening adapter only when flattening worsens the score.  This gives the
+controller an explicit `graph_output_flattening/ce_lift` signal for deciding
+whether score correction should be strengthened, held, or damped.
+
+The controller now treats loss correlations with the correct sign.  For
+loss-like metrics, positive correlation with BPB means the loss is high when BPB
+is high, so pressure that reduces that loss may be useful if gradient routing is
+clean.  Negative correlation is the suspicious case for a loss: the auxiliary
+loss may already be low while BPB remains high, indicating conflict,
+over-regularization, or a metric that should stay diagnostic-only.
 
 ## Advanced Loss Families
 
@@ -91,3 +113,7 @@ graph-LM BPB, artifact bytes, W&B metrics, screenshots, and the full
 The optimizer keeps the FineWeb cross-entropy/BPB objective dominant.  Advanced
 families remain useful only when they improve BPB, graph-reasoning quality, or
 diagnostic reliability without violating score-before-update causality.
+All advanced families remain observable from step 0, but the aggregate sidecar
+gradient multiplier is now warm-started: it starts small and ramps only after a
+short hold.  This preserves rigorous metrics while reducing early competition
+with the primary BPB objective.
