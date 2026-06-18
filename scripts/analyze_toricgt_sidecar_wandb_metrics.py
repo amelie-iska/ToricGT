@@ -34,6 +34,7 @@ RELATED_PREFIXES = (
     "08_toric_tropical_bgg/",
     "16_status/metrics_status/",
     "oai_gflownet/",
+    "oai_fot/",
     "oai_mtp/",
     "score_first_tta/",
     "graph_lm_primary/",
@@ -183,6 +184,8 @@ def stripped_name(metric: str) -> str:
 def metric_family(metric: str) -> str:
     if metric.startswith("oai_gflownet/"):
         return "oai_embedding_gflownet_graph_of_thought"
+    if metric.startswith("oai_fot/"):
+        return "oai_embedding_forest_of_thought"
     if metric.startswith("oai_mtp/"):
         return "oai_multi_token_prediction"
     if metric.startswith("score_first_tta/"):
@@ -229,6 +232,33 @@ def metric_goal(metric: str) -> str:
         if name in {"entropy", "action_diversity", "reward_mean"}:
             return "higher"
         if name in {"loss", "weighted_loss", "tb_residual", "entropy_objective"}:
+            return "lower"
+        return "context"
+    if metric.startswith("oai_fot/"):
+        name = metric.split("/", 1)[1]
+        if name in {
+            "activation_entropy",
+            "active_mass_topk",
+            "tree_diversity",
+            "reward_mean",
+            "correction_cosine",
+            "correction_bpb_proxy_lift",
+            "consensus_margin",
+            "consensus_tree_agreement",
+        }:
+            return "higher"
+        if name in {
+            "loss",
+            "weighted_loss",
+            "sparse_activation_loss",
+            "ucb_loss",
+            "self_correction_loss",
+            "consensus_loss",
+            "tb_loss",
+            "subtb_loss",
+            "complexity_loss",
+            "tb_residual",
+        }:
             return "lower"
         return "context"
     if metric.startswith("oai_mtp/"):
@@ -279,6 +309,36 @@ def description_for(metric: str) -> str:
         "oai_gflownet/sequences": "Number of FineWeb/graphified sequences sampled for the OAI GFlowNet auxiliary step.",
         "oai_gflownet/max_positions": "Maximum positions used from each sampled hidden trajectory for the OAI GFlowNet auxiliary step.",
         "oai_gflownet/num_actions": "Number of discrete graph-of-thought action buckets used by the OAI GFlowNet head.",
+        "oai_fot/enabled": "Status flag indicating that the OAI-baseline embedding-space Forest-of-Thought head is present for the run.",
+        "oai_fot/loss": "Training-only aggregate Forest-of-Thought objective over sparse tree activation, UCB expansion, self-correction, consensus, and trajectory balance in hidden space.",
+        "oai_fot/weighted_loss": "Actual weighted FoT auxiliary contribution before gradient routing.",
+        "oai_fot/loss_weight": "Configured scalar weight on the embedding-space Forest-of-Thought objective.",
+        "oai_fot/loss_weight_config": "Configured scalar weight on the embedding-space Forest-of-Thought objective.",
+        "oai_fot/sparse_activation_loss": "KL loss that asks a small subset of FoT trees to activate according to BPB-native reward and novelty.",
+        "oai_fot/ucb_loss": "UCB-style expansion loss; it encourages hidden tree transitions that combine value and exploration bonuses.",
+        "oai_fot/self_correction_loss": "Self-correction loss aligning learned correction vectors with useful hidden-state deltas and value lift.",
+        "oai_fot/consensus_loss": "Consensus-guided decision loss over tree leaves; it adapts FoT's consensus answer selection to token-bucket supervision.",
+        "oai_fot/tb_loss": "Trajectory-balance residual for the selected hidden-state forest path distribution.",
+        "oai_fot/subtb_loss": "Subtrajectory-balance residual for prefixes of hidden forest paths.",
+        "oai_fot/complexity_loss": "Complexity regularizer preventing excessive active-tree spread or tree collapse.",
+        "oai_fot/activation_entropy": "Normalized entropy of tree activation probabilities; low values indicate forest collapse, high values indicate broad forest use.",
+        "oai_fot/active_tree_count": "Effective number of active trees derived from tree-activation entropy.",
+        "oai_fot/active_mass_topk": "Probability mass assigned to the configured top-k active trees; high values mean sparse FoT activation is behaving as intended.",
+        "oai_fot/tree_diversity": "Mean dissimilarity among tree summaries; it measures whether different FoT trees explore distinct hidden reasoning modes.",
+        "oai_fot/value_mean": "Mean predicted hidden-state value for sampled FoT nodes.",
+        "oai_fot/reward_mean": "Mean BPB-native reward derived from per-token likelihood on sampled FoT trajectories.",
+        "oai_fot/tb_residual": "Absolute trajectory-balance residual for the FoT head.",
+        "oai_fot/correction_cosine": "Cosine alignment between learned self-correction vectors and useful next-state hidden deltas.",
+        "oai_fot/correction_bpb_proxy_lift": "Predicted value lift from applying the FoT self-correction vector; positive values suggest useful correction.",
+        "oai_fot/consensus_margin": "Top-vs-second consensus logit margin over tree leaves; higher means clearer forest consensus.",
+        "oai_fot/consensus_entropy": "Normalized entropy of the forest consensus distribution; very high values can mean indecision.",
+        "oai_fot/consensus_tree_agreement": "Fraction of tree leaves agreeing with the token-bucket consensus target.",
+        "oai_fot/log_z": "Learned log normalizer for the FoT trajectory-balance objective.",
+        "oai_fot/sequences": "Number of FineWeb/graphified sequences sampled for the FoT auxiliary step.",
+        "oai_fot/max_positions": "Maximum hidden positions used from each sampled trajectory for FoT.",
+        "oai_fot/num_trees": "Number of active FoT trees used by the sampled hidden trajectory.",
+        "oai_fot/node_count": "Number of sampled hidden nodes participating in FoT.",
+        "oai_fot/topk_trees": "Configured sparse top-k tree count for FoT activation.",
         "oai_mtp/enabled": "Status flag indicating that FineWeb-only multi-token prediction is enabled for the OAI baseline adaptation.",
         "oai_mtp/loss": "Auxiliary multi-token prediction cross-entropy using existing hidden states and the tied LM head at configured future offsets.",
         "oai_mtp/weighted_loss": "Actual weighted multi-token prediction contribution before gradient routing.",
@@ -331,6 +391,14 @@ def description_for(metric: str) -> str:
         "trajectory_memory_recall1": "Fraction of queries whose top memory matches the teacher argmax.",
         "trajectory_memory_entropy": "Normalized entropy of retrieval probabilities; it measures spread versus collapse.",
         "trajectory_memory_score_gap": "Average top-vs-second retrieval logit gap.",
+        "trajectory_memory_sheaf_gluing_score": "Selected-memory agreement score across GraphCG chart, toric phase, topology, GUDHI persistence, DAG shape, and derived-category summaries; higher means memory CE has sheaf-like structural support.",
+        "trajectory_memory_sheaf_gate": "Effective gate on raw memory CE from sheaf gluing evidence; lower values reduce direct retrieval pressure while leaving distillation and quality calibration active.",
+        "trajectory_memory_selected_chart_similarity": "GraphCG chart similarity for the teacher-selected memory candidate.",
+        "trajectory_memory_selected_toric_similarity": "Toric phase similarity for the teacher-selected memory candidate.",
+        "trajectory_memory_selected_topology_similarity": "Topology-summary similarity for the teacher-selected memory candidate.",
+        "trajectory_memory_selected_dag_similarity": "Graph-of-thought branch/merge DAG similarity for the teacher-selected memory candidate.",
+        "trajectory_memory_selected_derived_similarity": "Derived-category feature similarity for the teacher-selected memory candidate.",
+        "trajectory_memory_selected_persistence_similarity": "Vectorized persistent-homology feature similarity for the teacher-selected memory candidate.",
         "trajectory_memory_persistence_similarity": "Mean similarity of vectorized persistent-homology signatures across memory candidates.",
         "trajectory_memory_persistence_norm": "Norm of vectorized persistence features used by the retrieval head.",
         "trajectory_memory_persistence_entropy": "Entropy of persistence intervals/features in trajectory summaries.",
@@ -348,7 +416,16 @@ def description_for(metric: str) -> str:
         "sidecar_analogy_effective_weight": "Actual analogy loss weight after retrieval gating.",
         "sidecar_memory_effective_weight": "Actual trajectory-memory loss weight after retrieval gating.",
         "sidecar_advanced_effective_multiplier": "Shared uncertainty multiplier applied to advanced toric/BGG/topology/commutative-algebra sidecar families.",
+        "lagrangian_bpb_safety_gate": "BPB/NLL safety gate for the online Lagrangian controller; lower values protect early byte likelihood from excessive auxiliary pressure.",
+        "lagrangian_bpb_ceiling": "NLL ceiling used by the Lagrangian safety gate.",
+        "lagrangian_controller_active": "Flag showing whether online BPB-gated Lagrangian family multipliers are active.",
         "toric_geometry_loss": "Low-rank toric/tropical geometry objective combining active-face, moment, bend, binomial, Coxeter, braid, and phase-leaf terms.",
+        "toric_geometry_loss_coarse": "Stage-0 toric fan curriculum loss: active-face, margin, entropy, and moment terms only.",
+        "toric_geometry_loss_intermediate": "Stage-1 toric fan curriculum loss: coarse terms plus bend, affine wall/Coxeter, and phase-leaf coherence.",
+        "toric_geometry_loss_full": "Stage-2 full toric geometry loss including binomial/divisor-like and braid terms.",
+        "toric_fan_curriculum_stage": "Current toric fan curriculum stage, 0 coarse, 1 intermediate, 2 full.",
+        "toric_fan_curriculum_active": "Flag showing whether staged toric fan curriculum selection is active.",
+        "toric_geometry_curriculum_loss": "The gradient-bearing toric geometry loss selected by the active curriculum stage.",
         "toric_fan_loss": "Active normal-fan classification and margin loss for tropical ring attention embedded into toric geometry.",
         "toric_active_face_ce": "Cross-entropy for predicting the teacher active face of the Newton polytope.",
         "toric_active_face_margin": "Mean margin between active and competing toric/tropical faces; larger means more stable fan-cell decisions.",
@@ -378,6 +455,10 @@ def description_for(metric: str) -> str:
         "toric_bgg_loss": "Finite Toric BGG/category-O objective over boundary-square, standard-filtration, Koszul, Gale-dual, and signature terms.",
         "toric_bgg_resolution_consistency": "Resolution consistency score 1/(1+d^2 residual); larger means closer to a chain complex.",
         "toric_bgg_d2_residual": "Boundary-square residual measuring failure of d_{k-1} d_k = 0.",
+        "derived_signature_loss": "Online distillation loss from hidden summaries to bounded derived-category feature targets; it replaces direct CAS-in-loop pressure with a cheap exact-invariant teacher.",
+        "derived_signature_cosine": "Cosine similarity between predicted and target derived-category signatures; higher means hidden states retain the derived invariant.",
+        "derived_signature_target_norm": "Norm of the detached derived-category teacher target.",
+        "derived_signature_active": "Flag showing whether derived-signature distillation contributes gradient this run.",
         "toric_bgg_standard_leakage": "Probability mass outside the allowed standard-filtration order ideal.",
         "toric_bgg_standard_allowed_mass": "Probability mass inside the allowed standard-filtration order ideal.",
         "toric_bgg_koszul_linearity_residual": "Residual for mass away from the expected linear Koszul degree profile.",
@@ -403,6 +484,8 @@ def description_for(metric: str) -> str:
     }
     if name in exact:
         return exact[name]
+    if name.startswith("lagrangian_"):
+        return "Online BPB-gated Lagrangian controller metric: targets define tolerated residuals, violations update dual variables, multipliers scale family losses, and the safety gate protects byte likelihood."
     if name.endswith("_weight"):
         return "Configured family loss weight logged for audit; it controls how strongly the corresponding sidecar family contributes to training."
     if name.endswith("_active") or name.endswith("_enabled") or name.endswith("_available"):
@@ -421,6 +504,8 @@ def description_for(metric: str) -> str:
         return "Trajectory-memory retrieval metric for analogical graph-of-thought summaries, topology, persistence, DAG, or derived-category features."
     if family == "oai_embedding_gflownet_graph_of_thought":
         return "OAI-baseline embedding-space GFlowNet graph-of-thought metric; review it as a BPB-facing trajectory-search signal, not as part of the toric sidecar bucket."
+    if family == "oai_embedding_forest_of_thought":
+        return "OAI-baseline embedding-space Forest-of-Thought metric; review sparse tree activation, consensus, self-correction, and trajectory-balance behavior as BPB-facing latent forest search."
     if family == "oai_multi_token_prediction":
         return "OAI-baseline multi-token prediction metric for early BPB acceleration from future-token auxiliary supervision."
     if family == "score_first_test_time_adaptation":
@@ -437,6 +522,8 @@ def weight_guidance_for(metric: str) -> str:
     family = metric_family(metric)
     if family == "oai_embedding_gflownet_graph_of_thought":
         return "Raise OAI GFlowNet weight only when trajectory-balance residual falls, entropy/diversity remain healthy, and train/validation BPB improves; lower it if entropy collapses, score gaps spike, or aux-gradient conflict rises."
+    if family == "oai_embedding_forest_of_thought":
+        return "Raise FoT weight when reward, correction lift, consensus margin, and sparse tree diversity improve while BPB falls; lower it if tree diversity rises without BPB gain, consensus entropy stays high, or aux-gradient conflict increases."
     if family == "oai_multi_token_prediction":
         return "Raise MTP weight when it accelerates train BPB without widening train/validation BPB gap; lower it or shorten offsets if it overfits local token prediction."
     if family == "score_first_test_time_adaptation":

@@ -112,6 +112,118 @@ def load_state(checkpoint_path: Path) -> tuple[dict[str, torch.Tensor], dict[str
     raise TypeError(f"checkpoint {checkpoint_path} did not contain a state dict")
 
 
+def rows_minus_one(
+    state: dict[str, torch.Tensor],
+    key: str,
+    default: int,
+) -> int:
+    tensor = state.get(key)
+    if isinstance(tensor, torch.Tensor) and tensor.ndim >= 1:
+        return max(0, int(tensor.shape[0]) - 1)
+    return int(default)
+
+
+def rows_of(
+    state: dict[str, torch.Tensor],
+    key: str,
+    default: int,
+) -> int:
+    tensor = state.get(key)
+    if isinstance(tensor, torch.Tensor) and tensor.ndim >= 1:
+        return max(1, int(tensor.shape[0]))
+    return int(default)
+
+
+def input_dim_of(
+    state: dict[str, torch.Tensor],
+    key: str,
+    default: int,
+) -> int:
+    tensor = state.get(key)
+    if isinstance(tensor, torch.Tensor) and tensor.ndim == 2:
+        return max(1, int(tensor.shape[1]))
+    return int(default)
+
+
+def checkpoint_meta_values(checkpoint_meta: dict[str, Any]) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    if isinstance(checkpoint_meta.get("config"), dict):
+        values.update(checkpoint_meta["config"])
+    if isinstance(checkpoint_meta.get("hyperparameters"), dict):
+        values.update(checkpoint_meta["hyperparameters"])
+    return values
+
+
+def meta_int(meta_values: dict[str, Any], key: str, default: int) -> int:
+    value = meta_values.get(key)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def meta_mode(meta_values: dict[str, Any], key: str, default: str) -> str:
+    value = str(meta_values.get(key, default)).strip().lower()
+    return value if value in {"embedding", "functional"} else str(default)
+
+
+def checkpoint_graph_config(
+    state: dict[str, torch.Tensor],
+    checkpoint_meta: dict[str, Any] | None = None,
+) -> dict[str, int | str]:
+    """Infer graphification module constructor dimensions from checkpoint tensors.
+
+    ``load_state_dict(strict=False)`` still rejects shape mismatches, so the
+    extractor must instantiate the OAI baseline with the same radius and table
+    dimensions used by the checkpoint.  These values are structural: they are
+    encoded directly in embedding-table row counts and projection input widths
+    for older checkpoints, and in checkpoint hyperparameters for functional
+    distance-feature checkpoints where no learned distance table is serialized.
+    """
+
+    meta_values = checkpoint_meta_values(checkpoint_meta or {})
+    tokengt_distance_features = (
+        "embedding"
+        if "fineweb_tokengt.indegree_emb.weight" in state or "fineweb_tokengt.edge_distance_emb.weight" in state
+        else meta_mode(meta_values, "tokengt_distance_features", "functional")
+    )
+    graph_output_distance_features = (
+        "embedding"
+        if "graph_output_flattening.edge_distance_emb.weight" in state
+        else meta_mode(meta_values, "graph_output_distance_features", tokengt_distance_features)
+    )
+    tokengt_radius_default = meta_int(meta_values, "tokengt_graph_radius", 4)
+    graph_output_radius_default = meta_int(
+        meta_values,
+        "graph_output_edge_radius",
+        tokengt_radius_default,
+    )
+    tokengt_radius = rows_minus_one(state, "fineweb_tokengt.indegree_emb.weight", tokengt_radius_default)
+    tokengt_edge_radius = rows_minus_one(state, "fineweb_tokengt.edge_distance_emb.weight", tokengt_radius)
+    if tokengt_edge_radius != tokengt_radius:
+        tokengt_radius = min(tokengt_radius, tokengt_edge_radius)
+    graph_output_radius = rows_minus_one(
+        state,
+        "graph_output_flattening.edge_distance_emb.weight",
+        graph_output_radius_default,
+    )
+    identifier_feature_dim = input_dim_of(state, "fineweb_tokengt.identifier_proj.weight", 24)
+    endpoint_feature_dim = input_dim_of(state, "fineweb_tokengt.endpoint_proj.weight", 2 * identifier_feature_dim + 1)
+    if endpoint_feature_dim > 1:
+        inferred_identifier = max(1, (endpoint_feature_dim - 1) // 2)
+        if inferred_identifier == identifier_feature_dim:
+            identifier_feature_dim = inferred_identifier
+    return {
+        "tokengt_graph_radius": int(tokengt_radius),
+        "graph_output_edge_radius": int(graph_output_radius),
+        "tokengt_distance_features": tokengt_distance_features,
+        "graph_output_distance_features": graph_output_distance_features,
+        "tokengt_token_class_buckets": rows_of(state, "fineweb_tokengt.token_class_emb.weight", 64),
+        "tokengt_position_buckets": rows_of(state, "fineweb_tokengt.position_bucket_emb.weight", 256),
+        "tokengt_identifier_dim": int(identifier_feature_dim),
+    }
+
+
 def main() -> None:
     args = parse_args()
     checkpoint_path = resolve(args.checkpoint)
@@ -123,6 +235,7 @@ def main() -> None:
     state, checkpoint_meta = load_state(checkpoint_path)
     has_first_class_tokengt = any(key.startswith("fineweb_tokengt.") for key in state)
     has_graph_output_flattening = any(key.startswith("graph_output_flattening.") for key in state)
+    graph_config = checkpoint_graph_config(state, checkpoint_meta)
 
     device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
     model = train_gpt.GPT(
@@ -139,18 +252,20 @@ def main() -> None:
         qk_gain_init=1.5,
         fineweb_graphify=has_first_class_tokengt or has_graph_output_flattening,
         tokengt_first_class=has_first_class_tokengt,
-        tokengt_graph_radius=4,
-        tokengt_token_class_buckets=64,
-        tokengt_position_buckets=256,
+        tokengt_graph_radius=graph_config["tokengt_graph_radius"],
+        tokengt_distance_features=str(graph_config["tokengt_distance_features"]),
+        tokengt_token_class_buckets=graph_config["tokengt_token_class_buckets"],
+        tokengt_position_buckets=graph_config["tokengt_position_buckets"],
         tokengt_structural_weight=0.050,
         tokengt_edge_weight=0.035,
         tokengt_torus_weight=0.015,
-        tokengt_identifier_dim=24,
+        tokengt_identifier_dim=graph_config["tokengt_identifier_dim"],
         tokengt_identifier_weight=0.014,
         tokengt_endpoint_weight=0.018,
         tokengt_edge_token_weight=0.016,
         graph_output_flattening=has_graph_output_flattening,
-        graph_output_edge_radius=4,
+        graph_output_edge_radius=graph_config["graph_output_edge_radius"],
+        graph_output_distance_features=str(graph_config["graph_output_distance_features"]),
         graph_output_node_weight=0.05,
         graph_output_edge_weight=0.05,
         graph_output_virtual_edge_tokens=True,
@@ -239,6 +354,7 @@ def main() -> None:
                 "embedding_vectors_are_actual_checkpoint_hidden_states": True,
                 "comparison_space": "original_hidden_vectors",
                 "visualization_space": "PCA3_of_hidden_vectors",
+                "checkpoint_graph_config": graph_config,
                 "complex_rows": token_rows,
             }
             write_json(json_path, metadata)
@@ -263,6 +379,7 @@ def main() -> None:
         "schema": "toricgt.embedding_payload_manifest.v1",
         "source": "oai_parameter_golf_forward_aux",
         "checkpoint": str(checkpoint_path),
+        "checkpoint_graph_config": graph_config,
         "records": rows,
         "payloads": rows,
     }

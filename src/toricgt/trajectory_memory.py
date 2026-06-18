@@ -48,6 +48,10 @@ class TrajectoryMemoryConfig:
     persistence_landscape_layers: int = 3
     persistence_landscape_resolution: int = 24
     persistence_image_resolution: int = 12
+    sheaf_gate_min: float = 0.15
+    sheaf_gate_threshold: float = 0.12
+    sheaf_gate_softness: float = 0.18
+    sheaf_ce_weight: float = 1.0
 
 
 @dataclass
@@ -804,6 +808,14 @@ class TrajectoryRetrievalHead(nn.Module):
                 "trajectory_memory_persistence_entropy": zero,
                 "trajectory_memory_persistence_total": zero,
                 "trajectory_memory_persistence_weight": zero,
+                "trajectory_memory_sheaf_gluing_score": zero,
+                "trajectory_memory_sheaf_gate": zero,
+                "trajectory_memory_selected_chart_similarity": zero,
+                "trajectory_memory_selected_toric_similarity": zero,
+                "trajectory_memory_selected_topology_similarity": zero,
+                "trajectory_memory_selected_dag_similarity": zero,
+                "trajectory_memory_selected_derived_similarity": zero,
+                "trajectory_memory_selected_persistence_similarity": zero,
             }
         features = self._summary_features(
             hidden,
@@ -850,6 +862,28 @@ class TrajectoryRetrievalHead(nn.Module):
             teacher = teacher.masked_fill(diag, -1e4) / max(float(self.config.teacher_temperature), 1e-4)
             labels = teacher.argmax(dim=-1)
             teacher_probs = torch.softmax(teacher, dim=-1)
+            gather_index = labels.unsqueeze(1)
+            selected_chart = chart_sim.gather(1, gather_index).mean()
+            selected_toric = toric_sim.gather(1, gather_index).mean()
+            selected_topology = topo_sim.gather(1, gather_index).mean()
+            selected_dag = dag_sim.gather(1, gather_index).mean()
+            selected_derived = derived_sim.gather(1, gather_index).mean()
+            selected_persistence = persistence_sim.gather(1, gather_index).mean()
+            topology_unit = torch.tanh(selected_topology)
+            sheaf_gluing_score = torch.stack(
+                [
+                    selected_chart,
+                    selected_toric,
+                    topology_unit,
+                    selected_dag,
+                    selected_derived,
+                    selected_persistence,
+                ]
+            ).mean()
+            sheaf_gate = float(self.config.sheaf_gate_min) + (1.0 - float(self.config.sheaf_gate_min)) * torch.sigmoid(
+                (sheaf_gluing_score - float(self.config.sheaf_gate_threshold))
+                / max(float(self.config.sheaf_gate_softness), 1e-6)
+            )
         ce = F.cross_entropy(logits, labels)
         distill = F.kl_div(torch.log_softmax(logits, dim=-1), teacher_probs, reduction="batchmean")
         quality_pred = self.quality_head(features["summary"].to(hidden.dtype)).squeeze(-1).float()
@@ -859,7 +893,11 @@ class TrajectoryRetrievalHead(nn.Module):
         pred = logits.argmax(dim=-1)
         top2 = torch.topk(logits, k=min(2, logits.shape[-1]), dim=-1).values
         gap = (top2[:, 0] - top2[:, -1]).mean() if top2.shape[-1] > 1 else zero
-        loss = ce + float(self.config.distill_weight) * distill + float(self.config.quality_weight) * quality_loss
+        loss = (
+            float(self.config.sheaf_ce_weight) * sheaf_gate.to(dtype=ce.dtype) * ce
+            + float(self.config.distill_weight) * distill
+            + float(self.config.quality_weight) * quality_loss
+        )
         return {
             "trajectory_memory_loss": loss,
             "trajectory_memory_ce": ce.detach(),
@@ -880,4 +918,12 @@ class TrajectoryRetrievalHead(nn.Module):
             "trajectory_memory_persistence_entropy": features["persistence_stats"][:, 2].mean().detach(),
             "trajectory_memory_persistence_total": features["persistence_stats"][:, 0].mean().detach(),
             "trajectory_memory_persistence_weight": hidden.new_tensor(float(self.config.persistence_weight)).detach(),
+            "trajectory_memory_sheaf_gluing_score": sheaf_gluing_score.detach(),
+            "trajectory_memory_sheaf_gate": sheaf_gate.detach(),
+            "trajectory_memory_selected_chart_similarity": selected_chart.detach(),
+            "trajectory_memory_selected_toric_similarity": selected_toric.detach(),
+            "trajectory_memory_selected_topology_similarity": selected_topology.detach(),
+            "trajectory_memory_selected_dag_similarity": selected_dag.detach(),
+            "trajectory_memory_selected_derived_similarity": selected_derived.detach(),
+            "trajectory_memory_selected_persistence_similarity": selected_persistence.detach(),
         }

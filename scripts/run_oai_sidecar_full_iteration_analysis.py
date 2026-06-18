@@ -29,6 +29,8 @@ TRAIN_RE = re.compile(
     r"graph_lm_w:(?P<graph_lm_weight>[0-9.eE+-]+) )?.*?"
     r"(?:oai_gfn:(?P<oai_gflownet_loss>[0-9.eE+-]+) gfn_H:(?P<oai_gflownet_entropy>[0-9.eE+-]+) "
     r"gfn_R:(?P<oai_gflownet_reward>[0-9.eE+-]+) )?.*?"
+    r"(?:oai_fot:(?P<oai_fot_loss>[0-9.eE+-]+) fot_H:(?P<oai_fot_entropy>[0-9.eE+-]+) "
+    r"fot_R:(?P<oai_fot_reward>[0-9.eE+-]+) fot_div:(?P<oai_fot_diversity>[0-9.eE+-]+) )?.*?"
     r"(?:mtp:(?P<oai_mtp_loss>[0-9.eE+-]+) mtp_w:(?P<oai_mtp_weight>[0-9.eE+-]+) )?.*?"
     r"sidecar_loss:(?P<sidecar>[0-9.eE+-]+).*?"
     r"graphcg:(?P<graphcg>[0-9.eE+-]+).*?"
@@ -48,6 +50,12 @@ OAI_GFLOWNET_RE = re.compile(
 )
 OAI_MTP_RE = re.compile(
     r"mtp:(?P<oai_mtp_loss>[0-9.eE+-]+)\s+mtp_w:(?P<oai_mtp_weight>[0-9.eE+-]+)"
+)
+OAI_FOT_RE = re.compile(
+    r"oai_fot:(?P<oai_fot_loss>[0-9.eE+-]+)\s+"
+    r"fot_H:(?P<oai_fot_entropy>[0-9.eE+-]+)\s+"
+    r"fot_R:(?P<oai_fot_reward>[0-9.eE+-]+)\s+"
+    r"fot_div:(?P<oai_fot_diversity>[0-9.eE+-]+)"
 )
 
 
@@ -131,6 +139,9 @@ def parse_log(path: Path) -> dict[str, Any]:
                 row[key] = safe_float(raw)
             if gfn_match := OAI_GFLOWNET_RE.search(line):
                 for key, raw in gfn_match.groupdict().items():
+                    row[key] = safe_float(raw)
+            if fot_match := OAI_FOT_RE.search(line):
+                for key, raw in fot_match.groupdict().items():
                     row[key] = safe_float(raw)
             if mtp_match := OAI_MTP_RE.search(line):
                 for key, raw in mtp_match.groupdict().items():
@@ -399,6 +410,59 @@ def decide_next_profile(
     sidecar_review = sidecar_review or {}
     sidecar_count = int(sidecar_review.get("observed_metric_count") or 0)
     sidecar_risk = sidecar_review.get("bpb_risk_metrics_top") or []
+    oai_gfn_entropy = train.get("oai_gflownet_entropy") if isinstance(train, dict) else None
+    oai_fot_diversity = train.get("oai_fot_diversity") if isinstance(train, dict) else None
+    oai_fot_reward = train.get("oai_fot_reward") if isinstance(train, dict) else None
+    oai_mtp_loss = train.get("oai_mtp_loss") if isinstance(train, dict) else None
+    recovery_overrides = {
+        "MATRIX_LR": "0.048",
+        "SCALAR_LR": "0.048",
+        "TIED_EMBED_LR": "0.058",
+        "WARMUP_STEPS": "20",
+        "WARMDOWN_ITERS": "450",
+        "TOKENGT_DISTANCE_FEATURES": "functional",
+        "GRAPH_OUTPUT_DISTANCE_FEATURES": "functional",
+        "GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT": "0.018",
+        "GRAPH_LM_LOSS_WEIGHT_START": "0.005",
+        "GRAPH_LM_LOSS_WEIGHT": "0.060",
+        "GRAPH_LM_WARMUP_STEPS": "800",
+        "GRAPH_LM_HOLD_STEPS": "120",
+        "OAI_GFLOWNET_LOSS_WEIGHT": "1.2e-5",
+        "OAI_GFLOWNET_LR": "1.5e-4",
+        "OAI_GFLOWNET_ENTROPY_WEIGHT": "5e-6",
+        "OAI_GFLOWNET_ENTROPY_TARGET": "1.0",
+        "OAI_EMBEDDING_FOT": "1",
+        "OAI_FOT_LOSS_WEIGHT": "1.2e-5",
+        "OAI_FOT_LR": "1.5e-4",
+        "OAI_FOT_NUM_TREES": "4",
+        "OAI_FOT_MAX_DEPTH": "5",
+        "OAI_FOT_BRANCHING": "4",
+        "OAI_FOT_TOPK_TREES": "2",
+        "OAI_FOT_SUBTB_WEIGHT": "0.20",
+        "OAI_FOT_REWARD_ADVANCED_BONUS": "0.05",
+        "OAI_MTP_LOSS_WEIGHT": "0.0012",
+        "OAI_MTP_EVERY": "2",
+        "OAI_MTP_MAX_SEQUENCES": "1",
+        "GRAPHCG_LOSS_WEIGHT": "1.0e-6",
+        "GRAPHCG_BPB_ORTHOGONAL_WEIGHT": "0.040",
+        "GRAPHCG_COVARIANCE_CONFLICT_DAMPING": "0.75",
+        "ANALOGY_LOSS_WEIGHT": "2.6e-5",
+        "TRAJECTORY_MEMORY_LOSS_WEIGHT": "1.2e-5",
+        "RETRIEVAL_GATE_MIN": "0.05",
+        "RETRIEVAL_GATE_CENTER": "0.35",
+        "RETRIEVAL_GATE_SOFTNESS": "0.10",
+        "SIDECAR_UNCERTAINTY_ALPHA": "0.20",
+        "SIDECAR_UNCERTAINTY_MAX": "1.4",
+        "TORIC_GEOMETRY_LOSS_WEIGHT": "3.2e-6",
+        "TORIC_BGG_LOSS_WEIGHT": "2.0e-6",
+        "TORIC_VECTOR_BUNDLE_LOSS_WEIGHT": "1.5e-6",
+        "KOSZUL_PERSISTENCE_LOSS_WEIGHT": "3.0e-7",
+        "COMBINATORIAL_TORIC_LOSS_WEIGHT": "8.0e-7",
+        "TORICGT_SIDECAR_LOSS_WEIGHT_START": "0.02",
+        "TORICGT_SIDECAR_WARMUP_STEPS": "700",
+        "TORICGT_SIDECAR_HOLD_STEPS": "150",
+        "AUX_GRAD_ALIGNED_BOOST": "0.8",
+    }
     if not exact_ok:
         adaptive.update(
             {
@@ -408,9 +472,26 @@ def decide_next_profile(
             }
         )
         return adaptive
-    if artifact and artifact > 15_850_000:
+    if (
+        bpb > 1.27
+        and isinstance(oai_gfn_entropy, (int, float))
+        and float(oai_gfn_entropy) < 0.75
+        and isinstance(oai_mtp_loss, (int, float))
+        and float(oai_mtp_loss) > 8.0
+    ):
+        profile = "gate1500_fast_main_lr_aux_conflict_recovery"
+        reason = (
+            "The artifact review shows BPB remains far above target while OAI GFlowNet entropy has collapsed below 0.75 "
+            "and MTP loss remains high. Use the conflict-recovery profile: keep causal graphification active, "
+            "reduce MTP and memory pressure, slow graph-LM ramp, raise GFlowNet entropy discipline, keep FoT light, "
+            "and let the adaptive functional-radius controller choose radius 3-6 without adding learned distance tables."
+        )
+        merged_env = dict(adaptive.get("env_overrides") or {})
+        merged_env.update(recovery_overrides)
+        adaptive["env_overrides"] = merged_env
+    elif artifact and artifact > 16_000_000:
         profile = "artifact_margin_conservative_aux"
-        reason = "Artifact size is close to the 16,000,000-byte cap; avoid shape changes and keep auxiliary weights light."
+        reason = "Artifact size exceeded the 16,000,000-byte cap; recover with the conservative auxiliary profile."
     elif bpb > 1.30 or train_bpb > 1.45:
         profile = "gate1500_fast_main_lr_light_graphcg"
         reason = (
@@ -456,6 +537,8 @@ def decide_next_profile(
                 "graph_lm_weight": graph_lm_weight,
                 "sidecar_loss": sidecar,
                 "artifact_bytes": artifact,
+                "oai_fot_diversity": oai_fot_diversity,
+                "oai_fot_reward": oai_fot_reward,
             },
             "sidecar_metric_review": sidecar_review,
         }
@@ -588,6 +671,29 @@ def main() -> None:
     manifest = embedding_root / "embeddings" / "manifest.json"
     paths["embedding_manifest"] = str(manifest)
     first_npz, first_json = first_embedding_payload(manifest)
+
+    paths["embedding_fot_report"] = str(output_dir / "embedding_fot_report" / "index.html")
+    results.append(
+        run_command(
+            "embedding_fot_report",
+            [
+                PYTHON,
+                "scripts/render_embedding_fot_report.py",
+                "--checkpoint",
+                str(checkpoint),
+                "--embedding-npz",
+                str(first_npz),
+                "--embedding-json",
+                str(first_json),
+                "--metrics-json",
+                str(output_dir / "metrics.json"),
+                "--output-dir",
+                str(output_dir / "embedding_fot_report"),
+            ],
+            log_dir,
+            strict=strict,
+        )
+    )
 
     paths["gudhi_persistence"] = str(output_dir / "gudhi_persistence" / "index.html")
     results.append(
@@ -773,6 +879,8 @@ def main() -> None:
         f"- run id: `{args.run_id}`",
         f"- checkpoint: `{checkpoint}`",
         f"- selected BPB: `{metrics.get('selected_bpb')}`",
+        f"- latest train BPB: `{(metrics.get('latest_train') or {}).get('train_bpb') if isinstance(metrics.get('latest_train'), dict) else None}`",
+        f"- latest FoT loss/reward/diversity: `{(metrics.get('latest_train') or {}).get('oai_fot_loss') if isinstance(metrics.get('latest_train'), dict) else None}` / `{(metrics.get('latest_train') or {}).get('oai_fot_reward') if isinstance(metrics.get('latest_train'), dict) else None}` / `{(metrics.get('latest_train') or {}).get('oai_fot_diversity') if isinstance(metrics.get('latest_train'), dict) else None}`",
         f"- strict validation passed: `{validation.get('strict_validation_passed')}`",
         f"- next profile hint: `{decision.get('next_profile_hint')}`",
         f"- reason: {decision.get('reason')}",

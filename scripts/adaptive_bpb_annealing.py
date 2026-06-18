@@ -128,6 +128,21 @@ FAMILIES: tuple[FamilyRule, ...] = (
         "Combinatorial commutative algebra, syzygy, resolution, and Buchsbaum-Eisenbud audit pressure.",
     ),
     FamilyRule(
+        "derived_signature",
+        "DERIVED_SIGNATURE_LOSS_WEIGHT",
+        (
+            "derived_signature",
+            "derived_signature_loss",
+            "toricgt_sidecar/derived_signature_loss",
+            "toricgt_sidecar/derived_signature_cosine",
+        ),
+        2.5e-7,
+        5.0e-6,
+        1.0e-6,
+        0.30,
+        "Training-time derived-category signature distillation from bounded exact invariants; cheap online target for CAS-derived structure.",
+    ),
+    FamilyRule(
         "oai_embedding_gflownet",
         "OAI_GFLOWNET_LOSS_WEIGHT",
         (
@@ -144,6 +159,29 @@ FAMILIES: tuple[FamilyRule, ...] = (
         2.0e-5,
         0.34,
         "Training-only embedding-space GFlowNet graph-of-thought pressure for BPB-facing hidden trajectories.",
+    ),
+    FamilyRule(
+        "oai_embedding_forest_of_thought",
+        "OAI_FOT_LOSS_WEIGHT",
+        (
+            "oai_fot_loss",
+            "oai_fot_entropy",
+            "oai_fot_reward",
+            "oai_fot_diversity",
+            "oai_fot/loss",
+            "oai_fot/weighted_loss",
+            "oai_fot/tb_residual",
+            "oai_fot/reward_mean",
+            "oai_fot/tree_diversity",
+            "oai_fot/activation_entropy",
+            "oai_fot/consensus_margin",
+            "oai_fot/correction_bpb_proxy_lift",
+        ),
+        4.0e-6,
+        7.0e-5,
+        1.5e-5,
+        0.38,
+        "Training-only embedding-space Forest-of-Thought pressure: sparse tree activation, UCB expansion, self-correction, consensus, and trajectory balance over hidden reasoning forests.",
     ),
     FamilyRule(
         "oai_multi_token_prediction",
@@ -273,6 +311,10 @@ def route_conflict(metrics: dict[str, Any], family: str) -> float:
         route_name = "graph_lm"
     if family in {"graphcg", "analogy", "trajectory_memory", "toric_geometry", "toric_bgg", "koszul_persistence", "combinatorial_toric", "toric_vector_bundle_1d_cone"}:
         route_name = "sidecar"
+    if family == "oai_embedding_forest_of_thought":
+        route_name = "oai_fot"
+    if family == "oai_embedding_gflownet":
+        route_name = "oai_gflownet"
     return finite(latest(metrics, f"aux_grad_routing/{route_name}_conflict"), 0.0) or 0.0
 
 
@@ -367,32 +409,39 @@ def graph_structure_decision(
     )
     improving_fast = train_slope is not None and train_slope < -0.20
     near_target = train_bpb <= target_bpb + 0.10
-    if train_bpb > target_bpb + 0.22 or graph_signal_risky:
-        radius = 2
-        radius_mode = "local_bpb_recovery"
-    elif improving_fast and flatten_signal_helpful and not graph_signal_risky:
-        radius = 4 if near_target else 3
-        radius_mode = "evidence_widening"
-    elif near_target and not graph_signal_risky:
-        radius = 4
-        radius_mode = "near_target_generous"
-    else:
+    functional_radius_mode = True
+    if graph_signal_risky:
         radius = 3
-        radius_mode = "balanced_exploration"
-    # Deliberately explore a little, but only upward when the BPB curve is
-    # already healthy.  This makes wider graph neighborhoods a late-stage
-    # hypothesis rather than an early source of sequence-noise.
-    if near_target and improving_fast and flatten_signal_helpful:
+        radius_mode = "local_bpb_recovery_functional_minimum"
+    elif train_bpb > target_bpb + 0.22:
+        radius = 4
+        radius_mode = "high_bpb_functional_mid_radius"
+    elif improving_fast and flatten_signal_helpful:
+        radius = 6 if near_target else 5
+        radius_mode = "evidence_widening_functional"
+    elif near_target:
+        radius = 6
+        radius_mode = "near_target_functional_generous"
+    else:
+        radius = 5 if flatten_signal_helpful else 4
+        radius_mode = "balanced_functional_exploration"
+    # Functional/sinusoidal distance channels make a wider radius mostly a
+    # compute/runtime choice rather than a serialized-parameter choice.  Keep
+    # a little upward exploration when the BPB curve and flattening evidence are
+    # healthy, while preserving radius 3 as the conflict-recovery floor.
+    if not graph_signal_risky and (near_target or improving_fast or flatten_signal_helpful):
         jitter = deterministic_jitter(run_id or "radius", "graph_radius", 0.20)
         if jitter > 1.10:
             radius = min(6, radius + 1)
             radius_mode = f"{radius_mode}_generous_jitter"
-    radius = int(clamp(float(radius), 2.0, 6.0))
+    radius = int(clamp(float(radius), 3.0, 6.0))
     overrides = {
         "FINEWEB_GRAPHIFY": "1",
         "TOKENGT_FIRST_CLASS": "1",
+        "TOKENGT_DISTANCE_FEATURES": "functional",
         "GRAPH_OUTPUT_FLATTENING": "1",
         "OAI_FINEWEB_OUTPUT_FLATTENING": "1",
+        "GRAPH_OUTPUT_DISTANCE_FEATURES": "functional",
         "GRAPH_OUTPUT_EDGE_RADIUS": str(radius),
         "TOKENGT_GRAPH_RADIUS": str(radius),
         "TOKENGT_IDENTIFIER_DIM": "24",
@@ -405,7 +454,7 @@ def graph_structure_decision(
     }
     rationale: list[str] = [
         "Keep graphification first-class and keep OAI-FineWeb flattening scoped to BPB scoring.",
-        f"Adaptive graph radius selected {radius} via {radius_mode}; widen later only when BPB slope and graph/flattening evidence support it.",
+        f"Adaptive graph radius selected {radius} via {radius_mode}; functional distance features keep radius growth from adding learned distance tables or artifact pressure.",
     ]
     if train_bpb > target_bpb + 0.18 and (tokengt_corr is None or graph_signal_risky):
         overrides.update(
@@ -478,7 +527,8 @@ def graph_structure_decision(
         "flattening_corr_train_bpb": flatten_corr,
         "radius": radius,
         "radius_mode": radius_mode,
-        "radius_policy": "2-3 early, 4-6 only after BPB/flattening evidence supports wider neighborhoods",
+        "radius_policy": "functional distance features; adaptive 3-6 radius with radius 3 reserved for graph/BPB conflict recovery",
+        "functional_distance_features": functional_radius_mode,
         "reason": rationale,
     }
 
@@ -533,6 +583,7 @@ def family_decisions(metrics: dict[str, Any], sidecar_review: dict[str, Any], ru
             "toric_bgg",
             "koszul_persistence",
             "combinatorial_toric",
+            "derived_signature",
         }:
             if uncertainty is not None and uncertainty > 1.20:
                 score += 0.15
@@ -552,6 +603,43 @@ def family_decisions(metrics: dict[str, Any], sidecar_review: dict[str, Any], ru
             if train_bpb > 1.55:
                 score -= 0.12
                 reasons.append("primary BPB is very high; keep GFlowNet light until the base likelihood descends")
+        if rule.name == "oai_embedding_forest_of_thought":
+            entropy_corr = metric_corr_from_review(
+                sidecar_review,
+                ("oai_fot/activation_entropy", "oai_fot/active_mass_topk", "oai_fot/active_tree_count"),
+            )
+            reward_corr = metric_corr_from_review(
+                sidecar_review,
+                ("oai_fot/reward_mean", "oai_fot/correction_bpb_proxy_lift", "oai_fot/consensus_margin"),
+            )
+            diversity_corr = metric_corr_from_review(sidecar_review, ("oai_fot/tree_diversity", "oai_fot_diversity"))
+            reward_mean = latest(metrics, "oai_fot_reward", None)
+            diversity = latest(metrics, "oai_fot_diversity", None)
+            entropy = latest(metrics, "oai_fot_entropy", None)
+            if reward_corr is not None and reward_corr < -0.08:
+                score += 0.16
+                reasons.append(f"FoT reward/correction metrics anticorrelate with BPB ({reward_corr:.3f}); tree consensus may improve byte likelihood")
+            elif reward_corr is not None and reward_corr > 0.20:
+                score -= 0.12
+                reasons.append(f"FoT reward/correction metrics rise with BPB ({reward_corr:.3f}); lower pressure and keep as diagnostic")
+            if diversity is not None and diversity < 0.12:
+                score += 0.08
+                reasons.append(f"FoT tree diversity {diversity:.3f} is low; keep a small forest pressure to avoid tree collapse")
+            elif diversity is not None and diversity > 0.75 and train_bpb > 1.45:
+                score -= 0.08
+                reasons.append(f"FoT tree diversity {diversity:.3f} is high while BPB is high; reduce exploration pressure")
+            if entropy is not None and entropy < 0.35:
+                score += 0.07
+                reasons.append(f"FoT sparse activation entropy {entropy:.3f} is low; mild pressure can activate multiple useful trees")
+            if entropy_corr is not None and entropy_corr < -0.08:
+                score += 0.08
+                reasons.append(f"FoT activation entropy anticorrelates with BPB ({entropy_corr:.3f}); sparse forest selection looks helpful")
+            if diversity_corr is not None and diversity_corr > 0.22:
+                score -= 0.12
+                reasons.append(f"FoT diversity correlates with worse BPB ({diversity_corr:.3f}); favor consensus over exploration")
+            if reward_mean is not None and reward_mean < 0.04 and train_bpb > 1.50:
+                score -= 0.08
+                reasons.append(f"FoT reward {reward_mean:.3f} is weak during high BPB; delay heavier forest pressure")
         if rule.name == "oai_multi_token_prediction":
             mtp_corr = metric_corr_from_review(sidecar_review, ("oai_mtp/loss", "oai_mtp/weighted_loss"))
             if mtp_corr is not None and mtp_corr > 0.20:
@@ -596,7 +684,9 @@ def optimizer_decision(metrics: dict[str, Any], target_bpb: float) -> tuple[dict
     artifact = finite(metrics.get("artifact_bytes"), 0.0) or 0.0
     overrides: dict[str, str]
     reasons: list[str] = []
-    if artifact > 15_850_000:
+    if 15_850_000 < artifact <= 16_000_000:
+        reasons.append("artifact is close to the cap but still valid; do not override BPB-driven choices solely for margin")
+    if artifact > 16_000_000:
         overrides = {
             "TRAIN_BATCH_TOKENS": "917504",
             "MATRIX_LR": "0.036",
@@ -604,7 +694,7 @@ def optimizer_decision(metrics: dict[str, Any], target_bpb: float) -> tuple[dict
             "TIED_EMBED_LR": "0.046",
             "WARMDOWN_ITERS": "650",
         }
-        reasons.append("artifact margin is tight; avoid shape changes and use moderate LR")
+        reasons.append("artifact exceeded the 16,000,000-byte cap; use moderate LR and avoid shape growth")
     elif train_bpb > target_bpb + 0.30 and (train_slope is None or train_slope > -0.20):
         overrides = {
             "TRAIN_BATCH_TOKENS": "983040",
@@ -684,6 +774,8 @@ def build_adaptive_decision(
             "AUX_GRAD_ROUTING": "1",
             "AUX_GRAD_ROUTE_GRAPH_LM": "1",
             "AUX_GRAD_ROUTE_SIDECAR": "1",
+            "TOKENGT_DISTANCE_FEATURES": "functional",
+            "GRAPH_OUTPUT_DISTANCE_FEATURES": "functional",
             "OAI_GFLOWNET": "1",
             "OAI_GFLOWNET_EVERY": "1",
             "OAI_GFLOWNET_LR": "2e-4",
@@ -692,6 +784,28 @@ def build_adaptive_decision(
             "OAI_GFLOWNET_NUM_ACTIONS": "16",
             "OAI_GFLOWNET_MAX_SEQUENCES": "2",
             "OAI_GFLOWNET_MAX_POSITIONS": "192",
+            "OAI_EMBEDDING_FOT": "1",
+            "OAI_FOT_EVERY": "1",
+            "OAI_FOT_LR": "1.5e-4",
+            "OAI_FOT_NUM_TREES": "4",
+            "OAI_FOT_MAX_DEPTH": "5",
+            "OAI_FOT_BRANCHING": "4",
+            "OAI_FOT_TOPK_TREES": "2",
+            "OAI_FOT_HIDDEN_DIM": "192",
+            "OAI_FOT_MAX_SEQUENCES": "2",
+            "OAI_FOT_MAX_POSITIONS": "192",
+            "OAI_FOT_CONSENSUS_BUCKETS": "64",
+            "OAI_FOT_CORRECTION_SCALE": "0.08",
+            "OAI_FOT_UCB_EXPLORATION": "1.25",
+            "OAI_FOT_TEMPERATURE": "0.70",
+            "OAI_FOT_SPARSE_WEIGHT": "1.0",
+            "OAI_FOT_UCB_WEIGHT": "0.45",
+            "OAI_FOT_CORRECTION_WEIGHT": "0.55",
+            "OAI_FOT_CONSENSUS_WEIGHT": "0.80",
+            "OAI_FOT_TB_WEIGHT": "1.0",
+            "OAI_FOT_SUBTB_WEIGHT": "0.20",
+            "OAI_FOT_COMPLEXITY_WEIGHT": "0.04",
+            "OAI_FOT_REWARD_ADVANCED_BONUS": "0.05",
             "OAI_MTP": "1",
             "OAI_MTP_EVERY": "1",
             "OAI_MTP_OFFSETS": "2",
@@ -703,6 +817,22 @@ def build_adaptive_decision(
             "RETRIEVAL_CONDITIONED_AUX": "1",
             "SIDECAR_UNCERTAINTY_WEIGHTING": "1",
             "TORICGT_SIDECAR_COMPUTE_ALL_METRICS": "1",
+            "ADVANCED_LAGRANGIAN_CONTROLLER": "1",
+            "LAGRANGIAN_DUAL_LR": "0.025",
+            "LAGRANGIAN_DECAY": "0.985",
+            "LAGRANGIAN_MIN_MULTIPLIER": "0.25",
+            "LAGRANGIAN_MAX_MULTIPLIER": "2.25",
+            "LAGRANGIAN_BPB_CEILING": "3.05",
+            "LAGRANGIAN_BPB_SOFTNESS": "0.35",
+            "TORIC_FAN_CURRICULUM": "1",
+            "TORIC_FAN_COARSE_STEPS": "450",
+            "TORIC_FAN_INTERMEDIATE_STEPS": "950",
+            "MEMORY_SHEAF_GATE_MIN": "0.15",
+            "MEMORY_SHEAF_GATE_THRESHOLD": "0.12",
+            "MEMORY_SHEAF_GATE_SOFTNESS": "0.18",
+            "MEMORY_SHEAF_CE_WEIGHT": "1.0",
+            "DERIVED_SIGNATURE_MAX_VERTICES": "8",
+            "DERIVED_SIGNATURE_MAX_EDGES": "64",
             "GRAPHCG_BPB_ORTHOGONAL_WEIGHT": "0.025",
             "GRAPHCG_COVARIANCE_CONFLICT_DAMPING": "0.65",
             "TORICGT_SIDECAR_SEQ_LEN": "256",
@@ -745,6 +875,8 @@ def build_adaptive_decision(
     reason = (
         "Adaptive BPB controller built family-specific env overrides from train BPB slope, validation/int8 BPB, "
         "graph-LM difficulty, sidecar metric correlations, retrieval/uncertainty gates, PCGrad conflicts, and artifact margin. "
+        "It keeps the BPB-gated Lagrangian controller, toric fan curriculum, sheaf-gated retrieval CE, "
+        "derived-signature distillation, and BPB-preserving graph-output flattening enabled as separately reviewable mechanisms. "
     )
     if missed:
         reason += "The gate missed the target, so the next run should restart from step 0 with these overrides. "

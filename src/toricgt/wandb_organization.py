@@ -27,6 +27,7 @@ VISIBLE_METRIC_PREFIXES = (
     "03_validation",
     "04_losses",
     "05_gflownet",
+    "05_forest_of_thought",
     "06_graphcg",
     "07_topology_geometry",
     "08_toric_tropical_bgg",
@@ -66,6 +67,7 @@ RAW_HIDDEN_PATTERNS = (
     "model/*",
     "polarquant/*",
     "metrics_status/*",
+    "oai_fot/*",
     "system/*",
     "analysis/*",
     "reasoning_simplex/*",
@@ -98,6 +100,8 @@ MINIMIZE_PATTERNS = (
     "03_validation/*loss*",
     "04_losses/*",
     "05_gflownet/*loss*",
+    "05_forest_of_thought/*loss*",
+    "05_forest_of_thought/*residual*",
     "06_graphcg/*loss*",
     "07_topology_geometry/*loss*",
     "08_toric_tropical_bgg/*loss*",
@@ -110,6 +114,10 @@ MAXIMIZE_PATTERNS = (
     "00_primary/*target_reached*",
     "00_primary/*full_dataset*",
     "05_gflownet/*diversity*",
+    "05_forest_of_thought/*diversity*",
+    "05_forest_of_thought/*reward*",
+    "05_forest_of_thought/*agreement*",
+    "05_forest_of_thought/*margin*",
     "06_graphcg/*basis*",
     "07_topology_geometry/*stability*",
     "08_toric_tropical_bgg/*entropy*",
@@ -222,6 +230,8 @@ def _category_alias(key: str) -> str | None:
         return f"03_validation/{rest}"
     if key.startswith("tokengt_graph/"):
         return f"07_topology_geometry/tokengt_graph/{key.split('/', 1)[1]}"
+    if key.startswith("oai_fot/"):
+        return f"05_forest_of_thought/{key.split('/', 1)[1]}"
     if key.startswith("bpb/"):
         rest = key.split("/", 1)[1]
         if rest == "val":
@@ -246,6 +256,8 @@ def _category_alias(key: str) -> str | None:
     if key.startswith("train/"):
         rest = key.split("/", 1)[1]
         lower = rest.lower()
+        if "fot" in lower or "forest" in lower:
+            return f"05_forest_of_thought/train/{rest}"
         if "gflownet" in lower:
             return f"05_gflownet/train/{rest}"
         if "graphcg" in lower:
@@ -450,6 +462,9 @@ def primary_metric_aliases(payload: Mapping[str, Any]) -> OrderedDict[str, Any]:
     _add_first(out, payload, "00_primary/full_dataset_active", ("data/full_curated_train_split_active",))
     _add_first(out, payload, "00_primary/fineweb_mix_ratio", ("data/fineweb_mix_ratio", "fineweb_calibration/mix_ratio"))
     _add_first(out, payload, "00_primary/gflownet_loss", ("train/gflownet_loss",))
+    _add_first(out, payload, "00_primary/oai_fot_loss", ("oai_fot/loss", "05_forest_of_thought/loss"))
+    _add_first(out, payload, "00_primary/oai_fot_reward", ("oai_fot/reward_mean", "05_forest_of_thought/reward_mean"))
+    _add_first(out, payload, "00_primary/oai_fot_tree_diversity", ("oai_fot/tree_diversity", "05_forest_of_thought/tree_diversity"))
     _add_first(out, payload, "00_primary/tokengt_graph_loss", ("train/tokengt_graph_loss", "tokengt_graph/loss"))
     _add_first(out, payload, "00_primary/graphcg_loss", ("train/graphcg_loss",))
     _add_first(

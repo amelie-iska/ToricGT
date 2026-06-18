@@ -38,13 +38,15 @@ TRAIN_RE = re.compile(
     r"graph_lm_w:(?P<graph_lm_weight>[0-9.eE+-]+))?.*?"
     r"(?: oai_gfn:(?P<oai_gflownet_loss>[0-9.eE+-]+) gfn_H:(?P<oai_gflownet_entropy>[0-9.eE+-]+) "
     r"gfn_R:(?P<oai_gflownet_reward>[0-9.eE+-]+))?.*?"
+    r"(?: oai_fot:(?P<oai_fot_loss>[0-9.eE+-]+) fot_H:(?P<oai_fot_entropy>[0-9.eE+-]+) "
+    r"fot_R:(?P<oai_fot_reward>[0-9.eE+-]+) fot_div:(?P<oai_fot_diversity>[0-9.eE+-]+))?.*?"
     r"(?: mtp:(?P<oai_mtp_loss>[0-9.eE+-]+) mtp_w:(?P<oai_mtp_weight>[0-9.eE+-]+))?.*?"
     r"sidecar_loss:(?P<sidecar>[0-9.eE+-]+) graphcg:(?P<graphcg>[0-9.eE+-]+) "
     r"analogy:(?P<analogy>[0-9.eE+-]+) tokengt_graph:(?P<tokengt>[0-9.eE+-]+) "
     r"memory:(?P<memory>[0-9.eE+-]+)"
     r"(?: toric:(?P<toric>[0-9.eE+-]+) (?:vb1d|vb):(?P<vector_bundle_1d_cone>[0-9.eE+-]+) "
     r"bgg:(?P<bgg>[0-9.eE+-]+) koszul:(?P<koszul>[0-9.eE+-]+) "
-    r"cca:(?P<combinatorial_toric>[0-9.eE+-]+))?"
+    r"cca:(?P<combinatorial_toric>[0-9.eE+-]+)(?: derived:(?P<derived_signature>[0-9.eE+-]+))?)?"
 )
 FINAL_RE = re.compile(r"final_int8_zlib_roundtrip_exact val_loss:(?P<loss>[0-9.]+) val_bpb:(?P<bpb>[0-9.]+)")
 SIZE_RE = re.compile(r"Total submission size int8\+zlib: (?P<size>\d+) bytes")
@@ -56,6 +58,12 @@ OAI_GFLOWNET_RE = re.compile(
 )
 OAI_MTP_RE = re.compile(
     r"mtp:(?P<oai_mtp_loss>[0-9.eE+-]+)\s+mtp_w:(?P<oai_mtp_weight>[0-9.eE+-]+)"
+)
+OAI_FOT_RE = re.compile(
+    r"oai_fot:(?P<oai_fot_loss>[0-9.eE+-]+)\s+"
+    r"fot_H:(?P<oai_fot_entropy>[0-9.eE+-]+)\s+"
+    r"fot_R:(?P<oai_fot_reward>[0-9.eE+-]+)\s+"
+    r"fot_div:(?P<oai_fot_diversity>[0-9.eE+-]+)"
 )
 
 
@@ -108,12 +116,12 @@ PROFILES: list[Profile] = [
             "WARMDOWN_ITERS": "650",
             "WARMUP_STEPS": "10",
             "TOKENGT_FIRST_CLASS_LR": "2.0e-4",
-            "TOKENGT_GRAPH_RADIUS": "3",
+            "TOKENGT_GRAPH_RADIUS": "4",
             "TOKENGT_STRUCTURAL_WEIGHT": "0.050",
             "TOKENGT_EDGE_WEIGHT": "0.036",
             "TOKENGT_TORUS_WEIGHT": "0.012",
             "GRAPH_OUTPUT_FLATTENING_LR": "1.8e-4",
-            "GRAPH_OUTPUT_EDGE_RADIUS": "3",
+            "GRAPH_OUTPUT_EDGE_RADIUS": "4",
             "GRAPH_OUTPUT_NODE_WEIGHT": "0.060",
             "GRAPH_OUTPUT_EDGE_WEIGHT": "0.060",
             "TORICGT_SIDECAR_LR": "1.8e-4",
@@ -141,12 +149,12 @@ PROFILES: list[Profile] = [
             "WARMDOWN_ITERS": "550",
             "WARMUP_STEPS": "10",
             "TOKENGT_FIRST_CLASS_LR": "1.8e-4",
-            "TOKENGT_GRAPH_RADIUS": "3",
+            "TOKENGT_GRAPH_RADIUS": "4",
             "TOKENGT_STRUCTURAL_WEIGHT": "0.040",
             "TOKENGT_EDGE_WEIGHT": "0.028",
             "TOKENGT_TORUS_WEIGHT": "0.008",
             "GRAPH_OUTPUT_FLATTENING_LR": "1.5e-4",
-            "GRAPH_OUTPUT_EDGE_RADIUS": "3",
+            "GRAPH_OUTPUT_EDGE_RADIUS": "4",
             "GRAPH_OUTPUT_NODE_WEIGHT": "0.040",
             "GRAPH_OUTPUT_EDGE_WEIGHT": "0.040",
             "TORICGT_SIDECAR_LR": "1.5e-4",
@@ -163,6 +171,65 @@ PROFILES: list[Profile] = [
             "COMBINATORIAL_TORIC_LOSS_WEIGHT": "7.5e-7",
         },
         "Aggressive 1.5K BPB profile for under-fast early curves: larger microbatch, higher matrix/scalar/tied-embedding learning rates, light GraphCG pressure, and moderate advanced losses to test whether the BPB bottleneck is under-optimization rather than structure.",
+    ),
+    Profile(
+        "gate1500_fast_main_lr_aux_conflict_recovery",
+        {
+            "TRAIN_BATCH_TOKENS": "983040",
+            "MATRIX_LR": "0.048",
+            "SCALAR_LR": "0.048",
+            "TIED_EMBED_LR": "0.058",
+            "WARMDOWN_ITERS": "450",
+            "WARMUP_STEPS": "20",
+            "TOKENGT_FIRST_CLASS_LR": "1.6e-4",
+            "TOKENGT_GRAPH_RADIUS": "4",
+            "TOKENGT_STRUCTURAL_WEIGHT": "0.045",
+            "TOKENGT_EDGE_WEIGHT": "0.030",
+            "TOKENGT_TORUS_WEIGHT": "0.010",
+            "TOKENGT_IDENTIFIER_DIM": "24",
+            "TOKENGT_IDENTIFIER_WEIGHT": "0.014",
+            "TOKENGT_ENDPOINT_WEIGHT": "0.018",
+            "TOKENGT_EDGE_TOKEN_WEIGHT": "0.016",
+            "GRAPH_OUTPUT_FLATTENING_LR": "1.6e-4",
+            "GRAPH_OUTPUT_EDGE_RADIUS": "4",
+            "GRAPH_OUTPUT_NODE_WEIGHT": "0.050",
+            "GRAPH_OUTPUT_EDGE_WEIGHT": "0.050",
+            "GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT": "0.035",
+            "GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT": "0.018",
+            "GRAPH_LM_LOSS_WEIGHT_START": "0.005",
+            "GRAPH_LM_LOSS_WEIGHT": "0.060",
+            "GRAPH_LM_WARMUP_STEPS": "800",
+            "GRAPH_LM_HOLD_STEPS": "120",
+            "OAI_GFLOWNET_LOSS_WEIGHT": "1.2e-5",
+            "OAI_GFLOWNET_LR": "1.5e-4",
+            "OAI_GFLOWNET_ENTROPY_WEIGHT": "5e-6",
+            "OAI_GFLOWNET_ENTROPY_TARGET": "1.0",
+            "OAI_MTP_LOSS_WEIGHT": "0.0012",
+            "OAI_MTP_EVERY": "2",
+            "OAI_MTP_MAX_SEQUENCES": "1",
+            "GRAPHCG_LOSS_WEIGHT": "1.0e-6",
+            "GRAPHCG_BPB_ORTHOGONAL_WEIGHT": "0.040",
+            "GRAPHCG_COVARIANCE_CONFLICT_DAMPING": "0.75",
+            "ANALOGY_LOSS_WEIGHT": "2.6e-5",
+            "TOKENGT_GRAPH_LOSS_WEIGHT": "5.0e-5",
+            "TRAJECTORY_MEMORY_LOSS_WEIGHT": "1.2e-5",
+            "RETRIEVAL_GATE_MIN": "0.05",
+            "RETRIEVAL_GATE_CENTER": "0.35",
+            "RETRIEVAL_GATE_SOFTNESS": "0.10",
+            "SIDECAR_UNCERTAINTY_ALPHA": "0.20",
+            "SIDECAR_UNCERTAINTY_MAX": "1.4",
+            "TORICGT_SIDECAR_LOSS_WEIGHT_START": "0.02",
+            "TORICGT_SIDECAR_WARMUP_STEPS": "700",
+            "TORICGT_SIDECAR_HOLD_STEPS": "150",
+            "AUX_GRAD_ALIGNED_BOOST": "0.8",
+            "TORICGT_SIDECAR_COMPUTE_ALL_METRICS": "1",
+            "TORIC_GEOMETRY_LOSS_WEIGHT": "3.2e-6",
+            "TORIC_VECTOR_BUNDLE_LOSS_WEIGHT": "1.5e-6",
+            "TORIC_BGG_LOSS_WEIGHT": "2.0e-6",
+            "KOSZUL_PERSISTENCE_LOSS_WEIGHT": "3.0e-7",
+            "COMBINATORIAL_TORIC_LOSS_WEIGHT": "8.0e-7",
+        },
+        "Artifact-reviewed conflict-recovery profile: keep first-class causal graphification active and increase the local radius to 4, preserve toric/vector-bundle/BGG pressure at low nonzero values, but slow graph-LM ramp, reduce MTP cadence, lower GraphCG/memory pressure, and increase GFlowNet entropy discipline after the 1.5K artifacts showed auxiliary-gradient conflict above the BPB target.",
     ),
     Profile(
         "gate1500_structural_toric_heavy",
@@ -623,6 +690,8 @@ def parse_log(log_path: Path) -> dict[str, float | int | str | None]:
             row = {key: float(value) for key, value in match.groupdict().items() if value is not None}
             if gfn_match := OAI_GFLOWNET_RE.search(line):
                 row.update({key: float(value) for key, value in gfn_match.groupdict().items()})
+            if fot_match := OAI_FOT_RE.search(line):
+                row.update({key: float(value) for key, value in fot_match.groupdict().items()})
             if mtp_match := OAI_MTP_RE.search(line):
                 row.update({key: float(value) for key, value in mtp_match.groupdict().items()})
             trains.append(row)
@@ -657,6 +726,10 @@ def parse_log(log_path: Path) -> dict[str, float | int | str | None]:
         "oai_gflownet_loss": latest_train.get("oai_gflownet_loss"),
         "oai_gflownet_entropy": latest_train.get("oai_gflownet_entropy"),
         "oai_gflownet_reward": latest_train.get("oai_gflownet_reward"),
+        "oai_fot_loss": latest_train.get("oai_fot_loss"),
+        "oai_fot_entropy": latest_train.get("oai_fot_entropy"),
+        "oai_fot_reward": latest_train.get("oai_fot_reward"),
+        "oai_fot_diversity": latest_train.get("oai_fot_diversity"),
         "oai_mtp_loss": latest_train.get("oai_mtp_loss"),
         "oai_mtp_weight": latest_train.get("oai_mtp_weight"),
         "sidecar_loss": latest_train.get("sidecar"),
@@ -669,6 +742,7 @@ def parse_log(log_path: Path) -> dict[str, float | int | str | None]:
         "toric_bgg_loss": latest_train.get("bgg"),
         "koszul_persistence_loss": latest_train.get("koszul"),
         "toric_cca_topology_loss": latest_train.get("combinatorial_toric"),
+        "derived_signature_loss": latest_train.get("derived_signature"),
     }
 
 
@@ -744,7 +818,7 @@ def choose_profile(run_index: int, history: list[dict[str, object]], offset: int
         artifact_penalty = 0.0
         for metrics in values:
             artifact = metrics.get("artifact_bytes")
-            if isinstance(artifact, (int, float)) and float(artifact) > 15_800_000:
+            if isinstance(artifact, (int, float)) and float(artifact) > 16_000_000:
                 artifact_penalty += 0.010
         exploration_bonus = 0.012 * math.sqrt(math.log(total + 1.0) / max(1, len(values)))
         score = center + graph_penalty + artifact_penalty - train_bonus - exploration_bonus
@@ -888,7 +962,8 @@ def write_report(
             "Each campaign attempt restarts from step 0.  The OAI SP1024 FineWeb stream remains the primary BPB objective.  "
             "FineWeb graphification is first-class and enabled by default: the main GPT input stream receives causal TokenGT-style node/edge structural embeddings before the transformer blocks, and optional OAI-FineWeb-only output flattening maps graph-output states back to SentencePiece sequence order for BPB scoring.  "
             "Curated graph data is also bonafide primary LM training data: graph records are serialized into causal topological node/edge token sequences when directed and acyclic, and deterministic random-order graph token sequences when noncausal or cyclic.  Graph-data hidden states are not flattened by default; they remain graph structured for graph-in/graph-out training and sidecar analysis.  "
-            "ToricGT sidecar losses remain active from step 0 for full-rank GraphCG, analogy lattice structure, graph supervision, and trajectory-memory retrieval, but their weights are kept small so they regularize rather than dominate BPB.",
+            "ToricGT sidecar losses remain active from step 0 for full-rank GraphCG, analogy lattice structure, graph supervision, and trajectory-memory retrieval, but their weights are kept small so they regularize rather than dominate BPB.  "
+            "The OAI path also trains embedding-space GFlowNet graph-of-thought and Forest-of-Thought heads as BPB-facing training-only trajectory objectives; these shape hidden reasoning forests and retrieval behavior without entering the compressed artifact unless explicitly exported later.",
             "",
         ]
     )
@@ -903,7 +978,7 @@ def run_codex_review(report: Path) -> None:
         "toric/tropical geometry, persistent homology, vector-bundle/sheaf, "
         "BGG category O, Koszul/resolution, combinatorial commutative algebra, scheduled graph-LM weights, teacher distillation, "
         "adaptive graph radius, graph-output flattening CE lift/regression, calibration loss, score-correction gates, "
-        "OAI embedding-space GFlowNet graph-of-thought trajectory-balance metrics, OAI multi-token prediction metrics, "
+        "OAI embedding-space GFlowNet graph-of-thought trajectory-balance metrics, OAI embedding-space Forest-of-Thought sparse activation/UCB/self-correction/consensus/trajectory-balance metrics, OAI multi-token prediction metrics, "
         "non-destructive score-first TTA metrics, "
         "auxiliary-gradient routing cosines/projection coefficients, retrieval gates, uncertainty-weighted advanced multipliers, "
         "GraphCG BPB-orthogonalization metrics, artifact size, and round-trip quantization. "
@@ -1006,7 +1081,8 @@ def launch_training(
         "FINEWEB_GRAPHIFY": "1",
         "TOKENGT_FIRST_CLASS": "1",
         "TOKENGT_FIRST_CLASS_LR": "1.4e-4",
-        "TOKENGT_GRAPH_RADIUS": "3",
+        "TOKENGT_GRAPH_RADIUS": "4",
+        "TOKENGT_DISTANCE_FEATURES": "functional",
         "TOKENGT_TOKEN_CLASS_BUCKETS": "64",
         "TOKENGT_POSITION_BUCKETS": "256",
         "TOKENGT_STRUCTURAL_WEIGHT": "0.035",
@@ -1019,7 +1095,8 @@ def launch_training(
         "OAI_FINEWEB_OUTPUT_FLATTENING": "1",
         "GRAPH_OUTPUT_FLATTENING": "1",
         "GRAPH_OUTPUT_FLATTENING_LR": "1.4e-4",
-        "GRAPH_OUTPUT_EDGE_RADIUS": "3",
+        "GRAPH_OUTPUT_EDGE_RADIUS": "4",
+        "GRAPH_OUTPUT_DISTANCE_FEATURES": "functional",
         "GRAPH_OUTPUT_NODE_WEIGHT": "0.05",
         "GRAPH_OUTPUT_EDGE_WEIGHT": "0.05",
         "GRAPH_OUTPUT_VIRTUAL_EDGE_TOKENS": "1",
@@ -1056,6 +1133,23 @@ def launch_training(
         "SIDECAR_UNCERTAINTY_MAX": "2.0",
         "GRAPHCG_BPB_ORTHOGONAL_WEIGHT": "0.02",
         "GRAPHCG_COVARIANCE_CONFLICT_DAMPING": "0.50",
+        "DERIVED_SIGNATURE_LOSS_WEIGHT": os.environ.get("DERIVED_SIGNATURE_LOSS_WEIGHT", "1e-6"),
+        "DERIVED_SIGNATURE_MAX_VERTICES": os.environ.get("DERIVED_SIGNATURE_MAX_VERTICES", "8"),
+        "DERIVED_SIGNATURE_MAX_EDGES": os.environ.get("DERIVED_SIGNATURE_MAX_EDGES", "64"),
+        "ADVANCED_LAGRANGIAN_CONTROLLER": os.environ.get("ADVANCED_LAGRANGIAN_CONTROLLER", "1"),
+        "LAGRANGIAN_DUAL_LR": os.environ.get("LAGRANGIAN_DUAL_LR", "0.025"),
+        "LAGRANGIAN_DECAY": os.environ.get("LAGRANGIAN_DECAY", "0.985"),
+        "LAGRANGIAN_MIN_MULTIPLIER": os.environ.get("LAGRANGIAN_MIN_MULTIPLIER", "0.25"),
+        "LAGRANGIAN_MAX_MULTIPLIER": os.environ.get("LAGRANGIAN_MAX_MULTIPLIER", "2.25"),
+        "LAGRANGIAN_BPB_CEILING": os.environ.get("LAGRANGIAN_BPB_CEILING", "3.05"),
+        "LAGRANGIAN_BPB_SOFTNESS": os.environ.get("LAGRANGIAN_BPB_SOFTNESS", "0.35"),
+        "TORIC_FAN_CURRICULUM": os.environ.get("TORIC_FAN_CURRICULUM", "1"),
+        "TORIC_FAN_COARSE_STEPS": os.environ.get("TORIC_FAN_COARSE_STEPS", "450"),
+        "TORIC_FAN_INTERMEDIATE_STEPS": os.environ.get("TORIC_FAN_INTERMEDIATE_STEPS", "950"),
+        "MEMORY_SHEAF_GATE_MIN": os.environ.get("MEMORY_SHEAF_GATE_MIN", "0.15"),
+        "MEMORY_SHEAF_GATE_THRESHOLD": os.environ.get("MEMORY_SHEAF_GATE_THRESHOLD", "0.12"),
+        "MEMORY_SHEAF_GATE_SOFTNESS": os.environ.get("MEMORY_SHEAF_GATE_SOFTNESS", "0.18"),
+        "MEMORY_SHEAF_CE_WEIGHT": os.environ.get("MEMORY_SHEAF_CE_WEIGHT", "1.0"),
         "SCORE_FIRST_TTA": os.environ.get("SCORE_FIRST_TTA", "1"),
         "SCORE_FIRST_TTA_STEPS": os.environ.get("SCORE_FIRST_TTA_STEPS", "64"),
         "SCORE_FIRST_TTA_LR": os.environ.get("SCORE_FIRST_TTA_LR", "2e-5"),
@@ -1070,6 +1164,29 @@ def launch_training(
         "OAI_GFLOWNET_HIDDEN_DIM": os.environ.get("OAI_GFLOWNET_HIDDEN_DIM", "192"),
         "OAI_GFLOWNET_MAX_SEQUENCES": os.environ.get("OAI_GFLOWNET_MAX_SEQUENCES", "2"),
         "OAI_GFLOWNET_MAX_POSITIONS": os.environ.get("OAI_GFLOWNET_MAX_POSITIONS", "192"),
+        "OAI_EMBEDDING_FOT": os.environ.get("OAI_EMBEDDING_FOT", "1"),
+        "OAI_FOT_LR": os.environ.get("OAI_FOT_LR", "1.5e-4"),
+        "OAI_FOT_EVERY": os.environ.get("OAI_FOT_EVERY", "1"),
+        "OAI_FOT_LOSS_WEIGHT": os.environ.get("OAI_FOT_LOSS_WEIGHT", "1.5e-5"),
+        "OAI_FOT_NUM_TREES": os.environ.get("OAI_FOT_NUM_TREES", "4"),
+        "OAI_FOT_MAX_DEPTH": os.environ.get("OAI_FOT_MAX_DEPTH", "5"),
+        "OAI_FOT_BRANCHING": os.environ.get("OAI_FOT_BRANCHING", "4"),
+        "OAI_FOT_TOPK_TREES": os.environ.get("OAI_FOT_TOPK_TREES", "2"),
+        "OAI_FOT_HIDDEN_DIM": os.environ.get("OAI_FOT_HIDDEN_DIM", "192"),
+        "OAI_FOT_MAX_SEQUENCES": os.environ.get("OAI_FOT_MAX_SEQUENCES", "2"),
+        "OAI_FOT_MAX_POSITIONS": os.environ.get("OAI_FOT_MAX_POSITIONS", "192"),
+        "OAI_FOT_CONSENSUS_BUCKETS": os.environ.get("OAI_FOT_CONSENSUS_BUCKETS", "64"),
+        "OAI_FOT_CORRECTION_SCALE": os.environ.get("OAI_FOT_CORRECTION_SCALE", "0.08"),
+        "OAI_FOT_UCB_EXPLORATION": os.environ.get("OAI_FOT_UCB_EXPLORATION", "1.25"),
+        "OAI_FOT_TEMPERATURE": os.environ.get("OAI_FOT_TEMPERATURE", "0.70"),
+        "OAI_FOT_SPARSE_WEIGHT": os.environ.get("OAI_FOT_SPARSE_WEIGHT", "1.0"),
+        "OAI_FOT_UCB_WEIGHT": os.environ.get("OAI_FOT_UCB_WEIGHT", "0.45"),
+        "OAI_FOT_CORRECTION_WEIGHT": os.environ.get("OAI_FOT_CORRECTION_WEIGHT", "0.55"),
+        "OAI_FOT_CONSENSUS_WEIGHT": os.environ.get("OAI_FOT_CONSENSUS_WEIGHT", "0.80"),
+        "OAI_FOT_TB_WEIGHT": os.environ.get("OAI_FOT_TB_WEIGHT", "1.0"),
+        "OAI_FOT_SUBTB_WEIGHT": os.environ.get("OAI_FOT_SUBTB_WEIGHT", "0.20"),
+        "OAI_FOT_COMPLEXITY_WEIGHT": os.environ.get("OAI_FOT_COMPLEXITY_WEIGHT", "0.04"),
+        "OAI_FOT_REWARD_ADVANCED_BONUS": os.environ.get("OAI_FOT_REWARD_ADVANCED_BONUS", "0.05"),
         "OAI_MTP": os.environ.get("OAI_MTP", "1"),
         "OAI_MTP_EVERY": os.environ.get("OAI_MTP_EVERY", "1"),
         "OAI_MTP_LOSS_WEIGHT": os.environ.get("OAI_MTP_LOSS_WEIGHT", "0.003"),
@@ -1331,12 +1448,16 @@ def profile_summary(history: list[dict[str, object]]) -> list[dict[str, object]]
         graph_lm_weights = [finite_metric(row, "graph_lm_weight") for row in rows]
         artifacts = [finite_metric(row, "artifact_bytes") for row in rows]
         sidecars = [finite_metric(row, "sidecar_loss") for row in rows]
+        fot_losses = [finite_metric(row, "oai_fot_loss") for row in rows]
+        fot_rewards = [finite_metric(row, "oai_fot_reward") for row in rows]
+        fot_diversity = [finite_metric(row, "oai_fot_diversity") for row in rows]
         toric = [finite_metric(row, "toric_geometry_loss") or finite_metric(row, "toric") for row in rows]
         vector_bundle_1d = [
             finite_metric(row, "toric_vector_bundle_1d_cone_ce_loss") or finite_metric(row, "vector_bundle_1d_cone")
             for row in rows
         ]
         bgg = [finite_metric(row, "bgg_loss") or finite_metric(row, "bgg") for row in rows]
+        derived = [finite_metric(row, "derived_signature_loss") or finite_metric(row, "derived_signature") for row in rows]
         summary = {
             "profile": profile,
             "runs": len(rows),
@@ -1348,9 +1469,13 @@ def profile_summary(history: list[dict[str, object]]) -> list[dict[str, object]]
             "mean_graph_lm_weight": mean([v for v in graph_lm_weights if v is not None]),
             "mean_artifact_bytes": mean([v for v in artifacts if v is not None]),
             "mean_sidecar_loss": mean([v for v in sidecars if v is not None]),
+            "mean_oai_fot_loss": mean([v for v in fot_losses if v is not None]),
+            "mean_oai_fot_reward": mean([v for v in fot_rewards if v is not None]),
+            "mean_oai_fot_diversity": mean([v for v in fot_diversity if v is not None]),
             "mean_toric_loss": mean([v for v in toric if v is not None]),
             "mean_toric_vector_bundle_1d_cone_ce_loss": mean([v for v in vector_bundle_1d if v is not None]),
             "mean_bgg_loss": mean([v for v in bgg if v is not None]),
+            "mean_derived_signature_loss": mean([v for v in derived if v is not None]),
         }
         summaries.append(summary)
     summaries.sort(key=lambda row: float(row["best_bpb"]) if isinstance(row.get("best_bpb"), (int, float)) else float("inf"))
@@ -1369,14 +1494,16 @@ def profile_env_markdown(profile_name: str) -> list[str]:
     return [
         f"- rationale: {profile.rationale}",
         f"- LR: matrix `{profile.env.get('MATRIX_LR')}`, scalar `{profile.env.get('SCALAR_LR')}`, tied embedding `{profile.env.get('TIED_EMBED_LR')}`",
-        f"- first-class FineWeb TokenGT: lr `{profile.env.get('TOKENGT_FIRST_CLASS_LR')}`, radius `{profile.env.get('TOKENGT_GRAPH_RADIUS')}`, structural `{profile.env.get('TOKENGT_STRUCTURAL_WEIGHT')}`, one-dimensional-edge `{profile.env.get('TOKENGT_EDGE_WEIGHT')}`, torus `{profile.env.get('TOKENGT_TORUS_WEIGHT')}`, identifier `{profile.env.get('TOKENGT_IDENTIFIER_WEIGHT', 'base default')}`, endpoint `{profile.env.get('TOKENGT_ENDPOINT_WEIGHT', 'base default')}`, edge-token `{profile.env.get('TOKENGT_EDGE_TOKEN_WEIGHT', 'base default')}`",
-        f"- OAI-FineWeb-only graph-output flattening: lr `{profile.env.get('GRAPH_OUTPUT_FLATTENING_LR', 'base default')}`, radius `{profile.env.get('GRAPH_OUTPUT_EDGE_RADIUS', 'base default')}`, node `{profile.env.get('GRAPH_OUTPUT_NODE_WEIGHT', 'base default')}`, edge `{profile.env.get('GRAPH_OUTPUT_EDGE_WEIGHT', 'base default')}`, virtual-edge `{profile.env.get('GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT', 'base default')}`, score-correction `{profile.env.get('GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT', 'base default')}`",
-        "- graph radius policy: profile starts in the local radius 2-3 regime; the adaptive analysis may widen to 4-6 only when BPB slope, graph correlations, and flattening calibration support wider neighborhoods.",
+        f"- first-class FineWeb TokenGT: lr `{profile.env.get('TOKENGT_FIRST_CLASS_LR')}`, radius `{profile.env.get('TOKENGT_GRAPH_RADIUS')}`, distance features `{profile.env.get('TOKENGT_DISTANCE_FEATURES', 'functional/base default')}`, structural `{profile.env.get('TOKENGT_STRUCTURAL_WEIGHT')}`, one-dimensional-edge `{profile.env.get('TOKENGT_EDGE_WEIGHT')}`, torus `{profile.env.get('TOKENGT_TORUS_WEIGHT')}`, identifier `{profile.env.get('TOKENGT_IDENTIFIER_WEIGHT', 'base default')}`, endpoint `{profile.env.get('TOKENGT_ENDPOINT_WEIGHT', 'base default')}`, edge-token `{profile.env.get('TOKENGT_EDGE_TOKEN_WEIGHT', 'base default')}`",
+        f"- OAI-FineWeb-only graph-output flattening: lr `{profile.env.get('GRAPH_OUTPUT_FLATTENING_LR', 'base default')}`, radius `{profile.env.get('GRAPH_OUTPUT_EDGE_RADIUS', 'base default')}`, distance features `{profile.env.get('GRAPH_OUTPUT_DISTANCE_FEATURES', 'functional/base default')}`, node `{profile.env.get('GRAPH_OUTPUT_NODE_WEIGHT', 'base default')}`, edge `{profile.env.get('GRAPH_OUTPUT_EDGE_WEIGHT', 'base default')}`, virtual-edge `{profile.env.get('GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT', 'base default')}`, score-correction `{profile.env.get('GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT', 'base default')}`",
+        "- graph radius policy: BPB-gated recovery profiles now start at local radius 4; the adaptive analysis may later widen to 5-6 only when BPB slope, graph correlations, and flattening calibration support wider neighborhoods.",
         "- flattening calibration: enabled by base environment with a small regression-only loss that penalizes graph-output flattening only when it worsens FineWeb CE versus the raw graph hidden state.",
         f"- bonafide graph LM primary weight: `{profile.env.get('GRAPH_LM_LOSS_WEIGHT', 'base default')}`",
+        f"- embedding Forest-of-Thought: enabled `{profile.env.get('OAI_EMBEDDING_FOT', 'base default')}`, weight `{profile.env.get('OAI_FOT_LOSS_WEIGHT', 'base default')}`, trees `{profile.env.get('OAI_FOT_NUM_TREES', 'base default')}`, depth `{profile.env.get('OAI_FOT_MAX_DEPTH', 'base default')}`, branching `{profile.env.get('OAI_FOT_BRANCHING', 'base default')}`",
         f"- sidecar LR: `{profile.env.get('TORICGT_SIDECAR_LR')}`",
         f"- base sidecar weights: graphcg `{profile.env.get('GRAPHCG_LOSS_WEIGHT')}`, analogy `{profile.env.get('ANALOGY_LOSS_WEIGHT')}`, tokengt_graph `{profile.env.get('TOKENGT_GRAPH_LOSS_WEIGHT')}`, memory `{profile.env.get('TRAJECTORY_MEMORY_LOSS_WEIGHT')}`",
         f"- advanced weights: `{json.dumps(active_advanced, sort_keys=True)}`",
+        f"- controllers: Lagrangian `{profile.env.get('ADVANCED_LAGRANGIAN_CONTROLLER', 'base default')}`, toric fan curriculum `{profile.env.get('TORIC_FAN_CURRICULUM', 'base default')}`, derived signature `{profile.env.get('DERIVED_SIGNATURE_LOSS_WEIGHT', 'base default')}`, memory sheaf gate threshold `{profile.env.get('MEMORY_SHEAF_GATE_THRESHOLD', 'base default')}`",
     ]
 
 
@@ -1387,12 +1514,12 @@ def write_meta_analysis(notes_dir: Path, history: list[dict[str, object]], args:
     worst = max(rows, key=lambda row: metric_bpb(row.get("metrics", {}) if isinstance(row.get("metrics"), dict) else {}), default=None)
     best_profile = str(summaries[0]["profile"]) if summaries else ""
     table = [
-        "| profile | runs | best BPB | mean BPB | mean train BPB | mean graph-LM BPB | mean graph-LM weight | worst BPB | mean artifact bytes | mean sidecar |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| profile | runs | best BPB | mean BPB | mean train BPB | mean graph-LM BPB | mean graph-LM weight | mean FoT loss | mean FoT reward | mean FoT diversity | worst BPB | mean artifact bytes | mean sidecar |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in summaries:
         table.append(
-            "| {profile} | {runs} | {best} | {avg} | {train_avg} | {graph_avg} | {graph_weight} | {worst} | {artifact} | {sidecar} |".format(
+            "| {profile} | {runs} | {best} | {avg} | {train_avg} | {graph_avg} | {graph_weight} | {fot_loss} | {fot_reward} | {fot_div} | {worst} | {artifact} | {sidecar} |".format(
                 profile=row["profile"],
                 runs=row["runs"],
                 best=f"{row['best_bpb']:.6f}" if isinstance(row.get("best_bpb"), (int, float)) else "n/a",
@@ -1400,6 +1527,9 @@ def write_meta_analysis(notes_dir: Path, history: list[dict[str, object]], args:
                 train_avg=f"{row['mean_train_bpb']:.6f}" if isinstance(row.get("mean_train_bpb"), (int, float)) else "n/a",
                 graph_avg=f"{row['mean_graph_lm_bpb']:.6f}" if isinstance(row.get("mean_graph_lm_bpb"), (int, float)) else "n/a",
                 graph_weight=f"{row['mean_graph_lm_weight']:.4f}" if isinstance(row.get("mean_graph_lm_weight"), (int, float)) else "n/a",
+                fot_loss=f"{row['mean_oai_fot_loss']:.6g}" if isinstance(row.get("mean_oai_fot_loss"), (int, float)) else "n/a",
+                fot_reward=f"{row['mean_oai_fot_reward']:.6g}" if isinstance(row.get("mean_oai_fot_reward"), (int, float)) else "n/a",
+                fot_div=f"{row['mean_oai_fot_diversity']:.6g}" if isinstance(row.get("mean_oai_fot_diversity"), (int, float)) else "n/a",
                 worst=f"{row['worst_bpb']:.6f}" if isinstance(row.get("worst_bpb"), (int, float)) else "n/a",
                 artifact=f"{row['mean_artifact_bytes']:.0f}" if isinstance(row.get("mean_artifact_bytes"), (int, float)) else "n/a",
                 sidecar=f"{row['mean_sidecar_loss']:.6g}" if isinstance(row.get("mean_sidecar_loss"), (int, float)) else "n/a",
@@ -1483,6 +1613,17 @@ def main() -> None:
             run_id=f"prior_import:{prior_analysis_dir.name}",
             target_bpb=float(args.target_bpb),
         )
+        if isinstance(original_prior_analysis_decision, dict):
+            original_hint = str(original_prior_analysis_decision.get("next_profile_hint", "") or "").strip()
+            if original_hint:
+                prior_analysis_decision["next_profile_hint"] = original_hint
+                prior_analysis_decision["imported_full_analysis_hint_authoritative"] = True
+            original_env = original_prior_analysis_decision.get("env_overrides")
+            if isinstance(original_env, dict) and original_env:
+                merged_env = dict(prior_analysis_decision.get("env_overrides") or {})
+                merged_env.update({str(key): str(value) for key, value in original_env.items()})
+                prior_analysis_decision["env_overrides"] = merged_env
+                prior_analysis_decision["imported_full_analysis_env_authoritative"] = True
         prior_analysis_decision["recomputed_from_prior_analysis_with_current_policy"] = True
         prior_analysis_decision["original_prior_next_profile_hint"] = (
             original_prior_analysis_decision.get("next_profile_hint")

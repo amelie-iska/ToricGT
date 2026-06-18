@@ -60,6 +60,45 @@ def _run(command: list[str], *, cwd: Path | None = None, timeout_seconds: int = 
     )
 
 
+def _sage_integer_kernel_basis(rows: list[list[int]], *, timeout_seconds: int = 120) -> list[list[int]]:
+    """Return an exact integer right-kernel basis for an exponent matrix.
+
+    This is a Sage-backed CAS computation, not a numeric proxy.  It gives the
+    lattice basis used by Macaulay2 to build the saturated lattice ideal whose
+    saturation is the toric ideal of the monomial parametrization.
+    """
+
+    sage = discover_backend("sage")
+    if not sage.available or not sage.executable:
+        raise CASUnavailableError(sage.error or "sage executable unavailable for integer kernel basis")
+    with tempfile.TemporaryDirectory(prefix="toricgt_sage_kernel_") as tmp:
+        path = Path(tmp) / "kernel.py"
+        path.write_text(
+            "\n".join(
+                [
+                    "import json",
+                    "from sage.all import matrix, ZZ",
+                    f"rows = json.loads({json.dumps(json.dumps(rows))})",
+                    "A = matrix(ZZ, rows)",
+                    "basis = [[int(value) for value in vector] for vector in A.right_kernel().basis()]",
+                    'print("TORICGT_JSON_BEGIN")',
+                    "print(json.dumps({'rank': len(basis), 'basis': basis}))",
+                    'print("TORICGT_JSON_END")',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        proc = _run([sage.executable, "-python", str(path)], cwd=Path(tmp), timeout_seconds=timeout_seconds)
+    if proc.returncode != 0:
+        raise CASExecutionError(proc.stdout[-4000:])
+    payload = _extract_json_between_markers(proc.stdout)
+    basis = payload.get("basis", [])
+    if not isinstance(basis, list):
+        raise CASExecutionError(f"Sage returned invalid integer-kernel payload: {payload}")
+    return [[int(value) for value in row] for row in basis]
+
+
 def discover_backend(name: str) -> CASBackendInfo:
     """Discover a supported CAS backend on PATH."""
 
@@ -170,7 +209,7 @@ def discover_toric_toolchain() -> dict[str, dict[str, Any]]:
         "gfan": ("gfan",),
         "singular": ("Singular",),
         "normaliz": ("normaliz", "Normaliz"),
-        "4ti2": ("graver", "hilbert", "zsolve", "4ti2-zsolve"),
+        "4ti2": ("markov", "graver", "groebner", "hilbert", "zsolve", "4ti2-zsolve"),
         "latte_integrale": ("count", "integrate", "latte-count", "latte-integrate"),
         "lrslib": ("lrs", "redund"),
         "topcom": ("topcom-points2triangs", "points2triangs", "topcom-chiro2allfinetriangs"),
@@ -491,7 +530,12 @@ print "TORICGT_JSON_END"
 """
 
     @staticmethod
-    def script_for_toric_ideal(exponent_matrix: list[list[int]]) -> str:
+    def script_for_toric_ideal(
+        exponent_matrix: list[list[int]],
+        *,
+        kernel_basis: list[list[int]] | None = None,
+        include_derived: bool = False,
+    ) -> str:
         if not exponent_matrix or not exponent_matrix[0]:
             raise ValueError("exponent_matrix must be nonempty with shape [dimension, generators]")
         rows = [[int(value) for value in row] for row in exponent_matrix]
@@ -502,53 +546,80 @@ print "TORICGT_JSON_END"
             raise ValueError("Macaulay2 toric ideal certificate requires nonnegative exponents")
         d = len(rows)
         n = row_width
-        t_vars = [f"t_{idx}" for idx in range(d)]
         x_vars = [f"x_{idx}" for idx in range(n)]
-        ring_vars = ", ".join([*t_vars, *x_vars])
         matrix_literal = "{" + ",".join("{" + ",".join(str(value) for value in row) + "}" for row in rows) + "}"
-
-        def monomial_for_column(col: int) -> str:
-            factors: list[str] = []
-            for row_idx in range(d):
-                exponent = rows[row_idx][col]
-                if exponent == 0:
-                    continue
-                if exponent == 1:
-                    factors.append(t_vars[row_idx])
-                else:
-                    factors.append(f"{t_vars[row_idx]}^{exponent}")
-            return "*".join(factors) if factors else "1"
-
-        equations = ", ".join(f"{x_vars[col]} - {monomial_for_column(col)}" for col in range(n))
+        basis_rows = [[int(value) for value in rel] for rel in (kernel_basis or [])]
+        if any(len(rel) != n for rel in basis_rows):
+            raise ValueError("kernel_basis rows must have one entry per toric generator")
+        basis_literal = "{" + ",".join("{" + ",".join(str(value) for value in rel) + "}" for rel in basis_rows) + "}"
+        derived_block = ""
+        derived_payload = """
+  "module_dual_resolution" => "",
+  "module_ext0" => "",
+  "module_ext1" => "",
+  "module_ext2" => "",
+  "module_tor0_residue" => "",
+  "module_tor1_residue" => "",
+  "module_tor2_residue" => "",
+  "identity_chain_map" => "",
+  "identity_mapping_cone" => "",
+  "identity_mapping_cone_h0_pruned" => "",
+  "identity_mapping_cone_h1_pruned" => "",
+  "identity_mapping_cone_h2_pruned" => ""
+"""
+        if include_derived:
+            derived_block = """
+IdModuleResolution = try id_Cmodule else null
+ConeIdModuleResolution = try cone IdModuleResolution else null
+"""
+            derived_payload = """
+  "module_dual_resolution" => toString try dual Cmodule else "",
+  "module_ext0" => toString try Ext^0(M,R) else "",
+  "module_ext1" => toString try Ext^1(M,R) else "",
+  "module_ext2" => toString try Ext^2(M,R) else "",
+  "module_tor0_residue" => toString try Tor_0(M,coker vars R) else "",
+  "module_tor1_residue" => toString try Tor_1(M,coker vars R) else "",
+  "module_tor2_residue" => toString try Tor_2(M,coker vars R) else "",
+  "identity_chain_map" => toString try IdModuleResolution else "",
+  "identity_mapping_cone" => toString try ConeIdModuleResolution else "",
+  "identity_mapping_cone_h0_pruned" => toString try prune HH_0 ConeIdModuleResolution else "",
+  "identity_mapping_cone_h1_pruned" => toString try prune HH_1 ConeIdModuleResolution else "",
+  "identity_mapping_cone_h2_pruned" => toString try prune HH_2 ConeIdModuleResolution else ""
+"""
         return f"""
 needsPackage "JSON"
 A = {matrix_literal}
+kernelBasis = {basis_literal}
 d = {d}
 n = {n}
-R = QQ[{ring_vars}, MonomialOrder => Eliminate d]
-J = ideal({equations})
-G = gens gb J
-Igens = selectInSubring(1, G)
-I = ideal Igens
+R = QQ[{", ".join(x_vars)}]
+varsList = flatten entries vars R
+monomPlus = u -> product apply(n, i -> varsList#i^(max(u#i,0)))
+monomMinus = u -> product apply(n, i -> varsList#i^(max(-u#i,0)))
+J = if #kernelBasis == 0 then ideal(0_R) else ideal apply(kernelBasis, u -> monomPlus(u) - monomMinus(u))
+prodVars = product gens R
+I = saturate(J, ideal prodVars)
 Cideal = res I
 M = coker gens I
 Cmodule = res M
-IdModuleResolution = id_Cmodule
-ConeIdModuleResolution = try cone IdModuleResolution else null
+{derived_block}
 polys = flatten entries gens I
 relationRows = apply(polys, f -> (
     ee := exponents f;
     hashTable {{
         "polynomial" => toString f,
-        "positive_exponent" => if #ee > 0 then drop(ee#0, d) else {{}},
-        "negative_exponent" => if #ee > 1 then drop(ee#1, d) else {{}}
+        "positive_exponent" => if #ee > 0 then ee#0 else {{}},
+        "negative_exponent" => if #ee > 1 then ee#1 else {{}}
     }}
 ))
 out = hashTable {{
   "kind" => "macaulay2_toric_ideal_certificate",
+  "method" => "sage_integer_kernel_plus_macaulay2_saturated_lattice_basis_ideal",
   "dimension" => d,
   "num_generators" => n,
   "exponent_matrix" => A,
+  "kernel_basis" => kernelBasis,
+  "lattice_basis_ideal" => toString J,
   "ideal" => toString I,
   "generator_count" => #polys,
   "relations" => relationRows,
@@ -568,18 +639,7 @@ out = hashTable {{
   "module_resolution_d2d3_zero" => try Cmodule.dd_2 * Cmodule.dd_3 == 0 else true,
   "module_projective_dimension" => try pdim M else -1,
   "module_regularity" => try regularity M else -1,
-  "module_dual_resolution" => toString try dual Cmodule else "",
-  "module_ext0" => toString try Ext^0(M,R) else "",
-  "module_ext1" => toString try Ext^1(M,R) else "",
-  "module_ext2" => toString try Ext^2(M,R) else "",
-  "module_tor0_residue" => toString try Tor_0(M,coker vars R) else "",
-  "module_tor1_residue" => toString try Tor_1(M,coker vars R) else "",
-  "module_tor2_residue" => toString try Tor_2(M,coker vars R) else "",
-  "identity_chain_map" => toString try IdModuleResolution else "",
-  "identity_mapping_cone" => toString try ConeIdModuleResolution else "",
-  "identity_mapping_cone_h0_pruned" => toString try prune HH_0 ConeIdModuleResolution else "",
-  "identity_mapping_cone_h1_pruned" => toString try prune HH_1 ConeIdModuleResolution else "",
-  "identity_mapping_cone_h2_pruned" => toString try prune HH_2 ConeIdModuleResolution else ""
+{derived_payload}
 }}
 print "TORICGT_JSON_BEGIN"
 print toJSON out
@@ -839,21 +899,37 @@ print "TORICGT_JSON_END"
         exponent_matrix: list[list[int]],
         *,
         timeout_seconds: int = 120,
+        include_derived: bool = False,
+        sage_kernel_timeout_seconds: int | None = None,
     ) -> ToricTropicalCertificate:
-        """Compute an exact toric ideal certificate by Macaulay2 elimination.
+        """Compute an exact toric ideal certificate from a Sage lattice kernel.
 
         The input matrix has shape `[dimension, generators]` and must contain
-        nonnegative integer exponents.  Macaulay2 computes the elimination
-        ideal of the monomial parametrization exactly, then returns binomial
-        exponent vectors and a Betti tally string for the resulting ideal.
+        nonnegative integer exponents.  Sage computes the exact integer
+        right-kernel lattice.  Macaulay2 then builds the corresponding lattice
+        basis ideal, saturates by the product of variables, and computes the
+        exact toric ideal and free-resolution invariants.  Optional derived
+        expansion is available, but the periodic BPB campaign gate should keep
+        it disabled unless the selected exponent set is deliberately tiny.
         """
 
         self.require_available()
         assert self.info.executable is not None
         rows = [[int(value) for value in row] for row in exponent_matrix]
+        kernel_basis = _sage_integer_kernel_basis(
+            rows,
+            timeout_seconds=int(sage_kernel_timeout_seconds or max(30, min(180, timeout_seconds))),
+        )
         with tempfile.TemporaryDirectory(prefix="toricgt_m2_toric_ideal_") as tmp:
             path = Path(tmp) / "toric_ideal.m2"
-            path.write_text(self.script_for_toric_ideal(rows), encoding="utf-8")
+            path.write_text(
+                self.script_for_toric_ideal(
+                    rows,
+                    kernel_basis=kernel_basis,
+                    include_derived=bool(include_derived),
+                ),
+                encoding="utf-8",
+            )
             proc = _run([self.info.executable, "--script", str(path)], cwd=Path(tmp), timeout_seconds=timeout_seconds)
         if proc.returncode != 0:
             raise CASExecutionError(proc.stdout[-4000:])
@@ -861,7 +937,11 @@ print "TORICGT_JSON_END"
         relations = _relations_from_m2_payload(payload.get("relations", []))
         algebra = {
             "field": "QQ",
+            "method": payload.get("method", "sage_integer_kernel_plus_macaulay2_saturated_lattice_basis_ideal"),
             "exponent_matrix": payload.get("exponent_matrix", rows),
+            "sage_integer_kernel_basis": payload.get("kernel_basis", kernel_basis),
+            "sage_kernel_provenance": "exact_cas/sage",
+            "lattice_basis_ideal": payload.get("lattice_basis_ideal", ""),
             "toric_ideal": payload.get("ideal", ""),
             "toric_ideal_generator_count": payload.get("generator_count", len(relations)),
             "toric_ideal_binomials": payload.get("relations", []),
@@ -898,6 +978,7 @@ print "TORICGT_JSON_END"
                 "Tor2": payload.get("module_tor2_residue", ""),
             },
             "derived_category_maps": {
+                "include_derived": bool(include_derived),
                 "identity_chain_map_raw": payload.get("identity_chain_map", ""),
                 "identity_mapping_cone_raw": payload.get("identity_mapping_cone", ""),
                 "identity_mapping_cone_homology_pruned": {
@@ -909,9 +990,14 @@ print "TORICGT_JSON_END"
         }
         cert = ToricTropicalCertificate(
             kind="macaulay2_toric_ideal_certificate",
-            input_hash=stable_hash({"macaulay2_toric_ideal": rows}),
+            input_hash=stable_hash({"macaulay2_toric_ideal": rows, "kernel_basis": kernel_basis}),
             provenance="exact_cas/macaulay2",
-            source={"input_kind": "exponent_matrix", "input_hash": stable_hash(rows)},
+            source={
+                "input_kind": "exponent_matrix",
+                "input_hash": stable_hash(rows),
+                "kernel_basis_backend": "sage",
+                "toric_ideal_backend": "macaulay2",
+            },
             cas=self.info.to_dict(),
             toric={},
             tropical={},

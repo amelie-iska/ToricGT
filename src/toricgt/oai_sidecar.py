@@ -21,6 +21,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from .combinatorial_toric_metrics import CombinatorialToricConfig, combinatorial_toric_cca_topology_loss
+from .derived_category_metrics import DerivedCategoryConfig, derived_category_feature_summary
 from .koszul_persistence import KoszulPersistenceConfig, koszul_persistence_loss
 from .trajectory_memory import TrajectoryMemoryConfig, TrajectoryRetrievalHead
 from .toric_bgg import ToricBGGConfig, ToricBGGProbe
@@ -336,6 +337,19 @@ class GraphParquetTokenStream:
 class ToricGTSidecar(nn.Module):
     """Train graph, geometry, topology, category, and memory-retrieval heads."""
 
+    LAGRANGIAN_FAMILIES = (
+        "graphcg",
+        "analogy",
+        "tokengt_graph",
+        "trajectory_memory",
+        "toric_geometry",
+        "toric_vector_bundle_1d_cone_ce",
+        "toric_bgg",
+        "koszul_persistence",
+        "combinatorial_toric",
+        "derived_signature",
+    )
+
     def __init__(self, dim: int, args: Any):
         super().__init__()
         self.graphcg_basis = nn.Parameter(torch.empty(dim, dim))
@@ -360,7 +374,21 @@ class ToricGTSidecar(nn.Module):
                 persistence_landscape_layers=3,
                 persistence_landscape_resolution=24,
                 persistence_image_resolution=12,
+                sheaf_gate_min=float(getattr(args, "memory_sheaf_gate_min", 0.15)),
+                sheaf_gate_threshold=float(getattr(args, "memory_sheaf_gate_threshold", 0.12)),
+                sheaf_gate_softness=float(getattr(args, "memory_sheaf_gate_softness", 0.18)),
+                sheaf_ce_weight=float(getattr(args, "memory_sheaf_ce_weight", 1.0)),
             ),
+        )
+        self.derived_signature_head = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, 32),
+            nn.GELU(),
+            nn.Linear(32, 11),
+        )
+        self.derived_cfg = DerivedCategoryConfig(
+            max_vertices=int(getattr(args, "derived_signature_max_vertices", 8)),
+            max_edges=int(getattr(args, "derived_signature_max_edges", 64)),
         )
         self.graphcg_loss_weight = float(args.graphcg_loss_weight)
         self.analogy_loss_weight = float(args.analogy_loss_weight)
@@ -371,6 +399,7 @@ class ToricGTSidecar(nn.Module):
         self.toric_bgg_loss_weight = float(getattr(args, "toric_bgg_loss_weight", 0.0))
         self.koszul_persistence_loss_weight = float(getattr(args, "koszul_persistence_loss_weight", 0.0))
         self.combinatorial_toric_loss_weight = float(getattr(args, "combinatorial_toric_loss_weight", 0.0))
+        self.derived_signature_loss_weight = float(getattr(args, "derived_signature_loss_weight", 0.0))
         self.compute_all_metrics = bool(int(getattr(args, "sidecar_compute_all_metrics", 1)))
         self.retrieval_conditioned_aux = bool(int(getattr(args, "retrieval_conditioned_aux", 1)))
         self.retrieval_gate_min = float(getattr(args, "retrieval_gate_min", 0.20))
@@ -383,6 +412,34 @@ class ToricGTSidecar(nn.Module):
         self.uncertainty_max = max(float(getattr(args, "sidecar_uncertainty_max", 2.0)), 0.0)
         self.graphcg_bpb_orthogonal_weight = float(getattr(args, "graphcg_bpb_orthogonal_weight", 0.02))
         self.graphcg_covariance_conflict_damping = float(getattr(args, "graphcg_covariance_conflict_damping", 0.50))
+        self.advanced_lagrangian_controller = bool(int(getattr(args, "advanced_lagrangian_controller", 1)))
+        self.lagrangian_dual_lr = float(getattr(args, "lagrangian_dual_lr", 0.025))
+        self.lagrangian_decay = float(getattr(args, "lagrangian_decay", 0.985))
+        self.lagrangian_min_multiplier = float(getattr(args, "lagrangian_min_multiplier", 0.25))
+        self.lagrangian_max_multiplier = float(getattr(args, "lagrangian_max_multiplier", 2.25))
+        self.lagrangian_bpb_ceiling = float(getattr(args, "lagrangian_bpb_ceiling", 3.05))
+        self.lagrangian_bpb_softness = max(float(getattr(args, "lagrangian_bpb_softness", 0.35)), 1e-6)
+        self.toric_fan_curriculum = bool(int(getattr(args, "toric_fan_curriculum", 1)))
+        self.toric_fan_coarse_steps = int(getattr(args, "toric_fan_coarse_steps", 450))
+        self.toric_fan_intermediate_steps = int(getattr(args, "toric_fan_intermediate_steps", 950))
+        targets = torch.tensor(
+            [
+                float(getattr(args, "lagrangian_graphcg_target", 0.010)),
+                float(getattr(args, "lagrangian_analogy_target", 0.045)),
+                float(getattr(args, "lagrangian_tokengt_graph_target", 0.75)),
+                float(getattr(args, "lagrangian_memory_target", 1.15)),
+                float(getattr(args, "lagrangian_toric_target", 2.0)),
+                float(getattr(args, "lagrangian_vector_bundle_target", 0.45)),
+                float(getattr(args, "lagrangian_bgg_target", 0.06)),
+                float(getattr(args, "lagrangian_koszul_target", 0.035)),
+                float(getattr(args, "lagrangian_cca_target", 1.0)),
+                float(getattr(args, "lagrangian_derived_signature_target", 0.025)),
+            ],
+            dtype=torch.float32,
+        )
+        self.register_buffer("lagrangian_dual", torch.zeros(len(self.LAGRANGIAN_FAMILIES), dtype=torch.float32))
+        self.register_buffer("lagrangian_targets", targets)
+        self.register_buffer("sidecar_forward_count", torch.zeros((), dtype=torch.long))
 
         self.toric_geometry = LowRankToricGeometryProbe(
             dim,
@@ -441,6 +498,52 @@ class ToricGTSidecar(nn.Module):
             num_chambers=int(getattr(args, "combinatorial_toric_num_chambers", 8)),
             exponent_dim=int(getattr(args, "combinatorial_toric_exponent_dim", 4)),
         )
+
+    def _fan_curriculum_stage(self, step: int | None) -> tuple[int, str]:
+        if not self.toric_fan_curriculum:
+            return 2, "full"
+        if step is None:
+            step = int(self.sidecar_forward_count.detach().cpu().item())
+        if step < self.toric_fan_coarse_steps:
+            return 0, "coarse"
+        if step < self.toric_fan_intermediate_steps:
+            return 1, "intermediate"
+        return 2, "full"
+
+    def _lagrangian_multiplier(
+        self,
+        family: str,
+        loss: Tensor,
+        *,
+        safety_gate: Tensor,
+    ) -> tuple[Tensor, dict[str, Tensor]]:
+        device = loss.device
+        if family not in self.LAGRANGIAN_FAMILIES:
+            return loss.new_tensor(1.0), {}
+        idx = self.LAGRANGIAN_FAMILIES.index(family)
+        target = self.lagrangian_targets[idx].to(device=device, dtype=loss.dtype)
+        if self.advanced_lagrangian_controller:
+            with torch.no_grad():
+                observed = loss.detach().float().clamp_min(0.0)
+                violation = (observed - target.detach().float()).clamp_min(0.0)
+                update = float(self.lagrangian_dual_lr) * violation * safety_gate.detach().float().clamp(0.0, 1.0)
+                self.lagrangian_dual[idx].mul_(float(self.lagrangian_decay)).add_(
+                    update.to(device=self.lagrangian_dual.device)
+                )
+                self.lagrangian_dual[idx].clamp_(0.0, max(0.0, self.lagrangian_max_multiplier - 1.0))
+            multiplier = (1.0 + self.lagrangian_dual[idx].to(device=device, dtype=loss.dtype)) * (
+                0.25 + 0.75 * safety_gate.to(dtype=loss.dtype).clamp(0.0, 1.0)
+            )
+            multiplier = multiplier.clamp(float(self.lagrangian_min_multiplier), float(self.lagrangian_max_multiplier))
+        else:
+            multiplier = loss.new_tensor(1.0)
+        prefix = f"lagrangian_{family}"
+        return multiplier, {
+            f"{prefix}_target": target.detach(),
+            f"{prefix}_dual": self.lagrangian_dual[idx].to(device=device, dtype=loss.dtype).detach(),
+            f"{prefix}_multiplier": multiplier.detach(),
+            f"{prefix}_violation": (loss.detach().float() - target.detach().float()).clamp_min(0.0),
+        }
 
     @staticmethod
     def _byte_class_ids(tokens: Tensor) -> Tensor:
@@ -566,12 +669,45 @@ class ToricGTSidecar(nn.Module):
             "tokengt_graph_causal_edge_fraction": edge_target.mean().detach(),
         }
 
-    def forward(self, hidden: Tensor, targets: Tensor, positions: Tensor, per_token_nll: Tensor) -> dict[str, Tensor]:
+    def _derived_signature_losses(self, hidden: Tensor) -> dict[str, Tensor]:
+        max_vertices = min(hidden.shape[1], int(self.derived_cfg.max_vertices))
+        if max_vertices < 2:
+            zero = hidden.float().sum() * 0.0
+            return {
+                "derived_signature_loss": zero,
+                "derived_signature_cosine": zero.detach(),
+                "derived_signature_target_norm": zero.detach(),
+            }
+        window = hidden[:, :max_vertices, :].float()
+        target = derived_category_feature_summary(window, config=self.derived_cfg).detach().float()
+        pred = self.derived_signature_head(window.mean(dim=1).to(hidden.dtype)).float()
+        pred_norm = F.normalize(pred, dim=-1)
+        target_norm = F.normalize(target, dim=-1)
+        mse = F.mse_loss(pred, target)
+        cosine = (pred_norm * target_norm).sum(dim=-1).mean()
+        return {
+            "derived_signature_loss": mse,
+            "derived_signature_cosine": cosine.detach(),
+            "derived_signature_target_norm": target.norm(dim=-1).mean().detach(),
+        }
+
+    def forward(
+        self,
+        hidden: Tensor,
+        targets: Tensor,
+        positions: Tensor,
+        per_token_nll: Tensor,
+        *,
+        step: int | None = None,
+    ) -> dict[str, Tensor]:
+        with torch.no_grad():
+            self.sidecar_forward_count.add_(1)
         out: dict[str, Tensor] = {}
         out.update(self._graphcg_losses(hidden, per_token_nll))
         out.update(self._analogy_losses(hidden, targets))
         out.update(self._tokengt_graph_losses(hidden, targets))
         out.update(self.memory(hidden, positions, per_token_nll, graphcg_basis=self.graphcg_basis))
+        out.update(self._derived_signature_losses(hidden))
         run_all = bool(self.compute_all_metrics)
         if run_all or self.toric_geometry_loss_weight != 0.0:
             out.update(self.toric_geometry(hidden, positions, targets))
@@ -583,32 +719,81 @@ class ToricGTSidecar(nn.Module):
             out.update(koszul_persistence_loss(hidden, positions, config=self.koszul_cfg))
         if run_all or self.combinatorial_toric_loss_weight != 0.0:
             out.update(combinatorial_toric_cca_topology_loss(hidden, positions, config=self.combinatorial_cfg))
-        total = hidden.new_zeros(())
         nll_mean = per_token_nll.detach().float().mean()
         nll_p90 = per_token_nll.detach().float().flatten().quantile(0.90) if per_token_nll.numel() else nll_mean
+        bpb_safety_gate = torch.sigmoid(
+            (hidden.new_tensor(float(self.lagrangian_bpb_ceiling)) - nll_mean.to(device=hidden.device))
+            / float(self.lagrangian_bpb_softness)
+        )
+        lagrangian_metrics: dict[str, Tensor] = {
+            "lagrangian_bpb_safety_gate": bpb_safety_gate.detach(),
+            "lagrangian_bpb_ceiling": hidden.new_tensor(float(self.lagrangian_bpb_ceiling)).detach(),
+            "lagrangian_controller_active": hidden.new_tensor(float(self.advanced_lagrangian_controller)).detach(),
+        }
+        stage, stage_name = self._fan_curriculum_stage(step)
+        toric_loss_key = (
+            "toric_geometry_loss_coarse"
+            if stage == 0
+            else "toric_geometry_loss_intermediate"
+            if stage == 1
+            else "toric_geometry_loss_full"
+        )
+        zero = hidden.new_zeros(())
         uncertainty_raw = ((nll_p90 - self.uncertainty_center) / self.uncertainty_scale).clamp(0.0, self.uncertainty_max)
         uncertainty_weight = 1.0 + float(self.uncertainty_alpha) * uncertainty_raw if self.uncertainty_weighting else hidden.new_tensor(1.0)
-        memory_gap = out.get("trajectory_memory_score_gap", total.detach()).detach()
-        memory_recall = out.get("trajectory_memory_recall1", total.detach()).detach()
+        memory_gap = out.get("trajectory_memory_score_gap", zero.detach()).detach()
+        memory_recall = out.get("trajectory_memory_recall1", zero.detach()).detach()
         memory_signal = 0.5 * torch.sigmoid((memory_gap - self.retrieval_gate_center) / self.retrieval_gate_softness) + 0.5 * memory_recall.clamp(0.0, 1.0)
         retrieval_gate = self.retrieval_gate_min + (1.0 - self.retrieval_gate_min) * memory_signal
         if not self.retrieval_conditioned_aux:
             retrieval_gate = hidden.new_tensor(1.0)
-        total = total + self.graphcg_loss_weight * out["graphcg_loss"]
-        total = total + self.analogy_loss_weight * retrieval_gate * out["analogy_lattice_loss"]
-        total = total + self.tokengt_graph_loss_weight * out["tokengt_graph_loss"]
-        total = total + self.trajectory_memory_loss_weight * retrieval_gate * out["trajectory_memory_loss"]
-        total = total + self.toric_geometry_loss_weight * uncertainty_weight * out.get("toric_geometry_loss", total.new_zeros(()))
-        total = total + self.toric_vector_bundle_loss_weight * uncertainty_weight * out.get(
-            "toric_vector_bundle_1d_cone_ce_loss", total.new_zeros(())
+        total = zero
+        graphcg_mult, metrics = self._lagrangian_multiplier("graphcg", out["graphcg_loss"], safety_gate=bpb_safety_gate)
+        lagrangian_metrics.update(metrics)
+        total = total + self.graphcg_loss_weight * graphcg_mult * out["graphcg_loss"]
+        analogy_mult, metrics = self._lagrangian_multiplier(
+            "analogy", out["analogy_lattice_loss"], safety_gate=bpb_safety_gate
         )
-        total = total + self.toric_bgg_loss_weight * uncertainty_weight * out.get("toric_bgg_loss", total.new_zeros(()))
-        total = total + self.koszul_persistence_loss_weight * uncertainty_weight * out.get(
-            "koszul_persistence_loss", total.new_zeros(())
+        lagrangian_metrics.update(metrics)
+        total = total + self.analogy_loss_weight * analogy_mult * retrieval_gate * out["analogy_lattice_loss"]
+        tokengt_mult, metrics = self._lagrangian_multiplier(
+            "tokengt_graph", out["tokengt_graph_loss"], safety_gate=bpb_safety_gate
         )
-        total = total + self.combinatorial_toric_loss_weight * uncertainty_weight * out.get(
-            "toric_cca_topology_loss", total.new_zeros(())
+        lagrangian_metrics.update(metrics)
+        total = total + self.tokengt_graph_loss_weight * tokengt_mult * out["tokengt_graph_loss"]
+        memory_mult, metrics = self._lagrangian_multiplier(
+            "trajectory_memory", out["trajectory_memory_loss"], safety_gate=bpb_safety_gate
         )
+        lagrangian_metrics.update(metrics)
+        total = total + self.trajectory_memory_loss_weight * memory_mult * retrieval_gate * out["trajectory_memory_loss"]
+        toric_loss = out.get(toric_loss_key, out.get("toric_geometry_loss", total.new_zeros(())))
+        toric_mult, metrics = self._lagrangian_multiplier("toric_geometry", toric_loss, safety_gate=bpb_safety_gate)
+        lagrangian_metrics.update(metrics)
+        total = total + self.toric_geometry_loss_weight * toric_mult * uncertainty_weight * toric_loss
+        vector_loss = out.get("toric_vector_bundle_1d_cone_ce_loss", total.new_zeros(()))
+        vector_mult, metrics = self._lagrangian_multiplier(
+            "toric_vector_bundle_1d_cone_ce", vector_loss, safety_gate=bpb_safety_gate
+        )
+        lagrangian_metrics.update(metrics)
+        total = total + self.toric_vector_bundle_loss_weight * vector_mult * uncertainty_weight * vector_loss
+        bgg_loss = out.get("toric_bgg_loss", total.new_zeros(()))
+        bgg_mult, metrics = self._lagrangian_multiplier("toric_bgg", bgg_loss, safety_gate=bpb_safety_gate)
+        lagrangian_metrics.update(metrics)
+        total = total + self.toric_bgg_loss_weight * bgg_mult * uncertainty_weight * bgg_loss
+        koszul_loss = out.get("koszul_persistence_loss", total.new_zeros(()))
+        koszul_mult, metrics = self._lagrangian_multiplier("koszul_persistence", koszul_loss, safety_gate=bpb_safety_gate)
+        lagrangian_metrics.update(metrics)
+        total = total + self.koszul_persistence_loss_weight * koszul_mult * uncertainty_weight * koszul_loss
+        cca_loss = out.get("toric_cca_topology_loss", total.new_zeros(()))
+        cca_mult, metrics = self._lagrangian_multiplier("combinatorial_toric", cca_loss, safety_gate=bpb_safety_gate)
+        lagrangian_metrics.update(metrics)
+        total = total + self.combinatorial_toric_loss_weight * cca_mult * uncertainty_weight * cca_loss
+        derived_loss = out.get("derived_signature_loss", total.new_zeros(()))
+        derived_mult, metrics = self._lagrangian_multiplier(
+            "derived_signature", derived_loss, safety_gate=bpb_safety_gate
+        )
+        lagrangian_metrics.update(metrics)
+        total = total + self.derived_signature_loss_weight * derived_mult * uncertainty_weight * derived_loss
         out["sidecar_nll_mean"] = nll_mean.detach()
         out["sidecar_nll_p90"] = nll_p90.detach()
         out["sidecar_uncertainty_weight"] = uncertainty_weight.detach()
@@ -616,6 +801,11 @@ class ToricGTSidecar(nn.Module):
         out["sidecar_analogy_effective_weight"] = (hidden.new_tensor(self.analogy_loss_weight) * retrieval_gate).detach()
         out["sidecar_memory_effective_weight"] = (hidden.new_tensor(self.trajectory_memory_loss_weight) * retrieval_gate).detach()
         out["sidecar_advanced_effective_multiplier"] = uncertainty_weight.detach()
+        out["toric_fan_curriculum_stage"] = total.new_tensor(float(stage)).detach()
+        out["toric_fan_curriculum_active"] = total.new_tensor(float(self.toric_fan_curriculum)).detach()
+        out["toric_geometry_curriculum_loss"] = toric_loss.detach()
+        out["derived_signature_active"] = total.new_tensor(float(self.derived_signature_loss_weight != 0.0)).detach()
+        out.update(lagrangian_metrics)
         out["toric_geometry_active"] = total.new_tensor(float(self.toric_geometry_loss_weight != 0.0))
         out["toric_vector_bundle_1d_cone_ce_active"] = total.new_tensor(
             float(self.toric_vector_bundle_loss_weight != 0.0)

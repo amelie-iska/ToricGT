@@ -312,10 +312,21 @@ class LowRankToricGeometryProbe(nn.Module):
             + float(self.config.braid_weight) * braid_loss
             + float(self.config.leaf_weight) * leaf_residual
         )
+        coarse = float(self.config.fan_weight) * fan_loss + float(self.config.moment_weight) * moment_loss
+        intermediate = (
+            coarse
+            + float(self.config.bend_weight) * bend_loss
+            + float(self.config.coxeter_weight) * coxeter_loss
+            + float(self.config.leaf_weight) * leaf_residual
+        )
+        full = total
         active_entropy = -(pred_probs.clamp_min(1e-8) * pred_probs.clamp_min(1e-8).log()).sum(dim=-1).mean()
         active_entropy = active_entropy / math.log(max(2, logits.shape[-1]))
         return {
             "toric_geometry_loss": total,
+            "toric_geometry_loss_coarse": coarse,
+            "toric_geometry_loss_intermediate": intermediate,
+            "toric_geometry_loss_full": full,
             "toric_fan_loss": fan_loss.detach(),
             "toric_active_face_ce": face_ce.detach(),
             "toric_active_face_margin": margin.mean().detach(),

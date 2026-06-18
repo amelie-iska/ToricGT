@@ -7,7 +7,8 @@ trajectory this script builds a finite nonnegative integer exponent set from
 the actual embedding vectors, then runs:
 
 * SageMath normal-fan computation for the exponent polytope;
-* Macaulay2 elimination for the toric ideal of the monomial parametrization.
+* Sage integer-kernel and Macaulay2 saturation for the toric ideal of the
+  monomial parametrization.
 
 Requested CAS computations are strict: missing or failing backends raise an
 error rather than producing a substitute value.
@@ -68,6 +69,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--quantization-scale", type=int, default=12)
     parser.add_argument("--sage-timeout-seconds", type=int, default=180)
     parser.add_argument("--macaulay2-timeout-seconds", type=int, default=180)
+    parser.add_argument(
+        "--include-derived-category",
+        action="store_true",
+        help=(
+            "Also ask Macaulay2 for dual resolutions, Ext/Tor modules, and mapping-cone homology. "
+            "This is exact but can be much slower; the BPB campaign gate leaves it off by default."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -327,6 +336,7 @@ def main() -> None:
         m2_cert = m2.toric_ideal_certificate(
             exponents.T.astype(int).tolist(),
             timeout_seconds=max(30, int(args.macaulay2_timeout_seconds)),
+            include_derived=bool(args.include_derived_category),
         ).with_hash()
         record_json = records_dir / f"{record_id}_cas_sidecar.json"
         record_html = records_dir / f"{record_id}_cas_sidecar.html"
@@ -342,6 +352,7 @@ def main() -> None:
             "tropical_hypersurface": tropical_cert,
             "sage_normal_fan": sage_cert,
             "macaulay2_toric_ideal": m2_cert,
+            "derived_category_requested": bool(args.include_derived_category),
             "json": str(record_json),
             "html": f"records/{record_html.name}",
         }

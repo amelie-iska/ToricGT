@@ -1,3 +1,6 @@
 [submodule "external/gflownet"]
 	path = external/gflownet
 	url = https://github.com/amelie-iska/gflownet.git
+[submodule "external/Forest-of-Thought"]
+	path = external/Forest-of-Thought
+	url = https://github.com/amelie-iska/Forest-of-Thought.git
