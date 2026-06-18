@@ -33,6 +33,13 @@ RELATED_PREFIXES = (
     "07_topology_geometry/",
     "08_toric_tropical_bgg/",
     "16_status/metrics_status/",
+    "oai_gflownet/",
+    "oai_mtp/",
+    "score_first_tta/",
+    "graph_lm_primary/",
+    "teacher_distill/",
+    "flattening_calibration/",
+    "aux_grad/",
 )
 
 
@@ -174,6 +181,20 @@ def stripped_name(metric: str) -> str:
 
 
 def metric_family(metric: str) -> str:
+    if metric.startswith("oai_gflownet/"):
+        return "oai_embedding_gflownet_graph_of_thought"
+    if metric.startswith("oai_mtp/"):
+        return "oai_multi_token_prediction"
+    if metric.startswith("score_first_tta/"):
+        return "score_first_test_time_adaptation"
+    if metric.startswith("graph_lm_primary/"):
+        return "first_class_graph_lm"
+    if metric.startswith("teacher_distill/"):
+        return "teacher_distillation"
+    if metric.startswith("flattening_calibration/"):
+        return "graph_to_sequence_flattening_calibration"
+    if metric.startswith("aux_grad/"):
+        return "auxiliary_gradient_routing"
     name = stripped_name(metric)
     if name in {"loss", "toricgt_sidecar_loss", "lm_loss"}:
         return "sidecar_total"
@@ -187,8 +208,6 @@ def metric_family(metric: str) -> str:
         return "tokengt_causal_graph_tokenization"
     if name.startswith("trajectory_memory_"):
         return "trajectory_memory_retrieval"
-    if name.startswith("toric_geometry_") or name.startswith("toric_") and not name.startswith("toric_bgg") and not name.startswith("toric_cca"):
-        return "toric_tropical_geometry"
     if name.startswith("toric_vector_bundle_") or name.startswith("toric_sheaf_"):
         return "toric_vector_bundle_sheaf"
     if name.startswith("toric_bgg_"):
@@ -197,12 +216,33 @@ def metric_family(metric: str) -> str:
         return "koszul_persistence"
     if name.startswith("toric_cca_"):
         return "combinatorial_commutative_algebra"
+    if name.startswith("toric_geometry_") or name.startswith("toric_"):
+        return "toric_tropical_geometry"
     if name.endswith("_active") or name.endswith("_enabled") or name.endswith("_available") or name.endswith("_weight"):
         return "activation_and_weight_status"
     return "other_sidecar"
 
 
 def metric_goal(metric: str) -> str:
+    if metric.startswith("oai_gflownet/"):
+        name = metric.split("/", 1)[1]
+        if name in {"entropy", "action_diversity", "reward_mean"}:
+            return "higher"
+        if name in {"loss", "weighted_loss", "tb_residual", "entropy_objective"}:
+            return "lower"
+        return "context"
+    if metric.startswith("oai_mtp/"):
+        name = metric.split("/", 1)[1]
+        if name in {"loss", "weighted_loss"}:
+            return "lower"
+        return "context"
+    if metric.startswith("score_first_tta/"):
+        return "context"
+    if metric.startswith("graph_lm_primary/"):
+        name = metric.split("/", 1)[1]
+        if name in {"loss", "bpb", "weighted_loss"}:
+            return "lower"
+        return "context"
     name = stripped_name(metric)
     if name.endswith("_weight") or name.endswith("_active") or name.endswith("_enabled") or name.endswith("_available"):
         return "status"
@@ -220,6 +260,48 @@ def metric_goal(metric: str) -> str:
 def description_for(metric: str) -> str:
     name = stripped_name(metric)
     family = metric_family(metric)
+    raw_exact = {
+        "oai_gflownet/enabled": "Status flag indicating that the OAI-baseline embedding-space GFlowNet graph-of-thought head is present for the run.",
+        "oai_gflownet/loss": "Training-only trajectory-balance residual for embedding-space graph-of-thought actions over FineWeb/graphified hidden trajectories.",
+        "oai_gflownet/weighted_loss": "Actual weighted OAI GFlowNet auxiliary contribution before gradient routing.",
+        "oai_gflownet/loss_weight": "Configured scalar weight on the OAI embedding-space GFlowNet trajectory-balance loss.",
+        "oai_gflownet/loss_weight_config": "Configured scalar weight on the OAI embedding-space GFlowNet trajectory-balance loss.",
+        "oai_gflownet/entropy": "Normalized forward-policy action entropy for graph-of-thought actions; low values indicate action collapse.",
+        "oai_gflownet/entropy_weight": "Configured scalar weight on entropy-target pressure for the OAI GFlowNet head.",
+        "oai_gflownet/entropy_weight_config": "Configured scalar weight on entropy-target pressure for the OAI GFlowNet head.",
+        "oai_gflownet/entropy_target": "Target normalized action entropy for the OAI GFlowNet head.",
+        "oai_gflownet/entropy_objective": "Squared deviation between observed OAI GFlowNet entropy and the configured entropy target.",
+        "oai_gflownet/action_diversity": "Entropy of aggregate action mass across the batch; it measures whether the head uses multiple graph-of-thought actions globally.",
+        "oai_gflownet/reward_mean": "Mean terminal reward derived from per-token likelihood on sampled hidden trajectories; higher means the head is seeing easier or better-modeled trajectories.",
+        "oai_gflownet/tb_residual": "Absolute trajectory-balance residual for the OAI GFlowNet head.",
+        "oai_gflownet/score_gap": "Mean top-vs-runner-up action logit gap for OAI graph-of-thought actions; very high values can indicate collapse.",
+        "oai_gflownet/log_z": "Learned log normalizer for the OAI GFlowNet trajectory-balance objective.",
+        "oai_gflownet/sequences": "Number of FineWeb/graphified sequences sampled for the OAI GFlowNet auxiliary step.",
+        "oai_gflownet/max_positions": "Maximum positions used from each sampled hidden trajectory for the OAI GFlowNet auxiliary step.",
+        "oai_gflownet/num_actions": "Number of discrete graph-of-thought action buckets used by the OAI GFlowNet head.",
+        "oai_mtp/enabled": "Status flag indicating that FineWeb-only multi-token prediction is enabled for the OAI baseline adaptation.",
+        "oai_mtp/loss": "Auxiliary multi-token prediction cross-entropy using existing hidden states and the tied LM head at configured future offsets.",
+        "oai_mtp/weighted_loss": "Actual weighted multi-token prediction contribution before gradient routing.",
+        "oai_mtp/loss_weight": "Configured scalar weight on OAI multi-token prediction.",
+        "oai_mtp/loss_weight_config": "Configured scalar weight on OAI multi-token prediction.",
+        "oai_mtp/offset_count": "Number of future-token offsets active for the multi-token prediction auxiliary.",
+        "oai_mtp/max_offset": "Largest future-token offset active for the multi-token prediction auxiliary.",
+        "oai_mtp/sequences": "Number of FineWeb sequences sampled for the multi-token prediction auxiliary.",
+        "score_first_tta/eval_enabled": "Validation-time score-first adaptation flag: each validation batch is scored before any local update.",
+        "score_first_tta/eval_steps": "Number of local score-first adaptation steps used during validation.",
+        "score_first_tta/eval_lr": "Learning rate used for local score-first validation adaptation.",
+        "score_first_tta/eval_commit": "Whether score-first adaptation is committed after evaluation; zero means parameters are restored after the eval pass.",
+        "score_first_tta/steps": "Configured score-first adaptation steps logged during training.",
+        "score_first_tta/lr": "Configured score-first adaptation learning rate logged during training.",
+        "score_first_tta/commit": "Configured score-first adaptation commit flag logged during training.",
+        "graph_lm_primary/loss": "First-class graph language-modeling loss for graphified data, separate from the toric sidecar objective.",
+        "graph_lm_primary/bpb": "BPB-equivalent score for the graph LM stream; useful for diagnosing graphification mismatch against FineWeb BPB.",
+        "graph_lm_primary/weighted_loss": "Actual weighted graph LM loss contribution.",
+        "flattening_calibration/loss": "Calibration loss aligning graph-output flattening behavior with sequential BPB scoring.",
+        "teacher_distill/kl": "Teacher-student KL used for optional distillation on the OAI baseline path.",
+    }
+    if metric in raw_exact:
+        return raw_exact[metric]
     exact = {
         "lm_loss": "Auxiliary graph-text language-model loss on the curated graph stream; it measures how costly the sidecar batch is under the base model but is not itself added to the sidecar objective.",
         "loss": "Weighted scalar sidecar objective actually backpropagated for the auxiliary ToricGT heads at the log step.",
@@ -337,12 +419,34 @@ def description_for(metric: str) -> str:
         return "Toric/tropical geometry probe metric for active fan cells, toric ideals, affine walls, moments, or phase leaves."
     if family == "trajectory_memory_retrieval":
         return "Trajectory-memory retrieval metric for analogical graph-of-thought summaries, topology, persistence, DAG, or derived-category features."
+    if family == "oai_embedding_gflownet_graph_of_thought":
+        return "OAI-baseline embedding-space GFlowNet graph-of-thought metric; review it as a BPB-facing trajectory-search signal, not as part of the toric sidecar bucket."
+    if family == "oai_multi_token_prediction":
+        return "OAI-baseline multi-token prediction metric for early BPB acceleration from future-token auxiliary supervision."
+    if family == "score_first_test_time_adaptation":
+        return "Score-first test-time adaptation metric; it must preserve score-before-update semantics and should be compared against deterministic BPB."
+    if family == "first_class_graph_lm":
+        return "First-class graph language-modeling metric for graphified inputs/outputs in the OAI baseline adaptation."
+    if family == "graph_to_sequence_flattening_calibration":
+        return "Graph-to-sequence flattening metric for preserving BPB scoring while retaining graph-structured training information."
     return "Observed ToricGT sidecar metric; review its trend and BPB correlation before changing its family weight."
 
 
 def weight_guidance_for(metric: str) -> str:
     name = stripped_name(metric)
     family = metric_family(metric)
+    if family == "oai_embedding_gflownet_graph_of_thought":
+        return "Raise OAI GFlowNet weight only when trajectory-balance residual falls, entropy/diversity remain healthy, and train/validation BPB improves; lower it if entropy collapses, score gaps spike, or aux-gradient conflict rises."
+    if family == "oai_multi_token_prediction":
+        return "Raise MTP weight when it accelerates train BPB without widening train/validation BPB gap; lower it or shorten offsets if it overfits local token prediction."
+    if family == "score_first_test_time_adaptation":
+        return "Keep score-first TTA non-destructive unless paired deterministic-vs-score-first evaluation shows reliable BPB lift without leakage risk."
+    if family == "first_class_graph_lm":
+        return "Increase graph LM weight when graphified BPB tracks primary BPB improvements; reduce it if graph stream BPB improves while primary FineWeb BPB stalls or worsens."
+    if family == "graph_to_sequence_flattening_calibration":
+        return "Increase flattening calibration when graph-output structure hurts sequence BPB; reduce it if it suppresses useful graph-in/graph-out learning."
+    if family == "auxiliary_gradient_routing":
+        return "Use gradient-routing metrics to decide whether an auxiliary should touch the backbone; high conflict means lower the family weight or route more aggressively."
     if name in {"lm_loss"}:
         return "Not directly weighted. Use it as a distribution-mismatch diagnostic for the graph sidecar stream."
     if name in {"loss", "toricgt_sidecar_loss"}:

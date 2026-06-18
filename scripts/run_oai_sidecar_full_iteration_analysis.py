@@ -27,6 +27,9 @@ TRAIN_RE = re.compile(
     r"(?: train_bpb:(?P<train_bpb>[0-9.eE+-]+) train_bpt:(?P<train_bpt>[0-9.eE+-]+))?.*?"
     r"(?:graph_lm_loss:(?P<graph_lm_loss>[0-9.eE+-]+) graph_lm_bpb:(?P<graph_lm_bpb>[0-9.eE+-]+) "
     r"graph_lm_w:(?P<graph_lm_weight>[0-9.eE+-]+) )?.*?"
+    r"(?:oai_gfn:(?P<oai_gflownet_loss>[0-9.eE+-]+) gfn_H:(?P<oai_gflownet_entropy>[0-9.eE+-]+) "
+    r"gfn_R:(?P<oai_gflownet_reward>[0-9.eE+-]+) )?.*?"
+    r"(?:mtp:(?P<oai_mtp_loss>[0-9.eE+-]+) mtp_w:(?P<oai_mtp_weight>[0-9.eE+-]+) )?.*?"
     r"sidecar_loss:(?P<sidecar>[0-9.eE+-]+).*?"
     r"graphcg:(?P<graphcg>[0-9.eE+-]+).*?"
     r"analogy:(?P<analogy>[0-9.eE+-]+).*?"
@@ -38,6 +41,14 @@ TRAIN_RE = re.compile(
 FINAL_RE = re.compile(r"final_int8_zlib_roundtrip_exact val_loss:(?P<loss>[0-9.]+) val_bpb:(?P<bpb>[0-9.]+)")
 SIZE_RE = re.compile(r"Total submission size int8\+zlib: (?P<size>\d+) bytes")
 CHECKPOINT_RE = re.compile(r"checkpoint_saved:(?P<path>.*?) step:(?P<step>\d+) val_bpb:(?P<bpb>[-+0-9.eE]+|None)")
+OAI_GFLOWNET_RE = re.compile(
+    r"oai_gfn:(?P<oai_gflownet_loss>[0-9.eE+-]+)\s+"
+    r"gfn_H:(?P<oai_gflownet_entropy>[0-9.eE+-]+)\s+"
+    r"gfn_R:(?P<oai_gflownet_reward>[0-9.eE+-]+)"
+)
+OAI_MTP_RE = re.compile(
+    r"mtp:(?P<oai_mtp_loss>[0-9.eE+-]+)\s+mtp_w:(?P<oai_mtp_weight>[0-9.eE+-]+)"
+)
 
 
 @dataclass
@@ -118,6 +129,12 @@ def parse_log(path: Path) -> dict[str, Any]:
                 if raw is None:
                     continue
                 row[key] = safe_float(raw)
+            if gfn_match := OAI_GFLOWNET_RE.search(line):
+                for key, raw in gfn_match.groupdict().items():
+                    row[key] = safe_float(raw)
+            if mtp_match := OAI_MTP_RE.search(line):
+                for key, raw in mtp_match.groupdict().items():
+                    row[key] = safe_float(raw)
             metrics["train_rows"].append(row)
         if match := VAL_RE.search(line):
             metrics["val_rows"].append({key: safe_float(value) for key, value in match.groupdict().items()})

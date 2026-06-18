@@ -127,6 +127,34 @@ FAMILIES: tuple[FamilyRule, ...] = (
         0.28,
         "Combinatorial commutative algebra, syzygy, resolution, and Buchsbaum-Eisenbud audit pressure.",
     ),
+    FamilyRule(
+        "oai_embedding_gflownet",
+        "OAI_GFLOWNET_LOSS_WEIGHT",
+        (
+            "oai_gflownet_loss",
+            "oai_gflownet_entropy",
+            "oai_gflownet_reward",
+            "oai_gflownet/loss",
+            "oai_gflownet/tb_residual",
+            "oai_gflownet/reward_mean",
+            "oai_gflownet/action_diversity",
+        ),
+        5.0e-6,
+        8.0e-5,
+        2.0e-5,
+        0.34,
+        "Training-only embedding-space GFlowNet graph-of-thought pressure for BPB-facing hidden trajectories.",
+    ),
+    FamilyRule(
+        "oai_multi_token_prediction",
+        "OAI_MTP_LOSS_WEIGHT",
+        ("oai_mtp_loss", "oai_mtp/loss", "oai_mtp/weighted_loss"),
+        1.0e-3,
+        1.2e-2,
+        3.0e-3,
+        0.25,
+        "FineWeb-only multi-token prediction pressure using existing hidden states and the tied LM head.",
+    ),
 )
 
 
@@ -512,6 +540,29 @@ def family_decisions(metrics: dict[str, Any], sidecar_review: dict[str, Any], ru
             elif train_bpb > 1.45:
                 score -= 0.10
                 reasons.append("advanced algebraic pressure remains nonzero but lighter until BPB stabilizes")
+        if rule.name == "oai_embedding_gflownet":
+            entropy_corr = metric_corr_from_review(sidecar_review, ("oai_gflownet/entropy", "oai_gflownet/action_diversity"))
+            residual_corr = metric_corr_from_review(sidecar_review, ("oai_gflownet/tb_residual", "oai_gflownet/loss"))
+            if entropy_corr is not None and entropy_corr < -0.10:
+                score += 0.12
+                reasons.append(f"GFlowNet entropy/diversity anticorrelates with BPB ({entropy_corr:.3f}); keep exploration pressure active")
+            if residual_corr is not None and residual_corr > 0.20:
+                score += 0.10
+                reasons.append(f"GFlowNet residual tracks high BPB ({residual_corr:.3f}); lowering it may help hidden trajectory organization")
+            if train_bpb > 1.55:
+                score -= 0.12
+                reasons.append("primary BPB is very high; keep GFlowNet light until the base likelihood descends")
+        if rule.name == "oai_multi_token_prediction":
+            mtp_corr = metric_corr_from_review(sidecar_review, ("oai_mtp/loss", "oai_mtp/weighted_loss"))
+            if mtp_corr is not None and mtp_corr > 0.20:
+                score += 0.16
+                reasons.append(f"MTP loss tracks high BPB ({mtp_corr:.3f}); future-token auxiliary may accelerate early descent")
+            elif mtp_corr is not None and mtp_corr < -0.20:
+                score -= 0.18
+                reasons.append(f"MTP loss anticorrelates with BPB ({mtp_corr:.3f}); reduce to avoid overfitting a local auxiliary")
+            if train_bpb > 1.60:
+                score += 0.08
+                reasons.append("primary BPB is high; keep a small MTP acceleration signal active")
         jitter = deterministic_jitter(run_id, rule.name, rule.exploration)
         multiplier = math.exp(clamp(score, -0.70, 0.60)) * jitter
         value = clamp(rule.default_value * multiplier, rule.min_value, rule.max_value)
@@ -633,6 +684,22 @@ def build_adaptive_decision(
             "AUX_GRAD_ROUTING": "1",
             "AUX_GRAD_ROUTE_GRAPH_LM": "1",
             "AUX_GRAD_ROUTE_SIDECAR": "1",
+            "OAI_GFLOWNET": "1",
+            "OAI_GFLOWNET_EVERY": "1",
+            "OAI_GFLOWNET_LR": "2e-4",
+            "OAI_GFLOWNET_ENTROPY_WEIGHT": "2e-6",
+            "OAI_GFLOWNET_ENTROPY_TARGET": "1.8",
+            "OAI_GFLOWNET_NUM_ACTIONS": "16",
+            "OAI_GFLOWNET_MAX_SEQUENCES": "2",
+            "OAI_GFLOWNET_MAX_POSITIONS": "192",
+            "OAI_MTP": "1",
+            "OAI_MTP_EVERY": "1",
+            "OAI_MTP_OFFSETS": "2",
+            "OAI_MTP_MAX_SEQUENCES": "2",
+            "SCORE_FIRST_TTA": "1",
+            "SCORE_FIRST_TTA_STEPS": "64",
+            "SCORE_FIRST_TTA_LR": "2e-5",
+            "SCORE_FIRST_TTA_COMMIT": "0",
             "RETRIEVAL_CONDITIONED_AUX": "1",
             "SIDECAR_UNCERTAINTY_WEIGHTING": "1",
             "TORICGT_SIDECAR_COMPUTE_ALL_METRICS": "1",

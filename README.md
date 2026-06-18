@@ -65,6 +65,38 @@ momentum.
 The current campaign state, gate cadence, and graphification knobs are recorded
 in [docs/CURRENT_OAI_TORICGT_STATE.md](docs/CURRENT_OAI_TORICGT_STATE.md).
 
+The active OAI baseline adaptation remains causal autoregressive.  FineWeb BPB
+is still ordinary left-to-right next-token scoring under a causal mask.  The
+graphified representation changes the hidden computation, not the scoring
+contract: FineWeb nodes are revealed in sequence order, directed acyclic graph
+records use topological reveal ranks, and cyclic or non-causal graph records
+use deterministic content-independent random reveal ranks.  Edge-token and
+endpoint features are visible only when their reveal ranks are prefix-valid.
+For OAI FineWeb, the graph-valued output is flattened back to the original
+SentencePiece sequence before BPB is computed.
+
+The current OAI transfer route also promotes several formerly research-only
+techniques into the baseline adaptation as training-time, BPB-gated components:
+
+```text
+OAI_GFLOWNET=1          embedding-space graph-of-thought trajectory-balance head
+OAI_MTP=1               FineWeb-only multi-token prediction using the tied LM head
+SCORE_FIRST_TTA=1       non-destructive score-first validation adaptation
+SCORE_FIRST_TTA_COMMIT=0
+TORICGT_SIDECAR_COMPUTE_ALL_METRICS=1
+```
+
+The embedding-space GFlowNet head treats hidden FineWeb/graphified sequences as
+graph-of-thought trajectories and logs trajectory-balance residuals, reward,
+entropy, action diversity, score gaps, and `logZ` under `oai_gflownet/*`.
+The multi-token prediction auxiliary logs under `oai_mtp/*`.  Both are routed
+through the auxiliary-gradient conflict controls and are excluded from the
+submission artifact unless a later export ablation proves they improve
+round-trip BPB.  The adaptive campaign gate is currently `BPB < 1.19` by
+`1500` steps; if the gate is missed, the full analysis suite reviews every
+W&B/sidecar family separately, writes a timestamped report, updates
+hyperparameters, and restarts from step 0.
+
 The native TokenGT FineWeb route is now autoregressive when
 `use_causal_graph_attention` and `use_lm_token_embeddings` are enabled.  FineWeb
 token chains receive their ordinary left-to-right reveal ranks; directed

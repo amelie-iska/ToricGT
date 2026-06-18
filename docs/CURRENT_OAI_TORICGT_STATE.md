@@ -17,14 +17,21 @@ policy: if the gate is missed, run full analysis, write a report, adjust
 The current hardware target is roughly 20GB VRAM by using large token batches
 with `TRAIN_SEQ_LEN=1024`.
 
-## Active Run Versus Next Restart
+## Active Run
 
-The run that was already active when this document was updated is pre-patch.
-It should be allowed to reach its 1500-step gate.  The takeover watcher then
-runs the full analysis suite and starts the next run from step 0 using the
-patched code.
+The active restart is running the patched OAI baseline adaptation, not the
+older sidecar-only route.  The active run at the time of this update is:
 
-The next restart uses the updated first-class graph path:
+```text
+campaign: tg-bpb119-oai-transfer-gfn-mtp-20260617T235313Z
+run:      tg-bpb119-oai-transfer-gfn-mtp-20260617T235313Z-r001-gate1500_fast_main_lr_light_graphcg-20260617T235417Z
+path:     runs/oai_sidecar/tg-bpb119-oai-transfer-gfn-mtp-20260617T235313Z-r001-gate1500_fast_main_lr_light_graphcg-20260617T235417Z
+```
+
+It should reach the 1500-step gate, then the campaign controller runs the full
+analysis suite and starts the next run from step 0 if the BPB target is missed.
+
+The active run uses the updated first-class graph path:
 
 ```text
 FINEWEB_GRAPHIFY=1
@@ -37,13 +44,30 @@ GRAPH_LM_PRIMARY=1
 TORICGT_SIDECAR_COMPUTE_ALL_METRICS=1
 ```
 
-The next restart also uses the patched adaptive graph-radius and flattening
-calibration policy.  FineWeb graphification starts in a local radius-2 or
-radius-3 regime.  The 1.5K-step analysis may widen the TokenGT and
+It also uses the patched adaptive graph-radius and flattening calibration
+policy.  FineWeb graphification starts in a local radius-2 or radius-3 regime.
+The 1.5K-step analysis may widen the TokenGT and
 graph-output-flattening radii to 4--6 only when the evidence says the graph path
 is helping BPB: improving train-BPB slope, nonconflicting TokenGT graph loss,
 positive graph-output flattening lift, and no strong W&B correlation indicating
 that wider graph features are making BPB worse.
+
+## Autoregressive Graph Decoding Contract
+
+The active OAI baseline remains causal autoregressive.  Graphification changes
+the representation, not the BPB score contract.
+
+```text
+FineWeb BPB                 -> left-to-right autoregressive SP1024 sequence
+FineWeb graphification      -> causal path graph over the same tokens
+directed acyclic graph data -> topological autoregressive reveal ranks
+cyclic/non-causal graphs    -> deterministic random-order autoregressive ranks
+OAI FineWeb output          -> graph hidden states flattened back to sequence order
+```
+
+Edge-token and endpoint features are legal only when their reveal ranks are
+prefix-valid.  FineWeb output flattening is OAI-only and optional; general
+graph records remain graph structured and are not flattened by default.
 
 ## BPB-Safe FineWeb Graphification
 
@@ -96,10 +120,24 @@ over-regularization, or a metric that should stay diagnostic-only.
 
 ## Advanced Loss Families
 
+The current OAI baseline transfer also enables three BPB-facing heads/paths:
+
+- `oai_gflownet/*`: a training-only embedding-space graph-of-thought
+  GFlowNet head over hidden trajectories, with trajectory-balance residual,
+  reward, entropy, action-diversity, score-gap, and `logZ` metrics.
+- `oai_mtp/*`: FineWeb-only multi-token prediction at configured future
+  offsets using the existing hidden states and tied LM head.
+- `score_first_tta/*`: non-destructive score-first validation adaptation.
+  Validation examples are scored first; adaptation is restored afterward while
+  `SCORE_FIRST_TTA_COMMIT=0`.
+
 The 1500-step review analyzes train BPB, validation BPB when available,
 graph-LM BPB, artifact bytes, W&B metrics, screenshots, and the full
 `toricgt_sidecar` metric family.  It considers these families separately:
 
+- OAI embedding-space GFlowNet graph-of-thought pressure;
+- OAI multi-token prediction;
+- score-first test-time adaptation;
 - GraphCG full-rank chart pressure;
 - TokenGT graph loss;
 - graph-LM primary stream;

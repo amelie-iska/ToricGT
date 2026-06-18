@@ -98,6 +98,25 @@ test-time adaptation mechanism without changing model weights or reading
 future bytes. The causal audit mutates future bytes and verifies that current
 logits are unchanged.
 
+The OAI SP1024 baseline adaptation now has its own training-only
+embedding-space GFlowNet head.  It reads prefix-valid hidden trajectories from
+the graphified FineWeb/OAI stream, treats token/action buckets as discrete
+graph-of-thought refinements, and trains a normalized trajectory-balance
+objective against a detached likelihood-derived reward.  It logs
+`oai_gflownet/loss`, `oai_gflownet/tb_residual`,
+`oai_gflownet/reward_mean`, `oai_gflownet/entropy`,
+`oai_gflownet/action_diversity`, `oai_gflownet/score_gap`, and
+`oai_gflownet/log_z`.  This head is training-only by default; it is kept out of
+the exported artifact unless a later round-trip export ablation shows a BPB
+gain.
+
+The same route also enables a FineWeb-only multi-token prediction auxiliary
+under `oai_mtp/*`.  It reuses the existing hidden states and tied LM head to
+predict configured future offsets, giving a small early-descent pressure
+without adding inference-time parameters.  Both OAI GFlowNet and OAI MTP are
+handled independently by the adaptive 1.5K-step review rather than being
+collapsed into a single "advanced loss" bucket.
+
 Curated graph data is used by serializing `graph_json` into compact records:
 `node id=... type=... text=...` and `edge source->target type=...`. This keeps
 graph structure visible to the byte model while preserving the self-contained
@@ -124,6 +143,10 @@ OAI_FINEWEB_OUTPUT_FLATTENING=1
 GRAPH_OUTPUT_FLATTENING=1
 GRAPH_LM_PRIMARY=1
 TORICGT_SIDECAR_COMPUTE_ALL_METRICS=1
+OAI_GFLOWNET=1
+OAI_MTP=1
+SCORE_FIRST_TTA=1
+SCORE_FIRST_TTA_COMMIT=0
 ```
 
 The current graphification knobs are logged and swept independently:
@@ -143,6 +166,13 @@ This is intentionally not a single "graph pressure" setting.  The 1.5K-step
 review agent should decide whether node identifiers, endpoint maps,
 virtual-edge folding, or sequence score correction helped BPB, then adjust them
 separately on the next restart.
+
+FineWeb scoring is still causal autoregressive.  FineWeb graphification uses a
+causal path over the same SP1024 tokens, directed acyclic graph records use
+topological reveal ranks, and cyclic or non-causal graph records use
+deterministic random-order reveal ranks.  Only prefix-valid node, endpoint, and
+edge-token information can affect a prediction.  OAI FineWeb output flattening
+then maps the graph hidden state back to the original sequence order for BPB.
 
 The full configured model with these graph features has about `18.09M`
 parameters before training-only sidecar heads. The hard artifact gate remains

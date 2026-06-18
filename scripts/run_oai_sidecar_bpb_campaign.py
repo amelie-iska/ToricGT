@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from adaptive_bpb_annealing import build_adaptive_decision
+
 
 VAL_RE = re.compile(r"step:(?P<step>\d+)/(?P<total>\d+) val_loss:(?P<loss>[0-9.]+) val_bpb:(?P<bpb>[0-9.]+)")
 TRAIN_RE = re.compile(
@@ -34,6 +36,9 @@ TRAIN_RE = re.compile(
     r"(?: train_bpb:(?P<train_bpb>[0-9.eE+-]+) train_bpt:(?P<train_bpt>[0-9.eE+-]+))?.*?"
     r"(?: graph_lm_loss:(?P<graph_lm_loss>[0-9.eE+-]+) graph_lm_bpb:(?P<graph_lm_bpb>[0-9.eE+-]+) "
     r"graph_lm_w:(?P<graph_lm_weight>[0-9.eE+-]+))?.*?"
+    r"(?: oai_gfn:(?P<oai_gflownet_loss>[0-9.eE+-]+) gfn_H:(?P<oai_gflownet_entropy>[0-9.eE+-]+) "
+    r"gfn_R:(?P<oai_gflownet_reward>[0-9.eE+-]+))?.*?"
+    r"(?: mtp:(?P<oai_mtp_loss>[0-9.eE+-]+) mtp_w:(?P<oai_mtp_weight>[0-9.eE+-]+))?.*?"
     r"sidecar_loss:(?P<sidecar>[0-9.eE+-]+) graphcg:(?P<graphcg>[0-9.eE+-]+) "
     r"analogy:(?P<analogy>[0-9.eE+-]+) tokengt_graph:(?P<tokengt>[0-9.eE+-]+) "
     r"memory:(?P<memory>[0-9.eE+-]+)"
@@ -44,6 +49,14 @@ TRAIN_RE = re.compile(
 FINAL_RE = re.compile(r"final_int8_zlib_roundtrip_exact val_loss:(?P<loss>[0-9.]+) val_bpb:(?P<bpb>[0-9.]+)")
 SIZE_RE = re.compile(r"Total submission size int8\+zlib: (?P<size>\d+) bytes")
 CHECKPOINT_RE = re.compile(r"checkpoint_saved:(?P<path>.*?) step:(?P<step>\d+) val_bpb:(?P<bpb>[-+0-9.eE]+|None)")
+OAI_GFLOWNET_RE = re.compile(
+    r"oai_gfn:(?P<oai_gflownet_loss>[0-9.eE+-]+)\s+"
+    r"gfn_H:(?P<oai_gflownet_entropy>[0-9.eE+-]+)\s+"
+    r"gfn_R:(?P<oai_gflownet_reward>[0-9.eE+-]+)"
+)
+OAI_MTP_RE = re.compile(
+    r"mtp:(?P<oai_mtp_loss>[0-9.eE+-]+)\s+mtp_w:(?P<oai_mtp_weight>[0-9.eE+-]+)"
+)
 
 
 def utc_stamp() -> str:
@@ -607,7 +620,12 @@ def parse_log(log_path: Path) -> dict[str, float | int | str | None]:
         if match := VAL_RE.search(line):
             vals.append({key: float(value) for key, value in match.groupdict().items()})
         if match := TRAIN_RE.search(line):
-            trains.append({key: float(value) for key, value in match.groupdict().items() if value is not None})
+            row = {key: float(value) for key, value in match.groupdict().items() if value is not None}
+            if gfn_match := OAI_GFLOWNET_RE.search(line):
+                row.update({key: float(value) for key, value in gfn_match.groupdict().items()})
+            if mtp_match := OAI_MTP_RE.search(line):
+                row.update({key: float(value) for key, value in mtp_match.groupdict().items()})
+            trains.append(row)
         if match := FINAL_RE.search(line):
             final_loss = float(match.group("loss"))
             final_bpb = float(match.group("bpb"))
@@ -636,6 +654,11 @@ def parse_log(log_path: Path) -> dict[str, float | int | str | None]:
         "graph_lm_loss": latest_train.get("graph_lm_loss"),
         "graph_lm_bpb": latest_train.get("graph_lm_bpb"),
         "graph_lm_weight": latest_train.get("graph_lm_weight"),
+        "oai_gflownet_loss": latest_train.get("oai_gflownet_loss"),
+        "oai_gflownet_entropy": latest_train.get("oai_gflownet_entropy"),
+        "oai_gflownet_reward": latest_train.get("oai_gflownet_reward"),
+        "oai_mtp_loss": latest_train.get("oai_mtp_loss"),
+        "oai_mtp_weight": latest_train.get("oai_mtp_weight"),
         "sidecar_loss": latest_train.get("sidecar"),
         "graphcg_loss": latest_train.get("graphcg"),
         "analogy_loss": latest_train.get("analogy"),
@@ -668,11 +691,12 @@ def profile_by_name(name: str) -> Profile | None:
 
 def choose_profile(run_index: int, history: list[dict[str, object]], offset: int) -> Profile:
     if history:
-        decision = history[-1].get("analysis_decision", {})
-        if isinstance(decision, dict):
-            hinted = profile_by_name(str(decision.get("next_profile_hint", "")))
-            if hinted is not None:
-                return hinted
+        for row in reversed(history):
+            decision = row.get("analysis_decision", {})
+            if isinstance(decision, dict):
+                hinted = profile_by_name(str(decision.get("next_profile_hint", "")))
+                if hinted is not None:
+                    return hinted
     if not history:
         return PROFILES[offset % len(PROFILES)]
     known = {profile.name: profile for profile in PROFILES}
@@ -879,6 +903,8 @@ def run_codex_review(report: Path) -> None:
         "toric/tropical geometry, persistent homology, vector-bundle/sheaf, "
         "BGG category O, Koszul/resolution, combinatorial commutative algebra, scheduled graph-LM weights, teacher distillation, "
         "adaptive graph radius, graph-output flattening CE lift/regression, calibration loss, score-correction gates, "
+        "OAI embedding-space GFlowNet graph-of-thought trajectory-balance metrics, OAI multi-token prediction metrics, "
+        "non-destructive score-first TTA metrics, "
         "auxiliary-gradient routing cosines/projection coefficients, retrieval gates, uncertainty-weighted advanced multipliers, "
         "GraphCG BPB-orthogonalization metrics, artifact size, and round-trip quantization. "
         "If the report's full-analysis decision includes a sidecar_metric_review path, read that markdown/JSON and account for every observed "
@@ -890,7 +916,27 @@ def run_codex_review(report: Path) -> None:
         "do not automatically treat every positive correlation as harmful. "
         f"Report path: {report}"
     )
-    subprocess.run(["codex", "exec", prompt], check=False)
+    stdout_path = report.with_name(f"{report.stem}.codex-review.stdout.log")
+    stderr_path = report.with_name(f"{report.stem}.codex-review.stderr.log")
+    try:
+        stdout = stdout_path.open("w", encoding="utf-8")
+        stderr = stderr_path.open("w", encoding="utf-8")
+        try:
+            proc = subprocess.Popen(
+                ["codex", "exec", prompt],
+                stdout=stdout,
+                stderr=stderr,
+                start_new_session=True,
+            )
+        finally:
+            stdout.close()
+            stderr.close()
+        (report.with_name(f"{report.stem}.codex-review.pid")).write_text(f"{proc.pid}\n", encoding="utf-8")
+    except Exception as exc:
+        report.with_name(f"{report.stem}.codex-review.failed.txt").write_text(
+            f"failed to launch codex review: {exc!r}\n",
+            encoding="utf-8",
+        )
 
 
 def launch_training(
@@ -1010,9 +1056,25 @@ def launch_training(
         "SIDECAR_UNCERTAINTY_MAX": "2.0",
         "GRAPHCG_BPB_ORTHOGONAL_WEIGHT": "0.02",
         "GRAPHCG_COVARIANCE_CONFLICT_DAMPING": "0.50",
-        "SCORE_FIRST_TTA": os.environ.get("SCORE_FIRST_TTA", "0"),
-        "SCORE_FIRST_TTA_STEPS": os.environ.get("SCORE_FIRST_TTA_STEPS", "0"),
-        "SCORE_FIRST_TTA_LR": os.environ.get("SCORE_FIRST_TTA_LR", "0"),
+        "SCORE_FIRST_TTA": os.environ.get("SCORE_FIRST_TTA", "1"),
+        "SCORE_FIRST_TTA_STEPS": os.environ.get("SCORE_FIRST_TTA_STEPS", "64"),
+        "SCORE_FIRST_TTA_LR": os.environ.get("SCORE_FIRST_TTA_LR", "2e-5"),
+        "SCORE_FIRST_TTA_COMMIT": os.environ.get("SCORE_FIRST_TTA_COMMIT", "0"),
+        "OAI_GFLOWNET": os.environ.get("OAI_GFLOWNET", "1"),
+        "OAI_GFLOWNET_LR": os.environ.get("OAI_GFLOWNET_LR", "2e-4"),
+        "OAI_GFLOWNET_EVERY": os.environ.get("OAI_GFLOWNET_EVERY", "1"),
+        "OAI_GFLOWNET_LOSS_WEIGHT": os.environ.get("OAI_GFLOWNET_LOSS_WEIGHT", "2e-5"),
+        "OAI_GFLOWNET_ENTROPY_WEIGHT": os.environ.get("OAI_GFLOWNET_ENTROPY_WEIGHT", "2e-6"),
+        "OAI_GFLOWNET_ENTROPY_TARGET": os.environ.get("OAI_GFLOWNET_ENTROPY_TARGET", "1.8"),
+        "OAI_GFLOWNET_NUM_ACTIONS": os.environ.get("OAI_GFLOWNET_NUM_ACTIONS", "16"),
+        "OAI_GFLOWNET_HIDDEN_DIM": os.environ.get("OAI_GFLOWNET_HIDDEN_DIM", "192"),
+        "OAI_GFLOWNET_MAX_SEQUENCES": os.environ.get("OAI_GFLOWNET_MAX_SEQUENCES", "2"),
+        "OAI_GFLOWNET_MAX_POSITIONS": os.environ.get("OAI_GFLOWNET_MAX_POSITIONS", "192"),
+        "OAI_MTP": os.environ.get("OAI_MTP", "1"),
+        "OAI_MTP_EVERY": os.environ.get("OAI_MTP_EVERY", "1"),
+        "OAI_MTP_LOSS_WEIGHT": os.environ.get("OAI_MTP_LOSS_WEIGHT", "0.003"),
+        "OAI_MTP_OFFSETS": os.environ.get("OAI_MTP_OFFSETS", "2"),
+        "OAI_MTP_MAX_SEQUENCES": os.environ.get("OAI_MTP_MAX_SEQUENCES", "2"),
         "SEED": str(1337 + run_index),
     }
     env = {**base_env, **profile.env}
@@ -1402,6 +1464,8 @@ def main() -> None:
             prior_analysis_dir = repo / prior_analysis_dir
         prior_analysis_metrics = read_json_if_exists(prior_analysis_dir / "metrics.json")
         prior_analysis_decision = read_json_if_exists(prior_analysis_dir / "next_profile_decision.json")
+        prior_analysis_validation = read_json_if_exists(prior_analysis_dir / "validation.json")
+        prior_sidecar_summary = read_json_if_exists(prior_analysis_dir / "sidecar_metric_review" / "sidecar_metric_summary.json")
         prior_analysis_report = prior_analysis_dir / "FULL-ITERATION-REPORT.md"
         if not prior_analysis_metrics or "_read_error" in prior_analysis_metrics:
             raise FileNotFoundError(f"prior analysis metrics are unavailable: {prior_analysis_dir / 'metrics.json'}")
@@ -1411,6 +1475,20 @@ def main() -> None:
             )
         if not prior_analysis_report.exists():
             raise FileNotFoundError(f"prior analysis report is unavailable: {prior_analysis_report}")
+        original_prior_analysis_decision = prior_analysis_decision
+        prior_analysis_decision = build_adaptive_decision(
+            prior_analysis_metrics,
+            prior_analysis_validation if isinstance(prior_analysis_validation, dict) else {},
+            prior_sidecar_summary if isinstance(prior_sidecar_summary, dict) else {},
+            run_id=f"prior_import:{prior_analysis_dir.name}",
+            target_bpb=float(args.target_bpb),
+        )
+        prior_analysis_decision["recomputed_from_prior_analysis_with_current_policy"] = True
+        prior_analysis_decision["original_prior_next_profile_hint"] = (
+            original_prior_analysis_decision.get("next_profile_hint")
+            if isinstance(original_prior_analysis_decision, dict)
+            else None
+        )
         imported = notes_dir / f"PRIOR-FULL-ANALYSIS-{prior_analysis_dir.name}.md"
         imported.write_text(
             "\n".join(

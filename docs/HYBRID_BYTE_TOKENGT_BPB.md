@@ -208,6 +208,23 @@ analogy, memory, toric, BGG, Koszul, vector-bundle/sheaf, and combinatorial
 toric loss weights.  A poor correlation for one family is not treated as a
 blanket rejection of graphification.
 
+The OAI-baseline route now adds two BPB-facing training auxiliaries to this
+hybrid objective:
+
+```text
+oai_gflownet/loss       embedding-space graph-of-thought trajectory balance
+oai_gflownet/entropy    policy entropy for the graph-of-thought action buckets
+oai_gflownet/reward     detached likelihood-derived terminal reward
+oai_mtp/loss            FineWeb-only multi-token prediction CE at future offsets
+```
+
+These auxiliaries use the same graphified hidden states that produce the BPB
+logits.  They do not change the official scoring order, and they are routed
+through auxiliary-gradient controls before touching the backbone.  The review
+loop should interpret them separately: GFlowNet is a hidden-trajectory
+organization and exploration signal, while MTP is a local likelihood
+acceleration signal.
+
 Advanced sidecar pressure is also scheduled globally. Metrics and examples are
 computed from step 0, but the aggregate sidecar gradient multiplier starts
 small, holds briefly, and ramps. This keeps the mathematical audit always on
