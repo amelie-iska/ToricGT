@@ -1,7 +1,19 @@
 \documentclass[11pt]{article}
 
 \usepackage[margin=1in]{geometry}
-\usepackage{fontspec}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T1]{fontenc}
+  \DeclareUnicodeCharacter{05DB}{k}
+  \DeclareUnicodeCharacter{05EA}{t}
+  \DeclareUnicodeCharacter{05D1}{b}
+  \DeclareUnicodeCharacter{05BC}{}
+  \DeclareUnicodeCharacter{05B8}{a}
+  \DeclareUnicodeCharacter{05B7}{a}
+\else
+  \usepackage{fontspec}
+\fi
 \usepackage{amsmath,amssymb,amsthm,mathtools}
 \usepackage{booktabs,array,longtable,multirow}
 \usepackage{enumitem}
@@ -10,15 +22,23 @@
 \usepackage{subcaption}
 \usepackage{float}
 \usepackage{xcolor}
-\usepackage{microtype}
+\ifPDFTeX
+  \usepackage[expansion=false]{microtype}
+\else
+  \usepackage{microtype}
+\fi
 \usepackage{hyperref}
 \usepackage[nameinlink,noabbrev]{cleveref}
 
 \graphicspath{{./}{./toricgt_pg_softmoe_figures/}{./toricgt_extended_figures/}}
-\IfFontExistsTF{Noto Serif Hebrew}
-  {\newfontfamily\hebrewfont{Noto Serif Hebrew}}
-  {\newfontfamily\hebrewfont{Arial Unicode MS}}
-\newcommand{\heb}[1]{{\hebrewfont #1}}
+\ifPDFTeX
+  \newcommand{\heb}[1]{\textsf{#1}}
+\else
+  \IfFontExistsTF{Noto Serif Hebrew}
+    {\newfontfamily\hebrewfont{Noto Serif Hebrew}}
+    {\newfontfamily\hebrewfont{Arial Unicode MS}}
+  \newcommand{\heb}[1]{{\hebrewfont #1}}
+\fi
 
 \hypersetup{
   colorlinks=true,
@@ -103,7 +123,7 @@
 
 
 \begin{abstract}
-ToricGT is a graph-token Transformer framework for algebraic and graph-structured reasoning under stringent compression and evaluation constraints.  The paper makes the toric component operational rather than decorative.  We introduce a Toric BGG training layer built from finite shadows of hypertoric category $\mathcal O$, oriented-matroid category $\mathcal O$, multigraded BGG correspondences, toric Tate resolutions, and Euler-Koszul complexes.  These objects supply small, verifiable certificates for reasoning trajectories: sign-vector posets, standard filtrations, sparse differentials, Betti profiles, Gale-dual labels, active faces of Newton polytopes, and homological consistency checks.  The certificates are attached through low-rank probes to the existing ToricGT stack: TokenGT-style node/edge tokenization, tropical ring attention, noncommutative torus phase channels, Soft-MoE routing, GraphCG concept axes, embedding-space GFlowNet search, and trajectory-retrieval memory.  For the Parameter-Golf branch we add a byte-scored TokenGT hybrid: official BPB remains a byte-level prequential log score, while FineWeb byte paths and graph-of-thought examples receive causal or noncausal TokenGT-style graph losses on hidden reveal trajectories.  We prove equivariance and stability statements for graph-token layers, tropical active faces, Soft-MoE dispatch, prefix-causal byte scoring, BGG differentials, incidence-algebra proxies, chain-map supervision, Gale-dual curricula, BPB-safe interpolation heads, and behavior-corridor projections.  We also develop behavior-modification protocols that generalize Assistant-Axis capping into GraphCG-disentangled toric-tropical corridors and alcoves, with Stanley--Reisner, toric-ideal, Fitting, free-resolution, and DG-algebra barriers for graph-of-thought trajectories, memory, and analogy.  The methodology is designed for implementation: certificates are cached on CPU, GPU losses have small rank and sparse support, activation gates are staged, ablations are explicit, and evaluation remains centered on BPB and held-out reasoning quality.  The central design principle is that toric BGG theory should improve training by organizing hidden reasoning into exact finite complexes, while deployable models retain only the components that improve validation BPB, graph-reasoning accuracy, retrieval quality, behavior reliability, or out-of-distribution algebraic generalization under an auditable artifact budget.
+ToricGT is a graph-token Transformer framework for algebraic and graph-structured reasoning under stringent compression and evaluation constraints.  The paper makes the toric component operational rather than decorative.  We introduce a Toric BGG training layer built from finite shadows of hypertoric category $\mathcal O$, oriented-matroid category $\mathcal O$, multigraded BGG correspondences, toric Tate resolutions, and Euler-Koszul complexes.  These objects supply small, verifiable certificates for reasoning trajectories: sign-vector posets, standard filtrations, sparse differentials, Betti profiles, Gale-dual labels, active faces of Newton polytopes, and homological consistency checks.  The certificates are attached through low-rank probes to the existing ToricGT stack: TokenGT-style node/edge tokenization, tropical ring attention, noncommutative torus phase channels, Soft-MoE routing, GraphCG concept axes, embedding-space GFlowNet search, embedding-space Forest-of-Thought search, and trajectory-retrieval memory.  For the Parameter-Golf branch we add a byte-scored TokenGT hybrid: official BPB remains a byte-level prequential log score, while FineWeb byte paths and graph-of-thought examples receive causal or noncausal TokenGT-style graph losses on hidden reveal trajectories.  The newest implementation promotes FineWeb graphification and graph-output flattening to first-class training mechanisms and adds a training-only Forest-of-Thought head with sparse tree activation, UCB expansion pressure, dynamic self-correction, consensus-guided leaf selection, and trajectory/subtrajectory balance.  We prove equivariance and stability statements for graph-token layers, tropical active faces, Soft-MoE dispatch, prefix-causal byte scoring, BGG differentials, incidence-algebra proxies, chain-map supervision, Gale-dual curricula, BPB-safe interpolation heads, and behavior-corridor projections.  We also develop behavior-modification protocols that generalize Assistant-Axis capping into GraphCG-disentangled toric-tropical corridors and alcoves, with Stanley--Reisner, toric-ideal, Fitting, free-resolution, and DG-algebra barriers for graph-of-thought trajectories, memory, analogy, and Forest-of-Thought search.  The methodology is designed for implementation: certificates are cached on CPU, GPU losses have small rank and sparse support, activation gates are staged, ablations are explicit, and evaluation remains centered on BPB and held-out reasoning quality.  The central design principle is that toric BGG theory should improve training by organizing hidden reasoning into exact finite complexes, while deployable models retain only the components that improve validation BPB, graph-reasoning accuracy, retrieval quality, behavior reliability, or out-of-distribution algebraic generalization under an auditable artifact budget.
 \end{abstract}
 
 
@@ -113,7 +133,7 @@ ToricGT is a graph-token Transformer framework for algebraic and graph-structure
 
 \section{Purpose and high-level architecture}
 
-ToricGT begins from a simple modeling decision: represent structured reasoning problems as typed graphs, tokenize their nodes and edges, and process the resulting token table with a Transformer that respects graph relabeling.  The architecture then adds algebraic structure where the task calls for it.  Tropical heads implement max-plus and min-plus recurrences; ring evaluation changes the memory schedule without changing the exact attention function; noncommutative-torus channels provide projective phase memory; Soft-MoE blocks route typed graph tokens to specialized differentiable computations; GraphCG-style coordinates make concept directions inspectable; and GFlowNet fine-tuning samples diverse graph-of-thought completions.
+ToricGT begins from a simple modeling decision: represent structured reasoning problems as typed graphs, tokenize their nodes and edges, and process the resulting token table with a Transformer that respects graph relabeling.  The architecture then adds algebraic structure where the task calls for it.  Tropical heads implement max-plus and min-plus recurrences; ring evaluation changes the memory schedule without changing the exact attention function; noncommutative-torus channels provide projective phase memory; Soft-MoE blocks route typed graph tokens to specialized differentiable computations; GraphCG-style coordinates make concept directions inspectable; GFlowNet fine-tuning samples diverse graph-of-thought completions; and the new embedding-space Forest-of-Thought layer maintains several sparsely active hidden reasoning trees above the same graph-token state.
 
 The contribution of this revision is the Toric BGG layer.  The term is used in a precise but finite sense.  Hypertoric category $\mathcal O$ and category $\mathcal O$ for quantized conical symplectic resolutions give a toric analogue of BGG representation theory: highest-weight structure, standard and costandard objects, Koszulity, and Gale-dual behavior.  Multigraded BGG and toric Tate resolutions give a computational companion in toric commutative algebra.  ToricGT uses these theories to build small certificates that can be attached to training examples: a finite poset of chambers or sign vectors, a sparse chain complex, standard-filtration masks, a Betti table or Koszul degree profile, a Gale-dual partner, and optional Euler-Koszul data.  The model is trained not only to predict the answer, but to produce hidden trajectories whose local moves behave like differentials and whose analogical transfers behave like approximate exact functors between finite complexes.
 
@@ -124,7 +144,7 @@ A ToricGT instance consists of
 \begin{equation}
   \mathsf{ToricGT}=D\circ \Phi_L\circ\cdots\circ\Phi_1\circ T,
 \end{equation}
-where $T$ is a graph tokenizer, each $\Phi_\ell$ is a token-permutation-equivariant block with softmax, tropical, hybrid, or ring-evaluated attention, and $D$ is a shared node/edge/graph decoder.  Optional side modules supply toric phase transports, BGG certificate probes, GraphCG coordinate heads, GFlowNet policies, trajectory-memory retrieval, and long-context cache compression.  In a BPB-constrained deployment, most of these probes are training-only; they survive in the final artifact only if they improve the held-out log score under the byte budget.
+where $T$ is a graph tokenizer, each $\Phi_\ell$ is a token-permutation-equivariant block with softmax, tropical, hybrid, or ring-evaluated attention, and $D$ is a shared node/edge/graph decoder.  Optional side modules supply toric phase transports, BGG certificate probes, GraphCG coordinate heads, GFlowNet policies, Forest-of-Thought policies, trajectory-memory retrieval, and long-context cache compression.  In a BPB-constrained deployment, most of these probes are training-only; they survive in the final artifact only if they improve the held-out log score under the byte budget.
 
 \begin{figure}[p]
   \centering
@@ -3428,6 +3448,7 @@ The codebase should be organized as follows.
   \item \texttt{hebrew\_graphs.py}: root-template graph conversion, analyzer-hypothesis graphs, paradigm graphs.
   \item \texttt{model.py}: encoder, task heads, graph decoder, GFlowNet policy head.
   \item \texttt{gflownet.py}: trajectory balance, subtrajectory balance, replay buffer, novelty metrics.
+  \item \texttt{embedding\_forest\_of\_thought.py}: training-only embedding-space Forest-of-Thought head, sparse activation, UCB expansion pressure, hidden self-correction, consensus, and trajectory/subtrajectory balance metrics.
   \item \texttt{soft\_moe\_toric.py}: graph-token Soft-MoE dispatch/combine, typed expert banks, slot diagnostics, chunked dispatch.
   \item \texttt{random\_order\_lm.py}: dense random-order autoregressive byte model, toric position phases, tied embeddings, recurrence, compact GFlowNet action scaling, and score-before-update tests.
   \item \texttt{causal\_soft\_moe.py}: prefix-scan Soft-MoE for optional autoregressive Parameter-Golf ablations, causal audits, score-before-update tests.
@@ -4014,6 +4035,110 @@ with densities for continuous moves and probabilities for discrete moves.  The r
 \end{equation}
 This gives inference-time scaling a geometric search space.  Rather than sampling arbitrary latent perturbations, the model explores cells, walls, and faces that correspond to identifiable changes in reasoning.
 
+\subsection{Embedding-space Forest-of-Thought}
+
+The current ToricGT implementation adds a second inference-scaling and training-time search layer inspired by Tree-of-Thought, Graph-of-Thought, and Forest-of-Thought methods \cite{yao2023tree,besta2023graph,bi2024forest}.  The original FoT proposal runs several reasoning trees, activates only relevant branches, revisits flawed states through self-correction, and selects final answers by consensus.  ToricGT imports those operations into hidden space rather than prompt space.  This distinction is important for the Parameter-Golf track: the official scored object remains a byte-level prequential distribution, but the unscored auxiliary heads can train hidden states to support branching, correction, and consensus.
+
+\begin{definition}[Embedding Forest-of-Thought state]
+For a prefix-visible hidden table $H=(h_1,\ldots,h_L)$, an embedding-space FoT state is
+\begin{equation}
+  \mathfrak F(H)=
+  \left(
+    \{T_\alpha\}_{\alpha=1}^{A},
+    a_{i\alpha},
+    v_{i\alpha},
+    u_{i\alpha},
+    c_i,
+    \delta_i,
+    z
+  \right),
+\end{equation}
+where $T_\alpha$ is a latent thought tree, $a_{i\alpha}$ is the activation mass assigning token or graph position $i$ to tree $\alpha$, $v_{i\alpha}$ is a value estimate, $u_{i\alpha}$ is a UCB-style expansion score, $c_i$ is a consensus logit over a compact bucketed leaf space, $\delta_i$ is a correction vector, and $z$ is the learned log partition used by trajectory balance.  The node set of $T_\alpha$ is not serialized; it is a structured view of hidden positions, graph reasoning levels, and optional memory items.
+\end{definition}
+
+The tree activations are intentionally sparse.  With temperature $\tau_F$ and learned tree keys $k_\alpha$, the implementation uses
+\begin{equation}
+  a_{i\alpha}=
+  \operatorname{softmax}_\alpha
+  \left(\frac{\ip{W_a h_i}{k_\alpha}}{\tau_F}\right),
+  \qquad
+  A_i=\operatorname{TopK}_\alpha a_{i\alpha}.
+\end{equation}
+Sparse activation is measured by entropy and active-tree count.  A collapse to one tree too early indicates that the FoT head has become a single-path regularizer; diffuse activation across all trees indicates that it is wasting auxiliary compute.
+
+The reward is a training-only scalar that combines BPB pressure with advanced-structure agreement:
+\begin{equation}
+  R_i=
+  \sigma\left(
+    \rho_0-\operatorname{NLL}_i
+    +\eta_G R_i^{\mathrm{GFN}}
+    +\eta_T R_i^{\mathrm{toric}}
+    +\eta_{\mathrm{top}}R_i^{\mathrm{top}}
+    +\eta_{\mathrm{mem}}R_i^{\mathrm{mem}}
+  \right).
+\end{equation}
+When validation BPB is unavailable during an early gate, the controller falls back to train BPB and local NLL trends.  The advanced rewards may shape the forest, but they are routed through the same auxiliary-gradient controller as GraphCG, memory, BGG, Koszul, and toric losses; if they conflict with the byte objective, their gradients are damped or projected.
+
+\begin{definition}[Embedding FoT loss]
+The implemented FoT objective is
+\begin{equation}
+\begin{split}
+  \mathcal L_{\mathrm{FoT}}={}&
+  \lambda_{\mathrm{sp}}\mathcal L_{\mathrm{sparse}}
+  +\lambda_{\mathrm{ucb}}\mathcal L_{\mathrm{UCB}}
+  +\lambda_{\mathrm{corr}}\mathcal L_{\mathrm{corr}}
+  +\lambda_{\mathrm{cons}}\mathcal L_{\mathrm{cons}}\\
+  &+\lambda_{\mathrm{TB}}\mathcal L_{\mathrm{TB}}
+  +\lambda_{\mathrm{SubTB}}\mathcal L_{\mathrm{SubTB}}
+  +\lambda_{\mathrm{cmp}}\mathcal L_{\mathrm{complexity}} .
+\end{split}
+\end{equation}
+The sparse term controls activation entropy; the UCB term encourages expansion toward branches with high value and uncertainty; the correction term aligns $\delta_i$ with lower-NLL or higher-reward successor directions; the consensus term asks high-reward leaves to agree in a compact decision bucket; trajectory and subtrajectory balance make the forest a reward-proportional sampler; and the complexity term prevents unbounded tree growth.
+\end{definition}
+
+The UCB pressure uses the standard form
+\begin{equation}
+  u_{i\alpha}=v_{i\alpha}+
+  \beta_{\mathrm{ucb}}
+  \sqrt{
+    \frac{\log(1+\sum_\gamma n_{i\gamma})}
+         {1+n_{i\alpha}}
+  },
+\end{equation}
+where $n_{i\alpha}$ is a differentiable visit proxy induced by activation mass.  The correction term uses the local hidden displacement:
+\begin{equation}
+  \mathcal L_{\mathrm{corr}}
+  =
+  \Eop_i
+  \left[
+    w_i\left(1-\cos(\delta_i,h_{i+1}-h_i)\right)
+  \right],
+  \qquad
+  w_i=\max(0,\operatorname{NLL}_i-\operatorname{NLL}_{i+1}) .
+\end{equation}
+This is a hidden-state analogue of FoT self-correction: when a successor improves the score, the correction vector should point toward that improvement.
+
+For a forest trajectory $\tau=(s_0,\ldots,s_T)$, the trajectory-balance term is
+\begin{equation}
+  \mathcal L_{\mathrm{TB}}(\tau)=
+  \left(
+    z+\sum_{t=0}^{T-1}\log P_F(s_{t+1}\mid s_t)
+    -\log R(s_T)
+    -\sum_{t=0}^{T-1}\log P_B(s_t\mid s_{t+1})
+  \right)^2 .
+\end{equation}
+Subtrajectory balance applies the same relation to windows inside $\tau$ \cite{madan2023subtb}.  In the current OAI baseline adaptation, $P_F$ and $P_B$ are compact learned projections from hidden states and forest activations; they do not add tokens to the scored byte stream.
+
+\begin{proposition}[BPB-safe FoT auxiliary]
+Assume the FoT head is excluded from the serialized Parameter-Golf artifact and its gradients are routed through a controller that caps the auxiliary contribution by a fixed ratio of the current cross-entropy gradient norm.  Then enabling $\mathcal L_{\mathrm{FoT}}$ cannot by itself invalidate the byte-level BPB scoring protocol.  It can only change the learned base-model parameters through training-time gradients, which are evaluated by the ordinary score-before-update BPB audit.
+\end{proposition}
+
+\begin{proof}
+The official scorer sees only the exported byte model and its normalized next-byte distributions.  The FoT head does not introduce future byte values into the context, does not add scored tokens, and is omitted from export unless separately byte-accounted.  During training it contributes an auxiliary gradient bounded by the controller.  Therefore any effect on BPB must be mediated through ordinary parameter updates and is measured by the same validation protocol as every other training loss.
+\end{proof}
+
+Operationally, FoT metrics are reported under \texttt{oai\_fot/*} and then organized in the W\&B namespace \texttt{05\_forest\_of\_thought/*}.  The periodic review agent reads FoT loss, reward, activation entropy, active-tree count, top-$K$ tree mass, tree diversity, consensus entropy, consensus margin, tree agreement, correction cosine, correction BPB-proxy lift, and trajectory-balance residual separately rather than lumping them into a generic ``advanced loss'' bin.  At each gate the adaptive controller may increase tree count, lower activation temperature, raise correction weight, lower UCB pressure, or reduce FoT loss weight depending on how these quantities correlate with train BPB, validation BPB, graph-LM loss, and sidecar metrics.
+
 \subsection{Retraining protocol}
 
 The recommended next iteration has four stages.
@@ -4027,7 +4152,7 @@ For the Parameter-Golf track, the practical target is not a large toric module. 
 
 \section{Conclusion}
 
-The extended ToricGT framework gives a rigorous path from graph-tokenized Transformers to algebraic, tropical, toric-geometric, and morphological graph reasoning.  The central mathematical claims are exact finite statements: tokenization and layers are equivariant; tropical ring attention exactly equals full tropical attention; max-plus heads simulate bounded semiring algorithms; active faces are cells in normal fans of Newton polytopes; affine toric charts and Koszul complexes give audit-ready commutative-algebra diagnostics for persistent reasoning modules; finite Weyl pairs and cocycles provide controlled toric features; root-template Hebrew morphology becomes a typed graph problem; Soft-MoE blocks preserve graph equivariance while routing typed computations; Parameter-Golf compression defines a separate micro-LM deployment path with byte-level constraints; and PolarQuant-style cache compression admits explicit attention perturbation bounds.  The resulting research program is small enough for single-GPU experimentation yet structured enough to support serious mathematical diagnostics.
+The extended ToricGT framework gives a rigorous path from graph-tokenized Transformers to algebraic, tropical, toric-geometric, and morphological graph reasoning.  The central mathematical claims are exact finite statements: tokenization and layers are equivariant; tropical ring attention exactly equals full tropical attention; max-plus heads simulate bounded semiring algorithms; active faces are cells in normal fans of Newton polytopes; affine toric charts and Koszul complexes give audit-ready commutative-algebra diagnostics for persistent reasoning modules; finite Weyl pairs and cocycles provide controlled toric features; root-template Hebrew morphology becomes a typed graph problem; Soft-MoE blocks preserve graph equivariance while routing typed computations; embedding-space GFlowNets and Forest-of-Thought heads provide reward-proportional and consensus-guided inference-scaling scaffolds; Parameter-Golf compression defines a separate micro-LM deployment path with byte-level constraints; and PolarQuant-style cache compression admits explicit attention perturbation bounds.  The resulting research program is small enough for single-GPU experimentation yet structured enough to support serious mathematical diagnostics.
 
 \appendix
 
@@ -4316,6 +4441,21 @@ Mihai Pimsner and Dan Voiculescu.
 Alain Connes.
 \newblock $C^*$-algebres et geometrie differentielle.
 \newblock \emph{Comptes Rendus de l'Academie des Sciences}, 290:599--604, 1980.
+
+\bibitem{yao2023tree}
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths, Yuan Cao, and Karthik Narasimhan.
+\newblock Tree of Thoughts: Deliberate problem solving with large language models.
+\newblock \emph{NeurIPS}, 2023. arXiv:2305.10601.
+
+\bibitem{besta2023graph}
+Maciej Besta, Nils Blach, Ales Kubicek, Robert Gerstenberger, Micha\l{} Podstawski, Lukas Gianinazzi, Joanna Gajda, Tomasz Lehmann, Hubert Niewiadomski, Piotr Nyczyk, and Torsten Hoefler.
+\newblock Graph of Thoughts: Solving elaborate problems with large language models.
+\newblock arXiv:2308.09687, 2023.
+
+\bibitem{bi2024forest}
+Zhenni Bi, Kai Han, Chuanjian Liu, Yehui Tang, and Yunhe Wang.
+\newblock Forest-of-Thought: Scaling test-time compute for enhancing LLM reasoning.
+\newblock arXiv:2412.09078, 2024.
 
 \bibitem{bengio2023gflownet}
 Yoshua Bengio, Salem Lahlou, Tristan Deleu, Edward J. Hu, Mo Tiwari, and Emmanuel Bengio.

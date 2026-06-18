@@ -1,13 +1,23 @@
 \documentclass[10pt]{article}
 
 \usepackage[margin=0.78in]{geometry}
-\usepackage{fontspec}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T1]{fontenc}
+\else
+  \usepackage{fontspec}
+\fi
 \usepackage{amsmath,amssymb,amsthm,mathtools}
 \usepackage{booktabs,array}
 \usepackage{enumitem}
 \usepackage{graphicx}
 \usepackage{xcolor}
-\usepackage{microtype}
+\ifPDFTeX
+  \usepackage[expansion=false]{microtype}
+\else
+  \usepackage{microtype}
+\fi
 \usepackage[colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black]{hyperref}
 
 \graphicspath{{./}{./toricgt_pg_softmoe_figures/}}
@@ -46,7 +56,7 @@
 \maketitle
 
 \begin{abstract}
-We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The research model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and uses permutation-equivariant Soft-MoE routing in upper graph blocks.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate OpenAI Parameter-Golf track projects byte chunks to random-order graph positions and trains a dense recurrent micro language model with tied embeddings, toric position phases, tropical-ring attention, compact noncommutative-toric memory, strict-prefix GFlowNet graph-of-thought actions, BigramHash/CaseOps byte features, SmearGate confidence, stripped multi-token auxiliary heads, score-first test-time bias adaptation, and bit-packed 6-bit row-quantized export.  Its hybrid byte-TokenGT objective keeps official BPB as a byte-level prequential log score while applying causal or noncausal graph supervision to hidden reveal trajectories.  We also describe behavior-modification protocols in which learned GraphCG concept axes, toric-tropical chambers, and finite commutative-algebra certificates constrain hidden graph-of-thought trajectories to policy corridors for helpfulness, accuracy, tone, rigor, and detail.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, artifact bytes, BPB, corridor occupancy, and GFlowNet diversity rather than scalar accuracy alone.
+We present ToricGT, a compact graph-to-graph Transformer family for algebraic, mathematical, morphological, and parameter-constrained language-model reasoning.  The research model tokenizes nodes and edges as a shared sequence, uses exact blockwise ring evaluation for tropical max-plus attention, adds finite noncommutative-torus phase channels, and uses permutation-equivariant Soft-MoE routing in upper graph blocks.  The paper contributes a finite theory and an implementation-facing training contract.  We prove graph-token equivariance, exactness of tropical ring attention, stability of active faces under perturbation, and simulation of bounded semiring dynamic programs.  Motivated by recent toric geometry of ReLU networks, we further interpret tropical head decisions as active faces of Newton polytopes and normal fans, giving compact diagnostics for margins, bends, and future toric auxiliary losses.  A separate OpenAI Parameter-Golf track projects byte chunks to random-order graph positions and trains a dense recurrent micro language model with tied embeddings, toric position phases, tropical-ring attention, compact noncommutative-toric memory, strict-prefix GFlowNet graph-of-thought actions, embedding-space Forest-of-Thought search, BigramHash/CaseOps byte features, SmearGate confidence, stripped multi-token auxiliary heads, score-first test-time bias adaptation, and bit-packed 6-bit row-quantized export.  Its hybrid byte-TokenGT objective keeps official BPB as a byte-level prequential log score while applying causal or noncausal graph supervision to hidden reveal trajectories.  The new Forest-of-Thought head lifts Tree-of-Thought, Graph-of-Thought, and Forest-of-Thought test-time scaling into training-only hidden-state forests with sparse tree activation, UCB expansion pressure, dynamic self-correction, consensus-guided leaves, and trajectory-balance losses.  We also describe behavior-modification protocols in which learned GraphCG concept axes, toric-tropical chambers, and finite commutative-algebra certificates constrain hidden graph-of-thought trajectories to policy corridors for helpfulness, accuracy, tone, rigor, and detail.  The result is a small, auditable model design whose reasoning behavior is inspected through equivariance errors, active faces, toric moments, artifact bytes, BPB, corridor occupancy, GFlowNet diversity, and FoT consensus diagnostics rather than scalar accuracy alone.
 \end{abstract}
 
 \section{Introduction}
@@ -56,7 +66,7 @@ Many reasoning tasks are naturally graph-to-graph transformations: proof steps d
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{toricgt_architecture_and_training_diagram.png}
-  \caption{ToricGT combines graph tokenization, tropical ring attention, noncommutative-torus phase channels, Soft-MoE routing, and embedding-space GFlowNet fine-tuning.}
+  \caption{ToricGT combines graph tokenization, tropical ring attention, noncommutative-torus phase channels, Soft-MoE routing, embedding-space GFlowNet fine-tuning, and training-only Forest-of-Thought search.}
   \label{fig:arch-condensed}
 \end{figure}
 
@@ -210,10 +220,25 @@ The supervised objective combines node, edge, and graph losses with equivariance
 +\lambda_\Theta\mathcal L_\Theta+\lambda_{\mathrm{trop}}\mathcal L_{\mathrm{margin}}\\
 &+\lambda_H\mathcal L_H+\lambda_{\mathrm{moe}}\mathcal L_{\mathrm{moe}}
 +\lambda_{\mathrm{cache}}\mathcal L_{\mathrm{PQ}}
-+\lambda_{\mathrm{KD}}\mathcal L_{\mathrm{distill}}.
++\lambda_{\mathrm{KD}}\mathcal L_{\mathrm{distill}}
++\lambda_{\mathrm{FoT}}\mathcal L_{\mathrm{FoT}}.
 \end{split}
 \end{equation}
 Embedding-space GFlowNet fine-tuning samples reasoning graphs with probability proportional to reward using trajectory balance.  The reward combines correctness, novelty, low equivariance error, tropical margin, low toric commutator error, and complexity penalties.
+
+\paragraph{Embedding-space Forest-of-Thought.}
+FoT generalizes single-chain reasoning by maintaining several search trees, sparsely activating promising paths, correcting flawed partial solutions, and selecting leaves by consensus \cite{bi2024forest}.  ToricGT implements the same pattern in hidden space rather than prompt space, while retaining the continuous/hybrid trajectory-balance perspective of GFlowNets \cite{lahlou2023continuous}.  For hidden positions $h_i$, a learned forest head produces tree activations $a_{it}$, values $v_{it}$, rewards $r_i$ derived from local NLL improvement and auxiliary geometric signals, and consensus logits $c_i$.  The compact loss is
+\begin{equation}
+  \mathcal L_{\mathrm{FoT}}
+  =
+  \lambda_{\mathrm{sp}}\mathcal L_{\mathrm{sparse}}
+  +\lambda_{\mathrm{ucb}}\mathcal L_{\mathrm{UCB}}
+  +\lambda_{\mathrm{corr}}\mathcal L_{\mathrm{correct}}
+  +\lambda_{\mathrm{cons}}\mathcal L_{\mathrm{consensus}}
+  +\lambda_{\mathrm{tb}}\mathcal L_{\mathrm{TB}}
+  +\lambda_{\mathrm{sub}}\mathcal L_{\mathrm{SubTB}} .
+\end{equation}
+The terms respectively encourage sparse active trees, UCB-like expansion toward high-value uncertain branches, correction vectors aligned with lower-NLL successor states, consensus among high-reward leaves, and flow consistency.  The head is training-only in the Parameter-Golf track: it may shape hidden states and test-time scaling policies, but it is omitted from byte-accounted export unless a later ablation shows net BPB gain under the artifact cap.
 
 The data mixture is graph-first: math reasoning, graph-of-thought traces, algorithmic tasks, synthetic rotation/tropical tasks, Hebrew morphology graphs, and Jewish Hebrew text sources are normalized into Parquet records with stable content hashes and graph JSON.  Splits are clustered by near-duplicate text, graph sketches, algebraic normal forms, root families, and source references.
 
@@ -228,6 +253,7 @@ Toric bend consistency & incoherent polyhedral reasoning changes \\
 DEC conservation residual & noisy or nonconservative hidden reasoning flow \\
 Soft-MoE expert mass & expert collapse or over-routing \\
 GFlowNet diversity & mode collapse and reward hacking \\
+FoT consensus/diversity & overconfident single-tree reasoning or useless branching \\
 Parameter-Golf BPB/bytes & compactness and scoring compliance \\
 \bottomrule
 \end{tabular}
@@ -244,7 +270,7 @@ For a byte chunk $b=(b_1,\ldots,b_T)$, sample a content-independent order $\pi\i
 \begin{equation}
   q_\theta(b\mid \pi)=\prod_{k=1}^Tq_\theta(b_{\pi_k}\mid b_{\pi_{<k}},\pi_{\le k}).
 \end{equation}
-BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  A byte-safe GFlowNet policy samples latent graph-of-thought action embeddings from the prefix-visible hidden state, and validation can average multiple action samples.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.  Curated \texttt{graph\_json} records are projected into compact node/edge byte traces so graph structure is visible to this adapter.  Graph-of-thought trajectories are modeled as branch/merge DAGs \(G_\tau=(V_\tau,E_\tau)\), not as single lines: vertices with \(\operatorname{outdeg}>1\) explore alternatives, vertices with \(\operatorname{indeg}>1\) join or reconcile them, and the local diamond \(a\to\{b,c\}\to d\) is the basic cell.
+BPB is computed prequentially: predict a normalized next-byte distribution, score the observed byte, then update the state.  Because $\pi$ is independent of unscored byte values and row $k$ never contains $b_{\pi_k}$, random-order decoding is score-before-update valid while exposing more graph-like order diversity than ordinary left-to-right decoding.  A byte-safe GFlowNet policy samples latent graph-of-thought action embeddings from the prefix-visible hidden state, and validation can average multiple action samples.  The new FoT path maintains several latent thought trees above the same hidden states; this imports Tree-of-Thought deliberate search \cite{yao2023tree}, Graph-of-Thought branch/merge structure \cite{besta2023graph}, and Forest-of-Thought sparse collective decision-making \cite{bi2024forest} without changing the scored byte stream.  Dense recurrence is the default because it adds computation without adding stored expert weights; Soft-MoE adapters are retained only as byte-accounted ablations.  Curated \texttt{graph\_json} records are projected into compact node/edge byte traces so graph structure is visible to this adapter.  Graph-of-thought trajectories are modeled as branch/merge DAGs \(G_\tau=(V_\tau,E_\tau)\), not as single lines: vertices with \(\operatorname{outdeg}>1\) explore alternatives, vertices with \(\operatorname{indeg}>1\) join or reconcile them, and the local diamond \(a\to\{b,c\}\to d\) is the basic cell.
 
 The current hybrid keeps this byte distribution as the official scored object
 and adds a TokenGT-style hidden-graph objective.  For reveal hidden states
@@ -646,6 +672,21 @@ Hao Liu, Matei Zaharia, and Pieter Abbeel.
 Joan Puigcerver, Carlos Riquelme, Basil Mustafa, and Neil Houlsby.
 \newblock From Sparse to Soft Mixtures of Experts.
 \newblock \emph{ICLR}, 2024.
+
+\bibitem{yao2023tree}
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths, Yuan Cao, and Karthik Narasimhan.
+\newblock Tree of Thoughts: Deliberate problem solving with large language models.
+\newblock \emph{NeurIPS}, 2023. arXiv:2305.10601.
+
+\bibitem{besta2023graph}
+Maciej Besta, Nils Blach, Ales Kubicek, Robert Gerstenberger, Micha\l{} Podstawski, Lukas Gianinazzi, Joanna Gajda, Tomasz Lehmann, Hubert Niewiadomski, Piotr Nyczyk, and Torsten Hoefler.
+\newblock Graph of Thoughts: Solving elaborate problems with large language models.
+\newblock arXiv:2308.09687, 2023.
+
+\bibitem{bi2024forest}
+Zhenni Bi, Kai Han, Chuanjian Liu, Yehui Tang, and Yunhe Wang.
+\newblock Forest-of-Thought: Scaling test-time compute for enhancing LLM reasoning.
+\newblock arXiv:2412.09078, 2024.
 
 \bibitem{bengio2023gflownet}
 Yoshua Bengio, Salem Lahlou, Tristan Deleu, Edward J. Hu, Mo Tiwari, and Emmanuel Bengio.
