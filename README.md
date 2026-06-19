@@ -130,8 +130,8 @@ The implementation plan and test ledger are in
 ConvexTok build and run commands:
 
 ```bash
-MATCHED_FINEWEB_CONVEXTOK_ENCODE_WORKERS=24 \
-MATCHED_FINEWEB_CONVEXTOK_ENCODE_BATCH_DOCS=64 \
+MATCHED_FINEWEB_CONVEXTOK_ENCODE_WORKERS=8 \
+MATCHED_FINEWEB_CONVEXTOK_ENCODE_BATCH_DOCS=32 \
 conda run --no-capture-output -n tokengt python amelie-iska/parameter-golf/data/download_hf_docs_and_tokenize.py \
   --output-root /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full \
   --tokenizer-config /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/convextok_2048_det_reuse_tokenizer_specs.json \
@@ -670,11 +670,24 @@ Current validated status:
 
 ## What Is Here
 
-Public upstream clones are under `amelie-iska/`:
+First-class dependency repositories are tracked as git submodules:
+
+- `amelie-iska/parameter-golf`: the OpenAI Parameter Golf baseline adaptation
+  used by the active BPB training loop, including the ConvexTok path and
+  ToricGT graph/tokenization integrations.
+- `external/gflownet`: reference GFlowNet implementation.
+- `external/Forest-of-Thought`: reference Forest-of-Thought implementation.
+
+Local research/reference clones may also exist under `amelie-iska/`, but they
+remain ignored until promoted as explicit dependencies:
 
 - `amelie-iska/tokengt`: TokenGT baseline.
 - `amelie-iska/ringattention`: official Ring Attention implementation linked from the paper.
 - `amelie-iska/Tropical-Attention`: official Tropical Attention implementation.
+
+See `docs/CODEBASE-DEPENDENCIES.md` for the dependency and secret-handling
+policy.  `keys.txt`, `.env*`, private keys, generated runs, checkpoints, logs,
+and W&B state must remain untracked.
 
 Local implementation:
 

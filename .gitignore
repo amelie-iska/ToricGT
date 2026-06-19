@@ -10,7 +10,8 @@ wandb/
 logs/
 runs/
 training_notes/
-amelie-iska/
+amelie-iska/*
+!amelie-iska/parameter-golf/
 data/raw/
 data/curated/
 data/curated_*/
@@ -28,3 +29,7 @@ data/splits/*.jsonl
 *.fls
 *.fdb_latexmk
 keys.txt
+.env
+.env.*
+*.pem
+*.key

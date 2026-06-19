@@ -4,3 +4,7 @@
 [submodule "external/Forest-of-Thought"]
 	path = external/Forest-of-Thought
 	url = https://github.com/amelie-iska/Forest-of-Thought.git
+[submodule "amelie-iska/parameter-golf"]
+	path = amelie-iska/parameter-golf
+	url = https://github.com/amelie-iska/parameter-golf.git
+	branch = oai-advanced
