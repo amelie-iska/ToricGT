@@ -37,6 +37,12 @@ class EmbeddingFoTConfig:
     subtb_weight: float = 0.0
     complexity_weight: float = 0.05
     reward_advanced_bonus: float = 0.0
+    reward_mode: str = "bpb_delta"
+    bpb_delta_weight: float = 1.0
+    reward_graph_weight: float = 0.10
+    reward_consensus_weight: float = 0.20
+    reward_complexity_weight: float = 0.02
+    reward_floor: float = 1.0e-4
 
 
 class EmbeddingFoTOutput(dict):
@@ -112,6 +118,12 @@ class EmbeddingForestOfThoughtHead(nn.Module):
         per_token_nll: Tensor,
         *,
         advanced_signal: Tensor | None = None,
+        target_byte_lengths: Tensor | None = None,
+        lm_head_weight: Tensor | None = None,
+        logit_softcap: float = 30.0,
+        temperature_multiplier: float = 1.0,
+        ucb_multiplier: float = 1.0,
+        sparse_multiplier: float = 1.0,
     ) -> EmbeddingFoTOutput:
         cfg = self.config
         zero = hidden.new_zeros(())
@@ -125,10 +137,16 @@ class EmbeddingForestOfThoughtHead(nn.Module):
         nodes = self.node_norm(hidden[:, idx, :].float())
         targets = target_ids[:, idx].long()
         nll = per_token_nll[:, idx].detach().float()
+        if target_byte_lengths is not None:
+            byte_lengths = target_byte_lengths[:, idx].detach().float().clamp_min(1.0)
+        else:
+            byte_lengths = torch.ones_like(nll)
         batch, n_nodes, _ = nodes.shape
         num_trees = max(1, min(int(cfg.num_trees), int(n_nodes)))
         tree_ids = torch.remainder(torch.arange(n_nodes, device=hidden.device), num_trees).long()
         depth_ids = torch.div(torch.arange(n_nodes, device=hidden.device), num_trees, rounding_mode="floor")
+        temperature = max(float(cfg.temperature) * max(float(temperature_multiplier), 1.0e-4), 1.0e-4)
+        ucb_exploration = max(float(cfg.ucb_exploration) * max(float(ucb_multiplier), 0.0), 0.0)
 
         activation_logits = self.activation_head(nodes).squeeze(-1).clamp(-30.0, 30.0)
         values = self.value_head(nodes).squeeze(-1).float()
@@ -145,9 +163,10 @@ class EmbeddingForestOfThoughtHead(nn.Module):
             root_for_node = roots[:, tree_ids, :]
             novelty = (1.0 - (norm_nodes * root_for_node).sum(dim=-1)).clamp(0.0, 2.0)
             depth_bonus = depth_ids.to(nodes.dtype).view(1, -1) / max(float(depth_ids.max().item() + 1), 1.0)
-            target_score = -nll + 0.15 * novelty + 0.05 * depth_bonus
+            byte_nll = nll / byte_lengths
+            target_score = -byte_nll + float(cfg.reward_graph_weight) * novelty + 0.05 * depth_bonus
             tree_target_score = self._tree_reduce_mean(target_score, tree_ids, num_trees)
-            activation_target = torch.softmax(tree_target_score / max(float(cfg.temperature), 1e-4), dim=-1)
+            activation_target = torch.softmax(tree_target_score / temperature, dim=-1)
 
         tree_activation_logits = self._tree_reduce_mean(activation_logits, tree_ids, num_trees)
         tree_log_probs = F.log_softmax(tree_activation_logits, dim=-1)
@@ -168,10 +187,10 @@ class EmbeddingForestOfThoughtHead(nn.Module):
             visits = torch.arange(1, n_nodes, device=hidden.device, dtype=torch.float32).view(1, -1)
             parent_visits = (visits + num_trees).clamp_min(1.0)
             child_visits = (1.0 + torch.remainder(torch.arange(1, n_nodes, device=hidden.device), num_trees).float()).view(1, -1)
-            ucb_target_value = values[:, 1:].detach() + float(cfg.ucb_exploration) * torch.sqrt(
+            ucb_target_value = values[:, 1:].detach() + ucb_exploration * torch.sqrt(
                 torch.log(parent_visits + 1.0) / child_visits.clamp_min(1.0)
             )
-            ucb_weights = torch.softmax(ucb_target_value / max(float(cfg.temperature), 1e-4), dim=-1)
+            ucb_weights = torch.softmax(ucb_target_value / temperature, dim=-1)
             transition_nll = F.cross_entropy(
                 f_logits.reshape(-1, int(cfg.branching)),
                 actions.reshape(-1),
@@ -189,7 +208,29 @@ class EmbeddingForestOfThoughtHead(nn.Module):
             correction_lift_loss = F.relu(0.01 - value_lift).mean()
             correction_loss = correction_direction_loss + 0.25 * correction_lift_loss
 
-            reward = torch.exp(-nll.mean(dim=1)).clamp_min(1e-8)
+            raw_byte_nll = (nll / byte_lengths).mean(dim=1)
+            corrected_byte_nll = raw_byte_nll
+            bpb_delta_reward = hidden.new_zeros(batch, dtype=torch.float32)
+            corrected_ce = nll[:, :-1].detach()
+            if lm_head_weight is not None and str(cfg.reward_mode).strip().lower() in {"bpb_delta", "ce_delta", "byte_delta"}:
+                logits_proj = F.linear(corrected_nodes.reshape(-1, corrected_nodes.shape[-1]), lm_head_weight.float())
+                softcap = max(float(logit_softcap), 1.0e-4)
+                logits_proj = softcap * torch.tanh(logits_proj / softcap)
+                corrected_ce = F.cross_entropy(
+                    logits_proj.float(),
+                    targets[:, :-1].reshape(-1),
+                    reduction="none",
+                ).view(batch, -1)
+                selected_bytes = byte_lengths[:, :-1].clamp_min(1.0)
+                raw_local_byte_nll = (nll[:, :-1].detach() / selected_bytes).mean(dim=1)
+                corrected_byte_nll = (corrected_ce / selected_bytes).mean(dim=1)
+                bpb_delta_reward = (raw_local_byte_nll - corrected_byte_nll).clamp(-5.0, 5.0)
+                reward = torch.exp(
+                    -corrected_byte_nll.detach()
+                    + float(cfg.bpb_delta_weight) * bpb_delta_reward.detach().clamp(-2.0, 2.0)
+                )
+            else:
+                reward = torch.exp(-raw_byte_nll).clamp_min(1e-8)
             if advanced_signal is not None:
                 bonus = torch.as_tensor(advanced_signal, device=hidden.device, dtype=torch.float32)
                 while bonus.ndim > 1:
@@ -198,14 +239,18 @@ class EmbeddingForestOfThoughtHead(nn.Module):
                     bonus = bonus.expand_as(reward)
                 reward = reward * torch.exp(float(cfg.reward_advanced_bonus) * bonus[: reward.shape[0]].detach().clamp(-5.0, 5.0))
             complexity = (n_nodes / max(float(cfg.max_positions), 1.0)) + active_tree_count.float() / max(float(num_trees), 1.0)
-            reward = (reward * torch.exp(-0.05 * complexity.detach())).clamp_min(1e-8)
+            reward = (
+                reward
+                * torch.exp(float(cfg.reward_consensus_weight) * active_mass.detach().clamp(0.0, 1.0))
+                * torch.exp(-float(cfg.reward_complexity_weight) * complexity.detach())
+            ).clamp_min(max(float(cfg.reward_floor), 1.0e-8))
             tb_residual = self.log_z.float() + (log_pf - log_pb).mean(dim=1) - reward.log()
             tb_loss = tb_residual.square().mean()
             if n_nodes > 3:
                 prefix = torch.cumsum(log_pf - log_pb, dim=1)
                 denom = torch.arange(1, nll.shape[1], device=hidden.device, dtype=torch.float32).view(1, -1)
-                prefix_mean_nll = torch.cumsum(nll[:, 1:], dim=1) / denom.clamp_min(1.0)
-                prefix_reward = torch.exp(-prefix_mean_nll).clamp_min(1e-8)
+                prefix_mean_byte_nll = torch.cumsum(nll[:, 1:] / byte_lengths[:, 1:].clamp_min(1.0), dim=1) / denom.clamp_min(1.0)
+                prefix_reward = torch.exp(-prefix_mean_byte_nll).clamp_min(max(float(cfg.reward_floor), 1.0e-8))
                 prefix_flow = flow_values[:, 1:]
                 subtb_residual = prefix_flow + prefix - prefix_reward.log()
                 subtb_loss = subtb_residual.square().mean()
@@ -220,8 +265,11 @@ class EmbeddingForestOfThoughtHead(nn.Module):
             tb_loss = zero.float()
             subtb_loss = zero.float()
             tb_residual = zero.float().expand(batch)
-            reward = torch.exp(-nll.mean(dim=1)).clamp_min(1e-8)
+            reward = torch.exp(-(nll / byte_lengths).mean(dim=1)).clamp_min(max(float(cfg.reward_floor), 1.0e-8))
             complexity = zero.float()
+            bpb_delta_reward = zero.float().expand(batch)
+            corrected_ce = nll.detach()
+            corrected_byte_nll = (nll / byte_lengths).mean(dim=1)
 
         leaf_idx = self._tree_last_indices(tree_ids, num_trees)
         leaf_nodes = nodes[:, leaf_idx, :]
@@ -258,7 +306,7 @@ class EmbeddingForestOfThoughtHead(nn.Module):
         )
 
         total = (
-            float(cfg.sparse_weight) * sparse_loss
+            float(cfg.sparse_weight) * max(float(sparse_multiplier), 0.0) * sparse_loss
             + float(cfg.ucb_weight) * ucb_loss
             + float(cfg.correction_weight) * correction_loss
             + float(cfg.consensus_weight) * consensus_loss
@@ -284,6 +332,12 @@ class EmbeddingForestOfThoughtHead(nn.Module):
                 "oai_fot_tree_diversity": tree_diversity.detach(),
                 "oai_fot_value_mean": values.detach().mean(),
                 "oai_fot_reward_mean": reward.detach().mean(),
+                "oai_fot_reward_bpb_delta": bpb_delta_reward.detach().mean(),
+                "oai_fot_reward_raw_byte_nll": raw_byte_nll.detach().mean() if "raw_byte_nll" in locals() else zero.detach(),
+                "oai_fot_reward_corrected_byte_nll": (
+                    corrected_byte_nll.detach().mean() if torch.is_tensor(corrected_byte_nll) else zero.detach()
+                ),
+                "oai_fot_corrected_ce": corrected_ce.detach().mean() if torch.is_tensor(corrected_ce) else zero.detach(),
                 "oai_fot_tb_residual": tb_residual.detach().abs().mean(),
                 "oai_fot_correction_cosine": correction_cosine.detach().mean(),
                 "oai_fot_correction_bpb_proxy_lift": value_lift.detach().mean() if torch.is_tensor(value_lift) else zero.detach(),

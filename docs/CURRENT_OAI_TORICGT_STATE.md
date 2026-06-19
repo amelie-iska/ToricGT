@@ -1,6 +1,6 @@
 # Current OAI ToricGT State
 
-Updated: 2026-06-17
+Updated: 2026-06-19
 
 ## Goal
 
@@ -9,7 +9,7 @@ while promoting graph structure into the main model.  The working gate is:
 
 ```text
 target: BPB < 1.19
-gate:   1500 optimizer steps
+gate:   1000 optimizer steps
 policy: if the gate is missed, run full analysis, write a report, adjust
         hyperparameters, and restart from step 0
 ```
@@ -23,13 +23,17 @@ The active restart is running the patched OAI baseline adaptation, not the
 older sidecar-only route.  The active run at the time of this update is:
 
 ```text
-campaign: tg-bpb119-oai-transfer-gfn-mtp-20260617T235313Z
-run:      tg-bpb119-oai-transfer-gfn-mtp-20260617T235313Z-r001-gate1500_fast_main_lr_light_graphcg-20260617T235417Z
-path:     runs/oai_sidecar/tg-bpb119-oai-transfer-gfn-mtp-20260617T235313Z-r001-gate1500_fast_main_lr_light_graphcg-20260617T235417Z
+campaign: tg-bpb119-1k-ideas14-20260619T152338Z
+tmux:     toricgt_bpb119_ideas14_1k
+run:      tg-bpb119-1k-ideas14-20260619T152338Z-r001-gate1500_high_batch_toric_bgg_memory-20260619T152339Z
+path:     runs/oai_sidecar/tg-bpb119-1k-ideas14-20260619T152338Z-r001-gate1500_high_batch_toric_bgg_memory-20260619T152339Z
 ```
 
-It should reach the 1500-step gate, then the campaign controller runs the full
+It should reach the 1000-step gate, then the campaign controller runs the full
 analysis suite and starts the next run from step 0 if the BPB target is missed.
+The primary loop has 25 fresh attempts.  If none reaches `BPB < 1.19`, the
+supervisor writes a cross-run meta-review and a follow-up planning document,
+then launches 10 additional exploratory attempts.
 
 The active run uses the updated first-class graph path:
 
@@ -46,11 +50,31 @@ TORICGT_SIDECAR_COMPUTE_ALL_METRICS=1
 
 It also uses the patched adaptive graph-radius and flattening calibration
 policy.  FineWeb graphification starts in a local radius-2 or radius-3 regime.
-The 1.5K-step analysis may widen the TokenGT and
+The 1K-step analysis may widen the TokenGT and
 graph-output-flattening radii to 4--6 only when the evidence says the graph path
 is helping BPB: improving train-BPB slope, nonconflicting TokenGT graph loss,
 positive graph-output flattening lift, and no strong W&B correlation indicating
 that wider graph features are making BPB worse.
+
+## June 19 BPB-Focused Controls
+
+The current campaign includes four additional controls from
+`planning/BPB-IDEAS-1-4-IMPLEMENTATION-20260619.md`:
+
+- `BPB_FIRST_AUX_STAGING=1`: auxiliary graph-LM, sidecar, FoT, GFlowNet, and
+  MTP pressure starts at a small multiplier, ramps only after the primary
+  FineWeb BPB objective has early descent momentum, and is damped if BPB slope
+  or curvature indicates a rebound.
+- `AUX_CONFLICT_CONTROLLER=1`: the trainer keeps family-specific gradient route
+  scales instead of treating all advanced techniques as one bin.  Conflicting
+  auxiliary gradients are damped; aligned families can receive a bounded boost.
+- `OAI_FOT_REWARD_MODE=bpb_delta`: the embedding-space Forest-of-Thought reward
+  is grounded in the per-byte likelihood delta from its correction path through
+  the tied LM head, with graph/consensus/complexity terms kept as bounded
+  modifiers.
+- `OAI_FOT_ADAPTIVE_CONTROL=1`: FoT temperature, UCB exploration, sparse
+  pressure, and effective loss multiplier adapt from observed reward,
+  tree-diversity, and activation-entropy metrics during each run.
 
 ## Autoregressive Graph Decoding Contract
 
@@ -131,7 +155,7 @@ The current OAI baseline transfer also enables three BPB-facing heads/paths:
   Validation examples are scored first; adaptation is restored afterward while
   `SCORE_FIRST_TTA_COMMIT=0`.
 
-The 1500-step review analyzes train BPB, validation BPB when available,
+The 1000-step review analyzes train BPB, validation BPB when available,
 graph-LM BPB, artifact bytes, W&B metrics, screenshots, and the full
 `toricgt_sidecar` metric family.  It considers these families separately:
 

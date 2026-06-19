@@ -144,9 +144,14 @@ GRAPH_OUTPUT_FLATTENING=1
 GRAPH_LM_PRIMARY=1
 TORICGT_SIDECAR_COMPUTE_ALL_METRICS=1
 OAI_GFLOWNET=1
+OAI_EMBEDDING_FOT=1
+OAI_FOT_REWARD_MODE=bpb_delta
+OAI_FOT_ADAPTIVE_CONTROL=1
 OAI_MTP=1
 SCORE_FIRST_TTA=1
 SCORE_FIRST_TTA_COMMIT=0
+BPB_FIRST_AUX_STAGING=1
+AUX_CONFLICT_CONTROLLER=1
 ```
 
 The current graphification knobs are logged and swept independently:
@@ -198,13 +203,21 @@ For record-quality claims, require multiple runs and enough evidence that the
 improvement is larger than run-to-run variance. Treat single-run changes below
 about `0.007 BPB` as noise unless confirmed independently.
 
-The current adaptive campaign gate is `BPB < 1.19` by step `1500`. If that gate
+The current adaptive campaign gate is `BPB < 1.19` by step `1000`. If that gate
 is missed, the supervisor runs checkpoint-backed analyses, screenshots and
 HTML reports, sidecar/W&B metric review, and a written training note, then
 restarts from step `0` with updated hyperparameters. If validation BPB is not
 available at the gate, train BPB and graph-LM BPB are used as provisional
 evidence, with the next validation/roundtrip export treated as the deciding
 score.
+
+The active June 19 campaign keeps the next 25 one-thousand-step runs
+exploratory.  It does not consolidate around one profile yet.  The supervisor
+uses BPB-first auxiliary staging, per-family conflict routing, FoT BPB-delta
+reward, and reward-coupled FoT entropy/diversity control.  If the first 25
+attempts miss the target, it writes a 25-run meta-review plus a follow-up
+planning document, then starts 10 additional attempts from step 0 with the
+meta-review findings applied.
 
 ## Local Wallclock Equivalence
 

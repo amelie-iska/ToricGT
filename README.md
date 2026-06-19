@@ -92,10 +92,24 @@ entropy, action diversity, score gaps, and `logZ` under `oai_gflownet/*`.
 The multi-token prediction auxiliary logs under `oai_mtp/*`.  Both are routed
 through the auxiliary-gradient conflict controls and are excluded from the
 submission artifact unless a later export ablation proves they improve
-round-trip BPB.  The adaptive campaign gate is currently `BPB < 1.19` by
-`1500` steps; if the gate is missed, the full analysis suite reviews every
-W&B/sidecar family separately, writes a timestamped report, updates
-hyperparameters, and restarts from step 0.
+round-trip BPB.  The active exploratory campaign gate is currently
+`BPB < 1.19` by `1000` steps.  If the gate is missed, the full analysis suite
+reviews every W&B/sidecar family separately, writes a timestamped report,
+updates hyperparameters, and restarts from step 0.  The loop runs 25 fresh
+attempts, then writes a cross-run meta-review and launches 10 follow-up
+attempts if the target has not been reached.
+
+The June 19 BPB-focused route adds four score-first controls to keep these
+advanced techniques experimental without letting them dominate early byte
+likelihood: `BPB_FIRST_AUX_STAGING` holds sidecar, graph-LM, FoT, GFlowNet, and
+MTP pressure low until train BPB has descent momentum; `AUX_CONFLICT_CONTROLLER`
+adjusts per-family auxiliary routing instead of lumping all advanced losses
+together; `OAI_FOT_REWARD_MODE=bpb_delta` grounds Forest-of-Thought reward in
+per-byte likelihood improvement from the FoT correction path; and
+`OAI_FOT_ADAPTIVE_CONTROL` modulates FoT temperature, UCB exploration, sparse
+pressure, and effective loss weight from observed reward/diversity/entropy.
+The implementation plan and test ledger are in
+[`planning/BPB-IDEAS-1-4-IMPLEMENTATION-20260619.md`](planning/BPB-IDEAS-1-4-IMPLEMENTATION-20260619.md).
 
 The native TokenGT FineWeb route is now autoregressive when
 `use_causal_graph_attention` and `use_lm_token_embeddings` are enabled.  FineWeb

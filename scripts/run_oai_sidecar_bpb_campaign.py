@@ -979,6 +979,7 @@ def run_codex_review(report: Path) -> None:
         "BGG category O, Koszul/resolution, combinatorial commutative algebra, scheduled graph-LM weights, teacher distillation, "
         "adaptive graph radius, graph-output flattening CE lift/regression, calibration loss, score-correction gates, "
         "OAI embedding-space GFlowNet graph-of-thought trajectory-balance metrics, OAI embedding-space Forest-of-Thought sparse activation/UCB/self-correction/consensus/trajectory-balance metrics, OAI multi-token prediction metrics, "
+        "BPB-first auxiliary staging multipliers, family-level gradient conflict route scales, FoT BPB-delta reward metrics, and reward-coupled FoT entropy/diversity controls, "
         "non-destructive score-first TTA metrics, "
         "auxiliary-gradient routing cosines/projection coefficients, retrieval gates, uncertainty-weighted advanced multipliers, "
         "GraphCG BPB-orthogonalization metrics, artifact size, and round-trip quantization. "
@@ -989,6 +990,8 @@ def run_codex_review(report: Path) -> None:
         "vector-bundle/sheaf losses, persistent homology/Koszul losses, combinatorial toric algebra, GraphCG, analogy, memory, and graph-LM. "
         "For loss-like metrics, interpret positive BPB correlation as possible evidence that reducing that loss could help BPB; "
         "do not automatically treat every positive correlation as harmful. "
+        "Stay exploratory: this project has only a small number of short FoT-enabled 1K-step runs, so recommend inventive, evidence-based changes instead of prematurely collapsing the sweep. "
+        "Specifically evaluate whether BPB-first staging protected early CE descent, whether conflict routing projected or damped the right families, whether FoT reward_bpb_delta and corrected_byte_nll are moving in the right direction, and whether FoT entropy/diversity control should adjust temperature, UCB, sparse pressure, or loss weight next run. "
         f"Report path: {report}"
     )
     stdout_path = report.with_name(f"{report.stem}.codex-review.stdout.log")
@@ -1062,6 +1065,17 @@ def launch_training(
         "AUX_GRAD_ROUTE_TEACHER": "1",
         "AUX_GRAD_CONFLICT_PROJECTION": "1",
         "AUX_GRAD_ALIGNED_BOOST": "1.0",
+        "AUX_CONFLICT_CONTROLLER": "1",
+        "AUX_CONFLICT_DAMP_MIN": "0.10",
+        "AUX_CONFLICT_BOOST_MAX": "1.35",
+        "BPB_FIRST_AUX_STAGING": "1",
+        "BPB_FIRST_CORE_STEPS": "250",
+        "BPB_FIRST_RAMP_STEPS": "500",
+        "BPB_FIRST_MIN_AUX_MULT": "0.02",
+        "BPB_FIRST_REQUIRE_NEGATIVE_SLOPE": "1",
+        "BPB_FIRST_CURVATURE_GUARD": "1",
+        "BPB_FIRST_BAD_SLOPE_MULT": "0.25",
+        "BPB_FIRST_BAD_CURVATURE_MULT": "0.35",
         "TEACHER_CHECKPOINT": os.environ.get("TEACHER_CHECKPOINT", ""),
         "TEACHER_DISTILL_WEIGHT": os.environ.get("TEACHER_DISTILL_WEIGHT", "0"),
         "TEACHER_DISTILL_WEIGHT_START": os.environ.get("TEACHER_DISTILL_WEIGHT_START", "0"),
@@ -1187,6 +1201,21 @@ def launch_training(
         "OAI_FOT_SUBTB_WEIGHT": os.environ.get("OAI_FOT_SUBTB_WEIGHT", "0.20"),
         "OAI_FOT_COMPLEXITY_WEIGHT": os.environ.get("OAI_FOT_COMPLEXITY_WEIGHT", "0.04"),
         "OAI_FOT_REWARD_ADVANCED_BONUS": os.environ.get("OAI_FOT_REWARD_ADVANCED_BONUS", "0.05"),
+        "OAI_FOT_REWARD_MODE": os.environ.get("OAI_FOT_REWARD_MODE", "bpb_delta"),
+        "OAI_FOT_BPB_DELTA_WEIGHT": os.environ.get("OAI_FOT_BPB_DELTA_WEIGHT", "1.0"),
+        "OAI_FOT_REWARD_GRAPH_WEIGHT": os.environ.get("OAI_FOT_REWARD_GRAPH_WEIGHT", "0.10"),
+        "OAI_FOT_REWARD_CONSENSUS_WEIGHT": os.environ.get("OAI_FOT_REWARD_CONSENSUS_WEIGHT", "0.20"),
+        "OAI_FOT_REWARD_COMPLEXITY_WEIGHT": os.environ.get("OAI_FOT_REWARD_COMPLEXITY_WEIGHT", "0.02"),
+        "OAI_FOT_REWARD_FLOOR": os.environ.get("OAI_FOT_REWARD_FLOOR", "1e-4"),
+        "OAI_FOT_ADAPTIVE_CONTROL": os.environ.get("OAI_FOT_ADAPTIVE_CONTROL", "1"),
+        "OAI_FOT_REWARD_TARGET": os.environ.get("OAI_FOT_REWARD_TARGET", "0.08"),
+        "OAI_FOT_DIVERSITY_TARGET": os.environ.get("OAI_FOT_DIVERSITY_TARGET", "0.12"),
+        "OAI_FOT_ENTROPY_HIGH": os.environ.get("OAI_FOT_ENTROPY_HIGH", "0.985"),
+        "OAI_FOT_ENTROPY_LOW": os.environ.get("OAI_FOT_ENTROPY_LOW", "0.75"),
+        "OAI_FOT_TEMP_MIN": os.environ.get("OAI_FOT_TEMP_MIN", "0.45"),
+        "OAI_FOT_TEMP_MAX": os.environ.get("OAI_FOT_TEMP_MAX", "1.10"),
+        "OAI_FOT_UCB_MIN": os.environ.get("OAI_FOT_UCB_MIN", "0.40"),
+        "OAI_FOT_UCB_MAX": os.environ.get("OAI_FOT_UCB_MAX", "1.80"),
         "OAI_MTP": os.environ.get("OAI_MTP", "1"),
         "OAI_MTP_EVERY": os.environ.get("OAI_MTP_EVERY", "1"),
         "OAI_MTP_LOSS_WEIGHT": os.environ.get("OAI_MTP_LOSS_WEIGHT", "0.003"),
@@ -1545,7 +1574,18 @@ def write_meta_analysis(notes_dir: Path, history: list[dict[str, object]], args:
     if best_profile:
         recommendations.append(f"Current best evidence favors `{best_profile}` as the anchor for the next hyperparameter neighborhood.")
     meta_path = notes_dir / f"{phase}-META-ANALYSIS-{utc_stamp()}.md"
+    repo_root = notes_dir.parents[1] if len(notes_dir.parents) > 1 else Path.cwd()
+    planning_dir = repo_root / "planning"
+    planning_dir.mkdir(parents=True, exist_ok=True)
+    planning_path = planning_dir / f"{phase.upper()}-BPB119-FOLLOWUP-PLAN-{utc_stamp()}.md"
     best_profile_details = profile_env_markdown(best_profile) if best_profile else ["No completed profile rows are available."]
+    mechanism_review = [
+        "For the next phase, do not treat advanced training as one undifferentiated auxiliary block.",
+        "Review `bpb_aux_control/stage_multiplier`, slope and curvature metrics to decide whether the BPB-first stage is too protective or too permissive.",
+        "Review each `aux_grad_routing/*_cosine`, `*_route_scale`, and `*_projection_coeff` to identify families that are repeatedly aligned, neutral, or destructive.",
+        "Review `oai_fot/reward_bpb_delta`, `oai_fot/reward_corrected_byte_nll`, `oai_fot/runtime_after_*`, entropy, and diversity together; high entropy with poor BPB-delta reward means less exploration, not more FoT loss.",
+        "Keep exploration broad across run families.  The current evidence base is short-run and sparse, so the follow-up should test several theories rather than collapse onto one profile.",
+    ]
     lines = [
         f"# {phase.replace('-', ' ').title()} Meta-Analysis",
         "",
@@ -1568,6 +1608,10 @@ def write_meta_analysis(notes_dir: Path, history: list[dict[str, object]], args:
         "",
         *[f"- {item}" for item in recommendations],
         "",
+        "## Mechanism Review Requirements",
+        "",
+        *[f"- {item}" for item in mechanism_review],
+        "",
         "## Raw History",
         "",
         "```json",
@@ -1576,6 +1620,46 @@ def write_meta_analysis(notes_dir: Path, history: list[dict[str, object]], args:
         "",
     ]
     meta_path.write_text("\n".join(lines), encoding="utf-8")
+    planning_lines = [
+        f"# {phase.replace('-', ' ').title()} Follow-Up BPB Plan",
+        "",
+        f"- generated UTC: `{utc_iso()}`",
+        f"- source meta-analysis: `{meta_path}`",
+        f"- target BPB: `{args.target_bpb}`",
+        f"- completed rows: `{len(rows)}`",
+        "",
+        "## Required Mindset",
+        "",
+        "The follow-up campaign remains exploratory.  We have not yet observed a dramatic BPB drop from the new FoT path, so the agent should form and test multiple mechanistic hypotheses instead of repeating one conservative profile.",
+        "",
+        "## Evidence Summary",
+        "",
+        *table,
+        "",
+        "## Hypotheses To Test",
+        "",
+        "1. BPB-first staging may improve early CE descent by preventing non-BPB auxiliary objectives from rotating the first optimizer steps.",
+        "2. If route scales repeatedly damp the same family, lower that family's configured weight or delay it; if a family is repeatedly aligned, test a bounded increase.",
+        "3. FoT should be judged by BPB-delta reward and corrected byte NLL.  Structural reward without byte-likelihood lift should not justify higher FoT weight.",
+        "4. If graph-LM BPB is already easy while FineWeb BPB is poor, slow graph-LM ramp or lower graph mixture pressure while keeping graphification features active.",
+        "5. If graph-output flattening CE lift is positive, keep the flattening path and test stronger residual score correction; if it regresses, keep calibration and lower graph-output weights.",
+        "",
+        "## Follow-Up Actions",
+        "",
+        *[f"- {item}" for item in recommendations],
+        "",
+        "## Mechanism Review Requirements",
+        "",
+        *[f"- {item}" for item in mechanism_review],
+        "",
+        "## Raw History",
+        "",
+        "```json",
+        json.dumps(rows, indent=2, sort_keys=True),
+        "```",
+        "",
+    ]
+    planning_path.write_text("\n".join(planning_lines), encoding="utf-8")
     return meta_path
 
 
