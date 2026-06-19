@@ -17,16 +17,24 @@ policy: if the gate is missed, run full analysis, write a report, adjust
 The current hardware target is roughly 20GB VRAM by using large token batches
 with `TRAIN_SEQ_LEN=1024`.
 
-## Active Run
+## Active / Next Run
 
-The active restart is running the patched OAI baseline adaptation, not the
-older sidecar-only route.  The active run at the time of this update is:
+The previous 1K-step FoT/BPB control run completed.  The current tmux chain is:
 
 ```text
-campaign: tg-bpb119-1k-ideas14-20260619T152338Z
-tmux:     toricgt_bpb119_ideas14_1k
-run:      tg-bpb119-1k-ideas14-20260619T152338Z-r001-gate1500_high_batch_toric_bgg_memory-20260619T152339Z
-path:     runs/oai_sidecar/tg-bpb119-1k-ideas14-20260619T152338Z-r001-gate1500_high_batch_toric_bgg_memory-20260619T152339Z
+tmux: toricgt_convextok_full_train
+phase: full ConvexTok-2048 Det export, then automatic 1K-step campaign restart
+log:  logs/convextok2048_full_parallel_export_then_train_20260619T231200Z.log
+```
+
+The training restart is the patched OAI baseline adaptation with ConvexTok-2048
+Det once the matched FineWeb ConvexTok shards are available:
+
+```text
+profile:        convextok2048_det_tropical_toric_bpb
+tokenizer:      /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/tokenizers/fineweb_convextok_2048_det.convextok.json
+FineWeb shards: /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/datasets/fineweb10B_convextok2048_det
+vocab size:     2048
 ```
 
 It should reach the 1000-step gate, then the campaign controller runs the full
@@ -40,6 +48,8 @@ The active run uses the updated first-class graph path:
 ```text
 FINEWEB_GRAPHIFY=1
 TOKENGT_FIRST_CLASS=1
+CONVEXTOK_DAG_FEATURES=1
+CONVEXTOK_TORIC_REG_WEIGHT>0
 OAI_FINEWEB_OUTPUT_FLATTENING=1
 GRAPH_OUTPUT_FLATTENING=1
 GRAPH_OUTPUT_VIRTUAL_EDGE_TOKENS=1
@@ -82,7 +92,7 @@ The active OAI baseline remains causal autoregressive.  Graphification changes
 the representation, not the BPB score contract.
 
 ```text
-FineWeb BPB                 -> left-to-right autoregressive SP1024 sequence
+FineWeb BPB                 -> left-to-right autoregressive active-tokenizer sequence
 FineWeb graphification      -> causal path graph over the same tokens
 directed acyclic graph data -> topological autoregressive reveal ranks
 cyclic/non-causal graphs    -> deterministic random-order autoregressive ranks
@@ -96,7 +106,7 @@ graph records remain graph structured and are not flattened by default.
 ## BPB-Safe FineWeb Graphification
 
 FineWeb is graphified inside the model without adding extra scored tokens to
-the official sequence.  Each SentencePiece token is a graph node.  The model
+the official sequence.  Each active-tokenizer token is a graph node.  The model
 adds:
 
 - deterministic low-rank TokenGT-style node identifiers;
@@ -106,10 +116,53 @@ adds:
 - virtual causal edge-token states folded back into node hidden states.
 
 For OAI FineWeb only, graph-valued hidden states are flattened back to the
-original SentencePiece order with a gated sequence score-correction adapter.
+active tokenizer order with a gated sequence score-correction adapter.
 This preserves graph-in/graph-out hidden computation while keeping BPB a terse
 sequence score.  General graph records remain graph structured and should not
 use the OAI-only flattening path unless explicitly configured.
+
+## ConvexTok Tropical/Toric Tokenisation Path
+
+ConvexTok training constructs a byte-boundary DAG and solves a sparse LP
+relaxation on a configured tokenizer-training sample.  Det/Bias/Int rounding
+selects priced substring colours; all byte fallback edges remain available.
+Encoding is exact min-plus dynamic programming, so active token paths,
+top-two margins, and path entropy are tropical diagnostics.  Candidate token
+incidence and LP scores define a toric vocabulary polytope shadow: selected
+priced tokens are points/faces, and changes in shortest paths correspond to
+normal-fan wall crossings.
+
+The OAI baseline consumes this structure through:
+
+```text
+CONVEXTOK_DAG_FEATURES=1          # LP score, rank, byte length, priced/free flag
+CONVEXTOK_DAG_FEATURE_WEIGHT=...
+CONVEXTOK_TORIC_REG_WEIGHT=...    # embedding geometry follows LP/rank/length face coordinates
+tokenizer_regret/*
+tokenizer_tropical/*
+tokenizer_toric/*
+```
+
+The review loop treats tokenizer regret as its own evidence family.  A high LP
+gap suggests a tokenizer-bound BPB problem; low regret with high BPB suggests
+model or auxiliary-optimization bottlenecks.
+
+## Disk And Artifact Hygiene
+
+Large generated artifacts are not the canonical record of a run.  The canonical
+record is the train log, campaign state, markdown report, and cleanup ledger.
+The June 19 cleanup keeps five high-priority checkpoint binaries, compact
+selected int8 artifacts, and all markdown reports while deleting redundant
+full-precision checkpoints, redundant `final_model.pt` files, generated
+`*-full-analysis*` payload directories under `training_notes`, noisy Codex
+stderr logs, and Python caches.  The ledger is:
+
+```text
+docs/CLEANUP-LEDGER-20260619.md
+```
+
+The active ConvexTok export directory is explicitly excluded from cleanup until
+the campaign is running and has confirmed usable shards.
 
 ## Separately Tuned Graph Knobs
 

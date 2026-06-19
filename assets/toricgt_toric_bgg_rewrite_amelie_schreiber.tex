@@ -2407,8 +2407,8 @@ Under these conditions the reported objective is
   =\frac{\sum_{t=1}^{T}-\log_2 q_t(b_t\mid b_{<t})}{\sum_{t=1}^{T}\ell(t)}.
 \end{equation}
 
-\paragraph{Metric taxonomy and SP1024 conversion.}
-The implementation keeps three FineWeb quantities separate.  The official
+\paragraph{Metric taxonomy and active-tokenizer conversion.}
+The implementation keeps tokenizer-specific FineWeb quantities separate.  The official
 Parameter-Golf quantity is the byte-denominated score above; it is logged only
 when a byte-level or score-before-update evaluator has actually produced it.
 The TokenGT research model also exposes a graph-node SP1024 language-model
@@ -2454,9 +2454,9 @@ bidirectional graph attention by the mask
 FineWeb chains use $r(i)=i$, directed acyclic reasoning graphs use a
 topological rank, and cyclic or noncausal graphs use a deterministic
 content-independent random reveal rank.  Edge-token rank is the maximum of
-its endpoint ranks.  Under these hypotheses the SP1024 graph-node loss is a
-score-before-update next-token loss, and the byte denominator is the sum of
-SentencePiece target byte increments, so the restricted FineWeb metric can be
+its endpoint ranks.  Under these hypotheses the active-tokenizer graph-node
+loss is a score-before-update next-token loss, and the byte denominator is the
+sum of target token byte increments, so the restricted FineWeb metric can be
 reported as an OAI-style BPB for this route.  Without these hypotheses it
 remains a proxy.  Thus dashboards must display all relevant concepts under
 different names:
@@ -2469,6 +2469,25 @@ different names:
 Only score-valid byte or causal-token metrics should decide Parameter-Golf
 success; bidirectional graph proxies guide TokenGT representation training
 and ablations.
+
+\paragraph{ConvexTok tokenizer graph.}
+The current BPB campaign adds ConvexTok-2048 Det as an active-tokenizer option.
+ConvexTok constructs a byte-boundary DAG: vertices are byte offsets, free
+one-byte edges preserve feasibility, and priced substring edges carry
+vocabulary colours.  A sparse LP relaxation chooses colour masses on a
+tokenizer-training sample, and deterministic or bias-weighted rounding selects
+the deployable vocabulary.  With the vocabulary fixed, encoding is exact
+min-plus dynamic programming on this DAG.  The path length, LP lower bound,
+regret ratio, active-edge entropy, and top-two path margin are logged as
+tokenizer-level tropical metrics.  The selected token incidence vectors, LP
+scores, rounded ranks, byte lengths, and priced/free flags define a finite
+toric vocabulary-polytope shadow; token-path changes are treated as normal-fan
+wall crossings.  In the OAI baseline, \texttt{CONVEXTOK\_DAG\_FEATURES=1}
+feeds those features into the first-class TokenGT structural embedding, and
+\texttt{CONVEXTOK\_TORIC\_REG\_WEIGHT} applies a small training-only embedding
+regularizer.  The scored object remains the flattened active-tokenizer stream
+with exact byte accounting, so the tokenizer geometry cannot replace the BPB
+contract.
 
 \paragraph{OAI baseline transfers to causal TokenGT.}
 The causal TokenGT route ports the competition baseline's efficient input
@@ -3037,7 +3056,7 @@ The contest model should be a language model inspired by ToricGT, not the full g
   \item fixed toric phase features of target positions and optional PolarQuant KV perturbation audits;
   \item a compact prefix-visible GFlowNet action policy for latent graph-of-thought sampling;
   \item compact serialization of \texttt{graph\_json} node/edge records into the byte stream, so graph-structured supervision is not discarded in the contest adapter;
-  \item BPB-safe first-class TokenGT graphification for OAI FineWeb: every scored SentencePiece token is treated as a graph node with deterministic low-rank node identifiers, endpoint-pair features, local one-dimensional-edge features, toric phase features, and virtual causal edge-token states folded back into node states;
+  \item BPB-safe first-class TokenGT graphification for OAI FineWeb: every scored active-tokenizer token, whether SP1024 or ConvexTok, is treated as a graph node with deterministic low-rank node identifiers, endpoint-pair features, local one-dimensional-edge features, toric phase features, and virtual causal edge-token states folded back into node states;
   \item an OAI-FineWeb-only graph-output flattening and score-correction adapter, so graph-in/graph-out hidden computation is trained while official BPB is still computed on the terse sequential target;
   \item final int8 export by default, with int6/int4 packing tested only after round-trip BPB checks;
   \item optional Soft-MoE or low-rank expert adapters only as byte-accounted ablations after a dense baseline is stable.
@@ -3050,10 +3069,11 @@ A safe starting microarchitecture for the implemented dense track is
 \end{equation}
 with tied embeddings, recurrent block tying, hybrid softmax/tropical-ring attention, a tiny $A=8$ action GFlowNet policy, and no stored expert bank.  In the current artifact audit this gives about $13.0$M stored scalars and an int8 compressed artifact around $12.94$MB, leaving margin below $16{,}000{,}000$ bytes for code and metadata.  If $P_{\mathrm{fp}}$ is the uncompressed scalar count, then int8 export roughly permits $P_{\mathrm{fp}}<16$M minus code overhead; int6 export roughly permits $P_{\mathrm{fp}}<21$M before entropy compression; int4 export permits more parameters but is less stable unless quantization-aware training is strong.  These are engineering estimates; the actual gate is the serialized artifact size.
 
-The active OAI-baseline adaptation uses the same principle in a wider SP1024
-model: $V=1024$, $d=512$, $H=8$, $L=9$, tied embeddings, RoPE with
-\texttt{ROPE\_BASE}=10000, sequence length $1024$, and a training-token batch
-near $10^6$ tokens to use roughly the 20GB VRAM budget.  With first-class
+The active OAI-baseline adaptation uses the same principle with either the
+SP1024 baseline tokenizer or the ConvexTok-2048 Det tokenizer.  The current
+ConvexTok restart uses $V=2048$, $d=512$, $H=8$, $L=9$, tied embeddings, RoPE
+with \texttt{ROPE\_BASE}=10000, sequence length $1024$, and a training-token
+batch near $10^6$ tokens to use roughly the 20GB VRAM budget.  With first-class
 FineWeb TokenGT identifiers and graph-output flattening enabled, the current
 configuration has about $18.09$M trainable parameters before sidecar heads.
 The relevant exposed knobs are

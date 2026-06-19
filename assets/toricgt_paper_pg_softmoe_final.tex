@@ -1524,6 +1524,43 @@ dense blocks, and two recurrent passes; its 6-bit row-quantized LZMA artifact
 probe is $15{,}206{,}131$ bytes, leaving $793{,}869$ bytes below the
 $16{,}000{,}000$ byte cap.
 
+\subsection{ConvexTok as tropical tokenisation and toric vocabulary geometry}
+
+The active competition branch also treats tokenizer construction as a finite
+tropical optimization problem.  For a byte string $b_0,\ldots,b_T$, construct a
+directed acyclic graph whose vertices are byte-boundary positions
+$0,\ldots,T$.  Each one-byte fallback edge $(i,i+1)$ is free and always
+available.  Each candidate substring $b_i\cdots b_{j-1}$ supplies a priced edge
+$(i,j)$ carrying a colour $c$.  A ConvexTok vocabulary selects a bounded number
+of colours; with the vocabulary fixed, encoding is the exact min-plus shortest
+path
+\begin{equation}
+  d(j)=\min_{i<j:\,(i,j)\in E_{\mathrm{avail}}}\bigl(d(i)+1\bigr),
+  \qquad d(0)=0.
+\end{equation}
+The selected path, active predecessor, top-two margin, and path entropy are
+therefore tokenizer-level tropical diagnostics.  The tokenizer-training stage
+solves a sparse LP relaxation of the colour-selection problem on training
+shards, then applies deterministic, bias-weighted, or integer rounding to
+produce a deployable byte-exact vocabulary.
+
+This graph has a toric interpretation aligned with the rest of ToricGT.
+Candidate-token incidence vectors are exponent vectors, LP colour masses are
+rational weights, and the rounded vocabulary is a face-like finite subset of a
+vocabulary polytope.  Changes in the shortest token path under document
+perturbations are normal-fan wall crossings for this finite polyhedral shadow.
+The implementation records LP score, rounded rank, byte length, selected/free
+edge flags, vocabulary utilization, regret against the LP lower bound, active
+path entropy, and margin statistics.  When
+\texttt{CONVEXTOK\_DAG\_FEATURES=1}, these quantities become first-class
+TokenGT structural features for the OAI baseline.  When
+\texttt{CONVEXTOK\_TORIC\_REG\_WEIGHT}>0, a small training-only regularizer
+aligns token embeddings with the toric coordinates induced by LP score, rank,
+and byte length.  This is deliberately score-preserving: the official metric is
+still byte BPB on the final flattened ConvexTok token sequence, and the
+tokenizer geometry is used to diagnose and regularize the hidden
+representation rather than to change the evaluator contract.
+
 \subsection{Byte-safe embedding-space GFlowNet actions}
 
 The full ToricGT graph model uses an embedding-space GFlowNet over graph-of-thought states.  The Parameter-Golf adapter uses the score-valid subset of the same idea.  Let $h_k$ be the hidden state at random-order step $k$, computed from $(b_{\pi_{<k}},\pi_{\le k})$.  A small policy head produces

@@ -308,6 +308,23 @@ dense blocks, and two recurrent passes; its 6-bit row-quantized LZMA artifact
 probe is $15{,}206{,}131$ bytes, leaving $793{,}869$ bytes below the
 $16{,}000{,}000$ byte cap.
 
+The current tokenizer experiment replaces SP1024 in this same scored contract
+by ConvexTok-2048 Det.  ConvexTok represents tokenisation as a byte-boundary
+DAG: vertices are byte offsets, free one-byte edges guarantee feasibility, and
+priced substring edges carry vocabulary colours.  Training solves a sparse LP
+relaxation on tokenizer-training shards and rounds colour variables to a
+deployable vocabulary; inference then encodes each string by exact min-plus
+shortest-path dynamic programming.  This makes tokenizer choice a tropical
+object rather than an opaque preprocessing step.  ToricGT logs the rounded
+path length, LP lower bound, regret gap, active-edge entropy, top-two path
+margins, and vocabulary-face occupancy.  The selected priced-token incidence
+vectors define a toric vocabulary polytope shadow, while changes in the
+shortest token path correspond to normal-fan wall crossings.  The first-class
+TokenGT stream can consume LP score, rounded rank, byte length, and priced/free
+edge flags as compact structural embeddings; a tiny toric regularizer aligns
+token embeddings with these vocabulary-face coordinates.  BPB remains the
+byte-denominated prequential score on the final flattened token sequence.
+
 The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.  The local mirror of \texttt{AmelieSchreiber/toricgt-curated-splits} is used in the competition-safe split: train shards feed supervised BPB optimization, validation shards feed score-first validation, and test shards are reserved for held-out GFlowNet test-time scaling.  The byte loader packs multiple source rows into one chunk; after warmup the training iterator switches to larger technical records, and a 2048-byte packed-context config can resume from a 1024-byte checkpoint by resizing only the learned position table.  This exploits the tropical-ring upper layers for longer composite reasoning trajectories while preserving the strict prequential scoring contract.
 
 The next inference-scaling layer is anticipative trajectory memory.  Completed graph-of-thought DAGs are stored as compact keys

@@ -16,15 +16,33 @@ changes.
 - Order policy: content-independent random permutation per byte chunk/sample.
 - Graph projection: curated `graph_json` rows are serialized to compact
   node/edge traces and appended to the byte stream.
-- First-class FineWeb graphification: the OAI SP1024 baseline treats every
-  FineWeb token as a graph node in the primary model, with deterministic
+- FineWeb tokenizer options: the OAI baseline can use the original SP1024
+  SentencePiece stream or a ConvexTok byte-exact vocabulary trained by sparse
+  LP relaxation and rounded with Det/Bias/Int policies. ConvexTok-2048 Det is
+  the first experimental restart profile because tied embeddings keep the
+  16MB int8+zlib artifact plausible while reducing token count.
+- First-class FineWeb graphification: the OAI baseline treats every
+  FineWeb tokenizer token as a graph node in the primary model, with deterministic
   TokenGT-style node identifiers, endpoint-pair features, local
   one-dimensional-edge features, toric phase features, and virtual local
   edge-token states.
 - OAI-only sequence flattening: graph-valued hidden output is folded back to
-  the original SentencePiece sequence with a gated score-correction adapter for
+  the active tokenizer sequence with a gated score-correction adapter for
   BPB scoring. General graph data remains graph structured and is not flattened
   by default.
+- ConvexTok tropical/toric path: byte-boundary tokenisation DAGs are exact
+  min-plus shortest-path problems. The rounded vocabulary stores LP colour
+  scores, token byte lengths, selected ranks, and priced/free flags. These feed
+  first-class TokenGT via `CONVEXTOK_DAG_FEATURES=1`, while
+  `CONVEXTOK_TORIC_REG_WEIGHT` optionally regularizes token embeddings against
+  the toric vocabulary-face coordinates. Review reports inspect
+  `tokenizer_regret/*`, `tokenizer_tropical/*`, and `tokenizer_toric/*`.
+- Full ConvexTok shard generation reads the shared local curated dataset mirror
+  under `/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt`
+  but keeps all code, configs, docs, and orchestration in this ToricGT
+  repository. Generated ConvexTok shards are written under
+  `/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full`
+  to avoid duplicating the source dataset in `./data`.
 - GFlowNet: compact prefix-visible embedding action policy with sixteen latent
   graph-of-thought actions, a trajectory-balance surrogate, entropy logging,
   and multi-sample evaluation.
@@ -98,7 +116,7 @@ test-time adaptation mechanism without changing model weights or reading
 future bytes. The causal audit mutates future bytes and verifies that current
 logits are unchanged.
 
-The OAI SP1024 baseline adaptation now has its own training-only
+The OAI baseline adaptation now has its own training-only
 embedding-space GFlowNet head.  It reads prefix-valid hidden trajectories from
 the graphified FineWeb/OAI stream, treats token/action buckets as discrete
 graph-of-thought refinements, and trains a normalized trajectory-balance
@@ -124,21 +142,27 @@ artifact and avoiding a second evaluator-side graph dependency.
 
 ## Current OAI Baseline Adaptation
 
-The active `oai-toricgt` BPB campaign uses the OpenAI-style SP1024 baseline
-adaptation rather than the full graph research encoder. The current launch
+The active `oai-toricgt` BPB campaign uses the OpenAI-style baseline
+adaptation rather than the full graph research encoder. It can run on SP1024 or
+ConvexTok shards. The current ConvexTok-2048 launch
 contract is:
 
 ```text
 TRAIN_SEQ_LEN=1024
-TRAIN_BATCH_TOKENS=917504..983040
+TRAIN_BATCH_TOKENS=1048576
 MODEL_DIM=512
 NUM_LAYERS=9
 NUM_HEADS=8
 NUM_KV_HEADS=4
 MLP_MULT=2
 TIE_EMBEDDINGS=1
+VOCAB_SIZE=2048
+TOKENIZER_PATH=.../fineweb_convextok_2048_det.convextok.json
+DATA_PATH=.../fineweb10B_convextok2048_det
 FINEWEB_GRAPHIFY=1
 TOKENGT_FIRST_CLASS=1
+CONVEXTOK_DAG_FEATURES=1
+CONVEXTOK_TORIC_REG_WEIGHT=6e-6..8e-6
 OAI_FINEWEB_OUTPUT_FLATTENING=1
 GRAPH_OUTPUT_FLATTENING=1
 GRAPH_LM_PRIMARY=1
@@ -153,6 +177,13 @@ SCORE_FIRST_TTA_COMMIT=0
 BPB_FIRST_AUX_STAGING=1
 AUX_CONFLICT_CONTROLLER=1
 ```
+
+Generated artifacts are pruned after their reports are preserved. Keep train
+logs, campaign state, markdown reports, and at most a few high-priority
+checkpoint binaries; delete redundant full-precision checkpoints, duplicate
+`final_model.pt` outputs, noisy stderr logs, Python caches, and heavyweight
+`training_notes/*-full-analysis*` payload directories. The current cleanup
+ledger is `docs/CLEANUP-LEDGER-20260619.md`.
 
 The current graphification knobs are logged and swept independently:
 

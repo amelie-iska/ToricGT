@@ -30,8 +30,11 @@ tmux new-session -d -s toricgt_oai_toricgt_full_clone 'cd /home/iska/Documents/a
 
 **OAI Parameter-Golf baseline adaptation**
 
-The OAI SP1024 FineWeb BPB training path now graphifies FineWeb by default in
-the primary model, not only through an auxiliary sidecar.  Every FineWeb token
+The OAI FineWeb BPB training path now graphifies FineWeb by default in
+the primary model, not only through an auxiliary sidecar.  The active tokenizer
+can be the original SP1024 SentencePiece model or a ConvexTok tokenizer learned
+by sparse LP relaxation and rounded to a deployable byte-exact vocabulary.
+Every FineWeb token
 is treated as a TokenGT-style graph node, with causal local one-dimensional
 edges from already revealed previous tokens.  The compact GPT input stream
 receives learned node-class, position-bucket, local-edge, and toric-phase
@@ -43,6 +46,19 @@ switch visible while disabling the learned first-class TokenGT structural
 embeddings.  The existing ToricGT sidecar remains available for heavier
 GraphCG, analogy, trajectory-memory, toric, topological, BGG, Koszul, and
 derived-category losses over curated graph Parquet rows.
+
+The ConvexTok route makes tokenisation itself a graph.  Byte-boundary positions
+are vertices; one-byte fallback edges are free; candidate substring edges are
+priced by vocabulary colours; and encoding is an exact min-plus shortest path
+through that DAG.  ToricGT uses this structure directly: the tokenizer JSON
+stores LP colour scores, rounded ranks, byte lengths, and priced/free edge
+flags; first-class TokenGT can read those features through
+`CONVEXTOK_DAG_FEATURES=1`; and the campaign review writes
+`tokenizer_regret/*`, `tokenizer_tropical/*`, and `tokenizer_toric/*` metrics.
+An optional `CONVEXTOK_TORIC_REG_WEIGHT` regularizes token embeddings so high-LP
+priced tokens respect the toric vocabulary-face geometry induced by LP score,
+rank, and byte length.  BPB is still computed on the final flattened token
+sequence, with exact byte counts for ConvexTok byte-string tokens.
 
 The current OAI route also uses BPB-safe TokenGT-style identifiers without
 inserting extra scored tokens into the SentencePiece stream.  Deterministic
@@ -72,8 +88,8 @@ contract: FineWeb nodes are revealed in sequence order, directed acyclic graph
 records use topological reveal ranks, and cyclic or non-causal graph records
 use deterministic content-independent random reveal ranks.  Edge-token and
 endpoint features are visible only when their reveal ranks are prefix-valid.
-For OAI FineWeb, the graph-valued output is flattened back to the original
-SentencePiece sequence before BPB is computed.
+For OAI FineWeb, the graph-valued output is flattened back to the active
+tokenizer sequence before BPB is computed.
 
 The current OAI transfer route also promotes several formerly research-only
 techniques into the baseline adaptation as training-time, BPB-gated components:
@@ -110,6 +126,37 @@ per-byte likelihood improvement from the FoT correction path; and
 pressure, and effective loss weight from observed reward/diversity/entropy.
 The implementation plan and test ledger are in
 [`planning/BPB-IDEAS-1-4-IMPLEMENTATION-20260619.md`](planning/BPB-IDEAS-1-4-IMPLEMENTATION-20260619.md).
+
+ConvexTok build and run commands:
+
+```bash
+MATCHED_FINEWEB_CONVEXTOK_ENCODE_WORKERS=24 \
+MATCHED_FINEWEB_CONVEXTOK_ENCODE_BATCH_DOCS=64 \
+conda run --no-capture-output -n tokengt python amelie-iska/parameter-golf/data/download_hf_docs_and_tokenize.py \
+  --output-root /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full \
+  --tokenizer-config /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/convextok_2048_det_reuse_tokenizer_specs.json \
+  --docs-parquet-train-glob-local '/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/curated_hf_shards/train/*.parquet' \
+  --docs-parquet-val-glob-local '/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/curated_hf_shards/validation/*.parquet' \
+  --parquet-text-column text \
+  --max-export-doc-bytes 4096 \
+  --chunk-tokens 50000000 \
+  --skip-byte
+
+python scripts/run_oai_sidecar_bpb_campaign.py \
+  --campaign-id tg-bpb119-1k-convextok2048-det-$(date -u +%Y%m%dT%H%M%SZ) \
+  --steps-per-run 1000 \
+  --target-bpb 1.19 \
+  --fineweb-data /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/datasets/fineweb10B_convextok2048_det \
+  --tokenizer-path /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/tokenizers/fineweb_convextok_2048_det.convextok.json \
+  --vocab-size 2048
+```
+
+The active long export and training chain runs in tmux session
+`toricgt_convextok_full_train`.  It stays in the ToricGT codebase while reading
+the shared local dataset mirror under
+`/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt`; only
+large generated dataset shards are written there to avoid a duplicate download
+inside this repository.
 
 The native TokenGT FineWeb route is now autoregressive when
 `use_causal_graph_attention` and `use_lm_token_embeddings` are enabled.  FineWeb

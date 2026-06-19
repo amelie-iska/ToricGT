@@ -107,9 +107,87 @@ class Profile:
 
 PROFILES: list[Profile] = [
     Profile(
+        "convextok2048_det_tropical_toric_bpb",
+        {
+            "TRAIN_BATCH_TOKENS": "1048576",
+            "MATRIX_LR": "0.044",
+            "SCALAR_LR": "0.044",
+            "TIED_EMBED_LR": "0.054",
+            "WARMDOWN_ITERS": "560",
+            "WARMUP_STEPS": "10",
+            "TOKENGT_FIRST_CLASS_LR": "2.1e-4",
+            "TOKENGT_GRAPH_RADIUS": "4",
+            "TOKENGT_TOKEN_CLASS_BUCKETS": "128",
+            "TOKENGT_STRUCTURAL_WEIGHT": "0.052",
+            "TOKENGT_EDGE_WEIGHT": "0.038",
+            "TOKENGT_TORUS_WEIGHT": "0.014",
+            "CONVEXTOK_DAG_FEATURES": "1",
+            "CONVEXTOK_DAG_FEATURE_WEIGHT": "0.026",
+            "CONVEXTOK_TORIC_REG_WEIGHT": "8.0e-6",
+            "CONVEXTOK_TORIC_REG_TOPK": "128",
+            "GRAPH_OUTPUT_FLATTENING_LR": "1.9e-4",
+            "GRAPH_OUTPUT_EDGE_RADIUS": "4",
+            "GRAPH_OUTPUT_NODE_WEIGHT": "0.060",
+            "GRAPH_OUTPUT_EDGE_WEIGHT": "0.062",
+            "GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT": "0.040",
+            "GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT": "0.026",
+            "GRAPH_LM_LOSS_WEIGHT": "0.10",
+            "GRAPHCG_LOSS_WEIGHT": "2e-6",
+            "ANALOGY_LOSS_WEIGHT": "2.0e-5",
+            "TOKENGT_GRAPH_LOSS_WEIGHT": "4.5e-5",
+            "TRAJECTORY_MEMORY_LOSS_WEIGHT": "2.0e-5",
+            "TORICGT_SIDECAR_COMPUTE_ALL_METRICS": "1",
+            "TORIC_GEOMETRY_LOSS_WEIGHT": "4.0e-6",
+            "TORIC_VECTOR_BUNDLE_LOSS_WEIGHT": "1.6e-6",
+            "TORIC_BGG_LOSS_WEIGHT": "2.0e-6",
+            "KOSZUL_PERSISTENCE_LOSS_WEIGHT": "8.0e-7",
+            "COMBINATORIAL_TORIC_LOSS_WEIGHT": "1.0e-6",
+        },
+        "ConvexTok-2048 Det first run: expose LP/tokenisation-DAG metadata to first-class TokenGT, use min-plus/tropical shortest-path structure as a primary graph feature, and keep BPB-dominant optimization with low nonzero toric/tropical/BGG pressure.",
+    ),
+    Profile(
+        "convextok2048_bias_ood_probe",
+        {
+            "TRAIN_BATCH_TOKENS": "1048576",
+            "MATRIX_LR": "0.040",
+            "SCALAR_LR": "0.040",
+            "TIED_EMBED_LR": "0.050",
+            "WARMDOWN_ITERS": "640",
+            "WARMUP_STEPS": "10",
+            "TOKENGT_FIRST_CLASS_LR": "1.9e-4",
+            "TOKENGT_GRAPH_RADIUS": "4",
+            "TOKENGT_TOKEN_CLASS_BUCKETS": "128",
+            "TOKENGT_STRUCTURAL_WEIGHT": "0.048",
+            "TOKENGT_EDGE_WEIGHT": "0.034",
+            "TOKENGT_TORUS_WEIGHT": "0.014",
+            "CONVEXTOK_DAG_FEATURES": "1",
+            "CONVEXTOK_DAG_FEATURE_WEIGHT": "0.024",
+            "CONVEXTOK_TORIC_REG_WEIGHT": "6.0e-6",
+            "CONVEXTOK_TORIC_REG_TOPK": "128",
+            "GRAPH_OUTPUT_FLATTENING_LR": "1.7e-4",
+            "GRAPH_OUTPUT_EDGE_RADIUS": "4",
+            "GRAPH_OUTPUT_NODE_WEIGHT": "0.055",
+            "GRAPH_OUTPUT_EDGE_WEIGHT": "0.058",
+            "GRAPH_OUTPUT_EDGE_TOKEN_WEIGHT": "0.038",
+            "GRAPH_OUTPUT_SCORE_CORRECTION_WEIGHT": "0.024",
+            "GRAPH_LM_LOSS_WEIGHT": "0.09",
+            "GRAPHCG_LOSS_WEIGHT": "2e-6",
+            "ANALOGY_LOSS_WEIGHT": "2.2e-5",
+            "TOKENGT_GRAPH_LOSS_WEIGHT": "4.0e-5",
+            "TRAJECTORY_MEMORY_LOSS_WEIGHT": "2.4e-5",
+            "TORICGT_SIDECAR_COMPUTE_ALL_METRICS": "1",
+            "TORIC_GEOMETRY_LOSS_WEIGHT": "3.5e-6",
+            "TORIC_VECTOR_BUNDLE_LOSS_WEIGHT": "1.5e-6",
+            "TORIC_BGG_LOSS_WEIGHT": "2.2e-6",
+            "KOSZUL_PERSISTENCE_LOSS_WEIGHT": "8.0e-7",
+            "COMBINATORIAL_TORIC_LOSS_WEIGHT": "1.0e-6",
+        },
+        "ConvexTok-2048 Bias profile: test the more length-normalized tokenizer rounding as an OOD-stability/early-BPB probe while keeping the same first-class tropical tokenisation-DAG feature path.",
+    ),
+    Profile(
         "gate1500_high_batch_toric_bgg_memory",
         {
-            "TRAIN_BATCH_TOKENS": "983040",
+            "TRAIN_BATCH_TOKENS": "1048576",
             "MATRIX_LR": "0.042",
             "SCALAR_LR": "0.042",
             "TIED_EMBED_LR": "0.052",
@@ -640,6 +718,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--graph-data-path", default="/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/curated_hf_shards")
     parser.add_argument("--fineweb-data", default="amelie-iska/parameter-golf/data/datasets/fineweb10B_sp1024")
     parser.add_argument("--tokenizer-path", default="amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model")
+    parser.add_argument("--vocab-size", type=int, default=1024)
+    parser.add_argument("--matched-docs-jsonl", default="amelie-iska/parameter-golf/data/docs_selected.jsonl")
+    parser.add_argument(
+        "--matched-docs-parquet",
+        action="append",
+        default=[],
+        help="Parquet glob(s) for ConvexTok regret analysis samples when matched docs JSONL is absent. May be repeated.",
+    )
+    parser.add_argument("--matched-docs-parquet-text-column", default="text")
+    parser.add_argument("--sentencepiece-baseline-tokenizer", default="amelie-iska/parameter-golf/data/tokenizers/fineweb_1024_bpe.model")
     parser.add_argument("--codex-review", action="store_true", default=env_truthy("TORICGT_CODEX_REVIEW", "0"))
     parser.add_argument("--full-analysis", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--strict-analysis", action=argparse.BooleanOptionalAction, default=True)
@@ -959,7 +1047,8 @@ def write_report(
         [
             "## Interpretation",
             "",
-            "Each campaign attempt restarts from step 0.  The OAI SP1024 FineWeb stream remains the primary BPB objective.  "
+            "Each campaign attempt restarts from step 0.  The active OAI FineWeb tokenizer stream remains the primary BPB objective.  "
+            "For ConvexTok runs, tokenisation is a byte-boundary DAG with exact min-plus shortest-path encoding; LP lower-bound regret, active-path tropical margins, and toric vocabulary-face metrics are reviewed as tokenizer-specific evidence rather than merged into generic auxiliary losses.  "
             "FineWeb graphification is first-class and enabled by default: the main GPT input stream receives causal TokenGT-style node/edge structural embeddings before the transformer blocks, and optional OAI-FineWeb-only output flattening maps graph-output states back to SentencePiece sequence order for BPB scoring.  "
             "Curated graph data is also bonafide primary LM training data: graph records are serialized into causal topological node/edge token sequences when directed and acyclic, and deterministic random-order graph token sequences when noncausal or cyclic.  Graph-data hidden states are not flattened by default; they remain graph structured for graph-in/graph-out training and sidecar analysis.  "
             "ToricGT sidecar losses remain active from step 0 for full-rank GraphCG, analogy lattice structure, graph supervision, and trajectory-memory retrieval, but their weights are kept small so they regularize rather than dominate BPB.  "
@@ -978,6 +1067,7 @@ def run_codex_review(report: Path) -> None:
         "toric/tropical geometry, persistent homology, vector-bundle/sheaf, "
         "BGG category O, Koszul/resolution, combinatorial commutative algebra, scheduled graph-LM weights, teacher distillation, "
         "adaptive graph radius, graph-output flattening CE lift/regression, calibration loss, score-correction gates, "
+        "ConvexTok tokenizer-regret metrics, LP lower-bound gap ratios, min-plus tokenisation-DAG active paths, tropical path margins, toric vocabulary-face entropy, "
         "OAI embedding-space GFlowNet graph-of-thought trajectory-balance metrics, OAI embedding-space Forest-of-Thought sparse activation/UCB/self-correction/consensus/trajectory-balance metrics, OAI multi-token prediction metrics, "
         "BPB-first auxiliary staging multipliers, family-level gradient conflict route scales, FoT BPB-delta reward metrics, and reward-coupled FoT entropy/diversity controls, "
         "non-destructive score-first TTA metrics, "
@@ -987,7 +1077,7 @@ def run_codex_review(report: Path) -> None:
         "`toricgt_sidecar/*` metric description, trend, BPB correlation, and family weight guidance before recommending the next restart profile. "
         "If the 1.5K gate missed BPB < 1.19, recommend exact hyperparameter/config changes and explain why the next run should restart from step 0. "
         "Do not collapse all advanced losses into one bin: reason separately about tropical/toric fan losses, BGG/category-O losses, "
-        "vector-bundle/sheaf losses, persistent homology/Koszul losses, combinatorial toric algebra, GraphCG, analogy, memory, and graph-LM. "
+        "vector-bundle/sheaf losses, persistent homology/Koszul losses, combinatorial toric algebra, ConvexTok tokenizer regret, tropical shortest-path tokenisation, GraphCG, analogy, memory, and graph-LM. "
         "For loss-like metrics, interpret positive BPB correlation as possible evidence that reducing that loss could help BPB; "
         "do not automatically treat every positive correlation as harmful. "
         "Stay exploratory: this project has only a small number of short FoT-enabled 1K-step runs, so recommend inventive, evidence-based changes instead of prematurely collapsing the sweep. "
@@ -1084,7 +1174,7 @@ def launch_training(
         "TEACHER_DISTILL_TEMPERATURE": os.environ.get("TEACHER_DISTILL_TEMPERATURE", "2.0"),
         "TEACHER_DISTILL_MAX_SEQUENCES": os.environ.get("TEACHER_DISTILL_MAX_SEQUENCES", "2"),
         "FINEWEB_CASEOPS": os.environ.get("FINEWEB_CASEOPS", "0"),
-        "VOCAB_SIZE": "1024",
+        "VOCAB_SIZE": str(int(args.vocab_size)),
         "MODEL_DIM": "512",
         "NUM_LAYERS": "9",
         "NUM_HEADS": "8",
@@ -1106,6 +1196,10 @@ def launch_training(
         "TOKENGT_IDENTIFIER_WEIGHT": "0.014",
         "TOKENGT_ENDPOINT_WEIGHT": "0.018",
         "TOKENGT_EDGE_TOKEN_WEIGHT": "0.016",
+        "CONVEXTOK_DAG_FEATURES": os.environ.get("CONVEXTOK_DAG_FEATURES", "1"),
+        "CONVEXTOK_DAG_FEATURE_WEIGHT": os.environ.get("CONVEXTOK_DAG_FEATURE_WEIGHT", "0.018"),
+        "CONVEXTOK_TORIC_REG_WEIGHT": os.environ.get("CONVEXTOK_TORIC_REG_WEIGHT", "0"),
+        "CONVEXTOK_TORIC_REG_TOPK": os.environ.get("CONVEXTOK_TORIC_REG_TOPK", "96"),
         "OAI_FINEWEB_OUTPUT_FLATTENING": "1",
         "GRAPH_OUTPUT_FLATTENING": "1",
         "GRAPH_OUTPUT_FLATTENING_LR": "1.4e-4",
@@ -1271,6 +1365,73 @@ def launch_training(
     return int(proc.returncode)
 
 
+def run_convextok_regret_analysis(args: argparse.Namespace, output_dir: Path) -> None:
+    if not str(args.tokenizer_path).endswith(".convextok.json"):
+        return
+    repo = Path(args.repo_root).resolve()
+    tokenizer_path = (repo / args.tokenizer_path).resolve() if not Path(args.tokenizer_path).is_absolute() else Path(args.tokenizer_path)
+    docs_jsonl = (repo / args.matched_docs_jsonl).resolve() if not Path(args.matched_docs_jsonl).is_absolute() else Path(args.matched_docs_jsonl)
+    baseline = (
+        (repo / args.sentencepiece_baseline_tokenizer).resolve()
+        if not Path(args.sentencepiece_baseline_tokenizer).is_absolute()
+        else Path(args.sentencepiece_baseline_tokenizer)
+    )
+    parquet_patterns = [str(pattern) for pattern in getattr(args, "matched_docs_parquet", []) if str(pattern).strip()]
+    if not docs_jsonl.exists() and not parquet_patterns:
+        note = output_dir / "convextok_regret_missing_docs.md"
+        note.write_text(
+            "\n".join(
+                [
+                    "# ConvexTok Regret Analysis Not Run",
+                    "",
+                    f"- expected matched docs JSONL: `{docs_jsonl}`",
+                    "- no `--matched-docs-parquet` globs were provided.",
+                    "- reason: no document sample source was present for this run.",
+                    "- action: run the matched FineWeb ConvexTok export or pass local Parquet globs from the shared ToricGT corpus.",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return
+    command = [
+        args.conda_bin,
+        "run",
+        "--no-capture-output",
+        "-n",
+        args.conda_env,
+        "python",
+        "scripts/analyze_convextok_regret.py",
+        "--convextok-tokenizer",
+        str(tokenizer_path),
+        "--sentencepiece-tokenizer",
+        str(baseline),
+        "--max-docs",
+        "24",
+        "--max-doc-bytes",
+        "2048",
+        "--max-candidates",
+        "1800",
+        "--output-json",
+        str(output_dir / "convextok_regret.json"),
+        "--dag-output-json",
+        str(output_dir / "convextok_tokenisation_dag.json"),
+    ]
+    if docs_jsonl.exists():
+        command.extend(["--docs-jsonl", str(docs_jsonl)])
+    else:
+        for pattern in parquet_patterns:
+            command.extend(["--docs-parquet", pattern])
+        command.extend(["--parquet-text-column", str(args.matched_docs_parquet_text_column)])
+    (output_dir / "convextok_regret_command.json").write_text(
+        json.dumps(command, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    with (output_dir / "convextok_regret.stdout.log").open("w", encoding="utf-8") as stdout, (
+        output_dir / "convextok_regret.stderr.log"
+    ).open("w", encoding="utf-8") as stderr:
+        subprocess.run(command, cwd=repo, stdout=stdout, stderr=stderr, text=True, check=False)
+
+
 def run_full_iteration_analysis(
     args: argparse.Namespace,
     *,
@@ -1362,6 +1523,7 @@ def run_full_iteration_analysis(
             except Exception as exc:
                 last_decision = {"next_profile_hint": "", "reason": f"decision JSON parse failed: {exc}"}
         if last_returncode == 0:
+            run_convextok_regret_analysis(args, output_dir)
             if failure_records:
                 retry_success = notes_dir / f"RUN-{run_index:03d}-{run_id}-FULL-ANALYSIS-RETRY-SUCCEEDED.md"
                 retry_success.write_text(

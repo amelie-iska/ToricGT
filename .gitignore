@@ -8,6 +8,8 @@ checkpoints/
 outputs/
 wandb/
 logs/
+runs/
+training_notes/
 amelie-iska/
 data/raw/
 data/curated/
