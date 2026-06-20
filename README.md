@@ -30,6 +30,22 @@ tmux new-session -d -s toricgt_oai_toricgt_full_clone 'cd /home/iska/Documents/a
 
 **OAI Parameter-Golf baseline adaptation**
 
+Current best ConvexTok/ToricGT OAI run snapshot, uploaded to
+[`AmelieSchreiber/toricgt-checkpoints`](https://huggingface.co/AmelieSchreiber/toricgt-checkpoints),
+is `tg-bpb119-1k-convextok2048-det-skipval-20260620T021629Z-r001-convextok2048_det_tropical_toric_bpb-20260620T021630Z`.
+At step 1000 it reached train BPB `1.0213`, capped validation BPB `0.5656`,
+and int8+zlib round-trip validation BPB `0.5669`.  The compressed
+Parameter-Golf artifact estimate was `15,180,497` bytes, below the
+`16,000,000` byte cap.  The result used deterministic ConvexTok-2048,
+first-class TokenGT graphification, tokenization-DAG features, OAI-only
+graph-output flattening and score correction, tropical/tokenizer toric
+regularization, FoT/GFlowNet embedding-space search heads, MTP, full-rank
+GraphCG, trajectory-memory retrieval, toric geometry probes, vector-bundle
+1D-cone/sheaf terms, Toric BGG category-O certificates, Koszul persistence,
+combinatorial toric commutative-algebra metrics, and derived-signature
+distillation.  The reported validation is the campaign gate measurement, so a
+final submission candidate still needs a full official validation pass.
+
 The OAI FineWeb BPB training path now graphifies FineWeb by default in
 the primary model, not only through an auxiliary sidecar.  The active tokenizer
 can be the original SP1024 SentencePiece model or a ConvexTok tokenizer learned
