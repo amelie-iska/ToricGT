@@ -1,6 +1,6 @@
 """ToricGT sidecar losses for the OAI Parameter-Golf baseline.
 
-This module deliberately leaves the OAI SP1024 FineWeb language-model stream
+This module deliberately leaves the OAI FineWeb language-model stream
 untouched.  It consumes curated graph Parquet rows as an auxiliary stream and
 trains graph/analogy/retrieval heads from the same GPT hidden states.
 """
@@ -15,7 +15,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-import sentencepiece as spm
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -30,7 +29,7 @@ from .toric_vector_bundles import ToricVectorBundleConfig, ToricVectorBundleProb
 
 
 class GraphParquetTokenStream:
-    """Stream curated graph rows as SP1024 token chunks for graph LM training.
+    """Stream curated graph rows as tokenizer chunks for graph LM training.
 
     Every row is graphified before SentencePiece encoding.  Rows with a
     ``graph_json`` payload are serialized as explicit node and edge token
@@ -43,11 +42,11 @@ class GraphParquetTokenStream:
 
     TEXT_COLUMNS = ("text", "question", "reasoning", "solution", "answer", "graph_json", "metadata_json")
 
-    def __init__(self, pattern: str, sp: spm.SentencePieceProcessor, seq_len: int, batch_size: int):
+    def __init__(self, pattern: str, tokenizer: Any, seq_len: int, batch_size: int):
         self.files = [Path(p) for p in sorted(glob.glob(pattern))]
         if not self.files:
             raise FileNotFoundError(f"No graph Parquet files found for pattern: {pattern}")
-        self.sp = sp
+        self.tokenizer = tokenizer
         self.seq_len = int(seq_len)
         self.batch_size = int(batch_size)
         self.file_idx = 0
@@ -57,6 +56,13 @@ class GraphParquetTokenStream:
         self.policy_counts: dict[str, int] = {}
         self.rows_graphified = 0
         self._load_file()
+
+    def _encode(self, text: str) -> list[int]:
+        try:
+            ids = self.tokenizer.encode(text, out_type=int)
+        except TypeError:
+            ids = self.tokenizer.encode(text)
+        return [int(token_id) for token_id in ids]
 
     @staticmethod
     def _stable_key(value: Any, record_id: str) -> int:
@@ -318,9 +324,9 @@ class GraphParquetTokenStream:
             self._advance_file()
         text = self.rows[self.row_idx]
         self.row_idx += 1
-        ids = self.sp.encode(text, out_type=int)
-        sep = self.sp.encode("\n\n", out_type=int)
-        self.token_buffer.extend(int(v) for v in ids + sep)
+        ids = self._encode(text)
+        sep = self._encode("\n\n")
+        self.token_buffer.extend(ids + sep)
 
     def next_batch(self, device: torch.device) -> tuple[Tensor, Tensor]:
         needed = self.batch_size * self.seq_len + 1
