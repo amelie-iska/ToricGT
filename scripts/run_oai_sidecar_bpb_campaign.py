@@ -768,8 +768,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--followup-runs-after-meta",
         type=int,
-        default=10,
-        help="After max-runs primary attempts miss target, write a cross-run meta-analysis and run this many more fresh attempts.",
+        default=0,
+        help="Deprecated follow-up budget. Defaults to 0 so campaigns run exactly --max-runs attempts.",
+    )
+    parser.add_argument(
+        "--stop-on-target",
+        action="store_true",
+        default=env_truthy("TORICGT_STOP_ON_TARGET", "0"),
+        help="Stop early when a run reaches target BPB. Disabled by default so the campaign can select the best out of the exact run budget.",
     )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -1938,25 +1944,9 @@ def main() -> None:
             target_bpb=float(args.target_bpb),
         )
         history.append({"run_id": args.prior_run_id, "metrics": prior_metrics, "profile": "prior_external"})
-    total_runs = int(args.max_runs) + max(0, int(args.followup_runs_after_meta))
+    total_runs = int(args.max_runs)
     meta_written = False
     for run_index in range(1, total_runs + 1):
-        if run_index == int(args.max_runs) + 1 and not meta_written:
-            meta_path = write_meta_analysis(notes_dir, history, args, phase="primary-25-run")
-            write_state(
-                state_path,
-                {
-                    "campaign_id": args.campaign_id,
-                    "updated_utc": utc_iso(),
-                    "target_bpb": args.target_bpb,
-                    "history": history,
-                    "primary_meta_analysis": str(meta_path),
-                    "followup_runs_planned": int(args.followup_runs_after_meta),
-                },
-            )
-            if args.codex_review:
-                run_codex_review(meta_path)
-            meta_written = True
         profile = choose_profile(run_index, history, args.profile_offset)
         run_id = short_run_id(str(args.campaign_id), run_index, profile.name)
         env_overrides_used = latest_env_overrides(history)
@@ -2036,7 +2026,7 @@ def main() -> None:
             return
         if returncode != 0:
             print(f"[{utc_iso()}] run {run_id} failed with code {returncode}; continuing with next profile", flush=True)
-        if math.isfinite(bpb) and bpb <= args.target_bpb:
+        if args.stop_on_target and math.isfinite(bpb) and bpb <= args.target_bpb:
             synopsis = notes_dir / f"TARGET-REACHED-{utc_stamp()}.md"
             synopsis.write_text(
                 f"# Target Reached\n\n- run: `{run_id}`\n- BPB: `{bpb:.8f}`\n- target: `{args.target_bpb}`\n",
@@ -2045,7 +2035,7 @@ def main() -> None:
             print(f"[{utc_iso()}] target reached by {run_id}: {bpb:.6f}", flush=True)
             return
     best = min(history, key=lambda row: metric_bpb(row.get("metrics", {}) if isinstance(row.get("metrics"), dict) else {}))
-    final_meta = write_meta_analysis(notes_dir, history, args, phase="final-35-run")
+    final_meta = write_meta_analysis(notes_dir, history, args, phase="final-25-run")
     synopsis = notes_dir / f"CAMPAIGN-SYNOPSIS-{utc_stamp()}.md"
     synopsis.write_text(
         "\n".join(
@@ -2063,7 +2053,7 @@ def main() -> None:
                 json.dumps(best.get("metrics", {}), indent=2, sort_keys=True),
                 "```",
                 "",
-                "The campaign exhausted its configured primary and follow-up run budgets without reaching target.  Inspect the final meta-analysis before starting another campaign.",
+                "The campaign exhausted its configured exact run budget. Inspect the final meta-analysis and the best-run checkpoint before starting another campaign.",
                 "",
             ]
         ),
