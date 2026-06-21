@@ -86,10 +86,11 @@
     .loss-list span { color:var(--cyan); font-weight:800; }
     .loss-list strong { float:right; color:var(--gold); }
     .loss-list p { clear:both; margin:7px 0 0; color:#b7cce0; line-height:1.45; }
-    .chart { height:260px; display:flex; align-items:flex-end; gap:10px; padding:18px 6px 6px; border-bottom:1px solid rgba(157,184,207,.25); }
+    .chart { height:260px; display:flex; align-items:flex-end; gap:10px; padding:34px 6px 6px; border-bottom:1px solid rgba(157,184,207,.25); }
     .bar { flex:1; min-width:24px; border-radius:10px 10px 0 0; background:linear-gradient(180deg, var(--cyan), var(--violet)); position:relative; }
     .bar.best { background:linear-gradient(180deg, var(--green), var(--gold)); }
     .bar span { position:absolute; inset:auto 0 calc(100% + 8px); text-align:center; font-size:.75rem; color:#dff9ff; }
+    .chart-note { color:var(--muted); font-size:.9rem; margin:10px 0 0; }
     .gallery { grid-template-columns: repeat(2, minmax(0,1fr)); }
     .gallery-card { margin:0; overflow:hidden; }
     .gallery-card img { display:block; width:100%; aspect-ratio: 16 / 9; object-fit:cover; background:#020711; }
@@ -166,7 +167,6 @@
     <section class="wrap">
       <div class="section-head">
         <h2>Best Completed Run</h2>
-        <p>Generated 2026-06-21 16:50:50 UTC from <code>training_notes/tg-bpb-bestof10-convextok2048-det-20260621T040717Z/campaign_state.json</code>. The page should be regenerated after the 10-run sweep, 900-step candidate, HF upload, and PR creation finish.</p>
       </div>
       <div class="grid metrics">
         
@@ -202,8 +202,9 @@
 
     <section class="wrap grid panels">
       <article class="panel">
-        <h3>Campaign Trace</h3>
-        <div id="chart" class="chart" data-history='[{&quot;artifact&quot;: 14959389, &quot;bpb&quot;: 1.2637899, &quot;profile&quot;: &quot;prior_external&quot;, &quot;run&quot;: &quot;ge_batch_lower_lr_sidecar_light-20260616T222607Z&quot;, &quot;train_bpb&quot;: null}, {&quot;artifact&quot;: 15180494, &quot;bpb&quot;: 0.56512505, &quot;profile&quot;: &quot;convextok2048_det_tropical_toric_bpb&quot;, &quot;run&quot;: &quot;xtok2048_det_tropical_toric_bpb-20260621T040718Z&quot;, &quot;train_bpb&quot;: 1.0058}, {&quot;artifact&quot;: 15287974, &quot;bpb&quot;: 0.66925466, &quot;profile&quot;: &quot;gate1500_fast_main_lr_light_graphcg&quot;, &quot;run&quot;: &quot;1500_fast_main_lr_light_graphcg-20260621T101734Z&quot;, &quot;train_bpb&quot;: 0.9026}, {&quot;artifact&quot;: 15525100, &quot;bpb&quot;: 0.7186649, &quot;profile&quot;: &quot;gate1500_fast_main_lr_aux_conflict_recovery&quot;, &quot;run&quot;: &quot;t_main_lr_aux_conflict_recovery-20260621T120339Z&quot;, &quot;train_bpb&quot;: 0.8295}, {&quot;artifact&quot;: 14400139, &quot;bpb&quot;: 0.65850488, &quot;profile&quot;: &quot;gate1500_structural_toric_heavy&quot;, &quot;run&quot;: &quot;gate1500_structural_toric_heavy-20260621T135410Z&quot;, &quot;train_bpb&quot;: 0.8738}, {&quot;artifact&quot;: 14589172, &quot;bpb&quot;: 0.68937811, &quot;profile&quot;: &quot;gate1500_bgg_memory_probe&quot;, &quot;run&quot;: &quot;-r007-gate1500_bgg_memory_probe-20260621T144834Z&quot;, &quot;train_bpb&quot;: 0.8316}, {&quot;artifact&quot;: 12202796, &quot;bpb&quot;: 0.49533264, &quot;profile&quot;: &quot;gate2500_experimental_family_selective&quot;, &quot;run&quot;: &quot;0_experimental_family_selective-20260621T154110Z&quot;, &quot;train_bpb&quot;: 0.5036}, {&quot;artifact&quot;: 12199688, &quot;bpb&quot;: 0.49795596, &quot;profile&quot;: &quot;gate2500_fast_bpb_low_aux&quot;, &quot;run&quot;: &quot;-r009-gate2500_fast_bpb_low_aux-20260621T161926Z&quot;, &quot;train_bpb&quot;: 0.5056}]'></div>
+        <h3>Campaign BPB Trace</h3>
+        <div id="chart" class="chart" data-history='[{&quot;artifact&quot;: 15180494, &quot;bpb&quot;: 0.56512505, &quot;profile&quot;: &quot;convextok2048_det_tropical_toric_bpb&quot;, &quot;run&quot;: &quot;xtok2048_det_tropical_toric_bpb-20260621T040718Z&quot;, &quot;train_bpb&quot;: 1.0058}, {&quot;artifact&quot;: 15287974, &quot;bpb&quot;: 0.66925466, &quot;profile&quot;: &quot;gate1500_fast_main_lr_light_graphcg&quot;, &quot;run&quot;: &quot;1500_fast_main_lr_light_graphcg-20260621T101734Z&quot;, &quot;train_bpb&quot;: 0.9026}, {&quot;artifact&quot;: 15525100, &quot;bpb&quot;: 0.7186649, &quot;profile&quot;: &quot;gate1500_fast_main_lr_aux_conflict_recovery&quot;, &quot;run&quot;: &quot;t_main_lr_aux_conflict_recovery-20260621T120339Z&quot;, &quot;train_bpb&quot;: 0.8295}, {&quot;artifact&quot;: 14400139, &quot;bpb&quot;: 0.65850488, &quot;profile&quot;: &quot;gate1500_structural_toric_heavy&quot;, &quot;run&quot;: &quot;gate1500_structural_toric_heavy-20260621T135410Z&quot;, &quot;train_bpb&quot;: 0.8738}, {&quot;artifact&quot;: 14589172, &quot;bpb&quot;: 0.68937811, &quot;profile&quot;: &quot;gate1500_bgg_memory_probe&quot;, &quot;run&quot;: &quot;-r007-gate1500_bgg_memory_probe-20260621T144834Z&quot;, &quot;train_bpb&quot;: 0.8316}, {&quot;artifact&quot;: 12202796, &quot;bpb&quot;: 0.49533264, &quot;profile&quot;: &quot;gate2500_experimental_family_selective&quot;, &quot;run&quot;: &quot;0_experimental_family_selective-20260621T154110Z&quot;, &quot;train_bpb&quot;: 0.5036}, {&quot;artifact&quot;: 12199688, &quot;bpb&quot;: 0.49795596, &quot;profile&quot;: &quot;gate2500_fast_bpb_low_aux&quot;, &quot;run&quot;: &quot;-r009-gate2500_fast_bpb_low_aux-20260621T161926Z&quot;, &quot;train_bpb&quot;: 0.5056}]'></div>
+        <p class="chart-note">Lower bars are better: BPB is a cost, so the best run is highlighted in green and should sit closest to the baseline.</p>
         <p class="lead">Campaign <code>tg-bpb-bestof10-convextok2048-det-20260621T040717Z</code> restarts from step 0 each attempt. Current best profile: <code>gate2500_experimental_family_selective</code>. Best run id: <code>tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z</code>.</p>
       </article>
       <article class="panel">
@@ -267,7 +268,6 @@
     <section class="wrap">
       <div class="section-head">
         <h2>Visual Evidence</h2>
-        <p>These are copied from the project’s generated diagrams and audit screenshots so the public page reflects real outputs from the codebase.</p>
       </div>
       <div class="grid gallery">
         
@@ -358,10 +358,10 @@
       const worst = Math.max(...history.map(d => d.bpb));
       for (const [idx, d] of history.entries()) {
         const bar = document.createElement('div');
-        const t = worst === best ? 1 : (worst - d.bpb) / (worst - best);
+        const t = worst === best ? 0 : (d.bpb - best) / (worst - best);
         bar.className = 'bar' + (d.bpb === best ? ' best' : '');
-        bar.style.height = `${Math.max(24, 54 + t * 180)}px`;
-        bar.title = `${idx + 1} · ${d.profile || 'profile'} · BPB ${d.bpb.toFixed(4)}`;
+        bar.style.height = `${Math.max(26, 42 + t * 182)}px`;
+        bar.title = `${idx + 1} · ${d.profile || 'profile'} · BPB ${d.bpb.toFixed(4)} · lower is better`;
         const label = document.createElement('span');
         label.textContent = d.bpb.toFixed(3);
         bar.appendChild(label);

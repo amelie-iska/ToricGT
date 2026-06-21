@@ -108,10 +108,14 @@ def metric_bpb(metrics: dict[str, Any]) -> float:
     return float("inf")
 
 
-def completed_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
+def completed_rows(state: dict[str, Any], *, current_campaign_only: bool = True) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    campaign_id = str(state.get("campaign_id", ""))
     for row in state.get("history", []):
         if not isinstance(row, dict):
+            continue
+        run_id = str(row.get("run_id", ""))
+        if current_campaign_only and campaign_id and not run_id.startswith(campaign_id):
             continue
         metrics = row.get("metrics")
         if not isinstance(metrics, dict):
@@ -192,19 +196,12 @@ def card(title: str, value: str, note: str) -> str:
 
 
 def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_url: str, copied: dict[str, str]) -> str:
-    rows = completed_rows(state)
+    rows = completed_rows(state, current_campaign_only=True)
     best = best_row(rows)
     best_metrics = best.get("metrics", {}) if best else {}
     best_profile = str(best.get("profile", "pending")) if best else "pending"
     best_run_id = str(best.get("run_id", "pending")) if best else "pending"
     campaign_id = str(state.get("campaign_id", state_path.parent.name if state_path else "pending"))
-    if state_path:
-        try:
-            state_label = str(state_path.resolve().relative_to(repo.resolve()))
-        except ValueError:
-            state_label = state_path.name
-    else:
-        state_label = "no campaign state found"
     pr_label = pr_url or "pending after best-of-10 + 900-step candidate"
     pr_href = pr_url or PARAMETER_GOLF_URL
     hero = copied.get("logo") or copied.get("architecture") or ""
@@ -326,10 +323,11 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
     .loss-list span {{ color:var(--cyan); font-weight:800; }}
     .loss-list strong {{ float:right; color:var(--gold); }}
     .loss-list p {{ clear:both; margin:7px 0 0; color:#b7cce0; line-height:1.45; }}
-    .chart {{ height:260px; display:flex; align-items:flex-end; gap:10px; padding:18px 6px 6px; border-bottom:1px solid rgba(157,184,207,.25); }}
+    .chart {{ height:260px; display:flex; align-items:flex-end; gap:10px; padding:34px 6px 6px; border-bottom:1px solid rgba(157,184,207,.25); }}
     .bar {{ flex:1; min-width:24px; border-radius:10px 10px 0 0; background:linear-gradient(180deg, var(--cyan), var(--violet)); position:relative; }}
     .bar.best {{ background:linear-gradient(180deg, var(--green), var(--gold)); }}
     .bar span {{ position:absolute; inset:auto 0 calc(100% + 8px); text-align:center; font-size:.75rem; color:#dff9ff; }}
+    .chart-note {{ color:var(--muted); font-size:.9rem; margin:10px 0 0; }}
     .gallery {{ grid-template-columns: repeat(2, minmax(0,1fr)); }}
     .gallery-card {{ margin:0; overflow:hidden; }}
     .gallery-card img {{ display:block; width:100%; aspect-ratio: 16 / 9; object-fit:cover; background:#020711; }}
@@ -406,7 +404,6 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
     <section class="wrap">
       <div class="section-head">
         <h2>Best Completed Run</h2>
-        <p>Generated {html.escape(utc_now())} from <code>{html.escape(state_label)}</code>. The page should be regenerated after the 10-run sweep, 900-step candidate, HF upload, and PR creation finish.</p>
       </div>
       <div class="grid metrics">
         {card("Best int8 BPB", fmt(best_metrics.get("final_int8_bpb")), "final int8+zlib round-trip BPB")}
@@ -418,8 +415,9 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
 
     <section class="wrap grid panels">
       <article class="panel">
-        <h3>Campaign Trace</h3>
+        <h3>Campaign BPB Trace</h3>
         <div id="chart" class="chart" data-history='{html.escape(history)}'></div>
+        <p class="chart-note">Lower bars are better: BPB is a cost, so the best run is highlighted in green and should sit closest to the baseline.</p>
         <p class="lead">Campaign <code>{html.escape(campaign_id)}</code> restarts from step 0 each attempt. Current best profile: <code>{html.escape(best_profile)}</code>. Best run id: <code>{html.escape(best_run_id)}</code>.</p>
       </article>
       <article class="panel">
@@ -476,7 +474,6 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
     <section class="wrap">
       <div class="section-head">
         <h2>Visual Evidence</h2>
-        <p>These are copied from the project’s generated diagrams and audit screenshots so the public page reflects real outputs from the codebase.</p>
       </div>
       <div class="grid gallery">
         {''.join(gallery)}
@@ -517,10 +514,10 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
       const worst = Math.max(...history.map(d => d.bpb));
       for (const [idx, d] of history.entries()) {{
         const bar = document.createElement('div');
-        const t = worst === best ? 1 : (worst - d.bpb) / (worst - best);
+        const t = worst === best ? 0 : (d.bpb - best) / (worst - best);
         bar.className = 'bar' + (d.bpb === best ? ' best' : '');
-        bar.style.height = `${{Math.max(24, 54 + t * 180)}}px`;
-        bar.title = `${{idx + 1}} · ${{d.profile || 'profile'}} · BPB ${{d.bpb.toFixed(4)}}`;
+        bar.style.height = `${{Math.max(26, 42 + t * 182)}}px`;
+        bar.title = `${{idx + 1}} · ${{d.profile || 'profile'}} · BPB ${{d.bpb.toFixed(4)}} · lower is better`;
         const label = document.createElement('span');
         label.textContent = d.bpb.toFixed(3);
         bar.appendChild(label);
@@ -558,7 +555,11 @@ def main() -> int:
     (docs / ".nojekyll").write_text("", encoding="utf-8")
     manifest = {
         "generated_utc": utc_now(),
-        "campaign_state": str(state_path) if state_path else None,
+        "campaign_state": (
+            str(state_path.resolve().relative_to(repo.resolve()))
+            if state_path and state_path.resolve().is_relative_to(repo.resolve())
+            else (state_path.name if state_path else None)
+        ),
         "parameter_golf_pr_url": pr_url or None,
         "copied_assets": copied,
     }

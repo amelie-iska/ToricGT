@@ -1,5 +1,5 @@
 {
-  "campaign_state": "/home/iska/Documents/amelie/bio/ToricGT/training_notes/tg-bpb-bestof10-convextok2048-det-20260621T040717Z/campaign_state.json",
+  "campaign_state": "training_notes/tg-bpb-bestof10-convextok2048-det-20260621T040717Z/campaign_state.json",
   "copied_assets": {
     "analogy": "page_assets/analogy.png",
     "architecture": "page_assets/architecture.png",
@@ -17,6 +17,6 @@
     "tropical": "page_assets/tropical.png",
     "vectorized_ph": "page_assets/vectorized_ph.png"
   },
-  "generated_utc": "2026-06-21 16:50:50 UTC",
+  "generated_utc": "2026-06-21 16:57:20 UTC",
   "parameter_golf_pr_url": null
 }
