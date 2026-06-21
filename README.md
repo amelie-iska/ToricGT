@@ -4,6 +4,8 @@ Author: Amelie Schreiber
 
 **Note:** *Tropical varieties should be embedded into toric varieties, thus ToricGT and TropicalGT become a single project*
 
+**Recommendation for newcomers to algebraic geometry:** the project uses toric varieties, tropical degenerations, fans, cones, divisors, sheaves, and commutative-algebra certificates as concrete computational tools. If those ideas are new, start from the operational view: tropical attention chooses active max-plus faces, and the toric layer gives those faces a finite algebraic chart where audits and losses can be computed.
+
 The guiding convention is that tropical geometry is not a separate modeling layer bolted onto ToricGT, but the polyhedral and max-plus shadow of the same toric objects.  Tropical varieties naturally live inside toric varieties through their fans, cones, Newton polytopes, initial degenerations, and orbit stratifications; in the model this means tropical attention, active-face diagnostics, and max-plus reasoning should be treated as the computational chart language for the broader toric architecture.  Accordingly, ToricGT subsumes TropicalGT: the tropical components provide the piecewise-linear reasoning substrate, while the toric framework supplies the ambient algebraic geometry, compactification, and category-theoretic supervision.
 
 ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with tropical ring attention, default 4-expert Soft-MoE feed-forward blocks, finite noncommutative-torus features, Slepian/Pollak prolate concentration probes, combinatorial commutative-algebra certificates, and embedding-space GFlowNet fine-tuning.
