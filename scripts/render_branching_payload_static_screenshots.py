@@ -249,7 +249,6 @@ def _draw_analogy(payload: dict[str, Any], path: Path) -> None:
     memory = analogy["memory_simplex_tree"]
     sx = np.asarray([v.get("pca", [0.0, 0.0, 0.0]) for v in source.get("vertices", [])], dtype=np.float64)
     mx = np.asarray([v.get("pca", [0.0, 0.0, 0.0]) for v in memory.get("vertices", [])], dtype=np.float64)
-    mx = mx + np.asarray([3.5, 0.0, 0.0])
     r_idx = max(0, len(payload.get("radius_values", [])) // 2)
     source_pairs = _active_edge_pairs(source.get("edge_births", []), r_idx)
     memory_pairs = _active_edge_pairs(memory.get("edge_births", []), r_idx)
@@ -276,13 +275,18 @@ def _draw_analogy(payload: dict[str, Any], path: Path) -> None:
                 ax.plot([sx[i, 0], mx[j, 0]], [sx[i, 1], mx[j, 1]], [sx[i, 2], mx[j, 2]], color=YELLOW, alpha=0.42, linewidth=0.6)
     ax.legend(facecolor=PANEL, edgecolor=GRID, labelcolor=TEXT, loc="upper left")
     summary = analogy.get("candidate_map", {})
+    split = analogy.get("display_separation", {})
+    split_text = ""
+    if isinstance(split, dict) and "x_axis_separation" in split:
+        split_text = f" · display split {float(split.get('x_axis_separation', 0.0)):.2f} PC1 units"
     ax.text2D(
         0.02,
         0.02,
         "full map valid fraction "
         f"{float(analogy.get('full_reasoning_trajectory_simplex_tree_map', {}).get('valid_fraction', 0.0)):.4f} · "
         f"valid/collapsed fraction {float(summary.get('valid_fraction', 0.0)):.4f} · "
-        f"vectorized PH mean {float(analogy.get('vectorized_persistence_cosine_mean', 0.0)):.4f}",
+        f"vectorized PH mean {float(analogy.get('vectorized_persistence_cosine_mean', 0.0)):.4f}"
+        f"{split_text}",
         transform=ax.transAxes,
         color=TEXT,
         fontsize=11,

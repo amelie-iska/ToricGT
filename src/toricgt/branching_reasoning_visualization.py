@@ -112,6 +112,46 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(aa, bb) / denom)
 
 
+def _split_analogy_display(
+    source_display: np.ndarray,
+    target_display: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
+    """Separate source and retrieved-memory PCA clouds for display only.
+
+    The analogy gates, simplex-map validity checks, nearest-neighbor map, and
+    vectorized persistent-homology comparisons all use the original embedding
+    coordinates.  This function only translates the already-computed 3D PCA
+    display coordinates so similar analogies remain visually readable.
+    """
+
+    source = np.asarray(source_display, dtype=np.float64).copy()
+    target = np.asarray(target_display, dtype=np.float64).copy()
+    if source.size == 0 or target.size == 0:
+        return source, target, {
+            "x_axis_separation": 0.0,
+            "source_center_x": 0.0,
+            "memory_center_x": 0.0,
+            "y_axis_lift": 0.0,
+        }
+    source -= source.mean(axis=0, keepdims=True)
+    target -= target.mean(axis=0, keepdims=True)
+    source_span = np.ptp(source, axis=0)
+    target_span = np.ptp(target, axis=0)
+    max_span = float(max(np.max(source_span), np.max(target_span), 1.0))
+    x_separation = float(max(9.0, 2.75 * max_span))
+    y_lift = float(max(0.85, 0.18 * max_span))
+    source[:, 0] -= x_separation / 2.0
+    target[:, 0] += x_separation / 2.0
+    source[:, 1] -= y_lift / 2.0
+    target[:, 1] += y_lift / 2.0
+    return source, target, {
+        "x_axis_separation": x_separation,
+        "source_center_x": -x_separation / 2.0,
+        "memory_center_x": x_separation / 2.0,
+        "y_axis_lift": y_lift,
+    }
+
+
 def _triangle_count(n: int) -> int:
     n = int(n)
     if n < 3:
@@ -1065,7 +1105,7 @@ def _analogy_payload(
     display = _pca3(comparison_points)
     source_display = display[: step_embeddings.shape[0]]
     target_display = display[step_embeddings.shape[0] :]
-    target_display = target_display + np.asarray([3.3, 0.0, 0.0], dtype=np.float64)
+    source_display, target_display, display_separation = _split_analogy_display(source_display, target_display)
     dist = pairwise_distances(step_embeddings)
     positive = dist[dist > 1e-10]
     radius = float(np.quantile(positive, 0.70)) if positive.size else 1.0
@@ -1326,6 +1366,11 @@ def _analogy_payload(
         },
         "analogy_status": analogy_status,
         "analogy_confidence_score": confidence_score,
+        "display_separation": display_separation,
+        "display_note": (
+            "Source and retrieved-memory simplex trees are separated in the 3D PCA display only; "
+            "all simplex-map and vectorized persistent-homology comparisons use original embedding coordinates."
+        ),
         "decision_summary": {
             "narrative": narrative,
             "active_status": analogy_status,
@@ -2103,8 +2148,10 @@ function renderAnalogy() {{
   const sourceTris = treeTrianglesAtRadius(sourceTree, sourceIds, rIdx);
   const memoryTris = treeTrianglesAtRadius(memoryTree, memoryIds, rIdx);
   const visibleArrows = sourceIds.filter(id => analogy.candidate_map.vertex_map[id] !== undefined && memoryIds.includes(analogy.candidate_map.vertex_map[id])).length;
+  const split = analogy.display_separation || {{}};
+  const splitText = split.x_axis_separation !== undefined ? ' · display split <code>'+Number(split.x_axis_separation).toFixed(2)+'</code> PC1 units' : '';
   document.getElementById('analogy_state_caption').innerHTML =
-    'analogy radius <code>'+radius.toFixed(3)+'</code> · analogy reasoning level <code>'+level+'</code> · source/memory vertices <code>'+sourceIds.length+' / '+memoryIds.length+'</code> · one-dimensional simplex edges <code>'+sourceEdges.length+' / '+memoryEdges.length+'</code> · available 2-simplex faces <code>'+sourceTris.length+' / '+memoryTris.length+'</code> · rendered map arrows <code>'+visibleArrows+'</code> · label state <code>'+(showLabels ? 'visible' : 'hidden')+'</code>';
+    'analogy radius <code>'+radius.toFixed(3)+'</code> · analogy reasoning level <code>'+level+'</code> · source/memory vertices <code>'+sourceIds.length+' / '+memoryIds.length+'</code> · one-dimensional simplex edges <code>'+sourceEdges.length+' / '+memoryEdges.length+'</code> · available 2-simplex faces <code>'+sourceTris.length+' / '+memoryTris.length+'</code> · rendered map arrows <code>'+visibleArrows+'</code> · label state <code>'+(showLabels ? 'visible' : 'hidden')+'</code>'+splitText+'<br><span class="muted">'+(analogy.display_note || 'PCA display coordinates are visualization-only; retrieval comparisons use original embeddings.')+'</span>';
   const traces = [
     showTriangles ? treeMeshTrace(sourceTree, 'source simplex-tree 2-simplices', level, rIdx, '#37e8ff') : {{type:'mesh3d', x:[], y:[], z:[], i:[], j:[], k:[], name:'source simplex-tree 2-simplices hidden', opacity:0.0}},
     showTriangles ? treeMeshTrace(memoryTree, 'memory simplex-tree 2-simplices', level, rIdx, '#ff4fd8') : {{type:'mesh3d', x:[], y:[], z:[], i:[], j:[], k:[], name:'memory simplex-tree 2-simplices hidden', opacity:0.0}},
