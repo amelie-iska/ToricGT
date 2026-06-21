@@ -7,13 +7,14 @@
 main{max-width:1280px;margin:0 auto;padding:24px}.panel{border:1px solid var(--line);border-radius:10px;background:rgba(7,20,33,.86);padding:16px;margin:14px 0}
 h1{margin:0 0 8px}p{color:var(--muted);line-height:1.5}.plot{min-height:520px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713;margin-top:12px;overflow:hidden}
 .plot.triangle{min-height:420px}.view-controls{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin:8px 0 12px}select{width:100%;background:#020713;color:var(--text);border:1px solid rgba(70,231,255,.28);border-radius:8px;padding:10px}label{display:block;color:var(--muted);font-size:.9rem;margin-bottom:4px}.metric-note{font-size:.92rem;color:var(--muted);margin-top:8px}code{color:#7df5ff}
+input[type=range]{accent-color:var(--cyan)}.canvas-controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0 10px}.canvas-controls label{display:grid;gap:4px}.canvas-controls input{width:min(220px,60vw)}canvas.tetra-canvas{display:block;width:100%;height:auto;background:#020713}
 svg{display:block;width:100%;height:auto}.svg-label{font-size:13px;fill:#ecfbff;paint-order:stroke;stroke:#020713;stroke-width:3px}.svg-small{font-size:11px;fill:#9db8cf}.point-label{font-size:11px;fill:#ecfbff;paint-order:stroke;stroke:#020713;stroke-width:3px}.tetra-edge{stroke:#46e7ff;stroke-width:2.5}.tetra-face{fill:rgba(70,231,255,.10);stroke:#46e7ff;stroke-width:1.5}.triangle-cell{stroke:none;opacity:.72}.triangle-contour{stroke:rgba(236,251,255,.18);stroke-width:.9;fill:none}.run-point{stroke:#fff;stroke-width:1.2;cursor:pointer}.run-point:hover{stroke:#ffd166;stroke-width:3px}.details{border:1px solid rgba(70,231,255,.16);border-radius:8px;background:#020713;padding:10px;margin-top:10px;color:#dff8ff;line-height:1.45}
 table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{border-bottom:1px solid rgba(157,184,207,.16);padding:8px;text-align:left;vertical-align:top}td.num{text-align:right;color:var(--gold)}.scroll{overflow:auto;max-height:520px;border:1px solid rgba(70,231,255,.14);border-radius:8px}.scroll table{min-width:1100px}.button{border:1px solid var(--line);border-radius:999px;padding:8px 12px;background:rgba(70,231,255,.08);color:var(--text);font-weight:700;display:inline-block}
 </style></head><body><main>
 <section class="panel"><h1>Campaign Metric Tetrahedra and Shaded Triangles</h1>
-<p>This page is SVG-first and low-resource by default. It still shows every campaign metric view, all run labels, normalized tetrahedron/triangle geometry, raw metric tables, and hover/click details, but it does not load Plotly or WebGL.</p>
+<p>This page uses compact native Canvas/SVG renderers instead of Plotly/WebGL. Each campaign metric tetrahedron is interactive in 3D with yaw, pitch, zoom, hover, and click details while remaining light enough for low-resource browsers.</p>
 <p><a href="campaign_tetrahedron.json">payload JSON</a></p></section>
-<section class="panel"><h2>Tetrahedron Views</h2><div class="view-controls"><div><label for="tetra_select">metric tetrahedron</label><select id="tetra_select"><option>loading...</option></select></div><span id="tetra_count" class="metric-note"></span></div><div id="tetra_plot" class="plot"></div><p id="tetra_caption" class="metric-note"></p></section>
+<section class="panel"><h2>Interactive 3D Tetrahedron Views</h2><div class="view-controls"><div><label for="tetra_select">metric tetrahedron</label><select id="tetra_select"><option>loading...</option></select></div><span id="tetra_count" class="metric-note"></span></div><div class="canvas-controls"><label>yaw <input id="tetra_yaw" type="range" min="-180" max="180" value="28"></label><label>pitch <input id="tetra_pitch" type="range" min="-70" max="70" value="-18"></label><label>zoom <input id="tetra_zoom" type="range" min="70" max="180" value="100"></label></div><div id="tetra_plot" class="plot"></div><p id="tetra_caption" class="metric-note"></p></section>
 <section class="panel"><h2>Shaded Triangle Views</h2><p>Blue shading indicates the balanced-support region for the metric triple. Markers remain actual run observations; hover text reports profile, BPB, raw axis values, and barycentric weights.</p><div class="view-controls"><div><label for="triangle_select">metric triangle</label><select id="triangle_select"><option>loading...</option></select></div><span id="triangle_count" class="metric-note"></span></div><div id="triangle_plot" class="plot triangle"></div><p id="triangle_caption" class="metric-note"></p></section>
 <section class="panel"><h2>Run Table</h2><table><thead><tr><th>profile</th><th>run</th><th>BPB</th><th>NLL/loss</th><th>artifact bytes</th><th>train BPB</th></tr></thead><tbody>
 <tr><td>convextok2048_det_tropical_toric_bpb</td><td>0717Z-r001-convextok2048_det_tropical_toric_bpb-20260621T040718Z</td><td class='num'>0.565125</td><td class='num'>0.9599</td><td class='num'>15,180,494</td><td class='num'>1.0058</td></tr><tr><td>gate1500_fast_main_lr_light_graphcg</td><td>40717Z-r004-gate1500_fast_main_lr_light_graphcg-20260621T101734Z</td><td class='num'>0.669255</td><td class='num'>1.1383</td><td class='num'>15,287,974</td><td class='num'>0.9026</td></tr><tr><td>gate1500_fast_main_lr_aux_conflict_recovery</td><td>005-gate1500_fast_main_lr_aux_conflict_recovery-20260621T120339Z</td><td class='num'>0.718665</td><td class='num'>1.2220</td><td class='num'>15,525,100</td><td class='num'>0.8295</td></tr><tr><td>gate1500_structural_toric_heavy</td><td>21T040717Z-r006-gate1500_structural_toric_heavy-20260621T135410Z</td><td class='num'>0.658505</td><td class='num'>1.1188</td><td class='num'>14,400,139</td><td class='num'>0.8738</td></tr><tr><td>gate1500_bgg_memory_probe</td><td>20260621T040717Z-r007-gate1500_bgg_memory_probe-20260621T144834Z</td><td class='num'>0.689378</td><td class='num'>1.1706</td><td class='num'>14,589,172</td><td class='num'>0.8316</td></tr><tr><td>gate2500_experimental_family_selective</td><td>17Z-r008-gate2500_experimental_family_selective-20260621T154110Z</td><td class='num'>0.495333</td><td class='num'>0.8380</td><td class='num'>12,202,796</td><td class='num'>0.5036</td></tr><tr><td>gate2500_fast_bpb_low_aux</td><td>20260621T040717Z-r009-gate2500_fast_bpb_low_aux-20260621T161926Z</td><td class='num'>0.497956</td><td class='num'>0.8428</td><td class='num'>12,199,688</td><td class='num'>0.5056</td></tr><tr><td>large_batch_lower_lr_sidecar_light</td><td>040717Z-r010-large_batch_lower_lr_sidecar_light-20260621T164928Z</td><td class='num'>0.536639</td><td class='num'>0.8870</td><td class='num'>10,125,693</td><td class='num'>0.5316</td></tr>
@@ -49,8 +50,27 @@ function colorForBpb(value) {
   const b = Math.round(115 * (0.28 + 0.38 * (1 - t)));
   return `rgb(${r},${g},${b})`;
 }
-function project3(v) {
-  return [360 + v[0] * 150 + v[1] * 42, 270 - v[2] * 120 + v[1] * 34];
+let tetraProjected = [];
+function rotate3(v, yawDeg, pitchDeg) {
+  const yaw = yawDeg * Math.PI / 180, pitch = pitchDeg * Math.PI / 180;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x1 = v[0] * cy - v[2] * sy;
+  const z1 = v[0] * sy + v[2] * cy;
+  const y1 = v[1] * cp - z1 * sp;
+  const z2 = v[1] * sp + z1 * cp;
+  return [x1, y1, z2];
+}
+function project3Collection(points, width, height, yaw, pitch, zoom) {
+  const rotated = points.map(p => rotate3(p.xyz, yaw, pitch));
+  const minX = Math.min(...rotated.map(p=>p[0])), maxX = Math.max(...rotated.map(p=>p[0]));
+  const minY = Math.min(...rotated.map(p=>p[1])), maxY = Math.max(...rotated.map(p=>p[1]));
+  const scale = Math.min((width - 210) / Math.max(1e-6, maxX - minX), (height - 190) / Math.max(1e-6, maxY - minY)) * zoom / 100;
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  return points.map((p, i) => {
+    const r = rotated[i];
+    const persp = 680 / (680 + r[2] * 90);
+    return {...p, rx:r[0], ry:r[1], rz:r[2], x: width / 2 + (r[0] - cx) * scale * persp, y: height / 2 - (r[1] - cy) * scale * persp};
+  });
 }
 function showDetails(id, point, axes) {
   const rec = recordFor(point);
@@ -67,18 +87,74 @@ function populateSelect(select, views) {
   });
 }
 function renderTetra(view) {
-  const vertices = view.vertices;
+  document.getElementById('tetra_plot').innerHTML = `<canvas id="tetra_canvas" class="tetra-canvas" width="920" height="560" role="img" aria-label="${esc(view.title)}"></canvas><div id="tetra_details" class="details">Hover or click a run marker to inspect BPB, NLL/loss, artifact bytes, and raw axis values.</div>`;
+  const tetraCanvas = document.getElementById('tetra_canvas');
+  const tctx = tetraCanvas.getContext('2d');
+  const yawInput = document.getElementById('tetra_yaw');
+  const pitchInput = document.getElementById('tetra_pitch');
+  const zoomInput = document.getElementById('tetra_zoom');
+  const vertices = view.vertices.map((xyz, i) => ({kind:'vertex', xyz, label:view.labels[i], vertex_index:i}));
+  const runPoints = view.points.map(point => ({kind:'run', xyz:point.xyz, point}));
   const edges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
-  const pv = vertices.map(project3);
-  const faces = [[0,1,2],[0,1,3],[0,2,3],[1,2,3]].map(face => `<polygon class="tetra-face" points="${face.map(i=>pv[i].join(',')).join(' ')}" />`).join('');
-  const edgeSvg = edges.map(([i,j]) => `<line class="tetra-edge" x1="${pv[i][0]}" y1="${pv[i][1]}" x2="${pv[j][0]}" y2="${pv[j][1]}" />`).join('');
-  const labels = pv.map((p,i) => `<text class="svg-label" text-anchor="middle" x="${p[0]}" y="${p[1]-12}">${esc(view.labels[i])}</text>`).join('');
-  const points = view.points.map(point => {
-    const rec = recordFor(point);
-    const [x,y] = project3(point.xyz);
-    return `<g><circle class="run-point" cx="${x}" cy="${y}" r="8" fill="${colorForBpb(rec.bpb)}" onclick="showDetails('tetra_details', payload.tetrahedra[document.getElementById('tetra_select').value].points.find(p=>p.record_index===${point.record_index}), payload.tetrahedra[document.getElementById('tetra_select').value].axes)"><title>${esc(pointTitle(point, view.axes))}</title></circle><text class="point-label" x="${x+10}" y="${y+4}">${point.record_index}</text></g>`;
-  }).join('');
-  document.getElementById('tetra_plot').innerHTML = `<svg viewBox="0 0 720 540" role="img" aria-label="${esc(view.title)}">${faces}${edgeSvg}${labels}${points}</svg><div id="tetra_details" class="details">Hover a run marker for details; click it to pin exact raw axis values.</div>`;
+  const faces = [[0,1,2],[0,1,3],[0,2,3],[1,2,3]];
+  function drawTetraCanvas() {
+    const allProjected = project3Collection([...vertices, ...runPoints], tetraCanvas.width, tetraCanvas.height, Number(yawInput.value), Number(pitchInput.value), Number(zoomInput.value));
+    const projectedVertices = allProjected.slice(0, vertices.length);
+    tetraProjected = allProjected.slice(vertices.length);
+    tctx.clearRect(0,0,tetraCanvas.width,tetraCanvas.height);
+    tctx.fillStyle = '#020713'; tctx.fillRect(0,0,tetraCanvas.width,tetraCanvas.height);
+    tctx.strokeStyle = 'rgba(157,184,207,.18)'; tctx.lineWidth = 1;
+    for (let i=0;i<6;i++) { const y=70+i*(tetraCanvas.height-140)/5; tctx.beginPath(); tctx.moveTo(60,y); tctx.lineTo(tetraCanvas.width-60,y); tctx.stroke(); }
+    const sortedFaces = faces.map(face => ({face, depth: face.reduce((s,i)=>s+projectedVertices[i].rz,0)/3})).sort((a,b)=>a.depth-b.depth);
+    for (const item of sortedFaces) {
+      const pts = item.face.map(i => projectedVertices[i]);
+      tctx.fillStyle = 'rgba(70,231,255,.075)'; tctx.strokeStyle = 'rgba(70,231,255,.32)'; tctx.lineWidth = 1.2;
+      tctx.beginPath(); tctx.moveTo(pts[0].x, pts[0].y); tctx.lineTo(pts[1].x, pts[1].y); tctx.lineTo(pts[2].x, pts[2].y); tctx.closePath(); tctx.fill(); tctx.stroke();
+    }
+    for (const [i,j] of edges) {
+      const a=projectedVertices[i], b=projectedVertices[j];
+      tctx.strokeStyle = 'rgba(70,231,255,.78)'; tctx.lineWidth = 2.3;
+      tctx.beginPath(); tctx.moveTo(a.x,a.y); tctx.lineTo(b.x,b.y); tctx.stroke();
+    }
+    tctx.font = '13px system-ui'; tctx.textAlign = 'center';
+    for (const v of projectedVertices) {
+      tctx.fillStyle = '#ffd166'; tctx.beginPath(); tctx.arc(v.x,v.y,5,0,Math.PI*2); tctx.fill();
+      tctx.fillStyle = '#ecfbff'; tctx.fillText(v.label, v.x, v.y - 12);
+    }
+    for (const p of tetraProjected.sort((a,b)=>a.rz-b.rz)) {
+      const rec = recordFor(p.point);
+      tctx.fillStyle = colorForBpb(rec.bpb); tctx.strokeStyle = '#fff'; tctx.lineWidth = 1.2;
+      tctx.beginPath(); tctx.arc(p.x, p.y, 8, 0, Math.PI*2); tctx.fill(); tctx.stroke();
+      tctx.fillStyle = '#ecfbff'; tctx.font = '11px system-ui'; tctx.textAlign = 'left'; tctx.fillText(String(p.point.record_index), p.x + 10, p.y + 4);
+    }
+    tctx.fillStyle='#ecfbff'; tctx.font='15px system-ui'; tctx.textAlign='left';
+    tctx.fillText(`drag to rotate · yaw ${yawInput.value} · pitch ${pitchInput.value} · zoom ${zoomInput.value} · lower BPB is greener`, 22, 34);
+  }
+  function hitTetra(event) {
+    const rect = tetraCanvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * tetraCanvas.width / rect.width;
+    const y = (event.clientY - rect.top) * tetraCanvas.height / rect.height;
+    let best = null, bd = Infinity;
+    for (const p of tetraProjected) {
+      const d = (p.x-x)**2 + (p.y-y)**2;
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (best && bd < 360) showDetails('tetra_details', best.point, view.axes);
+  }
+  let down=false, lastX=0, lastY=0;
+  tetraCanvas.addEventListener('pointerdown', event => { down=true; lastX=event.clientX; lastY=event.clientY; tetraCanvas.setPointerCapture(event.pointerId); });
+  tetraCanvas.addEventListener('pointermove', event => {
+    if (!down) { hitTetra(event); return; }
+    const dx=event.clientX-lastX, dy=event.clientY-lastY; lastX=event.clientX; lastY=event.clientY;
+    yawInput.value = Math.max(Number(yawInput.min), Math.min(Number(yawInput.max), Number(yawInput.value) + dx * 0.45));
+    pitchInput.value = Math.max(Number(pitchInput.min), Math.min(Number(pitchInput.max), Number(pitchInput.value) - dy * 0.35));
+    drawTetraCanvas();
+  });
+  tetraCanvas.addEventListener('pointerup', () => { down=false; });
+  tetraCanvas.addEventListener('pointercancel', () => { down=false; });
+  tetraCanvas.addEventListener('click', hitTetra);
+  [yawInput, pitchInput, zoomInput].forEach(el => el.oninput = drawTetraCanvas);
+  drawTetraCanvas();
   document.getElementById('tetra_caption').innerHTML = 'Axes: '+view.axes.map(axis => payload.axis_library[axis].label).join(' · ');
 }
 function renderTriangle(view) {

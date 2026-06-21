@@ -11,7 +11,7 @@
     .hero,.panel{padding:18px;margin:14px 0}h1{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}h2{margin:0 0 12px}p{color:var(--muted);line-height:1.55}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
     table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{border-bottom:1px solid rgba(159,177,201,.16);padding:9px;text-align:left;vertical-align:top}th{color:#bdeeff;width:42%}td{color:#fff}
     .shot{margin:0;overflow:hidden}.shot img{display:block;width:100%;height:auto;background:#020713}.shot figcaption{display:grid;gap:5px;padding:12px 14px}.shot span{color:var(--muted);line-height:1.45}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}
-    .note{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:10px 0 14px}.controls label{display:grid;gap:4px;color:var(--muted);font-size:.9rem}.controls input{accent-color:var(--cyan)}button{border:1px solid var(--line);background:rgba(55,232,255,.08);color:var(--text);border-radius:999px;padding:8px 12px;font-weight:800}canvas{width:100%;height:auto;border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;display:block}.detail{border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;padding:12px;margin-top:10px;color:#dff8ff}
+    .note{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:10px 0 14px}.controls label{display:grid;gap:4px;color:var(--muted);font-size:.9rem}.controls input{accent-color:var(--cyan)}button,select{border:1px solid var(--line);background:rgba(55,232,255,.08);color:var(--text);border-radius:999px;padding:8px 12px;font-weight:800}canvas{width:100%;height:auto;border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;display:block}.detail{border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;padding:12px;margin-top:10px;color:#dff8ff}.split{display:grid;grid-template-columns:1fr;gap:14px}@media(min-width:1100px){.split{grid-template-columns:1.05fr .95fr}}
   </style>
 </head>
 <body><main>
@@ -19,19 +19,21 @@
     <h1>Branching Reasoning Trajectory Report</h1>
     <p>This is the low-resource public entry point for the graph-of-thought simplex trajectory. It keeps the exact summary metrics and visual evidence while avoiding the large browser-side payload that can freeze older machines.</p>
     <p><a class="pill" href="static_screenshots/index.html">Static screenshot audit</a><a class="pill" href="static_screenshots/contact_sheet.png">Contact sheet</a><a class="pill" href="manifest.json">Manifest</a></p>
-    <p class="note">The full slider/WebGL payload is intentionally not published as the default GitHub Pages artifact. It remains reproducible from the analysis output bundle; this page preserves the important measurements and rendered evidence without forcing a 100MB load.</p>
+    <p class="note">The heavyweight Plotly/WebGL artifact is not the default GitHub Pages payload. This page restores the core interactions with compact native Canvas/SVG views so it can load on low-resource machines while keeping the exact metrics and screenshots.</p>
   </section>
   <section class="panel">
     <h2>Exact Summary Metrics</h2>
     <table><tbody><tr><th>source mode</th><td>checkpoint_embedding_payload</td></tr><tr><th>reasoning steps</th><td>512</td></tr><tr><th>DAG edges</th><td>511</td></tr><tr><th>radius levels</th><td>7</td></tr><tr><th>analogy emitted</th><td>True</td></tr><tr><th>analogy status</th><td>strong_analogy</td></tr><tr><th>analogy confidence</th><td>0.975</td></tr><tr><th>full simplex-map valid fraction</th><td>0.9829</td></tr><tr><th>vectorized PH cosine mean</th><td>0.9495</td></tr><tr><th>vectorized PH gate score</th><td>0.9975</td></tr><tr><th>step simplex-map mean</th><td>0.7083</td></tr></tbody></table>
   </section>
   <section class="panel">
-    <h2>Interactive 3D PCA Trajectory</h2>
-    <p>This viewer restores the useful interaction from the full report without shipping hidden embeddings or the 50MB browser payload. It uses compact PCA coordinates, all reasoning/DAG edges, radius-born one-dimensional simplex edges, and sampled 2-simplices from the exact analysis payload.</p>
+    <h2>Interactive Native 3D PCA Trajectory</h2>
+    <p>This viewer restores rotation, pitch, zoom, reasoning-level filtering, radius filtering, one-dimensional simplex edges, and sampled 2-simplices without shipping hidden embeddings or the heavyweight plotting runtime.</p>
     <div class="controls">
       <label>reasoning level <input id="levelRange" type="range" min="0" max="1" value="1"></label>
       <label>radius <input id="radiusRange" type="range" min="0" max="1" value="0"></label>
-      <label>rotation <input id="rotRange" type="range" min="-120" max="120" value="28"></label>
+      <label>yaw <input id="rotRange" type="range" min="-180" max="180" value="28"></label>
+      <label>pitch <input id="pitchRange" type="range" min="-70" max="70" value="-14"></label>
+      <label>zoom <input id="zoomRange" type="range" min="55" max="165" value="100"></label>
       <label><input id="radiusEdgesToggle" type="checkbox" checked> radius simplex edges</label>
       <label><input id="triToggle" type="checkbox"> 2-simplices</label>
     </div>
@@ -39,7 +41,24 @@
     <div id="trajectoryDetail" class="detail">Move over or click a point to inspect the reasoning node, NLL, branch, and level.</div>
   </section>
   <section class="panel">
-    <h2>Visual Evidence</h2>
+    <h2>Reasoning-Step Filtered Simplicial Complex</h2>
+    <p>Each reasoning step uses its real compact token PCA coordinates from the analysis payload. The radius slider adds one-dimensional simplex edges by distance; the decoding slider reveals token order and decode edges.</p>
+    <div class="controls">
+      <label>step <select id="stepSelect"></select></label>
+      <label>radius <input id="stepRadiusRange" type="range" min="0" max="1" value="0"></label>
+      <label>decoding order <input id="decodeRange" type="range" min="0" max="1" value="1"></label>
+      <label>yaw <input id="stepYawRange" type="range" min="-180" max="180" value="36"></label>
+      <label>pitch <input id="stepPitchRange" type="range" min="-70" max="70" value="-18"></label>
+      <label>zoom <input id="stepZoomRange" type="range" min="65" max="190" value="115"></label>
+      <label><input id="stepDecodeToggle" type="checkbox" checked> decode arrows</label>
+      <label><input id="stepEdgeToggle" type="checkbox" checked> radius simplex edges</label>
+      <label><input id="stepTriToggle" type="checkbox"> 2-simplices</label>
+    </div>
+    <canvas id="stepCanvas" width="1120" height="560"></canvas>
+    <div id="stepDetail" class="detail">Move over or click a token point to inspect token text, type, NLL, entropy, rank, and source id.</div>
+  </section>
+  <section class="panel">
+    <h2>Visualizations</h2>
     <div class="grid">
             <figure class="shot">
               <a href="static_screenshots/summary.png"><img loading="lazy" decoding="async" src="static_screenshots/summary.png" alt="Summary Dashboard"></a>
@@ -73,45 +92,99 @@ const ctx = canvas.getContext('2d');
 const levelRange = document.getElementById('levelRange');
 const radiusRange = document.getElementById('radiusRange');
 const rotRange = document.getElementById('rotRange');
+const pitchRange = document.getElementById('pitchRange');
+const zoomRange = document.getElementById('zoomRange');
 const detail = document.getElementById('trajectoryDetail');
 const edgeToggle = document.getElementById('radiusEdgesToggle');
 const triToggle = document.getElementById('triToggle');
+const stepCanvas = document.getElementById('stepCanvas');
+const stepCtx = stepCanvas.getContext('2d');
+const stepSelect = document.getElementById('stepSelect');
+const stepRadiusRange = document.getElementById('stepRadiusRange');
+const decodeRange = document.getElementById('decodeRange');
+const stepYawRange = document.getElementById('stepYawRange');
+const stepPitchRange = document.getElementById('stepPitchRange');
+const stepZoomRange = document.getElementById('stepZoomRange');
+const stepDecodeToggle = document.getElementById('stepDecodeToggle');
+const stepEdgeToggle = document.getElementById('stepEdgeToggle');
+const stepTriToggle = document.getElementById('stepTriToggle');
+const stepDetail = document.getElementById('stepDetail');
 let compact = null;
 let projected = [];
 let projectedById = new Map();
+let stepProjected = [];
+let stepProjectedById = new Map();
+let stepVisibleIds = new Set();
 function esc(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 function colorForNll(nll, minNll, maxNll) {
   const t = Math.max(0, Math.min(1, (nll - minNll) / Math.max(1e-6, maxNll - minNll)));
   const r = Math.round(70 + 185 * t), g = Math.round(230 - 120 * t), b = Math.round(255 - 200 * t);
   return `rgb(${r},${g},${b})`;
 }
-function project(node, angle, bounds) {
-  const c = Math.cos(angle), s = Math.sin(angle);
-  const x = node.x * c - node.z * s;
-  const z = node.x * s + node.z * c;
-  const y = node.y - 0.22 * z;
-  const px = 76 + (x - bounds.minX) / Math.max(1e-6, bounds.maxX - bounds.minX) * (canvas.width - 152);
-  const py = canvas.height - 70 - (y - bounds.minY) / Math.max(1e-6, bounds.maxY - bounds.minY) * (canvas.height - 140);
-  return {px, py, depth:z};
+function rotated3(point, yawDeg, pitchDeg) {
+  const yaw = yawDeg * Math.PI / 180, pitch = pitchDeg * Math.PI / 180;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x1 = point.x * cy - point.z * sy;
+  const z1 = point.x * sy + point.z * cy;
+  const y1 = point.y * cp - z1 * sp;
+  const z2 = point.y * sp + z1 * cp;
+  return {x:x1, y:y1, z:z2};
+}
+function projectCollection(points, targetCanvas, yaw, pitch, zoom) {
+  if (!points.length) return [];
+  const rotated = points.map(p => ({...rotated3(p, yaw, pitch), node:p}));
+  const minX = Math.min(...rotated.map(p => p.x)), maxX = Math.max(...rotated.map(p => p.x));
+  const minY = Math.min(...rotated.map(p => p.y)), maxY = Math.max(...rotated.map(p => p.y));
+  const baseScale = Math.min(
+    (targetCanvas.width - 150) / Math.max(1e-6, maxX - minX),
+    (targetCanvas.height - 130) / Math.max(1e-6, maxY - minY)
+  ) * (zoom / 100);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  return rotated.map(p => {
+    const perspective = 780 / (780 + p.z * 42);
+    return {
+      px: targetCanvas.width / 2 + (p.x - cx) * baseScale * perspective,
+      py: targetCanvas.height / 2 - (p.y - cy) * baseScale * perspective,
+      depth: p.z,
+      node: p.node,
+    };
+  });
+}
+function drawArrow(context, a, b, color, width) {
+  if (!a || !b) return;
+  context.strokeStyle=color; context.fillStyle=color; context.lineWidth=width;
+  context.beginPath(); context.moveTo(a.px, a.py); context.lineTo(b.px, b.py); context.stroke();
+  const angle = Math.atan2(b.py - a.py, b.px - a.px);
+  const len = 9;
+  context.beginPath();
+  context.moveTo(b.px, b.py);
+  context.lineTo(b.px - len * Math.cos(angle - 0.42), b.py - len * Math.sin(angle - 0.42));
+  context.lineTo(b.px - len * Math.cos(angle + 0.42), b.py - len * Math.sin(angle + 0.42));
+  context.closePath(); context.fill();
+}
+function bindDrag(targetCanvas, yawInput, pitchInput, render) {
+  let down = false, lastX = 0, lastY = 0;
+  targetCanvas.addEventListener('pointerdown', event => { down = true; lastX = event.clientX; lastY = event.clientY; targetCanvas.setPointerCapture(event.pointerId); });
+  targetCanvas.addEventListener('pointermove', event => {
+    if (!down) return;
+    const dx = event.clientX - lastX, dy = event.clientY - lastY;
+    lastX = event.clientX; lastY = event.clientY;
+    yawInput.value = Math.max(Number(yawInput.min), Math.min(Number(yawInput.max), Number(yawInput.value) + dx * 0.45));
+    pitchInput.value = Math.max(Number(pitchInput.min), Math.min(Number(pitchInput.max), Number(pitchInput.value) - dy * 0.35));
+    render();
+  });
+  targetCanvas.addEventListener('pointerup', () => { down = false; });
+  targetCanvas.addEventListener('pointercancel', () => { down = false; });
 }
 function draw() {
   if (!compact) return;
   const maxLevel = Number(levelRange.value);
   const radiusIndex = Number(radiusRange.value);
   const radius = compact.radius_values[Math.min(radiusIndex, compact.radius_values.length - 1)] ?? 0;
-  const angle = Number(rotRange.value) * Math.PI / 180;
   const visible = compact.nodes.filter(n => n.level <= maxLevel);
-  const rotated = visible.map(n => {
-    const c = Math.cos(angle), s = Math.sin(angle);
-    return {x:n.x*c-n.z*s, y:n.y-0.22*(n.x*s+n.z*c)};
-  });
-  const bounds = {
-    minX: Math.min(...rotated.map(p=>p.x)), maxX: Math.max(...rotated.map(p=>p.x)),
-    minY: Math.min(...rotated.map(p=>p.y)), maxY: Math.max(...rotated.map(p=>p.y))
-  };
-  const byId = new Map(compact.nodes.map(n => [n.id, n]));
+  if (!visible.length) return;
   const visibleIds = new Set(visible.map(n => n.id));
-  projected = compact.nodes.map(n => ({...project(n, angle, bounds), node:n}));
+  projected = projectCollection(compact.nodes, canvas, Number(rotRange.value), Number(pitchRange.value), Number(zoomRange.value));
   projectedById = new Map(projected.map(p => [p.node.id, p]));
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.fillStyle = '#020713'; ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -128,7 +201,7 @@ function draw() {
   if (triToggle.checked) {
     ctx.fillStyle='rgba(167,139,250,.10)';
     for (const [a,b,c,birth] of compact.triangles) if (birth <= radius && visibleIds.has(a) && visibleIds.has(b) && visibleIds.has(c)) {
-      const pa=projected[a], pb=projected[b], pc=projected[c]; if (!pa||!pb||!pc) continue;
+      const pa=projectedById.get(Number(a)), pb=projectedById.get(Number(b)), pc=projectedById.get(Number(c)); if (!pa||!pb||!pc) continue;
       ctx.beginPath(); ctx.moveTo(pa.px,pa.py); ctx.lineTo(pb.px,pb.py); ctx.lineTo(pc.px,pc.py); ctx.closePath(); ctx.fill();
     }
   }
@@ -138,7 +211,7 @@ function draw() {
     ctx.strokeStyle = '#ecfbff'; ctx.lineWidth = 1.1;
     ctx.beginPath(); ctx.arc(p.px, p.py, 4.5, 0, Math.PI*2); ctx.fill(); ctx.stroke();
   }
-  ctx.fillStyle='#ecfbff'; ctx.font='16px system-ui'; ctx.fillText(`level ≤ ${maxLevel} · radius ${radius.toFixed(3)} · nodes ${visible.length} · compact native viewer`, 22, 34);
+  ctx.fillStyle='#ecfbff'; ctx.font='16px system-ui'; ctx.fillText(`level ≤ ${maxLevel} · radius ${radius.toFixed(3)} · nodes ${visible.length} · yaw ${rotRange.value} · pitch ${pitchRange.value}`, 22, 34);
 }
 function nearest(event) {
   const rect = canvas.getBoundingClientRect();
@@ -151,13 +224,89 @@ function nearest(event) {
   }
   if (best && bd < 400) detail.innerHTML = `<strong>${esc(best.node.label)} / id ${best.node.id}</strong><br>level ${best.node.level} · branch ${best.node.branch} · NLL ${best.node.nll.toFixed(4)} · kind ${esc(best.node.kind)}`;
 }
+function currentStep() {
+  if (!compact?.steps?.length) return null;
+  return compact.steps[Math.max(0, Math.min(compact.steps.length - 1, Number(stepSelect.value) || 0))];
+}
+function drawStep() {
+  const step = currentStep();
+  if (!step) return;
+  const maxDecode = Number(decodeRange.value);
+  const radiusIndex = Number(stepRadiusRange.value);
+  const radius = step.radius_values[Math.min(radiusIndex, step.radius_values.length - 1)] ?? 0;
+  const visible = step.tokens.filter(t => t.decode_order <= maxDecode);
+  const visibleIds = new Set(visible.map(t => t.id));
+  stepVisibleIds = visibleIds;
+  stepProjected = projectCollection(step.tokens, stepCanvas, Number(stepYawRange.value), Number(stepPitchRange.value), Number(stepZoomRange.value));
+  stepProjectedById = new Map(stepProjected.map(p => [p.node.id, p]));
+  stepCtx.clearRect(0,0,stepCanvas.width,stepCanvas.height);
+  stepCtx.fillStyle = '#020713'; stepCtx.fillRect(0,0,stepCanvas.width,stepCanvas.height);
+  stepCtx.strokeStyle = 'rgba(157,184,207,.18)'; stepCtx.lineWidth = 1;
+  for (let i=0;i<6;i++) { const y=58+i*(stepCanvas.height-116)/5; stepCtx.beginPath(); stepCtx.moveTo(60,y); stepCtx.lineTo(stepCanvas.width-60,y); stepCtx.stroke(); }
+  function stepLine(a,b,color,width,arrow=false) {
+    const pa = stepProjectedById.get(Number(a)), pb = stepProjectedById.get(Number(b));
+    if (!pa || !pb || !visibleIds.has(pa.node.id) || !visibleIds.has(pb.node.id)) return;
+    if (arrow) drawArrow(stepCtx, pa, pb, color, width);
+    else { stepCtx.strokeStyle=color; stepCtx.lineWidth=width; stepCtx.beginPath(); stepCtx.moveTo(pa.px, pa.py); stepCtx.lineTo(pb.px, pb.py); stepCtx.stroke(); }
+  }
+  if (stepTriToggle.checked) {
+    stepCtx.fillStyle='rgba(167,139,250,.14)';
+    for (const [a,b,c,birth] of step.triangles) if (birth <= radius && visibleIds.has(a) && visibleIds.has(b) && visibleIds.has(c)) {
+      const pa=stepProjectedById.get(Number(a)), pb=stepProjectedById.get(Number(b)), pc=stepProjectedById.get(Number(c)); if (!pa||!pb||!pc) continue;
+      stepCtx.beginPath(); stepCtx.moveTo(pa.px,pa.py); stepCtx.lineTo(pb.px,pb.py); stepCtx.lineTo(pc.px,pc.py); stepCtx.closePath(); stepCtx.fill();
+    }
+  }
+  if (stepEdgeToggle.checked) for (const [a,b,l,birth] of step.edge_births) if (birth <= radius) stepLine(a,b,'rgba(136,255,134,.22)',0.9,false);
+  if (stepDecodeToggle.checked) for (const [a,b,order] of step.decode_edges) if (order <= maxDecode) stepLine(a,b,'rgba(255,209,102,.62)',1.6,true);
+  const nlls = visible.map(t => t.nll), minNll = nlls.length ? Math.min(...nlls) : 0, maxNll = nlls.length ? Math.max(...nlls) : 1;
+  for (const p of stepProjected.filter(p => visibleIds.has(p.node.id)).sort((a,b)=>a.depth-b.depth)) {
+    stepCtx.fillStyle = colorForNll(p.node.nll, minNll, maxNll);
+    stepCtx.strokeStyle = '#ecfbff'; stepCtx.lineWidth = 1.1;
+    stepCtx.beginPath(); stepCtx.arc(p.px, p.py, 6, 0, Math.PI*2); stepCtx.fill(); stepCtx.stroke();
+    stepCtx.fillStyle = '#dff8ff'; stepCtx.font = '11px system-ui'; stepCtx.fillText(String(p.node.decode_order), p.px + 7, p.py - 6);
+  }
+  stepCtx.fillStyle='#ecfbff'; stepCtx.font='16px system-ui'; stepCtx.fillText(`${step.label || ('step '+step.step_index)} · tokens ${visible.length}/${step.tokens.length} · radius ${radius.toFixed(3)} · decode ≤ ${maxDecode}`, 22, 32);
+}
+function nearestStep(event) {
+  const rect = stepCanvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * stepCanvas.width / rect.width;
+  const y = (event.clientY - rect.top) * stepCanvas.height / rect.height;
+  let best=null, bd=Infinity;
+  for (const p of stepProjected) {
+    if (!stepVisibleIds.has(p.node.id)) continue;
+    const d=(p.px-x)**2+(p.py-y)**2;
+    if (d<bd) {bd=d; best=p;}
+  }
+  if (best && bd < 650) stepDetail.innerHTML = `<strong>${esc(best.node.text || ('token '+best.node.id))}</strong><br>type ${esc(best.node.token_type)} · local id ${best.node.id} · source node ${best.node.global_token_id} · decode ${best.node.decode_order}<br>NLL ${best.node.nll.toFixed(4)} · entropy ${best.node.entropy.toFixed(4)} · rank ${best.node.rank}`;
+}
 fetch('branching_reasoning_interactive.json').then(r => r.json()).then(data => {
   compact = data;
   const maxLevel = Math.max(...compact.nodes.map(n => n.level));
   levelRange.max = maxLevel; levelRange.value = maxLevel;
   radiusRange.max = Math.max(0, compact.radius_values.length - 1); radiusRange.value = Math.max(0, Math.floor((compact.radius_values.length - 1) / 3));
-  [levelRange, radiusRange, rotRange, edgeToggle, triToggle].forEach(el => el.addEventListener('input', draw));
+  [levelRange, radiusRange, rotRange, pitchRange, zoomRange, edgeToggle, triToggle].forEach(el => el.addEventListener('input', draw));
   canvas.addEventListener('mousemove', nearest); canvas.addEventListener('click', nearest);
+  bindDrag(canvas, rotRange, pitchRange, draw);
+  if (compact.steps?.length) {
+    stepSelect.innerHTML = compact.steps.map((s, i) => `<option value="${i}">${esc(s.label || ('step '+s.step_index))} · ${s.tokens.length} tokens</option>`).join('');
+    stepSelect.value = String(Math.min(compact.steps.length - 1, Math.floor(compact.steps.length / 2)));
+    function configureStepControls() {
+      const step = currentStep();
+      if (!step) return;
+      const maxDecode = Math.max(...step.tokens.map(t => t.decode_order));
+      decodeRange.max = maxDecode; decodeRange.value = maxDecode;
+      stepRadiusRange.max = Math.max(0, step.radius_values.length - 1);
+      stepRadiusRange.value = Math.max(0, Math.floor((step.radius_values.length - 1) / 2));
+      drawStep();
+    }
+    stepSelect.addEventListener('change', configureStepControls);
+    [stepRadiusRange, decodeRange, stepYawRange, stepPitchRange, stepZoomRange, stepDecodeToggle, stepEdgeToggle, stepTriToggle].forEach(el => el.addEventListener('input', drawStep));
+    stepCanvas.addEventListener('mousemove', nearestStep); stepCanvas.addEventListener('click', nearestStep);
+    bindDrag(stepCanvas, stepYawRange, stepPitchRange, drawStep);
+    configureStepControls();
+  } else {
+    stepDetail.textContent = 'Per-step compact simplex payload is unavailable for this report.';
+  }
   draw();
 }).catch(error => { detail.textContent = 'Compact interactive payload unavailable: '+error; });
   </script>

@@ -356,10 +356,61 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
             for row in payload.get("triangles", []):
                 if isinstance(row, (list, tuple)) and len(row) >= 4:
                     triangles.append([int(row[0]), int(row[1]), int(row[2]), round(float(row[3]), 4)])
+            compact_steps: list[dict[str, Any]] = []
+            for step in payload.get("steps", []):
+                if not isinstance(step, dict):
+                    continue
+                step_tokens: list[dict[str, Any]] = []
+                for token in step.get("tokens", []):
+                    if not isinstance(token, dict):
+                        continue
+                    pca = token.get("pca", [0, 0, 0])
+                    step_tokens.append(
+                        {
+                            "id": int(token.get("id", len(step_tokens)) or 0),
+                            "global_token_id": int(token.get("global_token_id", -1) or -1),
+                            "decode_order": int(token.get("decode_order", len(step_tokens)) or 0),
+                            "text": str(token.get("text", "")),
+                            "token_type": str(token.get("token_type", "")),
+                            "x": round(float(pca[0] if len(pca) > 0 else 0.0), 5),
+                            "y": round(float(pca[1] if len(pca) > 1 else 0.0), 5),
+                            "z": round(float(pca[2] if len(pca) > 2 else 0.0), 5),
+                            "nll": round(float(token.get("nll", 0.0) or 0.0), 4),
+                            "entropy": round(float(token.get("entropy", 0.0) or 0.0), 4),
+                            "rank": int(token.get("rank", 0) or 0),
+                        }
+                    )
+
+                step_edges: list[list[float]] = []
+                for row in step.get("edge_births", []):
+                    if isinstance(row, (list, tuple)) and len(row) >= 4:
+                        step_edges.append([int(row[0]), int(row[1]), int(row[2]), round(float(row[3]), 4)])
+                step_triangles: list[list[float]] = []
+                for row in step.get("triangles", []):
+                    if isinstance(row, (list, tuple)) and len(row) >= 4:
+                        step_triangles.append([int(row[0]), int(row[1]), int(row[2]), round(float(row[3]), 4)])
+                step_decode_edges: list[list[int]] = []
+                for row in step.get("decode_edges", []):
+                    if isinstance(row, (list, tuple)) and len(row) >= 3:
+                        step_decode_edges.append([int(row[0]), int(row[1]), int(row[2])])
+                compact_steps.append(
+                    {
+                        "step_index": int(step.get("step_index", len(compact_steps)) or 0),
+                        "level": int(step.get("level", 0) or 0),
+                        "label": str(step.get("label", "")),
+                        "tokens": step_tokens,
+                        "decode_edges": step_decode_edges,
+                        "edge_births": step_edges,
+                        "triangles": step_triangles,
+                        "radius_values": [round(float(v), 4) for v in step.get("radius_values", [])],
+                        "triangle_count_exact": int(step.get("triangle_count_exact", len(step_triangles)) or len(step_triangles)),
+                    }
+                )
             compact_payload = {
                 "schema": "toricgt.branching_reasoning_interactive_compact.v1",
                 "source_mode": payload.get("source_mode", "unknown"),
                 "nodes": compact_nodes,
+                "steps": compact_steps,
                 "dag_edges": compact_pair_edges(payload.get("dag_edges", [])),
                 "reasoning_edges": compact_pair_edges(payload.get("reasoning_order_edges", [])),
                 "radius_edges": radius_edges,
@@ -476,7 +527,7 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
     .hero,.panel{{padding:18px;margin:14px 0}}h1{{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}}h2{{margin:0 0 12px}}p{{color:var(--muted);line-height:1.55}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}}
     table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(159,177,201,.16);padding:9px;text-align:left;vertical-align:top}}th{{color:#bdeeff;width:42%}}td{{color:#fff}}
     .shot{{margin:0;overflow:hidden}}.shot img{{display:block;width:100%;height:auto;background:#020713}}.shot figcaption{{display:grid;gap:5px;padding:12px 14px}}.shot span{{color:var(--muted);line-height:1.45}}.pill{{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}}
-    .note{{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}}.controls{{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:10px 0 14px}}.controls label{{display:grid;gap:4px;color:var(--muted);font-size:.9rem}}.controls input{{accent-color:var(--cyan)}}button{{border:1px solid var(--line);background:rgba(55,232,255,.08);color:var(--text);border-radius:999px;padding:8px 12px;font-weight:800}}canvas{{width:100%;height:auto;border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;display:block}}.detail{{border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;padding:12px;margin-top:10px;color:#dff8ff}}
+    .note{{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}}.controls{{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:10px 0 14px}}.controls label{{display:grid;gap:4px;color:var(--muted);font-size:.9rem}}.controls input{{accent-color:var(--cyan)}}button,select{{border:1px solid var(--line);background:rgba(55,232,255,.08);color:var(--text);border-radius:999px;padding:8px 12px;font-weight:800}}canvas{{width:100%;height:auto;border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;display:block}}.detail{{border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;padding:12px;margin-top:10px;color:#dff8ff}}.split{{display:grid;grid-template-columns:1fr;gap:14px}}@media(min-width:1100px){{.split{{grid-template-columns:1.05fr .95fr}}}}
   </style>
 </head>
 <body><main>
@@ -484,19 +535,21 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
     <h1>Branching Reasoning Trajectory Report</h1>
     <p>This is the low-resource public entry point for the graph-of-thought simplex trajectory. It keeps the exact summary metrics and visual evidence while avoiding the large browser-side payload that can freeze older machines.</p>
     <p><a class="pill" href="static_screenshots/index.html">Static screenshot audit</a><a class="pill" href="static_screenshots/contact_sheet.png">Contact sheet</a><a class="pill" href="manifest.json">Manifest</a></p>
-    <p class="note">The full slider/WebGL payload is intentionally not published as the default GitHub Pages artifact. It remains reproducible from the analysis output bundle; this page preserves the important measurements and rendered evidence without forcing a 100MB load.</p>
+    <p class="note">The heavyweight Plotly/WebGL artifact is not the default GitHub Pages payload. This page restores the core interactions with compact native Canvas/SVG views so it can load on low-resource machines while keeping the exact metrics and screenshots.</p>
   </section>
   <section class="panel">
     <h2>Exact Summary Metrics</h2>
     <table><tbody>{''.join(metric_rows)}</tbody></table>
   </section>
   <section class="panel">
-    <h2>Interactive 3D PCA Trajectory</h2>
-    <p>This viewer restores the useful interaction from the full report without shipping hidden embeddings or the 50MB browser payload. It uses compact PCA coordinates, all reasoning/DAG edges, radius-born one-dimensional simplex edges, and sampled 2-simplices from the exact analysis payload.</p>
+    <h2>Interactive Native 3D PCA Trajectory</h2>
+    <p>This viewer restores rotation, pitch, zoom, reasoning-level filtering, radius filtering, one-dimensional simplex edges, and sampled 2-simplices without shipping hidden embeddings or the heavyweight plotting runtime.</p>
     <div class="controls">
       <label>reasoning level <input id="levelRange" type="range" min="0" max="1" value="1"></label>
       <label>radius <input id="radiusRange" type="range" min="0" max="1" value="0"></label>
-      <label>rotation <input id="rotRange" type="range" min="-120" max="120" value="28"></label>
+      <label>yaw <input id="rotRange" type="range" min="-180" max="180" value="28"></label>
+      <label>pitch <input id="pitchRange" type="range" min="-70" max="70" value="-14"></label>
+      <label>zoom <input id="zoomRange" type="range" min="55" max="165" value="100"></label>
       <label><input id="radiusEdgesToggle" type="checkbox" checked> radius simplex edges</label>
       <label><input id="triToggle" type="checkbox"> 2-simplices</label>
     </div>
@@ -504,7 +557,24 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
     <div id="trajectoryDetail" class="detail">Move over or click a point to inspect the reasoning node, NLL, branch, and level.</div>
   </section>
   <section class="panel">
-    <h2>Visual Evidence</h2>
+    <h2>Reasoning-Step Filtered Simplicial Complex</h2>
+    <p>Each reasoning step uses its real compact token PCA coordinates from the analysis payload. The radius slider adds one-dimensional simplex edges by distance; the decoding slider reveals token order and decode edges.</p>
+    <div class="controls">
+      <label>step <select id="stepSelect"></select></label>
+      <label>radius <input id="stepRadiusRange" type="range" min="0" max="1" value="0"></label>
+      <label>decoding order <input id="decodeRange" type="range" min="0" max="1" value="1"></label>
+      <label>yaw <input id="stepYawRange" type="range" min="-180" max="180" value="36"></label>
+      <label>pitch <input id="stepPitchRange" type="range" min="-70" max="70" value="-18"></label>
+      <label>zoom <input id="stepZoomRange" type="range" min="65" max="190" value="115"></label>
+      <label><input id="stepDecodeToggle" type="checkbox" checked> decode arrows</label>
+      <label><input id="stepEdgeToggle" type="checkbox" checked> radius simplex edges</label>
+      <label><input id="stepTriToggle" type="checkbox"> 2-simplices</label>
+    </div>
+    <canvas id="stepCanvas" width="1120" height="560"></canvas>
+    <div id="stepDetail" class="detail">Move over or click a token point to inspect token text, type, NLL, entropy, rank, and source id.</div>
+  </section>
+  <section class="panel">
+    <h2>Visualizations</h2>
     <div class="grid">{''.join(cards)}</div>
   </section>
   <script>
@@ -513,45 +583,99 @@ const ctx = canvas.getContext('2d');
 const levelRange = document.getElementById('levelRange');
 const radiusRange = document.getElementById('radiusRange');
 const rotRange = document.getElementById('rotRange');
+const pitchRange = document.getElementById('pitchRange');
+const zoomRange = document.getElementById('zoomRange');
 const detail = document.getElementById('trajectoryDetail');
 const edgeToggle = document.getElementById('radiusEdgesToggle');
 const triToggle = document.getElementById('triToggle');
+const stepCanvas = document.getElementById('stepCanvas');
+const stepCtx = stepCanvas.getContext('2d');
+const stepSelect = document.getElementById('stepSelect');
+const stepRadiusRange = document.getElementById('stepRadiusRange');
+const decodeRange = document.getElementById('decodeRange');
+const stepYawRange = document.getElementById('stepYawRange');
+const stepPitchRange = document.getElementById('stepPitchRange');
+const stepZoomRange = document.getElementById('stepZoomRange');
+const stepDecodeToggle = document.getElementById('stepDecodeToggle');
+const stepEdgeToggle = document.getElementById('stepEdgeToggle');
+const stepTriToggle = document.getElementById('stepTriToggle');
+const stepDetail = document.getElementById('stepDetail');
 let compact = null;
 let projected = [];
 let projectedById = new Map();
+let stepProjected = [];
+let stepProjectedById = new Map();
+let stepVisibleIds = new Set();
 function esc(value) {{ return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch])); }}
 function colorForNll(nll, minNll, maxNll) {{
   const t = Math.max(0, Math.min(1, (nll - minNll) / Math.max(1e-6, maxNll - minNll)));
   const r = Math.round(70 + 185 * t), g = Math.round(230 - 120 * t), b = Math.round(255 - 200 * t);
   return `rgb(${{r}},${{g}},${{b}})`;
 }}
-function project(node, angle, bounds) {{
-  const c = Math.cos(angle), s = Math.sin(angle);
-  const x = node.x * c - node.z * s;
-  const z = node.x * s + node.z * c;
-  const y = node.y - 0.22 * z;
-  const px = 76 + (x - bounds.minX) / Math.max(1e-6, bounds.maxX - bounds.minX) * (canvas.width - 152);
-  const py = canvas.height - 70 - (y - bounds.minY) / Math.max(1e-6, bounds.maxY - bounds.minY) * (canvas.height - 140);
-  return {{px, py, depth:z}};
+function rotated3(point, yawDeg, pitchDeg) {{
+  const yaw = yawDeg * Math.PI / 180, pitch = pitchDeg * Math.PI / 180;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x1 = point.x * cy - point.z * sy;
+  const z1 = point.x * sy + point.z * cy;
+  const y1 = point.y * cp - z1 * sp;
+  const z2 = point.y * sp + z1 * cp;
+  return {{x:x1, y:y1, z:z2}};
+}}
+function projectCollection(points, targetCanvas, yaw, pitch, zoom) {{
+  if (!points.length) return [];
+  const rotated = points.map(p => ({{...rotated3(p, yaw, pitch), node:p}}));
+  const minX = Math.min(...rotated.map(p => p.x)), maxX = Math.max(...rotated.map(p => p.x));
+  const minY = Math.min(...rotated.map(p => p.y)), maxY = Math.max(...rotated.map(p => p.y));
+  const baseScale = Math.min(
+    (targetCanvas.width - 150) / Math.max(1e-6, maxX - minX),
+    (targetCanvas.height - 130) / Math.max(1e-6, maxY - minY)
+  ) * (zoom / 100);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  return rotated.map(p => {{
+    const perspective = 780 / (780 + p.z * 42);
+    return {{
+      px: targetCanvas.width / 2 + (p.x - cx) * baseScale * perspective,
+      py: targetCanvas.height / 2 - (p.y - cy) * baseScale * perspective,
+      depth: p.z,
+      node: p.node,
+    }};
+  }});
+}}
+function drawArrow(context, a, b, color, width) {{
+  if (!a || !b) return;
+  context.strokeStyle=color; context.fillStyle=color; context.lineWidth=width;
+  context.beginPath(); context.moveTo(a.px, a.py); context.lineTo(b.px, b.py); context.stroke();
+  const angle = Math.atan2(b.py - a.py, b.px - a.px);
+  const len = 9;
+  context.beginPath();
+  context.moveTo(b.px, b.py);
+  context.lineTo(b.px - len * Math.cos(angle - 0.42), b.py - len * Math.sin(angle - 0.42));
+  context.lineTo(b.px - len * Math.cos(angle + 0.42), b.py - len * Math.sin(angle + 0.42));
+  context.closePath(); context.fill();
+}}
+function bindDrag(targetCanvas, yawInput, pitchInput, render) {{
+  let down = false, lastX = 0, lastY = 0;
+  targetCanvas.addEventListener('pointerdown', event => {{ down = true; lastX = event.clientX; lastY = event.clientY; targetCanvas.setPointerCapture(event.pointerId); }});
+  targetCanvas.addEventListener('pointermove', event => {{
+    if (!down) return;
+    const dx = event.clientX - lastX, dy = event.clientY - lastY;
+    lastX = event.clientX; lastY = event.clientY;
+    yawInput.value = Math.max(Number(yawInput.min), Math.min(Number(yawInput.max), Number(yawInput.value) + dx * 0.45));
+    pitchInput.value = Math.max(Number(pitchInput.min), Math.min(Number(pitchInput.max), Number(pitchInput.value) - dy * 0.35));
+    render();
+  }});
+  targetCanvas.addEventListener('pointerup', () => {{ down = false; }});
+  targetCanvas.addEventListener('pointercancel', () => {{ down = false; }});
 }}
 function draw() {{
   if (!compact) return;
   const maxLevel = Number(levelRange.value);
   const radiusIndex = Number(radiusRange.value);
   const radius = compact.radius_values[Math.min(radiusIndex, compact.radius_values.length - 1)] ?? 0;
-  const angle = Number(rotRange.value) * Math.PI / 180;
   const visible = compact.nodes.filter(n => n.level <= maxLevel);
-  const rotated = visible.map(n => {{
-    const c = Math.cos(angle), s = Math.sin(angle);
-    return {{x:n.x*c-n.z*s, y:n.y-0.22*(n.x*s+n.z*c)}};
-  }});
-  const bounds = {{
-    minX: Math.min(...rotated.map(p=>p.x)), maxX: Math.max(...rotated.map(p=>p.x)),
-    minY: Math.min(...rotated.map(p=>p.y)), maxY: Math.max(...rotated.map(p=>p.y))
-  }};
-  const byId = new Map(compact.nodes.map(n => [n.id, n]));
+  if (!visible.length) return;
   const visibleIds = new Set(visible.map(n => n.id));
-  projected = compact.nodes.map(n => ({{...project(n, angle, bounds), node:n}}));
+  projected = projectCollection(compact.nodes, canvas, Number(rotRange.value), Number(pitchRange.value), Number(zoomRange.value));
   projectedById = new Map(projected.map(p => [p.node.id, p]));
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.fillStyle = '#020713'; ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -568,7 +692,7 @@ function draw() {{
   if (triToggle.checked) {{
     ctx.fillStyle='rgba(167,139,250,.10)';
     for (const [a,b,c,birth] of compact.triangles) if (birth <= radius && visibleIds.has(a) && visibleIds.has(b) && visibleIds.has(c)) {{
-      const pa=projected[a], pb=projected[b], pc=projected[c]; if (!pa||!pb||!pc) continue;
+      const pa=projectedById.get(Number(a)), pb=projectedById.get(Number(b)), pc=projectedById.get(Number(c)); if (!pa||!pb||!pc) continue;
       ctx.beginPath(); ctx.moveTo(pa.px,pa.py); ctx.lineTo(pb.px,pb.py); ctx.lineTo(pc.px,pc.py); ctx.closePath(); ctx.fill();
     }}
   }}
@@ -578,7 +702,7 @@ function draw() {{
     ctx.strokeStyle = '#ecfbff'; ctx.lineWidth = 1.1;
     ctx.beginPath(); ctx.arc(p.px, p.py, 4.5, 0, Math.PI*2); ctx.fill(); ctx.stroke();
   }}
-  ctx.fillStyle='#ecfbff'; ctx.font='16px system-ui'; ctx.fillText(`level ≤ ${{maxLevel}} · radius ${{radius.toFixed(3)}} · nodes ${{visible.length}} · compact native viewer`, 22, 34);
+  ctx.fillStyle='#ecfbff'; ctx.font='16px system-ui'; ctx.fillText(`level ≤ ${{maxLevel}} · radius ${{radius.toFixed(3)}} · nodes ${{visible.length}} · yaw ${{rotRange.value}} · pitch ${{pitchRange.value}}`, 22, 34);
 }}
 function nearest(event) {{
   const rect = canvas.getBoundingClientRect();
@@ -591,13 +715,89 @@ function nearest(event) {{
   }}
   if (best && bd < 400) detail.innerHTML = `<strong>${{esc(best.node.label)}} / id ${{best.node.id}}</strong><br>level ${{best.node.level}} · branch ${{best.node.branch}} · NLL ${{best.node.nll.toFixed(4)}} · kind ${{esc(best.node.kind)}}`;
 }}
+function currentStep() {{
+  if (!compact?.steps?.length) return null;
+  return compact.steps[Math.max(0, Math.min(compact.steps.length - 1, Number(stepSelect.value) || 0))];
+}}
+function drawStep() {{
+  const step = currentStep();
+  if (!step) return;
+  const maxDecode = Number(decodeRange.value);
+  const radiusIndex = Number(stepRadiusRange.value);
+  const radius = step.radius_values[Math.min(radiusIndex, step.radius_values.length - 1)] ?? 0;
+  const visible = step.tokens.filter(t => t.decode_order <= maxDecode);
+  const visibleIds = new Set(visible.map(t => t.id));
+  stepVisibleIds = visibleIds;
+  stepProjected = projectCollection(step.tokens, stepCanvas, Number(stepYawRange.value), Number(stepPitchRange.value), Number(stepZoomRange.value));
+  stepProjectedById = new Map(stepProjected.map(p => [p.node.id, p]));
+  stepCtx.clearRect(0,0,stepCanvas.width,stepCanvas.height);
+  stepCtx.fillStyle = '#020713'; stepCtx.fillRect(0,0,stepCanvas.width,stepCanvas.height);
+  stepCtx.strokeStyle = 'rgba(157,184,207,.18)'; stepCtx.lineWidth = 1;
+  for (let i=0;i<6;i++) {{ const y=58+i*(stepCanvas.height-116)/5; stepCtx.beginPath(); stepCtx.moveTo(60,y); stepCtx.lineTo(stepCanvas.width-60,y); stepCtx.stroke(); }}
+  function stepLine(a,b,color,width,arrow=false) {{
+    const pa = stepProjectedById.get(Number(a)), pb = stepProjectedById.get(Number(b));
+    if (!pa || !pb || !visibleIds.has(pa.node.id) || !visibleIds.has(pb.node.id)) return;
+    if (arrow) drawArrow(stepCtx, pa, pb, color, width);
+    else {{ stepCtx.strokeStyle=color; stepCtx.lineWidth=width; stepCtx.beginPath(); stepCtx.moveTo(pa.px, pa.py); stepCtx.lineTo(pb.px, pb.py); stepCtx.stroke(); }}
+  }}
+  if (stepTriToggle.checked) {{
+    stepCtx.fillStyle='rgba(167,139,250,.14)';
+    for (const [a,b,c,birth] of step.triangles) if (birth <= radius && visibleIds.has(a) && visibleIds.has(b) && visibleIds.has(c)) {{
+      const pa=stepProjectedById.get(Number(a)), pb=stepProjectedById.get(Number(b)), pc=stepProjectedById.get(Number(c)); if (!pa||!pb||!pc) continue;
+      stepCtx.beginPath(); stepCtx.moveTo(pa.px,pa.py); stepCtx.lineTo(pb.px,pb.py); stepCtx.lineTo(pc.px,pc.py); stepCtx.closePath(); stepCtx.fill();
+    }}
+  }}
+  if (stepEdgeToggle.checked) for (const [a,b,l,birth] of step.edge_births) if (birth <= radius) stepLine(a,b,'rgba(136,255,134,.22)',0.9,false);
+  if (stepDecodeToggle.checked) for (const [a,b,order] of step.decode_edges) if (order <= maxDecode) stepLine(a,b,'rgba(255,209,102,.62)',1.6,true);
+  const nlls = visible.map(t => t.nll), minNll = nlls.length ? Math.min(...nlls) : 0, maxNll = nlls.length ? Math.max(...nlls) : 1;
+  for (const p of stepProjected.filter(p => visibleIds.has(p.node.id)).sort((a,b)=>a.depth-b.depth)) {{
+    stepCtx.fillStyle = colorForNll(p.node.nll, minNll, maxNll);
+    stepCtx.strokeStyle = '#ecfbff'; stepCtx.lineWidth = 1.1;
+    stepCtx.beginPath(); stepCtx.arc(p.px, p.py, 6, 0, Math.PI*2); stepCtx.fill(); stepCtx.stroke();
+    stepCtx.fillStyle = '#dff8ff'; stepCtx.font = '11px system-ui'; stepCtx.fillText(String(p.node.decode_order), p.px + 7, p.py - 6);
+  }}
+  stepCtx.fillStyle='#ecfbff'; stepCtx.font='16px system-ui'; stepCtx.fillText(`${{step.label || ('step '+step.step_index)}} · tokens ${{visible.length}}/${{step.tokens.length}} · radius ${{radius.toFixed(3)}} · decode ≤ ${{maxDecode}}`, 22, 32);
+}}
+function nearestStep(event) {{
+  const rect = stepCanvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * stepCanvas.width / rect.width;
+  const y = (event.clientY - rect.top) * stepCanvas.height / rect.height;
+  let best=null, bd=Infinity;
+  for (const p of stepProjected) {{
+    if (!stepVisibleIds.has(p.node.id)) continue;
+    const d=(p.px-x)**2+(p.py-y)**2;
+    if (d<bd) {{bd=d; best=p;}}
+  }}
+  if (best && bd < 650) stepDetail.innerHTML = `<strong>${{esc(best.node.text || ('token '+best.node.id))}}</strong><br>type ${{esc(best.node.token_type)}} · local id ${{best.node.id}} · source node ${{best.node.global_token_id}} · decode ${{best.node.decode_order}}<br>NLL ${{best.node.nll.toFixed(4)}} · entropy ${{best.node.entropy.toFixed(4)}} · rank ${{best.node.rank}}`;
+}}
 fetch('branching_reasoning_interactive.json').then(r => r.json()).then(data => {{
   compact = data;
   const maxLevel = Math.max(...compact.nodes.map(n => n.level));
   levelRange.max = maxLevel; levelRange.value = maxLevel;
   radiusRange.max = Math.max(0, compact.radius_values.length - 1); radiusRange.value = Math.max(0, Math.floor((compact.radius_values.length - 1) / 3));
-  [levelRange, radiusRange, rotRange, edgeToggle, triToggle].forEach(el => el.addEventListener('input', draw));
+  [levelRange, radiusRange, rotRange, pitchRange, zoomRange, edgeToggle, triToggle].forEach(el => el.addEventListener('input', draw));
   canvas.addEventListener('mousemove', nearest); canvas.addEventListener('click', nearest);
+  bindDrag(canvas, rotRange, pitchRange, draw);
+  if (compact.steps?.length) {{
+    stepSelect.innerHTML = compact.steps.map((s, i) => `<option value="${{i}}">${{esc(s.label || ('step '+s.step_index))}} · ${{s.tokens.length}} tokens</option>`).join('');
+    stepSelect.value = String(Math.min(compact.steps.length - 1, Math.floor(compact.steps.length / 2)));
+    function configureStepControls() {{
+      const step = currentStep();
+      if (!step) return;
+      const maxDecode = Math.max(...step.tokens.map(t => t.decode_order));
+      decodeRange.max = maxDecode; decodeRange.value = maxDecode;
+      stepRadiusRange.max = Math.max(0, step.radius_values.length - 1);
+      stepRadiusRange.value = Math.max(0, Math.floor((step.radius_values.length - 1) / 2));
+      drawStep();
+    }}
+    stepSelect.addEventListener('change', configureStepControls);
+    [stepRadiusRange, decodeRange, stepYawRange, stepPitchRange, stepZoomRange, stepDecodeToggle, stepEdgeToggle, stepTriToggle].forEach(el => el.addEventListener('input', drawStep));
+    stepCanvas.addEventListener('mousemove', nearestStep); stepCanvas.addEventListener('click', nearestStep);
+    bindDrag(stepCanvas, stepYawRange, stepPitchRange, drawStep);
+    configureStepControls();
+  }} else {{
+    stepDetail.textContent = 'Per-step compact simplex payload is unavailable for this report.';
+  }}
   draw();
 }}).catch(error => {{ detail.textContent = 'Compact interactive payload unavailable: '+error; }});
   </script>
@@ -1202,13 +1402,14 @@ def write_campaign_tetrahedron_report(docs: Path, rows: list[dict[str, Any]]) ->
 main{{max-width:1280px;margin:0 auto;padding:24px}}.panel{{border:1px solid var(--line);border-radius:10px;background:rgba(7,20,33,.86);padding:16px;margin:14px 0}}
 h1{{margin:0 0 8px}}p{{color:var(--muted);line-height:1.5}}.plot{{min-height:520px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713;margin-top:12px;overflow:hidden}}
 .plot.triangle{{min-height:420px}}.view-controls{{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin:8px 0 12px}}select{{width:100%;background:#020713;color:var(--text);border:1px solid rgba(70,231,255,.28);border-radius:8px;padding:10px}}label{{display:block;color:var(--muted);font-size:.9rem;margin-bottom:4px}}.metric-note{{font-size:.92rem;color:var(--muted);margin-top:8px}}code{{color:#7df5ff}}
+input[type=range]{{accent-color:var(--cyan)}}.canvas-controls{{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0 10px}}.canvas-controls label{{display:grid;gap:4px}}.canvas-controls input{{width:min(220px,60vw)}}canvas.tetra-canvas{{display:block;width:100%;height:auto;background:#020713}}
 svg{{display:block;width:100%;height:auto}}.svg-label{{font-size:13px;fill:#ecfbff;paint-order:stroke;stroke:#020713;stroke-width:3px}}.svg-small{{font-size:11px;fill:#9db8cf}}.point-label{{font-size:11px;fill:#ecfbff;paint-order:stroke;stroke:#020713;stroke-width:3px}}.tetra-edge{{stroke:#46e7ff;stroke-width:2.5}}.tetra-face{{fill:rgba(70,231,255,.10);stroke:#46e7ff;stroke-width:1.5}}.triangle-cell{{stroke:none;opacity:.72}}.triangle-contour{{stroke:rgba(236,251,255,.18);stroke-width:.9;fill:none}}.run-point{{stroke:#fff;stroke-width:1.2;cursor:pointer}}.run-point:hover{{stroke:#ffd166;stroke-width:3px}}.details{{border:1px solid rgba(70,231,255,.16);border-radius:8px;background:#020713;padding:10px;margin-top:10px;color:#dff8ff;line-height:1.45}}
 table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(157,184,207,.16);padding:8px;text-align:left;vertical-align:top}}td.num{{text-align:right;color:var(--gold)}}.scroll{{overflow:auto;max-height:520px;border:1px solid rgba(70,231,255,.14);border-radius:8px}}.scroll table{{min-width:1100px}}.button{{border:1px solid var(--line);border-radius:999px;padding:8px 12px;background:rgba(70,231,255,.08);color:var(--text);font-weight:700;display:inline-block}}
 </style></head><body><main>
 <section class="panel"><h1>Campaign Metric Tetrahedra and Shaded Triangles</h1>
-<p>This page is SVG-first and low-resource by default. It still shows every campaign metric view, all run labels, normalized tetrahedron/triangle geometry, raw metric tables, and hover/click details, but it does not load Plotly or WebGL.</p>
+<p>This page uses compact native Canvas/SVG renderers instead of Plotly/WebGL. Each campaign metric tetrahedron is interactive in 3D with yaw, pitch, zoom, hover, and click details while remaining light enough for low-resource browsers.</p>
 <p><a href="campaign_tetrahedron.json">payload JSON</a></p></section>
-<section class="panel"><h2>Tetrahedron Views</h2><div class="view-controls"><div><label for="tetra_select">metric tetrahedron</label><select id="tetra_select"><option>loading...</option></select></div><span id="tetra_count" class="metric-note"></span></div><div id="tetra_plot" class="plot"></div><p id="tetra_caption" class="metric-note"></p></section>
+<section class="panel"><h2>Interactive 3D Tetrahedron Views</h2><div class="view-controls"><div><label for="tetra_select">metric tetrahedron</label><select id="tetra_select"><option>loading...</option></select></div><span id="tetra_count" class="metric-note"></span></div><div class="canvas-controls"><label>yaw <input id="tetra_yaw" type="range" min="-180" max="180" value="28"></label><label>pitch <input id="tetra_pitch" type="range" min="-70" max="70" value="-18"></label><label>zoom <input id="tetra_zoom" type="range" min="70" max="180" value="100"></label></div><div id="tetra_plot" class="plot"></div><p id="tetra_caption" class="metric-note"></p></section>
 <section class="panel"><h2>Shaded Triangle Views</h2><p>Blue shading indicates the balanced-support region for the metric triple. Markers remain actual run observations; hover text reports profile, BPB, raw axis values, and barycentric weights.</p><div class="view-controls"><div><label for="triangle_select">metric triangle</label><select id="triangle_select"><option>loading...</option></select></div><span id="triangle_count" class="metric-note"></span></div><div id="triangle_plot" class="plot triangle"></div><p id="triangle_caption" class="metric-note"></p></section>
 <section class="panel"><h2>Run Table</h2><table><thead><tr><th>profile</th><th>run</th><th>BPB</th><th>NLL/loss</th><th>artifact bytes</th><th>train BPB</th></tr></thead><tbody>
 {''.join(f"<tr><td>{html.escape(p['profile'])}</td><td>{html.escape(p['run'])}</td><td class='num'>{p['bpb']:.6f}</td><td class='num'>{fmt(p.get('nll_loss'))}</td><td class='num'>{fmt(p.get('artifact'),0)}</td><td class='num'>{fmt(p.get('train_bpb'))}</td></tr>" for p in records)}
@@ -1244,8 +1445,27 @@ function colorForBpb(value) {{
   const b = Math.round(115 * (0.28 + 0.38 * (1 - t)));
   return `rgb(${{r}},${{g}},${{b}})`;
 }}
-function project3(v) {{
-  return [360 + v[0] * 150 + v[1] * 42, 270 - v[2] * 120 + v[1] * 34];
+let tetraProjected = [];
+function rotate3(v, yawDeg, pitchDeg) {{
+  const yaw = yawDeg * Math.PI / 180, pitch = pitchDeg * Math.PI / 180;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x1 = v[0] * cy - v[2] * sy;
+  const z1 = v[0] * sy + v[2] * cy;
+  const y1 = v[1] * cp - z1 * sp;
+  const z2 = v[1] * sp + z1 * cp;
+  return [x1, y1, z2];
+}}
+function project3Collection(points, width, height, yaw, pitch, zoom) {{
+  const rotated = points.map(p => rotate3(p.xyz, yaw, pitch));
+  const minX = Math.min(...rotated.map(p=>p[0])), maxX = Math.max(...rotated.map(p=>p[0]));
+  const minY = Math.min(...rotated.map(p=>p[1])), maxY = Math.max(...rotated.map(p=>p[1]));
+  const scale = Math.min((width - 210) / Math.max(1e-6, maxX - minX), (height - 190) / Math.max(1e-6, maxY - minY)) * zoom / 100;
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  return points.map((p, i) => {{
+    const r = rotated[i];
+    const persp = 680 / (680 + r[2] * 90);
+    return {{...p, rx:r[0], ry:r[1], rz:r[2], x: width / 2 + (r[0] - cx) * scale * persp, y: height / 2 - (r[1] - cy) * scale * persp}};
+  }});
 }}
 function showDetails(id, point, axes) {{
   const rec = recordFor(point);
@@ -1262,18 +1482,74 @@ function populateSelect(select, views) {{
   }});
 }}
 function renderTetra(view) {{
-  const vertices = view.vertices;
+  document.getElementById('tetra_plot').innerHTML = `<canvas id="tetra_canvas" class="tetra-canvas" width="920" height="560" role="img" aria-label="${{esc(view.title)}}"></canvas><div id="tetra_details" class="details">Hover or click a run marker to inspect BPB, NLL/loss, artifact bytes, and raw axis values.</div>`;
+  const tetraCanvas = document.getElementById('tetra_canvas');
+  const tctx = tetraCanvas.getContext('2d');
+  const yawInput = document.getElementById('tetra_yaw');
+  const pitchInput = document.getElementById('tetra_pitch');
+  const zoomInput = document.getElementById('tetra_zoom');
+  const vertices = view.vertices.map((xyz, i) => ({{kind:'vertex', xyz, label:view.labels[i], vertex_index:i}}));
+  const runPoints = view.points.map(point => ({{kind:'run', xyz:point.xyz, point}}));
   const edges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
-  const pv = vertices.map(project3);
-  const faces = [[0,1,2],[0,1,3],[0,2,3],[1,2,3]].map(face => `<polygon class="tetra-face" points="${{face.map(i=>pv[i].join(',')).join(' ')}}" />`).join('');
-  const edgeSvg = edges.map(([i,j]) => `<line class="tetra-edge" x1="${{pv[i][0]}}" y1="${{pv[i][1]}}" x2="${{pv[j][0]}}" y2="${{pv[j][1]}}" />`).join('');
-  const labels = pv.map((p,i) => `<text class="svg-label" text-anchor="middle" x="${{p[0]}}" y="${{p[1]-12}}">${{esc(view.labels[i])}}</text>`).join('');
-  const points = view.points.map(point => {{
-    const rec = recordFor(point);
-    const [x,y] = project3(point.xyz);
-    return `<g><circle class="run-point" cx="${{x}}" cy="${{y}}" r="8" fill="${{colorForBpb(rec.bpb)}}" onclick="showDetails('tetra_details', payload.tetrahedra[document.getElementById('tetra_select').value].points.find(p=>p.record_index===${{point.record_index}}), payload.tetrahedra[document.getElementById('tetra_select').value].axes)"><title>${{esc(pointTitle(point, view.axes))}}</title></circle><text class="point-label" x="${{x+10}}" y="${{y+4}}">${{point.record_index}}</text></g>`;
-  }}).join('');
-  document.getElementById('tetra_plot').innerHTML = `<svg viewBox="0 0 720 540" role="img" aria-label="${{esc(view.title)}}">${{faces}}${{edgeSvg}}${{labels}}${{points}}</svg><div id="tetra_details" class="details">Hover a run marker for details; click it to pin exact raw axis values.</div>`;
+  const faces = [[0,1,2],[0,1,3],[0,2,3],[1,2,3]];
+  function drawTetraCanvas() {{
+    const allProjected = project3Collection([...vertices, ...runPoints], tetraCanvas.width, tetraCanvas.height, Number(yawInput.value), Number(pitchInput.value), Number(zoomInput.value));
+    const projectedVertices = allProjected.slice(0, vertices.length);
+    tetraProjected = allProjected.slice(vertices.length);
+    tctx.clearRect(0,0,tetraCanvas.width,tetraCanvas.height);
+    tctx.fillStyle = '#020713'; tctx.fillRect(0,0,tetraCanvas.width,tetraCanvas.height);
+    tctx.strokeStyle = 'rgba(157,184,207,.18)'; tctx.lineWidth = 1;
+    for (let i=0;i<6;i++) {{ const y=70+i*(tetraCanvas.height-140)/5; tctx.beginPath(); tctx.moveTo(60,y); tctx.lineTo(tetraCanvas.width-60,y); tctx.stroke(); }}
+    const sortedFaces = faces.map(face => ({{face, depth: face.reduce((s,i)=>s+projectedVertices[i].rz,0)/3}})).sort((a,b)=>a.depth-b.depth);
+    for (const item of sortedFaces) {{
+      const pts = item.face.map(i => projectedVertices[i]);
+      tctx.fillStyle = 'rgba(70,231,255,.075)'; tctx.strokeStyle = 'rgba(70,231,255,.32)'; tctx.lineWidth = 1.2;
+      tctx.beginPath(); tctx.moveTo(pts[0].x, pts[0].y); tctx.lineTo(pts[1].x, pts[1].y); tctx.lineTo(pts[2].x, pts[2].y); tctx.closePath(); tctx.fill(); tctx.stroke();
+    }}
+    for (const [i,j] of edges) {{
+      const a=projectedVertices[i], b=projectedVertices[j];
+      tctx.strokeStyle = 'rgba(70,231,255,.78)'; tctx.lineWidth = 2.3;
+      tctx.beginPath(); tctx.moveTo(a.x,a.y); tctx.lineTo(b.x,b.y); tctx.stroke();
+    }}
+    tctx.font = '13px system-ui'; tctx.textAlign = 'center';
+    for (const v of projectedVertices) {{
+      tctx.fillStyle = '#ffd166'; tctx.beginPath(); tctx.arc(v.x,v.y,5,0,Math.PI*2); tctx.fill();
+      tctx.fillStyle = '#ecfbff'; tctx.fillText(v.label, v.x, v.y - 12);
+    }}
+    for (const p of tetraProjected.sort((a,b)=>a.rz-b.rz)) {{
+      const rec = recordFor(p.point);
+      tctx.fillStyle = colorForBpb(rec.bpb); tctx.strokeStyle = '#fff'; tctx.lineWidth = 1.2;
+      tctx.beginPath(); tctx.arc(p.x, p.y, 8, 0, Math.PI*2); tctx.fill(); tctx.stroke();
+      tctx.fillStyle = '#ecfbff'; tctx.font = '11px system-ui'; tctx.textAlign = 'left'; tctx.fillText(String(p.point.record_index), p.x + 10, p.y + 4);
+    }}
+    tctx.fillStyle='#ecfbff'; tctx.font='15px system-ui'; tctx.textAlign='left';
+    tctx.fillText(`drag to rotate · yaw ${{yawInput.value}} · pitch ${{pitchInput.value}} · zoom ${{zoomInput.value}} · lower BPB is greener`, 22, 34);
+  }}
+  function hitTetra(event) {{
+    const rect = tetraCanvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * tetraCanvas.width / rect.width;
+    const y = (event.clientY - rect.top) * tetraCanvas.height / rect.height;
+    let best = null, bd = Infinity;
+    for (const p of tetraProjected) {{
+      const d = (p.x-x)**2 + (p.y-y)**2;
+      if (d < bd) {{ bd = d; best = p; }}
+    }}
+    if (best && bd < 360) showDetails('tetra_details', best.point, view.axes);
+  }}
+  let down=false, lastX=0, lastY=0;
+  tetraCanvas.addEventListener('pointerdown', event => {{ down=true; lastX=event.clientX; lastY=event.clientY; tetraCanvas.setPointerCapture(event.pointerId); }});
+  tetraCanvas.addEventListener('pointermove', event => {{
+    if (!down) {{ hitTetra(event); return; }}
+    const dx=event.clientX-lastX, dy=event.clientY-lastY; lastX=event.clientX; lastY=event.clientY;
+    yawInput.value = Math.max(Number(yawInput.min), Math.min(Number(yawInput.max), Number(yawInput.value) + dx * 0.45));
+    pitchInput.value = Math.max(Number(pitchInput.min), Math.min(Number(pitchInput.max), Number(pitchInput.value) - dy * 0.35));
+    drawTetraCanvas();
+  }});
+  tetraCanvas.addEventListener('pointerup', () => {{ down=false; }});
+  tetraCanvas.addEventListener('pointercancel', () => {{ down=false; }});
+  tetraCanvas.addEventListener('click', hitTetra);
+  [yawInput, pitchInput, zoomInput].forEach(el => el.oninput = drawTetraCanvas);
+  drawTetraCanvas();
   document.getElementById('tetra_caption').innerHTML = 'Axes: '+view.axes.map(axis => payload.axis_library[axis].label).join(' · ');
 }}
 function renderTriangle(view) {{
@@ -2417,7 +2693,7 @@ def build_html(
 
     <section class="wrap">
       <div class="section-head">
-        <h2>Visual Evidence</h2>
+        <h2>Visualizations</h2>
       </div>
       <div class="grid gallery">
         {''.join(gallery)}
@@ -2427,7 +2703,7 @@ def build_html(
     <section class="wrap">
       <div class="section-head">
         <h2>Interactive Analysis Lab</h2>
-        <p>The generated reports are static-first and low-resource by default. They retain exact metrics, screenshot evidence, raw tables, hover/click details where cheap, CAS links, simplex-map summaries, vectorized PH panels, and tetrahedron/triangle views without forcing giant payloads or WebGL on first load.</p>
+        <p>The generated reports use compact native Canvas/SVG interactivity wherever it matters: 3D campaign tetrahedra, 3D reasoning trajectories, filtered reasoning-step simplicial complexes, CAS links, simplex-map summaries, vectorized PH panels, and raw metric tables without forcing giant plotting payloads on first load.</p>
       </div>
       <div class="grid interactive-grid">
         {''.join(interactive_cards)}
