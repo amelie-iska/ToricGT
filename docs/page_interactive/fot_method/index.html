@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forest-of-Thought Reasoning</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#030712;--panel:#071421;--panel2:#0b1b2b;--line:rgba(70,231,255,.28);--text:#ecfbff;--muted:#9db8cf;--cyan:#46e7ff;--gold:#ffd166;--pink:#ff5fa2;--green:#88ff86;--violet:#a78bfa}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 12% 10%,rgba(70,231,255,.18),transparent 30rem),radial-gradient(circle at 86% 6%,rgba(255,95,162,.13),transparent 24rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1240px;margin:0 auto;padding:28px 20px 64px}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+.hero,.panel,.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(11,27,43,.92),rgba(7,20,33,.88));box-shadow:0 24px 80px rgba(0,0,0,.38)}
+.hero{padding:24px;margin-bottom:18px}.panel{padding:18px;margin:18px 0}.grid{display:grid;gap:16px}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.card{padding:16px;min-height:220px}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
+</style></head><body><main>
+<section class="hero"><div class="eyebrow">Embedding-space reasoning forest</div><h1>Forest-of-Thought Reasoning</h1></section>
+
+<section class="panel">
+  <p class="lead">Forest-of-Thought (FoT) scales reasoning by running several thought trees, activating promising branches sparsely, correcting weak branches, and using consensus over the forest. In ToricGT the same idea is moved from prompt strings into embedding space: each branch is a graph-valued hidden trajectory, each edge is a graph edit or continuous displacement, and branch rewards are tied to BPB delta, verifier score, topological stability, and toric fan margins.</p>
+  <p><a href="https://arxiv.org/abs/2412.09078">FoT arXiv:2412.09078</a> · <a href="https://github.com/iamhankai/Forest-of-Thought">upstream code</a> · <a href="https://huggingface.co/blog/AmelieSchreiber/toricblm">ToricBLM continuation</a></p>
+</section>
+<section class="grid two">
+  <article class="panel"><h2>FoT Reference Diagram</h2><img class="source-img" src="../../page_assets/fot_reference.png" alt="Forest-of-Thought paper diagram"></article>
+  <article class="panel"><h2>Embedding-Space Adaptation</h2><div id="fotPlot" class="plot"></div></article>
+</section>
+<section class="grid three">
+  <article class="card"><h3>State</h3><p>Each state is <span class="accent">s=(G,H,Σ,μ,M)</span>: a reasoning graph, hidden table, toric/fan chart, moment coordinate, and memory pointer.</p></article>
+  <article class="card"><h3>Action</h3><p>Actions add/merge thought nodes, move inside a normal cone, cross a wall, retrieve an analogy, or flatten a graph output for BPB scoring.</p></article>
+  <article class="card"><h3>Reward</h3><p>Reward combines byte likelihood improvement with structural diversity, GUDHI persistent-homology stability, and toric/BGG certificate consistency.</p></article>
+</section>
+<section class="panel"><h2>Training Equation</h2><div class="equation">L<sub>FoT</sub> = (log Z + Σ<sub>t</sub> log p<sub>F</sub>(s<sub>t+1</sub>|s<sub>t</sub>) − log R(x) − Σ<sub>t</sub> log p<sub>B</sub>(s<sub>t</sub>|s<sub>t+1</sub>))<sup>2</sup>, with R(x)=exp((ΔBPB + α·diversity + β·fan_margin − γ·certificate_error)/τ).</div></section>
+<script>
+const payload = {"nodes": [{"id": "root", "tree": 0, "x": 0, "y": 0, "z": 0, "kind": "prompt"}, {"id": "t0a", "tree": 0, "x": 1, "y": 1.2, "z": 0.2, "kind": "branch"}, {"id": "t0b", "tree": 0, "x": 1, "y": -0.9, "z": -0.15, "kind": "branch"}, {"id": "t1a", "tree": 1, "x": 2.1, "y": 1.7, "z": 0.7, "kind": "tree"}, {"id": "t1b", "tree": 1, "x": 2.3, "y": 0.1, "z": -0.25, "kind": "tree"}, {"id": "t2a", "tree": 2, "x": 3.4, "y": -0.4, "z": 0.6, "kind": "tree"}, {"id": "vote", "tree": 3, "x": 4.6, "y": 0.25, "z": 0.1, "kind": "consensus"}], "edges": [["root", "t0a"], ["root", "t0b"], ["t0a", "t1a"], ["t0a", "t1b"], ["t0b", "t2a"], ["t1a", "vote"], ["t1b", "vote"], ["t2a", "vote"]]};
+const byId = Object.fromEntries(payload.nodes.map(n => [n.id, n]));
+const edgeTraces = payload.edges.map(e => {
+  const a = byId[e[0]], b = byId[e[1]];
+  return {type:'scatter3d',mode:'lines',x:[a.x,b.x],y:[a.y,b.y],z:[a.z,b.z],line:{color:'#46e7ff',width:5},hoverinfo:'skip',showlegend:false};
+});
+const nodeTrace = {type:'scatter3d',mode:'markers+text',x:payload.nodes.map(n=>n.x),y:payload.nodes.map(n=>n.y),z:payload.nodes.map(n=>n.z),text:payload.nodes.map(n=>n.id),customdata:payload.nodes.map(n=>[n.kind,n.tree]),marker:{size:9,color:payload.nodes.map(n=>n.tree),colorscale:'Viridis',line:{color:'#fff',width:1}},hovertemplate:'%{text}<br>kind %{customdata[0]}<br>tree %{customdata[1]}<extra></extra>'};
+Plotly.newPlot('fotPlot',[...edgeTraces,nodeTrace],{template:'plotly_dark',paper_bgcolor:'#020713',plot_bgcolor:'#020713',scene:{bgcolor:'#020713'},margin:{l:0,r:0,t:10,b:0}},{responsive:true});
+</script>
+
+</main></body></html>

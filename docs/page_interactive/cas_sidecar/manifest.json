@@ -1,5 +1,5 @@
 {
-  "embedding_manifest": "ToricGT/outputs/smoke_oai_full_iteration_analysis_2/geometry/embeddings/manifest.json",
+  "embedding_manifest": "outputs/github_pages_best_checkpoint_long_manual_20260621T182232Z/geometry/embeddings/manifest.json",
   "macaulay2_backend": {
     "available": true,
     "backend": "macaulay2",

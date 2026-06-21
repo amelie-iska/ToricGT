@@ -1,8 +1,8 @@
 {
   "analogy_emitted": true,
-  "edges": 95,
+  "edges": 511,
   "index_html": "index.html",
-  "nodes": 96,
+  "nodes": 512,
   "payload_json": "branching_reasoning_payload.json",
   "schema": "toricgt.branching_reasoning_visual_report.v1",
   "source_mode": "checkpoint_embedding_payload",

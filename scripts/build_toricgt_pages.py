@@ -37,6 +37,7 @@ IMAGE_SOURCES = {
     "branching": "assets/toricgt_pg_softmoe_figures/fig_graph_of_thought_branch_merge_dag.png",
     "protocol": "assets/toricgt_pg_softmoe_figures/fig_parameter_golf_protocol_clean.png",
     "dashboard": "assets/toricgt_pg_softmoe_figures/fig_visualization_dashboard.png",
+    "fot_reference": "external/Forest-of-Thought/assets/fot.png",
     "trajectory": "outputs/branching_reasoning_trajectory_final_long_20260616T171742Z/static_screenshots/full_trajectory_filtered_complex.png",
     "analogy": "outputs/branching_reasoning_trajectory_final_long_20260616T171742Z/static_screenshots/analogical_memory_simplex_tree_map.png",
     "vectorized_ph": "outputs/branching_reasoning_trajectory_final_long_20260616T171742Z/static_screenshots/vectorized_ph_features.png",
@@ -75,9 +76,9 @@ INTERACTIVE_REPORTS = {
         "title": "Toric Embedding and Staircases",
         "summary": (
             "Tropical ring-attention embeddings into toric charts, one-dimensional cones, "
-            "Miller-Sturmfels staircase modules, vector-bundle/sheaf panels, and fan diagnostics."
+            "Miller-Sturmfels staircase modules, staircase overlays, and fan diagnostics."
         ),
-        "features": "toric charts · staircases · vector bundles · one-dimensional cones",
+        "features": "toric charts · staircases · normal fans · one-dimensional cones",
         "embed": False,
     },
     "cas_sidecar": {
@@ -216,12 +217,41 @@ def find_pr_url(repo: Path, explicit: str | None) -> str:
     return ""
 
 
-def copy_assets(repo: Path, docs: Path) -> dict[str, str]:
+def find_analysis_output(repo: Path, explicit: str | None = None) -> Path | None:
+    if explicit:
+        path = Path(explicit)
+        if not path.is_absolute():
+            path = repo / path
+        return path if path.exists() else None
+    candidates = sorted(
+        repo.glob("outputs/github_pages_best_checkpoint_long_*"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+def copy_assets(repo: Path, docs: Path, analysis_dir: Path | None = None) -> dict[str, str]:
     assets_dir = docs / "page_assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     copied: dict[str, str] = {}
-    for key, rel in IMAGE_SOURCES.items():
+    sources = dict(IMAGE_SOURCES)
+    if analysis_dir and analysis_dir.exists():
+        dynamic_sources = {
+            "trajectory": analysis_dir / "branching_reasoning_report" / "static_screenshots" / "full_trajectory_filtered_complex.png",
+            "analogy": analysis_dir / "branching_reasoning_report" / "static_screenshots" / "analogical_memory_simplex_tree_map.png",
+            "vectorized_ph": analysis_dir / "branching_reasoning_report" / "static_screenshots" / "vectorized_ph_features.png",
+            "cas": analysis_dir / "html_screenshots" / "screenshots" / "embedding_cas_sidecar__index__slice_00.png",
+            "toric_embedding": analysis_dir / "html_screenshots" / "screenshots" / "toric_embedding_report__index__slice_00.png",
+            "bgg": analysis_dir / "html_screenshots" / "screenshots" / "bgg_category_o_report__index__slice_00.png",
+        }
+        for key, candidate in dynamic_sources.items():
+            if candidate.exists():
+                sources[key] = str(candidate)
+    for key, rel in sources.items():
         src = repo / rel
+        if Path(rel).is_absolute():
+            src = Path(rel)
         if not src.exists():
             continue
         dst = assets_dir / f"{key}{src.suffix.lower()}"
@@ -230,12 +260,16 @@ def copy_assets(repo: Path, docs: Path) -> dict[str, str]:
     return copied
 
 
-def copy_interactive_reports(repo: Path, docs: Path) -> dict[str, dict[str, str]]:
+def copy_interactive_reports(repo: Path, docs: Path, analysis_dir: Path | None = None) -> dict[str, dict[str, str]]:
     out_dir = docs / "page_interactive"
     out_dir.mkdir(parents=True, exist_ok=True)
     copied: dict[str, dict[str, str]] = {}
     for key, spec in INTERACTIVE_REPORTS.items():
         src = repo / spec["source"]
+        if analysis_dir and analysis_dir.exists():
+            candidate = analysis_dir / Path(str(spec["source"])).name
+            if (candidate / str(spec["entry"])).exists():
+                src = candidate
         entry = str(spec["entry"])
         if not src.exists() or not (src / entry).exists():
             continue
@@ -546,6 +580,209 @@ def run_history_json(rows: list[dict[str, Any]]) -> str:
             }
         )
     return json.dumps(data, sort_keys=True)
+
+
+METHOD_CSS = """
+:root{color-scheme:dark;--bg:#030712;--panel:#071421;--panel2:#0b1b2b;--line:rgba(70,231,255,.28);--text:#ecfbff;--muted:#9db8cf;--cyan:#46e7ff;--gold:#ffd166;--pink:#ff5fa2;--green:#88ff86;--violet:#a78bfa}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 12% 10%,rgba(70,231,255,.18),transparent 30rem),radial-gradient(circle at 86% 6%,rgba(255,95,162,.13),transparent 24rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1240px;margin:0 auto;padding:28px 20px 64px}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+.hero,.panel,.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(11,27,43,.92),rgba(7,20,33,.88));box-shadow:0 24px 80px rgba(0,0,0,.38)}
+.hero{padding:24px;margin-bottom:18px}.panel{padding:18px;margin:18px 0}.grid{display:grid;gap:16px}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.card{padding:16px;min-height:220px}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
+"""
+
+
+def method_report_shell(title: str, eyebrow: str, body: str) -> str:
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(title)}</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>{METHOD_CSS}</style></head><body><main>
+<section class="hero"><div class="eyebrow">{html.escape(eyebrow)}</div><h1>{html.escape(title)}</h1></section>
+{body}
+</main></body></html>
+"""
+
+
+def write_fot_method_report(docs: Path, copied: dict[str, str]) -> dict[str, str]:
+    out = docs / "page_interactive" / "fot_method"
+    out.mkdir(parents=True, exist_ok=True)
+    image = "../../" + copied.get("fot_reference", "")
+    payload = {
+        "nodes": [
+            {"id": "root", "tree": 0, "x": 0, "y": 0, "z": 0, "kind": "prompt"},
+            {"id": "t0a", "tree": 0, "x": 1, "y": 1.2, "z": .2, "kind": "branch"},
+            {"id": "t0b", "tree": 0, "x": 1, "y": -.9, "z": -.15, "kind": "branch"},
+            {"id": "t1a", "tree": 1, "x": 2.1, "y": 1.7, "z": .7, "kind": "tree"},
+            {"id": "t1b", "tree": 1, "x": 2.3, "y": .1, "z": -.25, "kind": "tree"},
+            {"id": "t2a", "tree": 2, "x": 3.4, "y": -.4, "z": .6, "kind": "tree"},
+            {"id": "vote", "tree": 3, "x": 4.6, "y": .25, "z": .1, "kind": "consensus"},
+        ],
+        "edges": [["root", "t0a"], ["root", "t0b"], ["t0a", "t1a"], ["t0a", "t1b"], ["t0b", "t2a"], ["t1a", "vote"], ["t1b", "vote"], ["t2a", "vote"]],
+    }
+    body = f"""
+<section class="panel">
+  <p class="lead">Forest-of-Thought (FoT) scales reasoning by running several thought trees, activating promising branches sparsely, correcting weak branches, and using consensus over the forest. In ToricGT the same idea is moved from prompt strings into embedding space: each branch is a graph-valued hidden trajectory, each edge is a graph edit or continuous displacement, and branch rewards are tied to BPB delta, verifier score, topological stability, and toric fan margins.</p>
+  <p><a href="https://arxiv.org/abs/2412.09078">FoT arXiv:2412.09078</a> · <a href="https://github.com/iamhankai/Forest-of-Thought">upstream code</a> · <a href="https://huggingface.co/blog/AmelieSchreiber/toricblm">ToricBLM continuation</a></p>
+</section>
+<section class="grid two">
+  <article class="panel"><h2>FoT Reference Diagram</h2>{f'<img class="source-img" src="{html.escape(image)}" alt="Forest-of-Thought paper diagram">' if image != "../../" else '<p>Local FoT paper image not found.</p>'}</article>
+  <article class="panel"><h2>Embedding-Space Adaptation</h2><div id="fotPlot" class="plot"></div></article>
+</section>
+<section class="grid three">
+  <article class="card"><h3>State</h3><p>Each state is <span class="accent">s=(G,H,Σ,μ,M)</span>: a reasoning graph, hidden table, toric/fan chart, moment coordinate, and memory pointer.</p></article>
+  <article class="card"><h3>Action</h3><p>Actions add/merge thought nodes, move inside a normal cone, cross a wall, retrieve an analogy, or flatten a graph output for BPB scoring.</p></article>
+  <article class="card"><h3>Reward</h3><p>Reward combines byte likelihood improvement with structural diversity, GUDHI persistent-homology stability, and toric/BGG certificate consistency.</p></article>
+</section>
+<section class="panel"><h2>Training Equation</h2><div class="equation">L<sub>FoT</sub> = (log Z + Σ<sub>t</sub> log p<sub>F</sub>(s<sub>t+1</sub>|s<sub>t</sub>) − log R(x) − Σ<sub>t</sub> log p<sub>B</sub>(s<sub>t</sub>|s<sub>t+1</sub>))<sup>2</sup>, with R(x)=exp((ΔBPB + α·diversity + β·fan_margin − γ·certificate_error)/τ).</div></section>
+<script>
+const payload = {json.dumps(payload)};
+const byId = Object.fromEntries(payload.nodes.map(n => [n.id, n]));
+const edgeTraces = payload.edges.map(e => {{
+  const a = byId[e[0]], b = byId[e[1]];
+  return {{type:'scatter3d',mode:'lines',x:[a.x,b.x],y:[a.y,b.y],z:[a.z,b.z],line:{{color:'#46e7ff',width:5}},hoverinfo:'skip',showlegend:false}};
+}});
+const nodeTrace = {{type:'scatter3d',mode:'markers+text',x:payload.nodes.map(n=>n.x),y:payload.nodes.map(n=>n.y),z:payload.nodes.map(n=>n.z),text:payload.nodes.map(n=>n.id),customdata:payload.nodes.map(n=>[n.kind,n.tree]),marker:{{size:9,color:payload.nodes.map(n=>n.tree),colorscale:'Viridis',line:{{color:'#fff',width:1}}}},hovertemplate:'%{{text}}<br>kind %{{customdata[0]}}<br>tree %{{customdata[1]}}<extra></extra>'}};
+Plotly.newPlot('fotPlot',[...edgeTraces,nodeTrace],{{template:'plotly_dark',paper_bgcolor:'#020713',plot_bgcolor:'#020713',scene:{{bgcolor:'#020713'}},margin:{{l:0,r:0,t:10,b:0}}}},{{responsive:true}});
+</script>
+"""
+    (out / "index.html").write_text(method_report_shell("Forest-of-Thought Reasoning", "Embedding-space reasoning forest", body), encoding="utf-8")
+    return {
+        "href": "page_interactive/fot_method/index.html",
+        "title": "Forest-of-Thought Method",
+        "summary": "Dark-mode FoT explanation and interactive embedding-space forest diagram adapted to ToricGT’s graph-valued hidden trajectories.",
+        "features": "multiple thought trees · sparse activation · self-correction · BPB-delta reward",
+        "embed": "0",
+    }
+
+
+def write_convextok_method_report(docs: Path) -> dict[str, str]:
+    out = docs / "page_interactive" / "convextok_method"
+    out.mkdir(parents=True, exist_ok=True)
+    nodes = list(range(13))
+    edges = [
+        (0, 1, "b", 1), (1, 2, "y", 1), (2, 3, "t", 1), (3, 4, "e", 1), (4, 5, " ", 1),
+        (5, 6, "g", 1), (6, 7, "r", 1), (7, 8, "a", 1), (8, 9, "p", 1), (9, 10, "h", 1),
+        (10, 11, "s", 1), (11, 12, "!", 1), (0, 4, "byte", .31), (5, 10, "graph", .22),
+        (5, 12, "graphs!", .18), (0, 12, "byte graphs!", .12),
+    ]
+    payload = {"nodes": nodes, "edges": edges}
+    body = f"""
+<section class="panel">
+  <p class="lead">ConvexTok turns tokenizer construction into a shortest-path and sparse linear-programming problem over a byte-boundary DAG. ToricGT uses the tokenization DAG as first-class graph structure: boundary vertices are graph nodes, candidate substrings are priced edges, LP scores become edge features, and the selected token path is a tropical min-plus dynamic program.</p>
+  <p><a href="https://arxiv.org/abs/2605.22821">ConvexTok preprint requested in the training notes</a> · <a href="https://github.com/openai/parameter-golf">OpenAI Parameter Golf</a></p>
+</section>
+<section class="grid two">
+  <article class="panel"><h2>Tokenization DAG</h2><div id="dagPlot" class="plot"></div></article>
+  <article class="panel"><h2>Equations</h2>
+    <div class="equation">D[j] = min<sub>(i,j,t)∈E</sub> D[i] + w<sub>t</sub></div>
+    <div class="equation">min Σ<sub>e</sub> c<sub>e</sub>x<sub>e</sub> subject to flow conservation and x<sub>e</sub> ≤ y<sub>token(e)</sub>, Σ<sub>t</sub> y<sub>t</sub> ≤ B.</div>
+    <p>The min-plus recurrence is tropical dynamic programming. The LP lower bound gives a tokenizer-regret metric: path length minus relaxed optimum. ToricGT can log this gap to decide whether BPB is tokenizer-bound or model-bound.</p>
+  </article>
+</section>
+<section class="grid three">
+  <article class="card"><h3>BPB Use</h3><p>FineWeb is graphified, but OAI scoring still uses the optional flattening path so the byte objective remains primary.</p></article>
+  <article class="card"><h3>Toric Use</h3><p>Candidate-token exponent and LP-score features define active faces; the selected path is audited as a tropical curve embedded into a toric chart.</p></article>
+  <article class="card"><h3>OOD Use</h3><p>Because substring choices are graph paths, the model sees reusable local graph grammar rather than opaque token IDs only.</p></article>
+</section>
+<script>
+const payload = {json.dumps(payload)};
+const xs = payload.nodes.map(i=>i), ys = payload.nodes.map(_=>0), zs = payload.nodes.map(_=>0);
+const edgeTraces = payload.edges.map(e => {{
+  const y = e[3] < .5 ? .65 : -.18;
+  return {{type:'scatter3d',mode:'lines',x:[e[0],e[1]],y:[y,y],z:[0,0],line:{{color:e[3]<.5?'#ffd166':'#46e7ff',width:e[3]<.5?7:3}},customdata:[[e[2],e[3]],[e[2],e[3]]],hovertemplate:'token %{{customdata[0]}}<br>LP/price %{{customdata[1]}}<extra></extra>',showlegend:false}};
+}});
+const nodeTrace = {{type:'scatter3d',mode:'markers+text',x:xs,y:ys,z:zs,text:payload.nodes.map(String),marker:{{size:7,color:'#88ff86'}},hovertemplate:'byte boundary %{{text}}<extra></extra>',name:'byte boundaries'}};
+Plotly.newPlot('dagPlot',[...edgeTraces,nodeTrace],{{template:'plotly_dark',paper_bgcolor:'#020713',plot_bgcolor:'#020713',scene:{{bgcolor:'#020713',xaxis:{{title:'byte boundary'}},yaxis:{{title:'candidate path layer'}},zaxis:{{visible:false}}}},margin:{{l:0,r:0,t:10,b:0}}}},{{responsive:true}});
+</script>
+"""
+    (out / "index.html").write_text(method_report_shell("ConvexTok Tokenization Geometry", "Tokenizer as tropical DAG and toric chart", body), encoding="utf-8")
+    return {
+        "href": "page_interactive/convextok_method/index.html",
+        "title": "ConvexTok Tokenization Geometry",
+        "summary": "Interactive byte-boundary DAG, min-plus equations, LP tokenizer-regret interpretation, and ToricGT TokenGT graphification links.",
+        "features": "LP lower bound · min-plus DP · tokenization DAG · tokenizer regret",
+        "embed": "0",
+    }
+
+
+def write_bgg_method_report(docs: Path, best_metrics: dict[str, Any]) -> dict[str, str]:
+    out = docs / "page_interactive" / "bgg_method"
+    out.mkdir(parents=True, exist_ok=True)
+    metrics = {
+        "toric_bgg_loss": best_metrics.get("toric_bgg_loss"),
+        "koszul_persistence_loss": best_metrics.get("koszul_persistence_loss"),
+        "derived_signature_loss": best_metrics.get("derived_signature_loss"),
+        "toric_cca_topology_loss": best_metrics.get("toric_cca_topology_loss"),
+    }
+    table = "".join(f"<tr><th>{html.escape(k)}</th><td>{fmt(v,6)}</td></tr>" for k, v in metrics.items())
+    body = f"""
+<section class="panel">
+  <p class="lead">The Toric BGG layer is a finite certificate system: it never claims the model contains a literal abelian category. It attaches small sign-vector posets, standard-filtration masks, sparse differentials, Koszul degree profiles, Gale-dual labels, and derived signatures to training records. Late-phase weights remain small so BPB stays primary.</p>
+</section>
+<section class="grid two">
+  <article class="panel"><h2>Finite Category-O Skeleton</h2>
+  <svg viewBox="0 0 640 420" aria-label="BGG poset and chain complex">
+    <defs><marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#46e7ff"/></marker></defs>
+    <rect x="20" y="20" width="600" height="380" rx="14" fill="#020713" stroke="rgba(70,231,255,.32)"/>
+    <g stroke="#46e7ff" stroke-width="3" marker-end="url(#arr)" fill="none">
+      <path d="M110 340 L210 250 L310 340"/><path d="M210 250 L310 160 L410 250"/><path d="M310 340 L410 250 L510 340"/><path d="M310 160 L410 70"/>
+    </g>
+    <g fill="#ffd166" stroke="#fff" stroke-width="1.5">
+      <circle cx="110" cy="340" r="18"/><circle cx="310" cy="340" r="18"/><circle cx="510" cy="340" r="18"/><circle cx="210" cy="250" r="18"/><circle cx="410" cy="250" r="18"/><circle cx="310" cy="160" r="18"/><circle cx="410" cy="70" r="18"/>
+    </g>
+    <g fill="#ecfbff" font-size="18" text-anchor="middle"><text x="110" y="346">Lα</text><text x="310" y="346">Lβ</text><text x="510" y="346">Lγ</text><text x="210" y="256">Δα</text><text x="410" y="256">Δβ</text><text x="310" y="166">P</text><text x="410" y="76">C</text></g>
+    <text x="52" y="58" fill="#9db8cf" font-size="18">standard objects, covers, and differentials</text>
+    <text x="52" y="382" fill="#88ff86" font-size="18">losses: d²≈0 · standard leakage · Gale dual · Koszul profile</text>
+  </svg></article>
+  <article class="panel"><h2>Best-Run BGG Metrics</h2><table class="mini-table"><tbody>{table}</tbody></table><div class="equation">d(m⊗ξ)=Σᵢ xᵢm⊗eᵢ∧ξ, so d²=0 by commutativity of xᵢ and anti-commutativity of eᵢ.</div></article>
+</section>
+"""
+    (out / "index.html").write_text(method_report_shell("Toric BGG Category O", "Finite homological certificates", body), encoding="utf-8")
+    return {
+        "href": "page_interactive/bgg_method/index.html",
+        "title": "Toric BGG Category O Method",
+        "summary": "Finite highest-weight skeletons, standard masks, BGG differentials, Gale duality, Koszul checks, and best-run metric table.",
+        "features": "category O skeleton · d² residual · Gale dual · Koszul profile",
+        "embed": "0",
+    }
+
+
+def write_theory_gallery_report(docs: Path) -> dict[str, str]:
+    out = docs / "page_interactive" / "theory_gallery"
+    out.mkdir(parents=True, exist_ok=True)
+    body = """
+<section class="panel">
+  <p class="lead">This gallery connects the visual mathematics behind ToricGT: tropical ring attention, toric fans, Young tableaux and Schur functors, tensor/wedge/symmetric products, multiparameter persistence modules, and thought-control dynamics. The diagrams are didactic illustrations generated for this page, not copied from textbooks.</p>
+  <p><a href="../../assets/2210.11433v1.pdf">Multiparameter persistence PDF</a> · <a href="../../assets/ergodic-theory.pdf">Ergodic theory reference</a> · <a href="https://github.com/amelie-iska/Tropical_Quivers_of_Archs/blob/main/tropical_quiver_research_program.tex">Tropical Quivers of Archs</a></p>
+</section>
+<section class="grid two">
+  <article class="card"><h3>Tropical Ring Attention → Toric Fan</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g transform="translate(128 150)" stroke="#46e7ff" stroke-width="3"><line x1="0" y1="0" x2="100" y2="-75"/><line x1="0" y1="0" x2="108" y2="70"/><line x1="0" y1="0" x2="-92" y2="80"/><line x1="0" y1="0" x2="-80" y2="-82"/></g><polyline points="255,210 315,112 372,148 430,64" fill="none" stroke="#ffd166" stroke-width="6"/><text x="30" y="36" fill="#ecfbff">Yᵢc=maxⱼ(Sᵢⱼ+Vⱼc)</text><text x="255" y="248" fill="#9db8cf">active face gives cone chart</text></svg></article>
+  <article class="card"><h3>Young Tableaux, Schur Functors</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g transform="translate(42 60)" fill="rgba(70,231,255,.18)" stroke="#46e7ff"><rect x="0" y="0" width="48" height="48"/><rect x="48" y="0" width="48" height="48"/><rect x="96" y="0" width="48" height="48"/><rect x="0" y="48" width="48" height="48"/><rect x="48" y="48" width="48" height="48"/><rect x="0" y="96" width="48" height="48"/></g><g fill="#ecfbff" font-size="24" text-anchor="middle"><text x="66" y="92">1</text><text x="114" y="92">2</text><text x="162" y="92">4</text><text x="66" y="140">2</text><text x="114" y="140">3</text><text x="66" y="188">4</text></g><text x="245" y="96" fill="#ffd166" font-size="24">LλE = (∧λ₁E ⊗ ⋯ ⊗ ∧λₛE)/R</text><text x="245" y="145" fill="#9db8cf" font-size="18">standard monomial bases for<br/>coordinate rings of complexes</text></svg></article>
+  <article class="card"><h3>Tensor, Wedge, Symmetric, Shuffle</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><text x="44" y="70" fill="#ecfbff" font-size="26">V⊗W</text><text x="44" y="132" fill="#88ff86" font-size="26">∧²V: v⊗w − w⊗v</text><text x="44" y="194" fill="#ffd166" font-size="26">Sym²V: v⊗w + w⊗v</text><path d="M315 62 C390 30 410 120 470 84" fill="none" stroke="#ff5fa2" stroke-width="5"/><path d="M315 162 C390 210 420 120 470 182" fill="none" stroke="#46e7ff" stroke-width="5" stroke-dasharray="8 8"/><text x="308" y="244" fill="#9db8cf">shuffle relations organize representation channels</text></svg></article>
+  <article class="card"><h3>F₂[x_level,y_radius] Persistence Module</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g stroke="rgba(157,184,207,.28)"><path d="M70 240 H450"/><path d="M70 200 H450"/><path d="M70 160 H450"/><path d="M70 120 H450"/><path d="M70 80 H450"/><path d="M90 60 V255"/><path d="M150 60 V255"/><path d="M210 60 V255"/><path d="M270 60 V255"/><path d="M330 60 V255"/><path d="M390 60 V255"/></g><path d="M90 240 L90 120 L150 120 L150 80 L270 80 L270 60 L450 60 L450 240 Z" fill="rgba(255,209,102,.25)" stroke="#ffd166" stroke-width="4"/><circle cx="150" cy="120" r="8" fill="#46e7ff"/><circle cx="270" cy="80" r="8" fill="#ff5fa2"/><text x="70" y="278" fill="#9db8cf">level</text><text x="20" y="72" fill="#9db8cf">radius</text></svg></article>
+  <article class="card"><h3>Thought Alcove Control</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g stroke="#46e7ff" stroke-width="2"><path d="M80 250 L260 40 L450 250"/><path d="M80 250 H450"/><path d="M170 145 H355"/></g><path d="M110 222 C180 170 230 212 280 126 S375 124 420 82" fill="none" stroke="#88ff86" stroke-width="6"/><circle cx="280" cy="126" r="9" fill="#ffd166"/><text x="56" y="36" fill="#ecfbff">control u(t) keeps trajectory inside stable fan alcoves</text><text x="84" y="282" fill="#9db8cf">Lyapunov / ergodic / optimal-control audits</text></svg></article>
+  <article class="card"><h3>Schubert/Toric Intersection Heuristic</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><circle cx="180" cy="150" r="88" fill="rgba(70,231,255,.16)" stroke="#46e7ff" stroke-width="4"/><circle cx="300" cy="150" r="88" fill="rgba(255,95,162,.16)" stroke="#ff5fa2" stroke-width="4"/><circle cx="240" cy="95" r="88" fill="rgba(255,209,102,.13)" stroke="#ffd166" stroke-width="4"/><text x="182" y="154" fill="#ecfbff" text-anchor="middle">σλ</text><text x="303" y="154" fill="#ecfbff" text-anchor="middle">σμ</text><text x="240" y="96" fill="#ecfbff" text-anchor="middle">Dρ</text><text x="112" y="260" fill="#9db8cf">intersection numbers become certificate features</text></svg></article>
+</section>
+"""
+    (out / "index.html").write_text(method_report_shell("Advanced Geometry Gallery", "Combinatorics, topology, and control", body), encoding="utf-8")
+    return {
+        "href": "page_interactive/theory_gallery/index.html",
+        "title": "Advanced Geometry Gallery",
+        "summary": "Dark-mode diagrams for tropical ring attention, toric fans, Young tableaux, tensor products, persistence modules, and control theory.",
+        "features": "Young tableaux · Schur functors · F2[x,y] modules · thought alcoves",
+        "embed": "0",
+    }
+
+
+def write_method_reports(docs: Path, copied: dict[str, str], best_metrics: dict[str, Any]) -> dict[str, dict[str, str]]:
+    reports = {
+        "fot_method": write_fot_method_report(docs, copied),
+        "convextok_method": write_convextok_method_report(docs),
+        "bgg_method": write_bgg_method_report(docs, best_metrics),
+        "theory_gallery": write_theory_gallery_report(docs),
+    }
+    return reports
 
 
 def card(title: str, value: str, note: str) -> str:
@@ -956,6 +1193,24 @@ def build_html(
         </table>
       </article>
     </section>
+
+    <section class="wrap">
+      <div class="section-head">
+        <h2>Next Steps</h2>
+        <p>The next phase turns ToricGT from a compact BPB competitor into a general graph-to-graph reasoning substrate for scientific and multimodal agents.</p>
+      </div>
+      <article class="panel">
+        <h3>Continuous Structure Tokenization</h3>
+        <p class="lead">ConvexTok suggests a practical recipe: build a candidate graph, solve or relax a global path/cover objective, then round into a compact token inventory. The same idea can be lifted from byte strings to continuous 3D structures by replacing byte-boundary edges with geometric motifs: protein backbone fragments, residue-neighborhood contact patches, ligand pharmacophore neighborhoods, mesh cells, point-cloud patches, and local dynamical states. The tokenization objective should remain tropical-toric: dynamic programming supplies active paths, LP or optimal-transport relaxations supply lower bounds and regret metrics, and toric charts organize the active motif complex into cones, divisors, and sheaf-compatible local neighborhoods.</p>
+        <h3>ToricBLM Continuation</h3>
+        <p class="lead">The ToricBLM direction builds on ToricGT by continuing training toward a universal-modality biomedical reasoning model: sequences, atom graphs, protein contact graphs, RNA/DNA structures, complexes, assay facts, trajectories, and scientific claims all become typed graphs with optional continuous coordinates. The mathematical foundation is the bounded-domain universal equivariant graph-to-graph approximation theorem: within fixed graph budgets, a TokenGT-style model can approximate continuous equivariant graph maps, while tropical heads add dynamic-programming and Boolean-circuit-like active support, and ConvexTok/TokenGT positional encodings expose graph grammar structure that ordinary token-only transformers must infer indirectly.</p>
+        <h3>Reasoning, Memory, and Control</h3>
+        <p class="lead">Embedding-space Forest-of-Thought and GFlowNet training make reasoning a controlled search process, not a single chain. GraphCG full-rank concept axes make the search directions inspectable. Persistent homology and Toric BGG certificates decide when a retrieved memory is an analogy rather than a superficial nearest neighbor. The proposed thought-alcove control layer then treats reasoning trajectories as dynamical systems inside tropical-toric cells: fan walls are decision boundaries, Lyapunov-style energies discourage unstable exits, ergodic averages diagnose repeated itinerary behavior, and optimal-control objectives choose interventions that keep the model inside productive alcoves while preserving BPB and task reward.</p>
+        <h3>Thought Fluid Dynamics</h3>
+        <p class="lead">The Tropical Quivers of Archs program frames learned graph-to-graph functions as composable operators with tropical/polyhedral local charts. For ToricGT, that suggests a fluid view of reasoning: hidden trajectories have divergence, circulation, vorticity, boundary flux, and energy. Navier-Stokes-inspired regularizers should be used conservatively, as audits and small penalties, but they give a precise vocabulary for branch merging, turbulence in unstable reasoning zones, and dissipative correction when FoT branches drift. The long-run objective is optimal control over a learned, graph-valued, tropical-toric dynamical system.</p>
+        <p><a href="https://huggingface.co/blog/AmelieSchreiber/toricblm">ToricBLM blog</a> · <a href="https://github.com/amelie-iska/Tropical_Quivers_of_Archs/blob/main/tropical_quiver_research_program.tex">Tropical Quivers of Archs</a> · <a href="https://zitniklab.hms.harvard.edu/projects/GeoBPE/">GeoBPE reference</a> · <a href="https://openreview.net/forum?id=o4ANDWaomX">protein structure tokenization benchmark</a></p>
+      </article>
+    </section>
   </main>
 
   <footer>
@@ -995,6 +1250,7 @@ def main() -> int:
     parser.add_argument("--campaign-state")
     parser.add_argument("--docs-dir", default="docs")
     parser.add_argument("--parameter-golf-pr-url", default="")
+    parser.add_argument("--analysis-output-dir", default="")
     args = parser.parse_args()
 
     repo = Path(args.repo_root).resolve()
@@ -1006,9 +1262,13 @@ def main() -> int:
     state_path = find_campaign_state(repo, args.campaign_state)
     state = load_json(state_path) if state_path else {}
     pr_url = find_pr_url(repo, args.parameter_golf_pr_url)
-    copied = copy_assets(repo, docs)
-    interactive = copy_interactive_reports(repo, docs)
+    analysis_dir = find_analysis_output(repo, args.analysis_output_dir)
+    copied = copy_assets(repo, docs, analysis_dir=analysis_dir)
+    interactive = copy_interactive_reports(repo, docs, analysis_dir=analysis_dir)
     rows = completed_rows(state, current_campaign_only=True)
+    best = best_row(rows)
+    best_metrics = best.get("metrics", {}) if best else {}
+    interactive = {**write_method_reports(docs, copied, best_metrics), **interactive}
     tetra = write_campaign_tetrahedron_report(docs, rows)
     if tetra:
         interactive = {"campaign_tetrahedron": tetra, **interactive}
@@ -1024,6 +1284,11 @@ def main() -> int:
             else (state_path.name if state_path else None)
         ),
         "parameter_golf_pr_url": pr_url or None,
+        "analysis_output_dir": (
+            str(analysis_dir.resolve().relative_to(repo.resolve()))
+            if analysis_dir and analysis_dir.resolve().is_relative_to(repo.resolve())
+            else (str(analysis_dir) if analysis_dir else None)
+        ),
         "copied_assets": copied,
         "interactive_reports": interactive,
     }

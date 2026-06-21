@@ -1,4 +1,5 @@
 {
+  "analysis_output_dir": "outputs/github_pages_best_checkpoint_long_manual_20260621T182232Z",
   "campaign_state": "training_notes/tg-bpb-bestof10-convextok2048-det-20260621T040717Z/campaign_state.json",
   "copied_assets": {
     "analogy": "page_assets/analogy.png",
@@ -7,6 +8,7 @@
     "branching": "page_assets/branching.png",
     "cas": "page_assets/cas.png",
     "dashboard": "page_assets/dashboard.png",
+    "fot_reference": "page_assets/fot_reference.png",
     "got": "page_assets/got.png",
     "graphcg": "page_assets/graphcg.png",
     "logo": "page_assets/logo.png",
@@ -17,7 +19,7 @@
     "tropical": "page_assets/tropical.png",
     "vectorized_ph": "page_assets/vectorized_ph.png"
   },
-  "generated_utc": "2026-06-21 17:13:39 UTC",
+  "generated_utc": "2026-06-21 18:39:53 UTC",
   "interactive_reports": {
     "bgg_category_o": {
       "embed": "0",
@@ -25,6 +27,13 @@
       "href": "page_interactive/bgg_category_o/index.html",
       "summary": "Finite category-O certificates, standard-filtration checks, sparse differentials, Gale-dual signals, and homological consistency metrics.",
       "title": "Toric BGG Category O"
+    },
+    "bgg_method": {
+      "embed": "0",
+      "features": "category O skeleton \u00b7 d\u00b2 residual \u00b7 Gale dual \u00b7 Koszul profile",
+      "href": "page_interactive/bgg_method/index.html",
+      "summary": "Finite highest-weight skeletons, standard masks, BGG differentials, Gale duality, Koszul checks, and best-run metric table.",
+      "title": "Toric BGG Category O Method"
     },
     "branching_reasoning": {
       "embed": "1",
@@ -47,6 +56,20 @@
       "summary": "Sage/Macaulay2-backed module, resolution, syzygy, and derived-signature evidence generated for the embedding audits.",
       "title": "CAS Algebra Sidecar"
     },
+    "convextok_method": {
+      "embed": "0",
+      "features": "LP lower bound \u00b7 min-plus DP \u00b7 tokenization DAG \u00b7 tokenizer regret",
+      "href": "page_interactive/convextok_method/index.html",
+      "summary": "Interactive byte-boundary DAG, min-plus equations, LP tokenizer-regret interpretation, and ToricGT TokenGT graphification links.",
+      "title": "ConvexTok Tokenization Geometry"
+    },
+    "fot_method": {
+      "embed": "0",
+      "features": "multiple thought trees \u00b7 sparse activation \u00b7 self-correction \u00b7 BPB-delta reward",
+      "href": "page_interactive/fot_method/index.html",
+      "summary": "Dark-mode FoT explanation and interactive embedding-space forest diagram adapted to ToricGT\u2019s graph-valued hidden trajectories.",
+      "title": "Forest-of-Thought Method"
+    },
     "gudhi_persistence": {
       "embed": "0",
       "features": "PH records \u00b7 landscapes/images \u00b7 entropy \u00b7 Macaulay2 links",
@@ -54,11 +77,18 @@
       "summary": "Exact simplex-tree persistent homology, persistence landscapes/images/entropy, vectorized PH features, and Macaulay2 F2[x_level,y_radius] artifacts.",
       "title": "GUDHI Persistent Homology"
     },
+    "theory_gallery": {
+      "embed": "0",
+      "features": "Young tableaux \u00b7 Schur functors \u00b7 F2[x,y] modules \u00b7 thought alcoves",
+      "href": "page_interactive/theory_gallery/index.html",
+      "summary": "Dark-mode diagrams for tropical ring attention, toric fans, Young tableaux, tensor products, persistence modules, and control theory.",
+      "title": "Advanced Geometry Gallery"
+    },
     "toric_embedding": {
       "embed": "0",
-      "features": "toric charts \u00b7 staircases \u00b7 vector bundles \u00b7 one-dimensional cones",
+      "features": "toric charts \u00b7 staircases \u00b7 normal fans \u00b7 one-dimensional cones",
       "href": "page_interactive/toric_embedding/index.html",
-      "summary": "Tropical ring-attention embeddings into toric charts, one-dimensional cones, Miller-Sturmfels staircase modules, vector-bundle/sheaf panels, and fan diagnostics.",
+      "summary": "Tropical ring-attention embeddings into toric charts, one-dimensional cones, Miller-Sturmfels staircase modules, staircase overlays, and fan diagnostics.",
       "title": "Toric Embedding and Staircases"
     },
     "toric_vector_bundle": {
@@ -69,5 +99,5 @@
       "title": "Toric Vector-Bundle Sheaf Audit"
     }
   },
-  "parameter_golf_pr_url": null
+  "parameter_golf_pr_url": "https://github.com/openai/parameter-golf/pull/2168"
 }

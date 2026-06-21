@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toric BGG Category O</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#030712;--panel:#071421;--panel2:#0b1b2b;--line:rgba(70,231,255,.28);--text:#ecfbff;--muted:#9db8cf;--cyan:#46e7ff;--gold:#ffd166;--pink:#ff5fa2;--green:#88ff86;--violet:#a78bfa}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 12% 10%,rgba(70,231,255,.18),transparent 30rem),radial-gradient(circle at 86% 6%,rgba(255,95,162,.13),transparent 24rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1240px;margin:0 auto;padding:28px 20px 64px}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+.hero,.panel,.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(11,27,43,.92),rgba(7,20,33,.88));box-shadow:0 24px 80px rgba(0,0,0,.38)}
+.hero{padding:24px;margin-bottom:18px}.panel{padding:18px;margin:18px 0}.grid{display:grid;gap:16px}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.card{padding:16px;min-height:220px}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
+</style></head><body><main>
+<section class="hero"><div class="eyebrow">Finite homological certificates</div><h1>Toric BGG Category O</h1></section>
+
+<section class="panel">
+  <p class="lead">The Toric BGG layer is a finite certificate system: it never claims the model contains a literal abelian category. It attaches small sign-vector posets, standard-filtration masks, sparse differentials, Koszul degree profiles, Gale-dual labels, and derived signatures to training records. Late-phase weights remain small so BPB stays primary.</p>
+</section>
+<section class="grid two">
+  <article class="panel"><h2>Finite Category-O Skeleton</h2>
+  <svg viewBox="0 0 640 420" aria-label="BGG poset and chain complex">
+    <defs><marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#46e7ff"/></marker></defs>
+    <rect x="20" y="20" width="600" height="380" rx="14" fill="#020713" stroke="rgba(70,231,255,.32)"/>
+    <g stroke="#46e7ff" stroke-width="3" marker-end="url(#arr)" fill="none">
+      <path d="M110 340 L210 250 L310 340"/><path d="M210 250 L310 160 L410 250"/><path d="M310 340 L410 250 L510 340"/><path d="M310 160 L410 70"/>
+    </g>
+    <g fill="#ffd166" stroke="#fff" stroke-width="1.5">
+      <circle cx="110" cy="340" r="18"/><circle cx="310" cy="340" r="18"/><circle cx="510" cy="340" r="18"/><circle cx="210" cy="250" r="18"/><circle cx="410" cy="250" r="18"/><circle cx="310" cy="160" r="18"/><circle cx="410" cy="70" r="18"/>
+    </g>
+    <g fill="#ecfbff" font-size="18" text-anchor="middle"><text x="110" y="346">Lα</text><text x="310" y="346">Lβ</text><text x="510" y="346">Lγ</text><text x="210" y="256">Δα</text><text x="410" y="256">Δβ</text><text x="310" y="166">P</text><text x="410" y="76">C</text></g>
+    <text x="52" y="58" fill="#9db8cf" font-size="18">standard objects, covers, and differentials</text>
+    <text x="52" y="382" fill="#88ff86" font-size="18">losses: d²≈0 · standard leakage · Gale dual · Koszul profile</text>
+  </svg></article>
+  <article class="panel"><h2>Best-Run BGG Metrics</h2><table class="mini-table"><tbody><tr><th>toric_bgg_loss</th><td>0.164997</td></tr><tr><th>koszul_persistence_loss</th><td>0.045398</td></tr><tr><th>derived_signature_loss</th><td>3.243159</td></tr><tr><th>toric_cca_topology_loss</th><td>1.045991</td></tr></tbody></table><div class="equation">d(m⊗ξ)=Σᵢ xᵢm⊗eᵢ∧ξ, so d²=0 by commutativity of xᵢ and anti-commutativity of eᵢ.</div></article>
+</section>
+
+</main></body></html>

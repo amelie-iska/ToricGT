@@ -1,47 +1,52 @@
 # Current OAI ToricGT State
 
-Updated: 2026-06-19
+Updated: 2026-06-21
 
 ## Goal
 
 The active OAI/Parameter-Golf campaign keeps FineWeb BPB as the primary score
-while promoting graph structure into the main model.  The working gate is:
+while promoting graph structure into the main model.  The latest short-run
+campaign used a best-of-10 gate:
 
 ```text
 target: BPB < 1.19
 gate:   1000 optimizer steps
-policy: if the gate is missed, run full analysis, write a report, adjust
-        hyperparameters, and restart from step 0
+policy: run all 10 attempts, review full analyses/visualizations, pick the
+        best configuration, and launch a full-data continuation
 ```
 
 The current hardware target is roughly 20GB VRAM by using large token batches
 with `TRAIN_SEQ_LEN=1024`.
 
-## Active / Next Run
+## Active Full Continuation
 
-The previous 1K-step FoT/BPB control run completed.  The current tmux chain is:
+The best completed short-run configuration came from:
 
 ```text
-tmux: toricgt_convextok_full_train
-phase: full ConvexTok-2048 Det export, then automatic 1K-step campaign restart
-log:  logs/convextok2048_full_parallel_export_then_train_20260619T231200Z.log
+run:      tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z
+profile:  gate2500_experimental_family_selective
+step:     1000
+train BPB: 0.5036
+val BPB:   0.4924
+int8+zlib round-trip val BPB: 0.49533264
+artifact estimate: 12,202,796 bytes
 ```
 
-The training restart is the patched OAI baseline adaptation with ConvexTok-2048
-Det once the matched FineWeb ConvexTok shards are available:
+The current tmux session is a full-data continuation from that best
+configuration:
 
 ```text
-profile:        convextok2048_det_tropical_toric_bpb
+tmux:           toricgt_convextok_bpb_loop_10_bestfull
+log:            logs/convextok2048_bpb_bestof10_full_20260621T040717Z.log
 tokenizer:      /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/tokenizers/fineweb_convextok_2048_det.convextok.json
 FineWeb shards: /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/datasets/fineweb10B_convextok2048_det
 vocab size:     2048
 ```
 
-It should reach the 1000-step gate, then the campaign controller runs the full
-analysis suite and starts the next run from step 0 if the BPB target is missed.
-The primary loop has 25 fresh attempts.  If none reaches `BPB < 1.19`, the
-supervisor writes a cross-run meta-review and a follow-up planning document,
-then launches 10 additional exploratory attempts.
+The public page in `docs/index.html` was regenerated from the best checkpoint
+with a 512-token hidden-state extraction and includes fresh interactive
+trajectory, GUDHI, CAS, Toric BGG, ConvexTok, Forest-of-Thought, toric
+embedding, vector-bundle, and theory-gallery reports.
 
 The active run uses the updated first-class graph path:
 

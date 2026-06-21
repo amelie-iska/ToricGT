@@ -5,9 +5,10 @@ The OAI Parameter-Golf baseline is a byte/token language model rather than the
 native TokenGT graph encoder, so the periodic geometric/CAS stack needs a
 bridge from an OAI checkpoint to the existing ``toricgt.embedding_payload.v1``
 format.  This script loads the exact checkpoint, streams graph-structured
-auxiliary Parquet rows through the same SP1024 tokenizer, runs ``forward_aux``,
-and writes hidden states, per-token NLL, token text, and decoding-order edges.
-No synthetic embeddings are introduced.
+auxiliary Parquet rows through the same tokenizer family used by training
+(SentencePiece or ConvexTok), runs ``forward_aux``, and writes hidden states,
+per-token NLL, token text, and decoding-order edges.  No synthetic embeddings
+are introduced.
 """
 
 from __future__ import annotations
@@ -85,11 +86,48 @@ def pca3(points: np.ndarray) -> np.ndarray:
     return projected.astype(np.float32)
 
 
-def sentencepiece_piece(sp: spm.SentencePieceProcessor, token_id: int) -> str:
+def import_convextok() -> Any:
+    path = ROOT / "amelie-iska" / "parameter-golf" / "convextok.py"
+    spec = importlib.util.spec_from_file_location("toricgt_parameter_golf_convextok", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not import ConvexTok from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_tokenizer(path: Path) -> tuple[Any, str, int]:
+    if path.suffix == ".json":
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        if payload.get("tokenizer_type") == "convextok":
+            convextok = import_convextok()
+            tokenizer = convextok.ConvexTokTokenizer.load_json(path)
+            return tokenizer, "convextok", int(tokenizer.vocab_size)
+    tokenizer = spm.SentencePieceProcessor(model_file=str(path))
+    return tokenizer, "sentencepiece", int(tokenizer.get_piece_size())
+
+
+def token_piece(tokenizer: Any, tokenizer_kind: str, token_id: int) -> str:
+    token_id = int(token_id)
+    if tokenizer_kind == "convextok":
+        try:
+            data = tokenizer.token_bytes(token_id)
+        except Exception:
+            return f"<tok:{token_id}>"
+        if not data:
+            return f"<special:{token_id}>"
+        text = data.decode("utf-8", errors="replace")
+        if text.strip() and "\ufffd" not in text and all(ch.isprintable() or ch.isspace() for ch in text):
+            return text.replace("\n", "\\n").replace("\t", "\\t")
+        return "0x" + data.hex()
     try:
-        return str(sp.id_to_piece(int(token_id)))
+        return str(tokenizer.id_to_piece(token_id))
     except Exception:
-        return f"<tok:{int(token_id)}>"
+        return f"<tok:{token_id}>"
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -134,6 +172,29 @@ def rows_of(
     return int(default)
 
 
+def infer_checkpoint_vocab_size(state: dict[str, torch.Tensor], default: int) -> int:
+    preferred = (
+        "embed.weight",
+        "emb.weight",
+        "token_embedding.weight",
+        "tok_embeddings.weight",
+        "wte.weight",
+    )
+    for key in preferred:
+        tensor = state.get(key)
+        if isinstance(tensor, torch.Tensor) and tensor.ndim == 2:
+            return int(tensor.shape[0])
+    candidates: list[int] = []
+    for key, tensor in state.items():
+        if not isinstance(tensor, torch.Tensor) or tensor.ndim != 2:
+            continue
+        if "embed" in key.lower() and int(tensor.shape[0]) >= 260:
+            candidates.append(int(tensor.shape[0]))
+    if candidates:
+        return max(candidates)
+    return int(default)
+
+
 def input_dim_of(
     state: dict[str, torch.Tensor],
     key: str,
@@ -160,6 +221,14 @@ def meta_int(meta_values: dict[str, Any], key: str, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return int(default)
+
+
+def meta_float(meta_values: dict[str, Any], key: str, default: float) -> float:
+    value = meta_values.get(key)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def meta_mode(meta_values: dict[str, Any], key: str, default: str) -> str:
@@ -229,17 +298,25 @@ def main() -> None:
     checkpoint_path = resolve(args.checkpoint)
     output_dir = resolve(args.output_dir)
     embeddings_dir = output_dir / "embeddings"
-    train_gpt = import_train_gpt(resolve(args.train_gpt_path))
-    sp = spm.SentencePieceProcessor(model_file=str(resolve(args.tokenizer_path)))
-    stream = GraphParquetTokenStream(args.graph_train_glob, sp, int(args.seq_len), int(args.batch_size))
     state, checkpoint_meta = load_state(checkpoint_path)
+    train_gpt = import_train_gpt(resolve(args.train_gpt_path))
+    tokenizer, tokenizer_kind, tokenizer_vocab_size = load_tokenizer(resolve(args.tokenizer_path))
+    meta_values = checkpoint_meta_values(checkpoint_meta if isinstance(checkpoint_meta, dict) else {})
+    vocab_size = max(
+        int(args.vocab_size),
+        int(tokenizer_vocab_size),
+        infer_checkpoint_vocab_size(state, int(tokenizer_vocab_size)),
+    )
+    if vocab_size != int(args.vocab_size):
+        print(f"embedding_extract:vocab_size_override requested={args.vocab_size} inferred={vocab_size} tokenizer_kind={tokenizer_kind}")
+    stream = GraphParquetTokenStream(args.graph_train_glob, tokenizer, int(args.seq_len), int(args.batch_size))
     has_first_class_tokengt = any(key.startswith("fineweb_tokengt.") for key in state)
     has_graph_output_flattening = any(key.startswith("graph_output_flattening.") for key in state)
     graph_config = checkpoint_graph_config(state, checkpoint_meta)
 
     device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
     model = train_gpt.GPT(
-        vocab_size=int(args.vocab_size),
+        vocab_size=int(vocab_size),
         num_layers=int(args.num_layers),
         model_dim=int(args.model_dim),
         num_heads=int(args.num_heads),
@@ -263,6 +340,8 @@ def main() -> None:
         tokengt_identifier_weight=0.014,
         tokengt_endpoint_weight=0.018,
         tokengt_edge_token_weight=0.016,
+        convextok_dag_features=bool(has_first_class_tokengt and tokenizer_kind == "convextok"),
+        convextok_dag_feature_weight=meta_float(meta_values, "convextok_dag_feature_weight", 0.026),
         graph_output_flattening=has_graph_output_flattening,
         graph_output_edge_radius=graph_config["graph_output_edge_radius"],
         graph_output_distance_features=str(graph_config["graph_output_distance_features"]),
@@ -285,6 +364,21 @@ def main() -> None:
             "checkpoint_load_non_strict "
             f"missing={len(load_result.missing_keys)} unexpected={len(load_result.unexpected_keys)}"
         )
+    if tokenizer_kind == "convextok" and hasattr(model, "set_convextok_features"):
+        try:
+            base_bytes, _space, _boundary, lp_scores, rank_scores, priced_flags = train_gpt.build_convextok_luts(
+                tokenizer,
+                int(vocab_size),
+                device,
+            )
+            model.set_convextok_features(
+                lp_scores=lp_scores,
+                rank_scores=rank_scores,
+                priced_flags=priced_flags,
+                byte_lengths=base_bytes.to(dtype=torch.float32),
+            )
+        except Exception as exc:
+            print(f"embedding_extract:convextok_lut_warning:{exc}")
     model.eval()
 
     rows: list[dict[str, Any]] = []
@@ -331,7 +425,7 @@ def main() -> None:
                 {
                     "token_index": int(idx),
                     "token_id": int(token_ids[idx]),
-                    "token_piece": sentencepiece_piece(sp, int(token_ids[idx])),
+                    "token_piece": token_piece(tokenizer, tokenizer_kind, int(token_ids[idx])),
                     "nll": float(nll[idx]) if math.isfinite(float(nll[idx])) else 0.0,
                     "decoding_parent": int(idx - 1) if idx > 0 else None,
                 }
@@ -344,6 +438,9 @@ def main() -> None:
                 "checkpoint": str(checkpoint_path),
                 "checkpoint_step": int(checkpoint_meta.get("step", -1)) if isinstance(checkpoint_meta, dict) else -1,
                 "checkpoint_run_id": str(checkpoint_meta.get("run_id", "")) if isinstance(checkpoint_meta, dict) else "",
+                "tokenizer_kind": tokenizer_kind,
+                "tokenizer_path": str(resolve(args.tokenizer_path)),
+                "vocab_size": int(vocab_size),
                 "arrays": {
                     "hidden": list(h.shape),
                     "projected": list(projected.shape),

@@ -1,7 +1,7 @@
 {
   "exactness_rule": "Panels marked exact only when exact CAS certificate provenance is present; missing exact data are rendered unavailable.",
   "index_html": "index.html",
-  "record_count": 2,
+  "record_count": 1,
   "records": [
     {
       "bias_source": "record",
@@ -12,116 +12,19 @@
       "exponent_count": 8,
       "exponent_dim": 2,
       "html": "records/record_000_toric_embedding.html",
-      "html_path": "ToricGT/outputs/smoke_oai_full_iteration_analysis_2/toric_embedding_report/records/record_000_toric_embedding.html",
+      "html_path": "outputs/github_pages_best_checkpoint_long_manual_20260621T182232Z/toric_embedding_report/records/record_000_toric_embedding.html",
       "json": "records/record_000_toric_embedding_summary.json",
-      "miller_sturmfels_staircase": {
-        "adjacent_lcm_layer": [],
-        "minimal_generators": [
-          [
-            0,
-            0
-          ]
-        ],
-        "quotient_basis": [],
-        "staircase_threshold_by_x": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "window": {
-          "x_max": 4,
-          "y_max": 4
-        }
-      },
-      "record_id": "record_000",
-      "schema": "toricgt.toric_embedding_visual_record.v1",
-      "source_sidecar_json": "ToricGT/outputs/smoke_oai_full_iteration_analysis_2/embedding_cas_sidecar/records/record_000_cas_sidecar.json",
-      "visualization_demo_only": false
-    },
-    {
-      "bias_source": "record",
-      "exactness": {
-        "macaulay2_toric_ideal_exact": false,
-        "sage_normal_fan_exact": false
-      },
-      "exponent_count": 9,
-      "exponent_dim": 2,
-      "html": "records/rich_miller_sturmfels_staircase_demo_toric_embedding.html",
-      "html_path": "ToricGT/outputs/smoke_oai_full_iteration_analysis_2/toric_embedding_report/records/rich_miller_sturmfels_staircase_demo_toric_embedding.html",
-      "json": "records/rich_miller_sturmfels_staircase_demo_toric_embedding_summary.json",
       "miller_sturmfels_staircase": {
         "adjacent_lcm_layer": [
           {
             "index": 0,
             "lcm_corner": [
-              10,
-              2
-            ],
-            "left_generator": [
-              10,
-              0
-            ],
-            "right_generator": [
-              8,
-              2
-            ]
-          },
-          {
-            "index": 1,
-            "lcm_corner": [
-              8,
-              4
-            ],
-            "left_generator": [
-              8,
-              2
-            ],
-            "right_generator": [
               6,
-              4
-            ]
-          },
-          {
-            "index": 2,
-            "lcm_corner": [
-              6,
-              7
-            ],
-            "left_generator": [
-              6,
-              4
-            ],
-            "right_generator": [
-              4,
-              7
-            ]
-          },
-          {
-            "index": 3,
-            "lcm_corner": [
-              4,
-              9
-            ],
-            "left_generator": [
-              4,
-              7
-            ],
-            "right_generator": [
-              2,
-              9
-            ]
-          },
-          {
-            "index": 4,
-            "lcm_corner": [
-              2,
               12
             ],
             "left_generator": [
-              2,
-              9
+              6,
+              0
             ],
             "right_generator": [
               0,
@@ -131,24 +34,8 @@
         ],
         "minimal_generators": [
           [
-            10,
-            0
-          ],
-          [
-            8,
-            2
-          ],
-          [
             6,
-            4
-          ],
-          [
-            4,
-            7
-          ],
-          [
-            2,
-            9
+            0
           ],
           [
             0,
@@ -181,22 +68,6 @@
             0
           ],
           [
-            6,
-            0
-          ],
-          [
-            7,
-            0
-          ],
-          [
-            8,
-            0
-          ],
-          [
-            9,
-            0
-          ],
-          [
             0,
             1
           ],
@@ -218,22 +89,6 @@
           ],
           [
             5,
-            1
-          ],
-          [
-            6,
-            1
-          ],
-          [
-            7,
-            1
-          ],
-          [
-            8,
-            1
-          ],
-          [
-            9,
             1
           ],
           [
@@ -261,14 +116,6 @@
             2
           ],
           [
-            6,
-            2
-          ],
-          [
-            7,
-            2
-          ],
-          [
             0,
             3
           ],
@@ -290,14 +137,6 @@
           ],
           [
             5,
-            3
-          ],
-          [
-            6,
-            3
-          ],
-          [
-            7,
             3
           ],
           [
@@ -386,6 +225,14 @@
           ],
           [
             3,
+            7
+          ],
+          [
+            4,
+            7
+          ],
+          [
+            5,
             7
           ],
           [
@@ -402,6 +249,14 @@
           ],
           [
             3,
+            8
+          ],
+          [
+            4,
+            8
+          ],
+          [
+            5,
             8
           ],
           [
@@ -410,6 +265,22 @@
           ],
           [
             1,
+            9
+          ],
+          [
+            2,
+            9
+          ],
+          [
+            3,
+            9
+          ],
+          [
+            4,
+            9
+          ],
+          [
+            5,
             9
           ],
           [
@@ -418,6 +289,22 @@
           ],
           [
             1,
+            10
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            10
+          ],
+          [
+            4,
+            10
+          ],
+          [
+            5,
             10
           ],
           [
@@ -426,20 +313,32 @@
           ],
           [
             1,
+            11
+          ],
+          [
+            2,
+            11
+          ],
+          [
+            3,
+            11
+          ],
+          [
+            4,
+            11
+          ],
+          [
+            5,
             11
           ]
         ],
         "staircase_threshold_by_x": [
           12,
           12,
-          9,
-          9,
-          7,
-          7,
-          4,
-          4,
-          2,
-          2,
+          12,
+          12,
+          12,
+          12,
           0,
           0,
           0,
@@ -447,16 +346,16 @@
           0
         ],
         "window": {
-          "x_max": 14,
+          "x_max": 10,
           "y_max": 16
         }
       },
-      "record_id": "rich_miller_sturmfels_staircase_demo",
+      "record_id": "record_000",
       "schema": "toricgt.toric_embedding_visual_record.v1",
-      "source_sidecar_json": "ToricGT/outputs/smoke_oai_full_iteration_analysis_2/toric_embedding_report/_generated_sidecars/rich_miller_sturmfels_staircase_demo_cas_sidecar.json",
-      "visualization_demo_only": true
+      "source_sidecar_json": "ToricGT/outputs/github_pages_best_checkpoint_long_manual_20260621T182232Z/embedding_cas_sidecar/records/record_000_cas_sidecar.json",
+      "visualization_demo_only": false
     }
   ],
   "schema": "toricgt.toric_embedding_visual_report.v1",
-  "vector_bundle_certificate": true
+  "vector_bundle_certificate": false
 }

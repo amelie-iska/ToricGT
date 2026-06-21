@@ -25,7 +25,10 @@ The public project page is generated from the current best campaign artifacts
 with `python scripts/build_toricgt_pages.py` and lives in `docs/index.html`.
 It summarizes the best BPB run, active losses, toric/tropical/topological
 visualizations, papers, Hugging Face checkpoints, and the Parameter Golf
-submission link once the PR is created.
+submission link.  The current page bundle includes a best-checkpoint
+512-token hidden-state analysis plus interactive Forest-of-Thought,
+ConvexTok, Toric BGG, GUDHI persistence, CAS, toric embedding,
+simplex-trajectory, vector-bundle, and theory-gallery reports.
 
 *Note: consider PH disambiguation along decision boundaries or of words with multiple meanings*
 
@@ -39,10 +42,10 @@ tmux new-session -d -s toricgt_oai_toricgt_full_clone 'cd /home/iska/Documents/a
 
 Current best ConvexTok/ToricGT OAI run snapshot, uploaded to
 [`AmelieSchreiber/toricgt-checkpoints`](https://huggingface.co/AmelieSchreiber/toricgt-checkpoints),
-is `tg-bpb119-1k-convextok2048-det-skipval-20260620T021629Z-r001-convextok2048_det_tropical_toric_bpb-20260620T021630Z`.
-At step 1000 it reached train BPB `1.0213`, capped validation BPB `0.5656`,
-and int8+zlib round-trip validation BPB `0.5669`.  The compressed
-Parameter-Golf artifact estimate was `15,180,497` bytes, below the
+is `tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z`.
+At step 1000 it reached train BPB `0.5036`, capped validation BPB `0.4924`,
+and int8+zlib round-trip validation BPB `0.49533264`.  The compressed
+Parameter-Golf artifact estimate was `12,202,796` bytes, below the
 `16,000,000` byte cap.  The result used deterministic ConvexTok-2048,
 first-class TokenGT graphification, tokenization-DAG features, OAI-only
 graph-output flattening and score correction, tropical/tokenizer toric
@@ -51,7 +54,7 @@ GraphCG, trajectory-memory retrieval, toric geometry probes, vector-bundle
 1D-cone/sheaf terms, Toric BGG category-O certificates, Koszul persistence,
 combinatorial toric commutative-algebra metrics, and derived-signature
 distillation.  The reported validation is the campaign gate measurement, so a
-final submission candidate still needs a full official validation pass.
+final submission candidate still needs official Parameter Golf review.
 
 The OAI FineWeb BPB training path now graphifies FineWeb by default in
 the primary model, not only through an auxiliary sidecar.  The active tokenizer
@@ -131,12 +134,10 @@ entropy, action diversity, score gaps, and `logZ` under `oai_gflownet/*`.
 The multi-token prediction auxiliary logs under `oai_mtp/*`.  Both are routed
 through the auxiliary-gradient conflict controls and are excluded from the
 submission artifact unless a later export ablation proves they improve
-round-trip BPB.  The active exploratory campaign gate is currently
-`BPB < 1.19` by `1000` steps.  If the gate is missed, the full analysis suite
-reviews every W&B/sidecar family separately, writes a timestamped report,
-updates hyperparameters, and restarts from step 0.  The loop runs 25 fresh
-attempts, then writes a cross-run meta-review and launches 10 follow-up
-attempts if the target has not been reached.
+round-trip BPB.  The latest exploratory campaign used a best-of-10 short-run
+loop with `BPB < 1.19` by `1000` steps, then launched a full-data continuation
+from the best configuration while preserving the same analysis-and-restart
+tooling for future campaigns.
 
 The June 19 BPB-focused route adds four score-first controls to keep these
 advanced techniques experimental without letting them dominate early byte
@@ -166,7 +167,7 @@ conda run --no-capture-output -n tokengt python amelie-iska/parameter-golf/data/
   --skip-byte
 
 python scripts/run_oai_sidecar_bpb_campaign.py \
-  --campaign-id tg-bpb119-1k-convextok2048-det-$(date -u +%Y%m%dT%H%M%SZ) \
+  --campaign-id tg-bpb-bestof10-convextok2048-det-$(date -u +%Y%m%dT%H%M%SZ) \
   --steps-per-run 1000 \
   --target-bpb 1.19 \
   --fineweb-data /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/datasets/fineweb10B_convextok2048_det \

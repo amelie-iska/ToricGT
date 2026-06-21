@@ -1,12 +1,12 @@
 {
   "contact_sheet": "contact_sheet.png",
-  "dag_edges": 95,
+  "dag_edges": 511,
   "decode_order": 10,
   "index_html": "index.html",
-  "nodes": 96,
-  "payload_json": "ToricGT/outputs/smoke_oai_full_iteration_analysis_2/branching_reasoning_report/branching_reasoning_payload.json",
+  "nodes": 512,
+  "payload_json": "outputs/github_pages_best_checkpoint_long_manual_20260621T182232Z/branching_reasoning_report/branching_reasoning_payload.json",
   "radius_index": 3,
-  "reasoning_level": 95,
+  "reasoning_level": 511,
   "schema": "toricgt.branching_payload_static_screenshots.v1",
   "screenshots": [
     {
@@ -30,6 +30,6 @@
       "path": "vectorized_ph_features.png"
     }
   ],
-  "selected_step_id": 48,
+  "selected_step_id": 256,
   "step_radius_index": 6
 }

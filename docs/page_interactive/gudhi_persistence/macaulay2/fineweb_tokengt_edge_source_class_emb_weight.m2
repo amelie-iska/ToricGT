@@ -1,0 +1,96 @@
+needsPackage "JSON"
+R = GF(2)[x_level,y_radius, Degrees=>{{1,0},{0,1}}]
+C0 = R^{{0,0},{-1,0},{-2,0},{-3,0},{-4,0},{-5,0},{-6,0},{-7,0},{-8,0},{-9,0},{-10,0},{-11,0}}
+C1 = R^{{-1,-4},{-3,-4},{-5,-4},{-6,-4},{-7,-4},{-8,-2},{-9,-4},{-10,-4},{-2,-4},{-3,-3},{-4,-4},{-6,-3},{-7,-4},{-8,-3},{-9,-3},{-10,-4},{-5,-4},{-7,-4},{-8,-4},{-9,-4},{-10,-4},{-5,-3},{-7,-4},{-8,-4},{-9,-3},{-10,-4},{-11,-4},{-6,-4},{-8,-4},{-9,-4},{-6,-4},{-7,-4},{-8,-4},{-9,-4},{-8,-4},{-10,-4},{-8,-3},{-9,-3},{-10,-3},{-11,-4},{-10,-4}}
+C2 = R^{{-3,-4},{-6,-4},{-7,-4},{-8,-4},{-9,-4},{-10,-4},{-5,-4},{-7,-4},{-8,-4},{-9,-4},{-10,-4},{-6,-4},{-7,-4},{-8,-4},{-9,-4},{-8,-4},{-10,-4},{-8,-4},{-9,-4},{-10,-4},{-10,-4},{-7,-4},{-8,-4},{-9,-4},{-10,-4},{-7,-4},{-8,-4},{-9,-3},{-10,-4},{-6,-4},{-8,-4},{-9,-4},{-8,-4},{-10,-4},{-8,-4},{-9,-3},{-10,-4},{-10,-4},{-7,-4},{-8,-4},{-9,-4},{-8,-4},{-9,-4},{-10,-4},{-10,-4},{-7,-4},{-8,-4},{-9,-4},{-8,-4},{-9,-4},{-10,-4},{-11,-4},{-10,-4},{-8,-4},{-9,-4},{-8,-4},{-8,-4},{-9,-4},{-10,-4},{-10,-4}}
+d1 = map(C0,C1,matrix{{x_level*y_radius^4,x_level^3*y_radius^4,x_level^5*y_radius^4,x_level^6*y_radius^4,x_level^7*y_radius^4,x_level^8*y_radius^2,x_level^9*y_radius^4,x_level^10*y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level*y_radius^4,x_level^2*y_radius^3,x_level^3*y_radius^4,x_level^5*y_radius^3,x_level^6*y_radius^4,x_level^7*y_radius^3,x_level^8*y_radius^3,x_level^9*y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^3*y_radius^4,x_level^5*y_radius^4,x_level^6*y_radius^4,x_level^7*y_radius^4,x_level^8*y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^3,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^2*y_radius^3,x_level^4*y_radius^4,x_level^5*y_radius^4,x_level^6*y_radius^3,x_level^7*y_radius^4,x_level^8*y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^2*y_radius^4,x_level^4*y_radius^4,x_level^5*y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,y_radius^3,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level*y_radius^4,x_level^2*y_radius^4,x_level^3*y_radius^4,x_level^4*y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^3,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,y_radius^4,0_R,0_R,0_R,x_level^2*y_radius^4,x_level^4*y_radius^4,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,x_level*y_radius^3,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,y_radius^2,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^3,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,y_radius^4,0_R,y_radius^4,0_R,y_radius^3,x_level*y_radius^3,x_level^2*y_radius^3,x_level^3*y_radius^4,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^3,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,y_radius^3,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,y_radius^3,0_R,0_R,x_level*y_radius^4},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,y_radius^3,0_R,y_radius^4},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius^4,0_R}})
+d2 = map(C1,C2,matrix{{x_level^2,x_level^5,x_level^6,x_level^7,x_level^8,x_level^9,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{1_R,0_R,0_R,0_R,0_R,0_R,x_level^2,x_level^4,x_level^5,x_level^6,x_level^7,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,x_level,x_level^2,x_level^3,x_level^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,x_level^2,x_level^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,1_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,x_level,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,y_radius^2,0_R,0_R,0_R,0_R,y_radius^2,0_R,0_R,0_R,0_R,y_radius^2,0_R,y_radius^2,0_R,y_radius^2,x_level*y_radius^2,x_level^2*y_radius^2,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,1_R,0_R,x_level,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,1_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^5,x_level^6,x_level^7,x_level^8,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^4*y_radius,x_level^5*y_radius,x_level^6,x_level^7*y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^2,x_level^4,x_level^5,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,x_level^2*y_radius,x_level^4*y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,y_radius,0_R,y_radius,0_R,y_radius,x_level,x_level^2*y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,1_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,1_R,0_R,x_level*y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,1_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^2,x_level^3,x_level^4,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,x_level,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,1_R,x_level,x_level^2,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,1_R,0_R,x_level,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^2*y_radius,x_level^3*y_radius,x_level^4*y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,x_level,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,1_R,x_level,x_level^2,x_level^3,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,y_radius,0_R,0_R,x_level*y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^2,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,x_level,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level^2,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,x_level,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,1_R,x_level,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,1_R,0_R,0_R,x_level^2,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,y_radius,0_R,x_level*y_radius},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,0_R,0_R,0_R,0_R,0_R,0_R,0_R,y_radius,y_radius},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R},{0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R,0_R,0_R,0_R,0_R,0_R,0_R,1_R}})
+C = chainComplex({d1,d2})
+H0 = HH_0 C
+H1 = HH_1 C
+H2 = HH_2 C
+RH0 = res H0
+RH1 = res H1
+RH2 = res H2
+IdC = id_C
+ConeIdC = try cone IdC else null
+ConeIdRH0 = try cone id_RH0 else null
+ConeIdRH1 = try cone id_RH1 else null
+ConeIdRH2 = try cone id_RH2 else null
+resolutionSummary = hashTable {
+  "H0_module" => toString H0,
+  "H1_module" => toString H1,
+  "H2_module" => toString H2,
+  "H0_presentation" => toString presentation H0,
+  "H1_presentation" => toString presentation H1,
+  "H2_presentation" => toString presentation H2,
+  "H0_betti" => toString betti RH0,
+  "H1_betti" => toString betti RH1,
+  "H2_betti" => toString betti RH2,
+  "H0_resolution" => toString RH0,
+  "H1_resolution" => toString RH1,
+  "H2_resolution" => toString RH2
+}
+derivedSummary = hashTable {
+  "chain_identity_map" => toString IdC,
+  "chain_identity_mapping_cone" => toString ConeIdC,
+  "chain_identity_mapping_cone_homology_pruned" => hashTable {
+    "H0" => toString (try prune HH_0 ConeIdC else ""),
+    "H1" => toString (try prune HH_1 ConeIdC else ""),
+    "H2" => toString (try prune HH_2 ConeIdC else "")
+  },
+  "homology_resolution_identity_maps" => hashTable {
+    "H0" => toString (try id_RH0 else ""),
+    "H1" => toString (try id_RH1 else ""),
+    "H2" => toString (try id_RH2 else "")
+  },
+  "homology_resolution_identity_cone_homology_pruned" => hashTable {
+    "H0" => hashTable {
+      "H0" => toString (try prune HH_0 ConeIdRH0 else ""),
+      "H1" => toString (try prune HH_1 ConeIdRH0 else "")
+    },
+    "H1" => hashTable {
+      "H0" => toString (try prune HH_0 ConeIdRH1 else ""),
+      "H1" => toString (try prune HH_1 ConeIdRH1 else "")
+    },
+    "H2" => hashTable {
+      "H0" => toString (try prune HH_0 ConeIdRH2 else ""),
+      "H1" => toString (try prune HH_1 ConeIdRH2 else "")
+    }
+  },
+  "Ext_modules" => hashTable {
+    "H0_Ext0" => toString (try Ext^0(H0,R) else ""),
+    "H0_Ext1" => toString (try Ext^1(H0,R) else ""),
+    "H1_Ext0" => toString (try Ext^0(H1,R) else ""),
+    "H1_Ext1" => toString (try Ext^1(H1,R) else ""),
+    "H2_Ext0" => toString (try Ext^0(H2,R) else ""),
+    "H2_Ext1" => toString (try Ext^1(H2,R) else "")
+  },
+  "Tor_residue_modules" => hashTable {
+    "H0_Tor0" => toString (try Tor_0(H0,coker vars R) else ""),
+    "H0_Tor1" => toString (try Tor_1(H0,coker vars R) else ""),
+    "H1_Tor0" => toString (try Tor_0(H1,coker vars R) else ""),
+    "H1_Tor1" => toString (try Tor_1(H1,coker vars R) else ""),
+    "H2_Tor0" => toString (try Tor_0(H2,coker vars R) else ""),
+    "H2_Tor1" => toString (try Tor_1(H2,coker vars R) else "")
+  }
+}
+out = hashTable {
+  "kind" => "macaulay2_bigraded_persistence_resolution",
+  "ring" => "GF(2)[x_level,y_radius]",
+  "module_language" => "F2[x_level,y_radius]-graded chain complex",
+  "num_C0_generators" => rank C0,
+  "num_C1_generators" => rank C1,
+  "num_C2_generators" => rank C2,
+  "homogeneous_d1" => isHomogeneous d1,
+  "homogeneous_d2" => isHomogeneous d2,
+  "d_squared_zero" => d1*d2 == 0,
+  "chain_complex" => toString C,
+  "boundary_d1" => toString d1,
+  "boundary_d2" => toString d2,
+  "homology_and_resolutions" => resolutionSummary,
+  "derived_category_maps" => derivedSummary
+}
+print "TORICGT_JSON_BEGIN"
+print toJSON out
+print "TORICGT_JSON_END"
