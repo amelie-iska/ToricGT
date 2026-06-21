@@ -15,6 +15,7 @@ It does not resume checkpoints between attempts.  Checkpoints are only evidence.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -806,6 +807,60 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("TORICGT_HF_TOKEN_FILE", "keys.txt"),
         help="Local file containing an hf_* token. The token is read into the environment and never printed.",
     )
+    parser.add_argument(
+        "--submission-step-candidate",
+        type=int,
+        default=int(os.environ.get("TORICGT_SUBMISSION_STEP_CANDIDATE", "0")),
+        help="After the short-run sweep, rerun the best profile for this many steps as an exact submission candidate. Use 900 to test whether the pre-1K checkpoint is better; 0 disables.",
+    )
+    parser.add_argument(
+        "--create-parameter-golf-pr",
+        action="store_true",
+        default=env_truthy("TORICGT_CREATE_PARAMETER_GOLF_PR", "0"),
+        help="After the short-run sweep and optional submission-step candidate, create a Parameter Golf record folder, commit it in the local fork, push it, and open a PR.",
+    )
+    parser.add_argument(
+        "--parameter-golf-repo",
+        default=os.environ.get("TORICGT_PARAMETER_GOLF_REPO", "amelie-iska/parameter-golf"),
+        help="Local clone of the Parameter Golf fork used for record-folder submission packaging.",
+    )
+    parser.add_argument(
+        "--parameter-golf-track",
+        default=os.environ.get("TORICGT_PARAMETER_GOLF_TRACK", "track_non_record_16mb"),
+        help="Records subfolder to use for the generated submission. Defaults to non-record because ConvexTok/custom graphification needs extra validation.",
+    )
+    parser.add_argument(
+        "--parameter-golf-author",
+        default=os.environ.get("TORICGT_PARAMETER_GOLF_AUTHOR", "Amelie Schreiber"),
+    )
+    parser.add_argument(
+        "--parameter-golf-github-id",
+        default=os.environ.get("TORICGT_PARAMETER_GOLF_GITHUB_ID", "amelie-iska"),
+    )
+    parser.add_argument(
+        "--parameter-golf-submission-name",
+        default=os.environ.get("TORICGT_PARAMETER_GOLF_SUBMISSION_NAME", "ToricGT ConvexTok-2048 Graphified FoT"),
+    )
+    parser.add_argument(
+        "--parameter-golf-pr-base-repo",
+        default=os.environ.get("TORICGT_PARAMETER_GOLF_PR_BASE_REPO", "openai/parameter-golf"),
+    )
+    parser.add_argument(
+        "--parameter-golf-pr-base",
+        default=os.environ.get("TORICGT_PARAMETER_GOLF_PR_BASE", "main"),
+    )
+    parser.add_argument(
+        "--parameter-golf-pr-draft",
+        action="store_true",
+        default=env_truthy("TORICGT_PARAMETER_GOLF_PR_DRAFT", "0"),
+        help="Open the Parameter Golf PR as a draft. Disabled by default when --create-parameter-golf-pr is used because that flag means submit.",
+    )
+    parser.add_argument(
+        "--parameter-golf-include-model-artifact",
+        action="store_true",
+        default=env_truthy("TORICGT_PARAMETER_GOLF_INCLUDE_MODEL_ARTIFACT", "0"),
+        help="Copy final_model.int8.ptz into the record folder. Disabled by default; the model artifact is uploaded to Hugging Face and the PR carries reproducible code/logs/manifests.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -823,15 +878,10 @@ def parse_log(log_path: Path) -> dict[str, float | int | str | None]:
     for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
         if match := VAL_RE.search(line):
             vals.append({key: float(value) for key, value in match.groupdict().items()})
-        if match := TRAIN_RE.search(line):
-            row = {key: float(value) for key, value in match.groupdict().items() if value is not None}
-            if gfn_match := OAI_GFLOWNET_RE.search(line):
-                row.update({key: float(value) for key, value in gfn_match.groupdict().items()})
-            if fot_match := OAI_FOT_RE.search(line):
-                row.update({key: float(value) for key, value in fot_match.groupdict().items()})
-            if mtp_match := OAI_MTP_RE.search(line):
-                row.update({key: float(value) for key, value in mtp_match.groupdict().items()})
-            trains.append(row)
+        if " train_loss:" in line:
+            row = parse_train_metric_line(line)
+            if row:
+                trains.append(row)
         if match := FINAL_RE.search(line):
             final_loss = float(match.group("loss"))
             final_bpb = float(match.group("bpb"))
@@ -841,7 +891,9 @@ def parse_log(log_path: Path) -> dict[str, float | int | str | None]:
             checkpoint_path = match.group("path")
             checkpoint_step = int(match.group("step"))
     latest_val = vals[-1] if vals else {}
-    latest_train = trains[-1] if trains else {}
+    latest_train: dict[str, float] = {}
+    for row in trains:
+        latest_train.update(row)
     return {
         "exists": 1,
         "path": str(log_path),
@@ -881,6 +933,69 @@ def parse_log(log_path: Path) -> dict[str, float | int | str | None]:
         "toric_cca_topology_loss": latest_train.get("combinatorial_toric"),
         "derived_signature_loss": latest_train.get("derived_signature"),
     }
+
+
+def parse_train_metric_line(line: str) -> dict[str, float]:
+    """Parse a train log line without regex backtracking.
+
+    Some training lines contain only BPB/loss fields, while analysis lines add
+    graph, FoT, GFlowNet, toric, BGG, and persistence metrics.  A single broad
+    regex can spend unbounded time backtracking on lines that omit optional
+    sidecar fields.  Token parsing is deterministic and keeps the controller
+    from stalling between runs.
+    """
+
+    aliases = {
+        "train_loss": "loss",
+        "train_bpb": "train_bpb",
+        "train_bpt": "train_bpt",
+        "graph_lm_loss": "graph_lm_loss",
+        "graph_lm_bpb": "graph_lm_bpb",
+        "graph_lm_w": "graph_lm_weight",
+        "oai_gfn": "oai_gflownet_loss",
+        "gfn_H": "oai_gflownet_entropy",
+        "gfn_R": "oai_gflownet_reward",
+        "oai_fot": "oai_fot_loss",
+        "fot_H": "oai_fot_entropy",
+        "fot_R": "oai_fot_reward",
+        "fot_div": "oai_fot_diversity",
+        "mtp": "oai_mtp_loss",
+        "mtp_w": "oai_mtp_weight",
+        "sidecar_loss": "sidecar",
+        "graphcg": "graphcg",
+        "analogy": "analogy",
+        "tokengt_graph": "tokengt",
+        "memory": "memory",
+        "toric": "toric",
+        "vb1d": "vector_bundle_1d_cone",
+        "vb": "vector_bundle_1d_cone",
+        "bgg": "bgg",
+        "koszul": "koszul",
+        "cca": "combinatorial_toric",
+        "derived": "derived_signature",
+    }
+    row: dict[str, float] = {}
+    for token in line.split():
+        if ":" not in token:
+            continue
+        key, raw_value = token.split(":", 1)
+        raw_value = raw_value.rstrip(",;")
+        if key == "step":
+            try:
+                step, total = raw_value.split("/", 1)
+                row["step"] = float(step)
+                row["total"] = float(total)
+            except ValueError:
+                continue
+            continue
+        mapped = aliases.get(key)
+        if mapped is None:
+            continue
+        try:
+            row[mapped] = float(raw_value)
+        except ValueError:
+            continue
+    return row
 
 
 def metric_bpb(metrics: dict[str, float | int | str | None]) -> float:
@@ -1402,6 +1517,7 @@ def launch_training(
     )
     command = (
         f"cd {shlex.quote(str(work_dir))} && "
+        f"set -o pipefail && "
         f"{shell_env(env)} "
         f"{shlex.quote(args.conda_bin)} run --no-capture-output -n {shlex.quote(args.conda_env)} "
         f"python {shlex.quote(str(train_gpt))} 2>&1 | tee train.log"
@@ -1650,6 +1766,85 @@ def read_json_if_exists(path: Path) -> dict[str, object]:
     except Exception as exc:
         return {"_read_error": f"{type(exc).__name__}: {exc}", "_path": str(path)}
     return payload if isinstance(payload, dict) else {"_payload": payload, "_path": str(path)}
+
+
+def run_index_from_id(campaign_id: str, run_id: str) -> int | None:
+    match = re.search(rf"{re.escape(campaign_id)}-r(?P<idx>\d{{3}})-", run_id)
+    if not match:
+        return None
+    return int(match.group("idx"))
+
+
+def profile_from_run_id(campaign_id: str, run_id: str) -> str:
+    match = re.match(rf"{re.escape(campaign_id)}-r\d{{3}}-(?P<profile>.*)-\d{{8}}T\d{{6}}Z$", run_id)
+    if match:
+        return match.group("profile")
+    return "unknown"
+
+
+def completed_run_indices(history: list[dict[str, object]], campaign_id: str) -> set[int]:
+    indices: set[int] = set()
+    for row in history:
+        run_id = str(row.get("run_id", ""))
+        idx = run_index_from_id(campaign_id, run_id)
+        if idx is not None:
+            indices.add(idx)
+    return indices
+
+
+def recover_logged_runs(repo: Path, args: argparse.Namespace, history: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Recover completed run directories that were logged but not persisted.
+
+    This protects long campaigns from controller-side parsing failures.  It does
+    not invent metrics: only existing `train.log` files under `runs/oai_sidecar`
+    are parsed, and recovered rows are marked explicitly in the state.
+    """
+
+    campaign_id = str(args.campaign_id)
+    known = completed_run_indices(history, campaign_id)
+    run_root = repo / "runs" / "oai_sidecar"
+    recovered: list[dict[str, object]] = []
+    if not run_root.exists():
+        return history
+    candidates: list[tuple[int, Path]] = []
+    for path in run_root.glob(f"{campaign_id}-r[0-9][0-9][0-9]-*"):
+        if not path.is_dir():
+            continue
+        idx = run_index_from_id(campaign_id, path.name)
+        if idx is None or idx in known:
+            continue
+        log_path = path / "train.log"
+        if not log_path.exists():
+            continue
+        metrics = parse_log(log_path)
+        if not metrics.get("checkpoint_path") and not metrics.get("final_int8_bpb"):
+            continue
+        candidates.append((idx, path))
+    for idx, path in sorted(candidates, key=lambda item: item[0]):
+        metrics = parse_log(path / "train.log")
+        profile_name = profile_from_run_id(campaign_id, path.name)
+        row = {
+            "run_id": path.name,
+            "profile": profile_name,
+            "env_overrides_used": {},
+            "metrics": metrics,
+            "returncode": 0 if metrics.get("checkpoint_path") or metrics.get("final_int8_bpb") else 1,
+            "analysis_returncode": 0,
+            "analysis_decision": {
+                "next_profile_hint": "",
+                "reason": "Recovered from existing train.log after controller restart; no full-analysis decision was available.",
+            },
+            "recovered_from_log": True,
+        }
+        history.append(row)
+        recovered.append(row)
+    if recovered:
+        print(
+            f"[{utc_iso()}] recovered {len(recovered)} completed run(s) from logs: "
+            + ", ".join(str(row.get("run_id")) for row in recovered),
+            flush=True,
+        )
+    return history
 
 
 def finite_metric(row: dict[str, object], key: str) -> float | None:
@@ -2059,6 +2254,531 @@ def upload_best_short_checkpoint_to_hf(
         return 1
 
 
+SUBMISSION_TORICGT_MODULES = [
+    "embedding_forest_of_thought.py",
+    "oai_sidecar.py",
+    "combinatorial_toric_metrics.py",
+    "derived_category_metrics.py",
+    "koszul_persistence.py",
+    "trajectory_memory.py",
+    "toric_bgg.py",
+    "toric_geometry_tasks.py",
+    "toric_vector_bundles.py",
+    "symbolic_multigraded_resolution.py",
+    "topological_reasoning.py",
+    "gudhi_persistence.py",
+    "got_trajectory.py",
+    "cas_backed_losses.py",
+    "cas_certificates.py",
+]
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def row_run_dir(repo: Path, row: dict[str, object]) -> Path:
+    metrics = row.get("metrics", {})
+    if isinstance(metrics, dict):
+        log_path = metrics.get("path")
+        if isinstance(log_path, str) and log_path:
+            path = Path(log_path)
+            if not path.is_absolute():
+                path = repo / path
+            if path.exists():
+                return path.parent
+    return repo / "runs" / "oai_sidecar" / str(row.get("run_id", ""))
+
+
+def submission_source_files(args: argparse.Namespace) -> list[Path]:
+    repo = Path(args.repo_root).resolve()
+    pg_repo = repo / args.parameter_golf_repo if not Path(args.parameter_golf_repo).is_absolute() else Path(args.parameter_golf_repo)
+    tokenizer = Path(args.tokenizer_path)
+    if not tokenizer.is_absolute():
+        tokenizer = repo / tokenizer
+    files = [
+        pg_repo / "train_gpt.py",
+        pg_repo / "convextok.py",
+        pg_repo / "requirements.txt",
+        tokenizer,
+    ]
+    source_pkg = repo / "src" / "toricgt"
+    files.extend(source_pkg / name for name in SUBMISSION_TORICGT_MODULES)
+    return files
+
+
+def submission_code_bytes(args: argparse.Namespace) -> int:
+    total = 0
+    for path in submission_source_files(args):
+        if path.exists():
+            total += path.stat().st_size
+    total += len("# minimal package marker for Parameter Golf record\n".encode("utf-8"))
+    total += 512  # run_submission.sh reserve; exact record bytes are recomputed after writing.
+    return total
+
+
+def row_model_artifact_bytes(repo: Path, row: dict[str, object]) -> int | None:
+    artifact = row_run_dir(repo, row) / "final_model.int8.ptz"
+    if artifact.exists():
+        return artifact.stat().st_size
+    metrics = row.get("metrics", {})
+    if isinstance(metrics, dict):
+        value = metrics.get("artifact_bytes")
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            return int(value)
+    return None
+
+
+def row_self_contained_submission_bytes(args: argparse.Namespace, row: dict[str, object]) -> int | None:
+    repo = Path(args.repo_root).resolve()
+    model_bytes = row_model_artifact_bytes(repo, row)
+    if model_bytes is None:
+        return None
+    return int(model_bytes) + submission_code_bytes(args)
+
+
+def best_submission_row(args: argparse.Namespace, history: list[dict[str, object]]) -> dict[str, object] | None:
+    candidates: list[dict[str, object]] = []
+    for row in completed_campaign_rows(history):
+        metrics = row.get("metrics", {})
+        if not isinstance(metrics, dict):
+            continue
+        if not math.isfinite(metric_bpb(metrics)):
+            continue
+        total_bytes = row_self_contained_submission_bytes(args, row)
+        if total_bytes is None or total_bytes > 16_000_000:
+            continue
+        final_artifact = row_run_dir(Path(args.repo_root).resolve(), row) / "final_model.int8.ptz"
+        train_log = row_run_dir(Path(args.repo_root).resolve(), row) / "train.log"
+        if final_artifact.exists() and train_log.exists():
+            candidates.append(row)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda row: metric_bpb(row.get("metrics", {}) if isinstance(row.get("metrics"), dict) else {}))
+
+
+def seed_for_row(args: argparse.Namespace, row: dict[str, object], fallback: int) -> int:
+    idx = run_index_from_id(str(args.campaign_id), str(row.get("run_id", "")))
+    if idx is None:
+        return fallback
+    return 1337 + idx
+
+
+def launch_submission_step_candidate(
+    args: argparse.Namespace,
+    notes_dir: Path,
+    best: dict[str, object],
+    *,
+    steps: int,
+    run_index: int,
+) -> dict[str, object] | None:
+    if steps <= 0:
+        return None
+    profile = profile_by_name(str(best.get("profile", "")))
+    if profile is None:
+        raise RuntimeError(f"best run profile is not available in current profile table: {best.get('profile')}")
+    env_overrides = best.get("env_overrides_used", {})
+    if not isinstance(env_overrides, dict):
+        env_overrides = {}
+    env_overrides = {str(key): str(value) for key, value in env_overrides.items()}
+    env_overrides["SEED"] = str(seed_for_row(args, best, fallback=1337 + run_index))
+    run_id = short_run_id(f"{args.campaign_id}-submit{steps}", run_index, profile.name)
+    original_steps = int(args.steps_per_run)
+    args.steps_per_run = int(steps)
+    note = notes_dir / f"SUBMISSION-STEP-{steps}-CANDIDATE-{utc_stamp()}.md"
+    note.write_text(
+        "\n".join(
+            [
+                f"# Submission Step-{steps} Candidate Rerun",
+                "",
+                f"- generated UTC: `{utc_iso()}`",
+                f"- source best run: `{best.get('run_id')}`",
+                f"- profile: `{profile.name}`",
+                f"- rerun id: `{run_id}`",
+                f"- steps: `{steps}`",
+                f"- seed override: `{env_overrides.get('SEED')}`",
+                "",
+                "This is an exact rerun to test whether a pre-1K checkpoint/export is better than the terminal 1K export. It is not inferred from intermediate train BPB logs.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        print(f"[{utc_iso()}] launching exact {steps}-step submission candidate {run_id}", flush=True)
+        returncode = launch_training(args, run_id, profile, run_index, env_overrides=env_overrides)
+        metrics = parse_log(Path(args.repo_root).resolve() / "runs" / "oai_sidecar" / run_id / "train.log")
+        row = {
+            "run_id": run_id,
+            "profile": profile.name,
+            "env_overrides_used": env_overrides,
+            "metrics": metrics,
+            "returncode": returncode,
+            "analysis_returncode": 0,
+            "analysis_decision": {
+                "next_profile_hint": "",
+                "reason": f"Exact {steps}-step submission candidate rerun for Parameter Golf packaging.",
+            },
+            "submission_step_candidate": True,
+        }
+        report = notes_dir / f"SUBMISSION-STEP-{steps}-CANDIDATE-{run_id}-REPORT.md"
+        write_report(
+            report,
+            f"Submission Step-{steps} Candidate Report",
+            run_id,
+            profile,
+            metrics,
+            None,
+            returncode,
+            row["analysis_decision"],
+            target_bpb=float(args.target_bpb),
+            env_overrides_used=env_overrides,
+        )
+        return row
+    finally:
+        args.steps_per_run = original_steps
+
+
+def copy_submission_dependency_package(args: argparse.Namespace, record_dir: Path) -> list[str]:
+    repo = Path(args.repo_root).resolve()
+    source_pkg = repo / "src" / "toricgt"
+    target_pkg = record_dir / "toricgt"
+    target_pkg.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    init_text = "# Minimal ToricGT dependency package for this Parameter Golf record.\n"
+    (target_pkg / "__init__.py").write_text(init_text, encoding="utf-8")
+    copied.append("toricgt/__init__.py")
+    for name in SUBMISSION_TORICGT_MODULES:
+        src = source_pkg / name
+        if not src.exists():
+            raise FileNotFoundError(f"missing ToricGT dependency for submission: {src}")
+        dst = target_pkg / name
+        shutil.copy2(src, dst)
+        copied.append(f"toricgt/{name}")
+    return copied
+
+
+def write_parameter_golf_submission(
+    args: argparse.Namespace,
+    notes_dir: Path,
+    best: dict[str, object],
+    history: list[dict[str, object]],
+    *,
+    phase: str,
+) -> tuple[Path, Path]:
+    repo = Path(args.repo_root).resolve()
+    pg_repo = repo / args.parameter_golf_repo if not Path(args.parameter_golf_repo).is_absolute() else Path(args.parameter_golf_repo)
+    if not pg_repo.exists():
+        raise FileNotFoundError(f"Parameter Golf repo does not exist: {pg_repo}")
+    record_slug = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}_ToricGT_ConvexTok2048_Graphified_FoT_BestOf10"
+    record_dir = pg_repo / "records" / str(args.parameter_golf_track) / record_slug
+    if record_dir.exists():
+        record_dir = pg_repo / "records" / str(args.parameter_golf_track) / f"{record_slug}_{utc_stamp()}"
+    record_dir.mkdir(parents=True, exist_ok=False)
+
+    metrics = best.get("metrics", {})
+    if not isinstance(metrics, dict):
+        metrics = {}
+    run_id = str(best.get("run_id", "unknown-run"))
+    profile_name = str(best.get("profile", "unknown-profile"))
+    run_dir = row_run_dir(repo, best)
+    final_artifact = run_dir / "final_model.int8.ptz"
+    train_log = run_dir / "train.log"
+    tokenizer = Path(args.tokenizer_path)
+    if not tokenizer.is_absolute():
+        tokenizer = repo / tokenizer
+
+    copied: list[str] = []
+    for filename in ("train_gpt.py", "convextok.py", "requirements.txt"):
+        src = pg_repo / filename
+        if not src.exists():
+            raise FileNotFoundError(f"missing Parameter Golf dependency: {src}")
+        shutil.copy2(src, record_dir / filename)
+        copied.append(filename)
+    shutil.copy2(tokenizer, record_dir / tokenizer.name)
+    copied.append(tokenizer.name)
+    copied.extend(copy_submission_dependency_package(args, record_dir))
+    run_script = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            ": \"${DATA_PATH:?set DATA_PATH to the ConvexTok-2048 FineWeb shard directory}\"",
+            "PYTHONPATH=. \\",
+            f"TOKENIZER_PATH=./{tokenizer.name} \\",
+            "VOCAB_SIZE=2048 \\",
+            "FINEWEB_CASEOPS=0 \\",
+            "FINEWEB_GRAPHIFY=1 TOKENGT_FIRST_CLASS=1 GRAPH_OUTPUT_FLATTENING=1 OAI_FINEWEB_OUTPUT_FLATTENING=1 \\",
+            "OAI_GFLOWNET=1 OAI_EMBEDDING_FOT=1 OAI_MTP=1 \\",
+            "TORICGT_SIDECAR=1 REQUIRE_TORICGT_SIDECAR=1 GRAPH_LM_PRIMARY=1 REQUIRE_GRAPH_LM_PRIMARY=1 \\",
+            "python train_gpt.py \"$@\"",
+            "",
+        ]
+    )
+    (record_dir / "run_submission.sh").write_text(run_script, encoding="utf-8")
+    (record_dir / "run_submission.sh").chmod(0o755)
+    copied.append("run_submission.sh")
+    if train_log.exists():
+        shutil.copy2(train_log, record_dir / "train.log")
+        copied.append("train.log")
+    if args.parameter_golf_include_model_artifact and final_artifact.exists():
+        shutil.copy2(final_artifact, record_dir / "final_model.int8.ptz")
+        copied.append("final_model.int8.ptz")
+
+    code_bytes = 0
+    for path in record_dir.rglob("*"):
+        if path.is_file() and path.name != "final_model.int8.ptz":
+            code_bytes += path.stat().st_size
+    model_bytes = final_artifact.stat().st_size if final_artifact.exists() else row_model_artifact_bytes(repo, best) or 0
+    total_bytes = code_bytes + int(model_bytes)
+    artifact_sha = sha256_file(final_artifact) if final_artifact.exists() else ""
+    checkpoint_path = Path(str(metrics.get("checkpoint_path") or ""))
+    checkpoint_sha = sha256_file(checkpoint_path) if checkpoint_path.exists() else ""
+    history_rows = completed_campaign_rows(history)
+    run_table = [
+        "| run | profile | train BPB | val BPB | int8 BPB | self-contained bytes | status |",
+        "|---|---|---:|---:|---:|---:|---|",
+    ]
+    for row in history_rows:
+        row_metrics = row.get("metrics", {}) if isinstance(row.get("metrics"), dict) else {}
+        row_bytes = row_self_contained_submission_bytes(args, row)
+        run_table.append(
+            "| {run} | {profile} | {train} | {val} | {final} | {bytes} | {status} |".format(
+                run=row.get("run_id"),
+                profile=row.get("profile"),
+                train=f"{row_metrics.get('train_bpb'):.6f}" if isinstance(row_metrics.get("train_bpb"), (int, float)) else "n/a",
+                val=f"{row_metrics.get('val_bpb'):.6f}" if isinstance(row_metrics.get("val_bpb"), (int, float)) else "n/a",
+                final=f"{row_metrics.get('final_int8_bpb'):.6f}" if isinstance(row_metrics.get("final_int8_bpb"), (int, float)) else "n/a",
+                bytes=str(row_bytes) if row_bytes is not None else "n/a",
+                status="selected" if row.get("run_id") == run_id else "candidate",
+            )
+        )
+    caveat = (
+        "This is packaged as a non-record submission by default. The run uses ConvexTok-2048 and a graphified OAI-baseline adaptation, "
+        "so the BPB path needs extra independent verification before any SOTA claim. The record folder includes the tokenizer and the exact "
+        "minimal ToricGT modules required by `train_gpt.py`, and the README reports a self-contained code/tokenizer/model size estimate."
+    )
+    readme = [
+        "# ToricGT ConvexTok-2048 Graphified FoT",
+        "",
+        caveat,
+        "",
+        "## Result",
+        "",
+        f"- selected run: `{run_id}`",
+        f"- selected profile: `{profile_name}`",
+        f"- checkpoint step: `{metrics.get('checkpoint_step')}`",
+        f"- train BPB: `{metrics.get('train_bpb')}`",
+        f"- validation BPB: `{metrics.get('val_bpb')}`",
+        f"- int8+zlib round-trip BPB: `{metrics.get('final_int8_bpb')}`",
+        f"- compressed model bytes: `{model_bytes}`",
+        f"- self-contained code/tokenizer/dependency bytes: `{code_bytes}`",
+        f"- total estimated artifact bytes: `{total_bytes}` / `16000000`",
+        f"- final model SHA256: `{artifact_sha}`",
+        f"- checkpoint SHA256: `{checkpoint_sha}`",
+        "",
+        "## Technique Summary",
+        "",
+        "This submission adapts the OpenAI Parameter Golf baseline rather than replacing it with the full ToricGT research model. The byte LM remains the BPB objective, while the input/output stream is augmented with first-class graph structure.",
+        "",
+        "- **ConvexTok-2048 deterministic tokenizer**: byte-boundary tokenization DAG with LP/token-rank/price/byte-length features.",
+        "- **TokenGT-style FineWeb graphification**: token nodes, causal one-dimensional edge tokens, distance/endpoint/identifier channels, and toric phase features are injected into the baseline hidden stream.",
+        "- **OAI-FineWeb-only flattening**: graph-output states are flattened back to the tokenizer sequence for BPB scoring; non-FineWeb graph data remains graph structured.",
+        "- **Tropical/toric tokenization features**: min-plus path structure and toric vocabulary-face regularization expose tokenizer active paths as trainable geometry.",
+        "- **Embedding-space GFlowNet and Forest-of-Thought heads**: training-only trajectory objectives encourage useful reasoning forests and memory retrieval without increasing the compressed inference artifact.",
+        "- **Low-weight advanced sidecar losses**: full-rank GraphCG, analogical memory, TokenGT graph supervision, toric geometry, vector-bundle 1D-cone/sheaf, Toric BGG category-O, Koszul persistence, combinatorial toric commutative algebra, and derived signatures are active with BPB-first staging.",
+        "",
+        "## Best-Of-10 Sweep",
+        "",
+        *run_table,
+        "",
+        "## Reproduction",
+        "",
+        "The record folder is self-contained with the minimal ToricGT modules required by the adapted `train_gpt.py`. It still expects the Parameter Golf FineWeb binary shards to be available through `DATA_PATH`; no network access is used during evaluation.",
+        "",
+        "```bash",
+        "DATA_PATH=/path/to/fineweb10B_convextok2048_det \\",
+        "./run_submission.sh",
+        "```",
+        "",
+        "## Rule Notes",
+        "",
+        "- The official README states the cap is `16,000,000` decimal bytes for code plus compressed model. This folder reports the stricter self-contained size including the tokenizer and dependency modules.",
+        "- Tokenizer changes require extra proof that BPB is correct. The campaign logs include native validation BPB and int8 round-trip BPB; ConvexTok regret/tokenization-DAG analyses are retained in the ToricGT training notes.",
+        "- This local campaign was not an 8xH100 10-minute record run. It is submitted as a unique non-record graph/tropical/toric OAI-baseline adaptation unless later rerun under official record conditions.",
+        "- Score-first test-time adaptation is configured as non-committing in these short runs; no validation tokens are used for training before scoring.",
+        "",
+    ]
+    (record_dir / "README.md").write_text("\n".join(readme), encoding="utf-8")
+
+    submission = {
+        "author": args.parameter_golf_author,
+        "github_id": args.parameter_golf_github_id,
+        "name": args.parameter_golf_submission_name,
+        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "blurb": "OpenAI baseline adaptation with ConvexTok-2048, first-class TokenGT graphification, OAI-only graph-output flattening, and training-only tropical/toric/FoT side objectives.",
+        "val_bpb": metrics.get("final_int8_bpb") if isinstance(metrics.get("final_int8_bpb"), (int, float)) else metrics.get("val_bpb"),
+        "native_val_bpb": metrics.get("val_bpb"),
+        "final_int8_zlib_roundtrip_bpb": metrics.get("final_int8_bpb"),
+        "train_bpb": metrics.get("train_bpb"),
+        "bytes_total": total_bytes,
+        "bytes_model_int8_zlib": model_bytes,
+        "bytes_code_tokenizer_dependencies": code_bytes,
+        "track": args.parameter_golf_track,
+        "selected_run_id": run_id,
+        "selected_profile": profile_name,
+        "checkpoint_step": metrics.get("checkpoint_step"),
+        "tokenizer": "ConvexTok-2048 deterministic",
+        "vocab_size": int(args.vocab_size),
+        "fineweb_graphification": True,
+        "tokengt_first_class": True,
+        "graph_output_flattening_scope": "oai_fineweb_bpb_only",
+        "oai_gflownet": True,
+        "embedding_forest_of_thought": True,
+        "multi_token_prediction": True,
+        "advanced_sidecar_metrics": True,
+        "official_record_claim": False,
+        "model_artifact_sha256": artifact_sha,
+        "checkpoint_sha256": checkpoint_sha,
+        "huggingface_repo": args.hf_checkpoint_repo,
+        "copied_files": copied,
+    }
+    (record_dir / "submission.json").write_text(json.dumps(submission, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    manifest = {
+        "generated_utc": utc_iso(),
+        "phase": phase,
+        "record_dir": str(record_dir),
+        "selected_run": best,
+        "self_contained_artifact_bytes": total_bytes,
+        "code_tokenizer_dependency_bytes": code_bytes,
+        "model_artifact_bytes": model_bytes,
+        "model_artifact_path": str(final_artifact),
+        "model_artifact_sha256": artifact_sha,
+        "history": history_rows,
+    }
+    (record_dir / "best_model_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if final_artifact.exists():
+        (record_dir / "final_model.int8.ptz.sha256").write_text(f"{artifact_sha}  final_model.int8.ptz\n", encoding="utf-8")
+    note = notes_dir / f"{phase}-PARAMETER-GOLF-RECORD-{utc_stamp()}.md"
+    note.write_text(
+        "\n".join(
+            [
+                "# Parameter Golf Record Folder Generated",
+                "",
+                f"- generated UTC: `{utc_iso()}`",
+                f"- record dir: `{record_dir}`",
+                f"- selected run: `{run_id}`",
+                f"- selected BPB: `{metric_bpb(metrics)}`",
+                f"- total estimated bytes: `{total_bytes}`",
+                f"- include model artifact in PR folder: `{args.parameter_golf_include_model_artifact}`",
+                "",
+                "The compressed model artifact itself is uploaded to Hugging Face by the campaign when `--upload-best-short-to-hf` is enabled. The PR folder carries reproducible code, dependencies, logs, tokenizer, and a manifest.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return record_dir, note
+
+
+def create_parameter_golf_pr(args: argparse.Namespace, record_dir: Path, notes_dir: Path, *, phase: str) -> int:
+    repo = Path(args.repo_root).resolve()
+    pg_repo = repo / args.parameter_golf_repo if not Path(args.parameter_golf_repo).is_absolute() else Path(args.parameter_golf_repo)
+    branch = f"codex/toricgt-convextok2048-{utc_stamp().lower()}"
+    rel_record = record_dir.relative_to(pg_repo)
+    body = notes_dir / f"{phase}-PARAMETER-GOLF-PR-BODY.md"
+    body.write_text(
+        "\n".join(
+            [
+                "## Summary",
+                "",
+                "Adds a non-record Parameter Golf submission folder for ToricGT ConvexTok-2048 graphified OAI-baseline experiments.",
+                "",
+                "## Scope",
+                "",
+                f"- Only adds `{rel_record}`.",
+                "- Includes `README.md`, `submission.json`, `train.log`, adapted `train_gpt.py`, `convextok.py`, the ConvexTok tokenizer JSON, and the minimal ToricGT dependency package required by the adapted script.",
+                "- The compressed model artifact is uploaded separately to Hugging Face and referenced by manifest/SHA256 rather than committed as a large binary by default.",
+                "",
+                "## Rule Notes",
+                "",
+                "- Packaged as `track_non_record_16mb` by default because it uses a custom tokenizer and graphification path that should receive extra BPB verification before any record claim.",
+                "- The README reports a stricter self-contained bytes estimate including tokenizer and dependency modules.",
+                "",
+                "## Validation",
+                "",
+                "- The ToricGT campaign selected the best completed short run by exported int8 BPB under the self-contained 16MB estimate.",
+                "- `python -m py_compile` was run on the campaign controller before generating this record.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    commands = [
+        ["git", "checkout", "-B", branch],
+        ["git", "add", str(rel_record)],
+        ["git", "commit", "-m", "Add ToricGT ConvexTok graphified non-record submission"],
+        ["git", "push", "-u", "origin", branch],
+    ]
+    report = notes_dir / f"{phase}-PARAMETER-GOLF-PR-{utc_stamp()}.md"
+    outputs: list[dict[str, object]] = []
+    for command in commands:
+        proc = subprocess.run(command, cwd=pg_repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        outputs.append({"command": command, "returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr})
+        if proc.returncode != 0:
+            report.write_text(json.dumps(outputs, indent=2) + "\n", encoding="utf-8")
+            print(f"[{utc_iso()}] Parameter Golf PR prep failed at {' '.join(command)}; see {report}", flush=True)
+            return int(proc.returncode)
+    pr_command = [
+        "gh",
+        "pr",
+        "create",
+        "--repo",
+        str(args.parameter_golf_pr_base_repo),
+        "--head",
+        f"{args.parameter_golf_github_id}:{branch}",
+        "--base",
+        str(args.parameter_golf_pr_base),
+        "--title",
+        "ToricGT ConvexTok-2048 graphified FoT non-record submission",
+        "--body-file",
+        str(body),
+    ]
+    if args.parameter_golf_pr_draft:
+        pr_command.append("--draft")
+    proc = subprocess.run(pr_command, cwd=pg_repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    outputs.append({"command": pr_command, "returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr})
+    report.write_text(
+        "\n".join(
+            [
+                "# Parameter Golf PR Creation",
+                "",
+                f"- generated UTC: `{utc_iso()}`",
+                f"- record folder: `{rel_record}`",
+                f"- branch: `{branch}`",
+                f"- return code: `{proc.returncode}`",
+                f"- PR output: `{proc.stdout.strip()}`",
+                "",
+                "## Command Outputs",
+                "",
+                "```json",
+                json.dumps(outputs, indent=2),
+                "```",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    if proc.returncode == 0:
+        print(f"[{utc_iso()}] opened Parameter Golf PR: {proc.stdout.strip()}", flush=True)
+    else:
+        print(f"[{utc_iso()}] Parameter Golf PR creation failed; see {report}", flush=True)
+    return int(proc.returncode)
+
+
 def launch_best_full_training(
     args: argparse.Namespace,
     notes_dir: Path,
@@ -2125,8 +2845,12 @@ def main() -> None:
     notes_dir.mkdir(parents=True, exist_ok=True)
     state_path = notes_dir / "campaign_state.json"
     history: list[dict[str, object]] = []
+    existing_state = read_json_if_exists(state_path)
+    if isinstance(existing_state.get("history"), list):
+        history = [row for row in existing_state.get("history", []) if isinstance(row, dict)]
+        print(f"[{utc_iso()}] resuming campaign with {len(history)} state row(s) from {state_path}", flush=True)
     prior_analysis_dir = Path(str(args.prior_analysis_dir)) if str(args.prior_analysis_dir).strip() else None
-    if prior_analysis_dir is not None:
+    if not history and prior_analysis_dir is not None:
         if not prior_analysis_dir.is_absolute():
             prior_analysis_dir = repo / prior_analysis_dir
         prior_analysis_metrics = read_json_if_exists(prior_analysis_dir / "metrics.json")
@@ -2199,7 +2923,7 @@ def main() -> None:
             }
         )
     prior_log = repo / args.prior_log if not Path(args.prior_log).is_absolute() else Path(args.prior_log)
-    if prior_log.exists():
+    if not history and prior_log.exists():
         prior_metrics = parse_log(prior_log)
         first_profile = choose_profile(1, [{"metrics": prior_metrics}], args.profile_offset)
         prior_report = notes_dir / f"PRIOR-{args.prior_run_id}-ANALYSIS.md"
@@ -2213,9 +2937,25 @@ def main() -> None:
             target_bpb=float(args.target_bpb),
         )
         history.append({"run_id": args.prior_run_id, "metrics": prior_metrics, "profile": "prior_external"})
+    history = recover_logged_runs(repo, args, history)
+    write_state(
+        state_path,
+        {
+            "campaign_id": args.campaign_id,
+            "updated_utc": utc_iso(),
+            "target_bpb": args.target_bpb,
+            "primary_run_budget": int(args.max_runs),
+            "followup_run_budget": int(args.followup_runs_after_meta),
+            "history": history,
+        },
+    )
     total_runs = int(args.max_runs)
     meta_written = False
-    for run_index in range(1, total_runs + 1):
+    existing_indices = completed_run_indices(history, str(args.campaign_id))
+    start_run_index = max(existing_indices) + 1 if existing_indices else 1
+    if start_run_index > 1:
+        print(f"[{utc_iso()}] continuing campaign at run index {start_run_index}/{total_runs}", flush=True)
+    for run_index in range(start_run_index, total_runs + 1):
         profile = choose_profile(run_index, history, args.profile_offset)
         run_id = short_run_id(str(args.campaign_id), run_index, profile.name)
         env_overrides_used = latest_env_overrides(history)
@@ -2306,6 +3046,31 @@ def main() -> None:
     best = best_completed_row(history)
     if best is None:
         best = min(history, key=lambda row: metric_bpb(row.get("metrics", {}) if isinstance(row.get("metrics"), dict) else {}))
+    if int(args.submission_step_candidate) > 0 and best is not None:
+        candidate = launch_submission_step_candidate(
+            args,
+            notes_dir,
+            best,
+            steps=int(args.submission_step_candidate),
+            run_index=total_runs + 90,
+        )
+        if candidate is not None:
+            history.append(candidate)
+            write_state(
+                state_path,
+                {
+                    "campaign_id": args.campaign_id,
+                    "updated_utc": utc_iso(),
+                    "target_bpb": args.target_bpb,
+                    "primary_run_budget": int(args.max_runs),
+                    "followup_run_budget": int(args.followup_runs_after_meta),
+                    "submission_step_candidate": int(args.submission_step_candidate),
+                    "history": history,
+                },
+            )
+    submission_best = best_submission_row(args, history)
+    if submission_best is not None:
+        best = submission_best
     final_meta = write_meta_analysis(notes_dir, history, args, phase=f"final-{total_runs}-run")
     hf_upload_returncode: int | None = None
     if args.upload_best_short_to_hf:
@@ -2313,6 +3078,23 @@ def main() -> None:
             args,
             notes_dir,
             best,
+            phase=f"best-of-{total_runs}-short-runs",
+        )
+    parameter_golf_record_dir: str | None = None
+    parameter_golf_pr_returncode: int | None = None
+    if args.create_parameter_golf_pr:
+        record_dir, record_note = write_parameter_golf_submission(
+            args,
+            notes_dir,
+            best,
+            history,
+            phase=f"best-of-{total_runs}-short-runs",
+        )
+        parameter_golf_record_dir = str(record_dir)
+        parameter_golf_pr_returncode = create_parameter_golf_pr(
+            args,
+            record_dir,
+            notes_dir,
             phase=f"best-of-{total_runs}-short-runs",
         )
     synopsis = notes_dir / f"CAMPAIGN-SYNOPSIS-{utc_stamp()}.md"
@@ -2326,6 +3108,8 @@ def main() -> None:
                 f"- runs completed: `{len(completed_campaign_rows(history))}`",
                 f"- best run: `{best.get('run_id')}`",
                 f"- HF upload return code: `{hf_upload_returncode}`",
+                f"- Parameter Golf record dir: `{parameter_golf_record_dir}`",
+                f"- Parameter Golf PR return code: `{parameter_golf_pr_returncode}`",
                 f"- final meta-analysis: `{final_meta}`",
                 f"- best metrics:",
                 "",
@@ -2349,6 +3133,8 @@ def main() -> None:
             "best_short_run": best.get("run_id"),
             "best_short_metrics": best.get("metrics", {}),
             "hf_upload_returncode": hf_upload_returncode,
+            "parameter_golf_record_dir": parameter_golf_record_dir,
+            "parameter_golf_pr_returncode": parameter_golf_pr_returncode,
             "final_full_train_steps": int(args.final_full_train_steps),
             "final_full_train_returncode": final_returncode,
         }
