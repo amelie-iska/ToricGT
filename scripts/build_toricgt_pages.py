@@ -41,14 +41,11 @@ IMAGE_SOURCES = {
     "trajectory": "outputs/branching_reasoning_trajectory_final_long_20260616T171742Z/static_screenshots/full_trajectory_filtered_complex.png",
     "analogy": "outputs/branching_reasoning_trajectory_final_long_20260616T171742Z/static_screenshots/analogical_memory_simplex_tree_map.png",
     "vectorized_ph": "outputs/branching_reasoning_trajectory_final_long_20260616T171742Z/static_screenshots/vectorized_ph_features.png",
-    "cas": "outputs/smoke_oai_full_iteration_analysis_2/html_screenshots/screenshots/embedding_cas_sidecar__index__slice_00.png",
-    "toric_embedding": "outputs/smoke_oai_full_iteration_analysis_2/html_screenshots/screenshots/toric_embedding_report__index__slice_00.png",
-    "bgg": "outputs/smoke_oai_full_iteration_analysis_2/html_screenshots/screenshots/bgg_category_o_report__index__slice_00.png",
 }
 
 INTERACTIVE_REPORTS = {
     "branching_reasoning": {
-        "source": "outputs/smoke_oai_full_iteration_analysis_2/branching_reasoning_report",
+        "source": "branching_reasoning_report",
         "entry": "index.html",
         "title": "Simplex Trajectory Report",
         "summary": (
@@ -61,7 +58,7 @@ INTERACTIVE_REPORTS = {
         "embed": False,
     },
     "gudhi_persistence": {
-        "source": "outputs/smoke_oai_full_iteration_analysis_2/gudhi_persistence",
+        "source": "gudhi_persistence",
         "entry": "index.html",
         "title": "GUDHI Persistent Homology",
         "summary": (
@@ -72,7 +69,7 @@ INTERACTIVE_REPORTS = {
         "embed": False,
     },
     "toric_embedding": {
-        "source": "outputs/smoke_oai_full_iteration_analysis_2/toric_embedding_report",
+        "source": "toric_embedding_report",
         "entry": "index.html",
         "title": "Toric Embedding and Staircases",
         "summary": (
@@ -83,7 +80,7 @@ INTERACTIVE_REPORTS = {
         "embed": False,
     },
     "cas_sidecar": {
-        "source": "outputs/smoke_oai_full_iteration_analysis_2/embedding_cas_sidecar",
+        "source": "embedding_cas_sidecar",
         "entry": "index.html",
         "title": "CAS Algebra Sidecar",
         "summary": (
@@ -94,7 +91,7 @@ INTERACTIVE_REPORTS = {
         "embed": False,
     },
     "bgg_category_o": {
-        "source": "outputs/smoke_oai_full_iteration_analysis_2/bgg_category_o_report",
+        "source": "bgg_category_o_report",
         "entry": "index.html",
         "title": "Toric BGG Category O",
         "summary": (
@@ -105,7 +102,7 @@ INTERACTIVE_REPORTS = {
         "embed": False,
     },
     "toric_vector_bundle": {
-        "source": "outputs/smoke_oai_full_iteration_analysis_2/toric_vector_bundle_report",
+        "source": "toric_vector_bundle_report",
         "entry": "index.html",
         "title": "Toric Vector-Bundle Sheaf Audit",
         "summary": (
@@ -807,32 +804,139 @@ fetch('branching_reasoning_interactive.json').then(r => r.json()).then(data => {
     )
 
 
+def _monomial_label_2d(exp: list[int] | tuple[int, int]) -> str:
+    a, b = int(exp[0]), int(exp[1])
+    parts: list[str] = []
+    if a:
+        parts.append("x" if a == 1 else f"x^{a}")
+    if b:
+        parts.append("y" if b == 1 else f"y^{b}")
+    return " ".join(parts) if parts else "1"
+
+
+def _miller_sturmfels_resolution_rows(gens: list[list[int]]) -> tuple[list[dict[str, Any]], str]:
+    rows: list[dict[str, Any]] = []
+    for idx, (left, right) in enumerate(zip(gens, gens[1:])):
+        a1, b1 = int(left[0]), int(left[1])
+        a2, b2 = int(right[0]), int(right[1])
+        lcm = [max(a1, a2), max(b1, b2)]
+        rows.append(
+            {
+                "source": f"f_{idx}",
+                "lcm": lcm,
+                "differential": (
+                    f"d2(f_{idx}) = {_monomial_label_2d([0, max(0, b2 - b1)])} e_{idx} "
+                    f"- {_monomial_label_2d([max(0, a1 - a2), 0])} e_{idx + 1}"
+                ),
+                "check": (
+                    f"d1 d2(f_{idx}) = {_monomial_label_2d(lcm)} - {_monomial_label_2d(lcm)} = 0"
+                ),
+            }
+        )
+    html_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(row['source'])}</td>"
+        f"<td><code>{html.escape(_monomial_label_2d(row['lcm']))}</code></td>"
+        f"<td><code>{html.escape(row['differential'])}</code></td>"
+        f"<td>{html.escape(row['check'])}</td>"
+        "</tr>"
+        for row in rows
+    )
+    table = (
+        "<table class=\"resolution-table\"><thead><tr><th>basis</th><th>LCM shift</th><th>differential</th><th>d1 d2 check</th></tr></thead>"
+        f"<tbody>{html_rows}</tbody></table>"
+    )
+    return rows, table
+
+
+def _load_source_sidecar(summary: dict[str, Any]) -> dict[str, Any]:
+    raw = summary.get("source_sidecar_json")
+    if not raw:
+        return {}
+    path = Path(str(raw))
+    if not path.exists():
+        return {}
+    try:
+        return load_json(path)
+    except Exception:
+        return {}
+
+
 def write_toric_embedding_lite_report(dst: Path) -> None:
     records_dir = dst / "records"
     summaries = sorted(records_dir.glob("*_summary.json")) if records_dir.exists() else []
+    manifest = load_json(dst / "manifest.json") if (dst / "manifest.json").exists() else {}
+    manifest_records = manifest.get("records", []) if isinstance(manifest.get("records"), list) else []
+    if manifest:
+        manifest["exactness_rule"] = (
+            "This public mirror contains exact precomputed Sage/Macaulay2 data for the selected "
+            "checkpoint-derived antichain. Browser code only renders the JSON artifact and does not "
+            "run algebra, optimization, or CAS computations."
+        )
+        (dst / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    source_by_record = {
+        str(row.get("record_id")): row.get("source_sidecar_json")
+        for row in manifest_records
+        if isinstance(row, dict) and row.get("record_id") and row.get("source_sidecar_json")
+    }
     cards = []
     interactive_records: list[dict[str, Any]] = []
     for summary_path in summaries:
         summary = load_json(summary_path)
+        if not summary.get("source_sidecar_json"):
+            rid = str(summary.get("record_id", summary_path.stem.replace("_summary", "")))
+            if source_by_record.get(rid):
+                summary["source_sidecar_json"] = source_by_record[rid]
+        source_sidecar = _load_source_sidecar(summary)
+        source_metadata = source_sidecar.get("exponent_metadata", {}) if isinstance(source_sidecar.get("exponent_metadata"), dict) else {}
+        selection = (
+            source_metadata.get("configuration_selection", {})
+            if isinstance(source_metadata.get("configuration_selection"), dict)
+            else {}
+        )
+        algebra = (
+            source_sidecar.get("macaulay2_toric_ideal", {})
+            .get("commutative_algebra", {})
+            if isinstance(source_sidecar.get("macaulay2_toric_ideal"), dict)
+            else {}
+        )
+        relations = algebra.get("toric_ideal_relations", []) if isinstance(algebra.get("toric_ideal_relations"), list) else []
         record_id = str(summary.get("record_id", summary_path.stem.replace("_summary", "")))
         exactness = summary.get("exactness", {}) if isinstance(summary.get("exactness"), dict) else {}
         staircase = summary.get("miller_sturmfels_staircase", {}) if isinstance(summary.get("miller_sturmfels_staircase"), dict) else {}
         minimal_generators = staircase.get("minimal_generators", [])
         quotient_basis = staircase.get("quotient_basis", [])
         adjacent = staircase.get("adjacent_lcm_layer", [])
+        resolution_rows, resolution_table = _miller_sturmfels_resolution_rows(minimal_generators)
+        relation_polys = [str(item.get("polynomial", "")) for item in relations if isinstance(item, dict) and item.get("polynomial")]
         interactive_records.append(
             {
                 "record_id": record_id,
                 "exponent_count": summary.get("exponent_count"),
                 "exponent_dim": summary.get("exponent_dim"),
+                "exponent_points": source_sidecar.get("exponent_points", []),
+                "selection": selection,
                 "minimal_generators": minimal_generators,
                 "quotient_basis": quotient_basis,
                 "adjacent_lcm_layer": adjacent,
+                "miller_sturmfels_resolution": resolution_rows,
+                "toric_ideal": {
+                    "provenance": (
+                        source_sidecar.get("macaulay2_toric_ideal", {}).get("provenance")
+                        if isinstance(source_sidecar.get("macaulay2_toric_ideal"), dict)
+                        else None
+                    ),
+                    "generator_count": algebra.get("toric_ideal_generator_count"),
+                    "resolution_length": algebra.get("resolution_length"),
+                    "regularity": algebra.get("regularity"),
+                    "relation_polynomials": relation_polys,
+                },
                 "staircase_threshold_by_x": staircase.get("staircase_threshold_by_x", []),
                 "window": staircase.get("window", {}),
                 "exactness": exactness,
             }
         )
+        relation_items = "".join(f"<li><code>{html.escape(poly)}</code></li>" for poly in relation_polys)
         cards.append(
             f"""
             <section class="card">
@@ -843,31 +947,44 @@ def write_toric_embedding_lite_report(dst: Path) -> None:
                   <tr><th>dimension</th><td>{fmt(summary.get("exponent_dim"), 0)}</td></tr>
                   <tr><th>Sage normal fan exact</th><td>{html.escape(str(exactness.get("sage_normal_fan_exact", "unknown")))}</td></tr>
                   <tr><th>Macaulay2 toric ideal exact</th><td>{html.escape(str(exactness.get("macaulay2_toric_ideal_exact", "unknown")))}</td></tr>
+                  <tr><th>selection</th><td>{html.escape(str(selection.get("selection", "record exponents")))}</td></tr>
+                  <tr><th>input unique checkpoint exponents</th><td>{fmt(selection.get("input_unique_exponent_count"), 0)}</td></tr>
                   <tr><th>minimal generators</th><td><code>{html.escape(json.dumps(minimal_generators))}</code></td></tr>
                   <tr><th>quotient-basis lattice points</th><td>{fmt(len(quotient_basis), 0)}</td></tr>
                   <tr><th>adjacent LCM corners</th><td>{fmt(len(adjacent), 0)}</td></tr>
+                  <tr><th>Macaulay2 toric ideal generators</th><td>{fmt(algebra.get("toric_ideal_generator_count"), 0)}</td></tr>
+                  <tr><th>Macaulay2 resolution length</th><td>{fmt(algebra.get("resolution_length"), 0)}</td></tr>
+                  <tr><th>Macaulay2 regularity</th><td>{fmt(algebra.get("regularity"), 0)}</td></tr>
                 </tbody>
               </table>
-              <p><a class="pill" href="records/{html.escape(summary_path.name)}">summary JSON</a></p>
+              <p><a class="pill" href="records/{html.escape(summary_path.name)}">summary JSON</a><a class="pill" href="../cas_sidecar/records/{html.escape(Path(str(summary.get("source_sidecar_json", "record_000_cas_sidecar.json"))).name)}">exact CAS sidecar JSON</a></p>
+              <details>
+                <summary>Complete Macaulay2 toric ideal relation list ({len(relation_polys)})</summary>
+                <ol>{relation_items}</ol>
+              </details>
+              <h3>Miller-Sturmfels S/I Resolution</h3>
+              {resolution_table}
             </section>
             """
         )
     for html_record in records_dir.glob("*.html") if records_dir.exists() else []:
         html_record.unlink()
+    interactive_payload = {
+        "schema": "toricgt.toric_embedding_interactive_exact_native.v1",
+        "records": interactive_records,
+    }
     if interactive_records:
         (dst / "toric_embedding_interactive.json").write_text(
             json.dumps(
-                {
-                    "schema": "toricgt.toric_embedding_interactive_compact.v1",
-                    "records": interactive_records,
-                },
+                interactive_payload,
                 separators=(",", ":"),
                 sort_keys=True,
             ),
             encoding="utf-8",
         )
+    inline_payload_json = json.dumps(interactive_payload, separators=(",", ":"), sort_keys=True).replace("</", "<\\/")
     if not cards:
-        cards.append("<section class='card'><h2>No record summaries found</h2><p>The toric embedding manifest was copied, but no small summary JSON was available.</p></section>")
+        cards.append("<section class='card'><h2>No exact record summaries found</h2><p>No exact toric embedding summary JSON was generated for this selected analysis artifact.</p></section>")
     (dst / "index.html").write_text(
         f"""<!doctype html>
 <html lang="en">
@@ -881,6 +998,7 @@ def write_toric_embedding_lite_report(dst: Path) -> None:
     main{{max-width:1180px;margin:0 auto;padding:28px 18px 64px}}a{{color:var(--cyan)}}.hero,.card,.panel{{background:linear-gradient(180deg,rgba(11,23,40,.96),rgba(5,13,25,.98));border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.28)}}
     .hero,.panel{{padding:18px;margin:14px 0}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}}.card{{padding:16px}}h1{{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}}p{{color:var(--muted);line-height:1.55}}
     table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(159,177,201,.16);padding:8px;text-align:left;vertical-align:top}}th{{color:#bdeeff;width:38%}}td{{color:#fff}}code{{color:#ffd166;white-space:pre-wrap;overflow-wrap:anywhere}}
+    .resolution-table th{{width:auto}}.resolution-table th:nth-child(1){{width:10%}}.resolution-table th:nth-child(2){{width:20%}}.resolution-table th:nth-child(3){{width:38%}}.resolution-table th:nth-child(4){{width:32%}}.resolution-table td{{font-size:.94rem;line-height:1.35}}
     img{{display:block;width:100%;border:1px solid rgba(55,232,255,.20);border-radius:8px;background:#020713}}.pill{{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}}.controls{{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0 14px}}button,select{{border:1px solid var(--line);background:rgba(55,232,255,.08);color:var(--text);border-radius:999px;padding:8px 12px;font-weight:800}}svg{{width:100%;height:auto;border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713}}.detail{{border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;padding:12px;margin-top:10px;color:#dff8ff}}
     .note{{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}}
   </style>
@@ -888,22 +1006,19 @@ def write_toric_embedding_lite_report(dst: Path) -> None:
 <body><main>
   <section class="hero">
     <h1>Tropical-To-Toric Embedding Report</h1>
-    <p>This low-resource page preserves the exact finite toric-embedding record summaries: exponent counts, Sage normal-fan status, Macaulay2 toric-ideal status, Miller-Sturmfels staircase generators, quotient-basis counts, and adjacent LCM data. The original large Plotly record is omitted from GitHub Pages so older browsers do not parse tens of megabytes of JavaScript.</p>
+    <p>This page is a lightweight native-rendered mirror of the selected exact analysis artifact. Sage, Macaulay2, antichain selection, toric-ideal relations, and Miller-Sturmfels resolution data are computed before page generation; the browser only draws precomputed JSON and handles simple hover/click interactions.</p>
     <p><a class="pill" href="manifest.json">manifest JSON</a></p>
-    <p class="note">The visual screenshot below is generated from the original audit. The small summary JSON files keep the reproducible algebraic evidence without forcing a heavy interactive plot.</p>
-  </section>
-  <section class="panel">
-    <h2>Rendered Audit Screenshot</h2>
-    <img loading="lazy" decoding="async" src="../../page_assets/toric_embedding.png" alt="Toric embedding audit screenshot">
+    <p class="note">No demo sidecars are accepted. The displayed staircase is derived from the checkpoint embedding payload through exact product-order antichain selection, then certified by Sage and Macaulay2.</p>
   </section>
   <section class="panel">
     <h2>Interactive Miller-Sturmfels Staircase</h2>
-    <p>This compact viewer restores interaction from the large toric report without loading Plotly. The overhead mode shows the quotient-basis lattice points under the staircase; the projected 3D mode lifts adjacent module layers by small heights so the toric module geometry is visible without losing the familiar xy-grid view.</p>
+    <p>This native viewer draws the exact precomputed quotient-basis lattice points, minimal generators, adjacent LCM layer, and ideal region. The overhead mode shows the Miller-Sturmfels xy-grid; the projected 3D mode lifts module layers by small heights while keeping the same underlying exact lattice data.</p>
     <div class="controls"><select id="recordSelect"></select><button id="view2d" type="button">Overhead xy Grid</button><button id="view3d" type="button">Projected 3D Layers</button><button id="idealToggle" type="button">Toggle Ideal Region</button></div>
     <svg id="staircaseSvg" viewBox="0 0 980 560" role="img" aria-label="Interactive Miller-Sturmfels monomial staircase"></svg>
     <div id="staircaseDetail" class="detail">Click a lattice point, generator, or LCM corner for exact monomial data.</div>
   </section>
   <section class="grid">{''.join(cards)}</section>
+  <script id="toricEmbeddingPayload" type="application/json">{inline_payload_json}</script>
   <script>
 const staircaseSvg = document.getElementById('staircaseSvg');
 const recordSelect = document.getElementById('recordSelect');
@@ -950,6 +1065,7 @@ function drawStaircase() {{
     html += `<rect class="lcm-point" data-index="${{a.index || 0}}" x="${{p[0]-8}}" y="${{p[1]-8}}" width="16" height="16" rx="3" fill="#ff5fa2" stroke="#ecfbff"><title>adjacent LCM corner x^${{c[0]}} y^${{c[1]}}</title></rect>`;
   }}
   html += `<text x="28" y="34" fill="#ecfbff" font-size="18">${{esc(rec.record_id)}} · ${{viewMode === '3d' ? 'projected 3D module layers' : 'overhead xy-grid staircase'}}</text>`;
+  if (rec.selection?.selection) html += `<text x="28" y="56" fill="#9db8cf" font-size="13">exact selection: ${{esc(rec.selection.selection)}} · input unique exponents: ${{esc(rec.selection.input_unique_exponent_count)}} · selected: ${{gens.length}}</text>`;
   html += `<text x="28" y="528" fill="#9db8cf" font-size="14">white = monomial basis of S/I · gold = minimal generators · pink = adjacent LCM corners · shaded = ideal region</text>`;
   staircaseSvg.innerHTML = html;
   staircaseSvg.querySelectorAll('.basis-point').forEach(el => el.addEventListener('click', () => setDetail(`<strong>basis monomial</strong><br>x^${{el.dataset.x}} y^${{el.dataset.y}} lies outside the monomial ideal and represents a basis element of S/I.`)));
@@ -967,7 +1083,8 @@ function drawStaircase() {{
     }});
   }});
 }}
-fetch('toric_embedding_interactive.json').then(r => r.json()).then(data => {{
+try {{
+  const data = JSON.parse(document.getElementById('toricEmbeddingPayload').textContent);
   toricData = data;
   recordSelect.innerHTML = data.records.map((r,i)=>`<option value="${{i}}">${{esc(r.record_id)}}</option>`).join('');
   recordSelect.addEventListener('change', drawStaircase);
@@ -975,7 +1092,9 @@ fetch('toric_embedding_interactive.json').then(r => r.json()).then(data => {{
   document.getElementById('view3d').addEventListener('click', () => {{ viewMode='3d'; drawStaircase(); }});
   document.getElementById('idealToggle').addEventListener('click', () => {{ showIdeal=!showIdeal; drawStaircase(); }});
   drawStaircase();
-}}).catch(error => {{ detail.textContent = 'Compact toric interactive payload unavailable: '+error; }});
+}} catch (error) {{
+  detail.textContent = 'Exact toric interactive payload failed to parse: '+error;
+}}
   </script>
 </main></body></html>
 """,

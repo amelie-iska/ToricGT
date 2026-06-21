@@ -31,6 +31,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from toricgt.cas_oracles import Macaulay2TropicalOracle, SageToricOracle  # noqa: E402
+from toricgt.toric_embedding_visualization import _staircase_generators  # noqa: E402
 from toricgt.tropical_toric_certificates import tropical_hypersurface_certificate  # noqa: E402
 
 
@@ -67,6 +68,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--embedding-key", choices=["hidden", "projected", "complex_projected"], default="hidden")
     parser.add_argument("--exponent-dim", type=int, default=2)
     parser.add_argument("--quantization-scale", type=int, default=12)
+    parser.add_argument(
+        "--point-selection",
+        choices=["prefix", "staircase_antichain"],
+        default="prefix",
+        help=(
+            "prefix uses all quantized points from the selected prefix. "
+            "staircase_antichain uses the exact product-order minimal antichain "
+            "of those checkpoint-derived exponent points as the toric subconfiguration."
+        ),
+    )
+    parser.add_argument(
+        "--max-selected-points",
+        type=int,
+        default=0,
+        help="Optional cap after exact antichain selection; 0 keeps the whole antichain.",
+    )
     parser.add_argument("--sage-timeout-seconds", type=int, default=180)
     parser.add_argument("--macaulay2-timeout-seconds", type=int, default=180)
     parser.add_argument(
@@ -122,7 +139,7 @@ def finite_points_from_npz(path: Path, key: str, *, max_points: int) -> np.ndarr
 
 
 def exponent_points_from_embeddings(points: np.ndarray, *, exponent_dim: int, scale: int) -> tuple[np.ndarray, dict[str, Any]]:
-    """Convert real embedding vectors to a finite exponent set over Z_{\ge 0}^d."""
+    """Convert real embedding vectors to a finite exponent set over Z_{>=0}^d."""
 
     x = np.asarray(points, dtype=float)
     if x.ndim != 2 or x.shape[0] < 3:
@@ -152,6 +169,51 @@ def exponent_points_from_embeddings(points: np.ndarray, *, exponent_dim: int, sc
         "duplicate_count_removed": int(exponents.shape[0] - unique.shape[0]),
     }
     return unique.astype(int), metadata
+
+
+def select_exponent_configuration(
+    exponents: np.ndarray,
+    metadata: dict[str, Any],
+    *,
+    point_selection: str,
+    max_selected_points: int,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Select the exact exponent configuration sent to Sage/Macaulay2."""
+
+    selected = np.asarray(exponents, dtype=int)
+    selection_metadata: dict[str, Any] = {
+        "selection": point_selection,
+        "input_unique_exponent_count": int(selected.shape[0]),
+    }
+    if point_selection == "staircase_antichain":
+        antichain = _staircase_generators(selected)
+        if antichain.shape[0] < 3:
+            raise ValueError(
+                "staircase_antichain selection produced fewer than three exact antichain points; "
+                "increase --max-points or --quantization-scale"
+            )
+        if int(max_selected_points) > 0:
+            antichain = antichain[: int(max_selected_points)]
+        if antichain.shape[0] < 3:
+            raise ValueError("--max-selected-points left fewer than three antichain points")
+        selected = antichain.astype(int)
+        selection_metadata.update(
+            {
+                "selected_antichain_count": int(selected.shape[0]),
+                "selected_antichain_points": selected.astype(int).tolist(),
+                "meaning": (
+                    "Exact checkpoint-derived product-order minimal exponent subconfiguration. "
+                    "The toric ideal, normal fan, tropical certificate, and staircase are computed "
+                    "for this selected antichain from the saved model embedding payload."
+                ),
+            }
+        )
+    elif point_selection != "prefix":
+        raise ValueError(f"unsupported point_selection: {point_selection}")
+    metadata = dict(metadata)
+    metadata["configuration_selection"] = selection_metadata
+    metadata["unique_exponent_count"] = int(selected.shape[0])
+    return selected, metadata
 
 
 def matrix_table(matrix: np.ndarray) -> str:
@@ -322,6 +384,12 @@ def main() -> None:
             points,
             exponent_dim=int(args.exponent_dim),
             scale=int(args.quantization_scale),
+        )
+        exponents, exponent_metadata = select_exponent_configuration(
+            exponents,
+            exponent_metadata,
+            point_selection=str(args.point_selection),
+            max_selected_points=int(args.max_selected_points),
         )
         record_id = f"record_{int(row.get('record_index', len(records))):03d}"
         biases = [0 for _ in range(int(exponents.shape[0]))]

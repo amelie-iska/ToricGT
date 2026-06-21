@@ -19,7 +19,7 @@
     "tropical": "page_assets/tropical.png",
     "vectorized_ph": "page_assets/vectorized_ph.png"
   },
-  "generated_utc": "2026-06-21 22:31:19 UTC",
+  "generated_utc": "2026-06-21 23:11:44 UTC",
   "interactive_reports": {
     "bgg_category_o": {
       "embed": "0",
@@ -83,13 +83,6 @@
       "href": "page_interactive/toric_embedding/index.html",
       "summary": "Tropical ring-attention embeddings into toric charts, one-dimensional cones, Miller-Sturmfels staircase modules, staircase overlays, and fan diagnostics.",
       "title": "Toric Embedding and Staircases"
-    },
-    "toric_vector_bundle": {
-      "embed": "0",
-      "features": "1D-cone filtrations \u00b7 sheaf CE \u00b7 fan-neighborhood compatibility",
-      "href": "page_interactive/toric_vector_bundle/index.html",
-      "summary": "Klyachko-style vector-bundle and sheaf compatibility evidence over one-dimensional cones and adjacent fan neighborhoods.",
-      "title": "Toric Vector-Bundle Sheaf Audit"
     }
   },
   "parameter_golf_pr_url": "https://github.com/openai/parameter-golf/pull/2168"

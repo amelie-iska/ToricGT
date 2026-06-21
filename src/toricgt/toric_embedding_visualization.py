@@ -129,38 +129,6 @@ def collect_sidecar_records(*, sidecar_records: list[Path] | None = None, sideca
     return unique
 
 
-def rich_staircase_demo_record() -> dict[str, Any]:
-    """Return a deterministic sidecar that makes the staircase geometry legible.
-
-    This is a visualization sidecar, not a checkpoint-derived measurement.  It
-    deliberately uses several incomparable two-variable monomial generators so
-    the overhead view resembles the Miller-Sturmfels staircase figure and the
-    adjacent-lcm layer is nontrivial.  CAS-dependent panels remain unavailable
-    unless exact CAS certificates are supplied separately.
-    """
-
-    return {
-        "schema": "toricgt.embedding_cas_sidecar_record.v1",
-        "record_id": "rich_miller_sturmfels_staircase_demo",
-        "visualization_demo_only": True,
-        "demo_note": "Deterministic monomial-ideal staircase demo; not a checkpoint-derived metric.",
-        "embedding_npz": "",
-        "embedding_key": "deterministic_demo",
-        "exponent_points": [
-            [10, 0],
-            [8, 2],
-            [6, 4],
-            [4, 7],
-            [2, 9],
-            [0, 12],
-            [11, 3],
-            [9, 6],
-            [5, 10],
-        ],
-        "biases": [0, 0, 0, 0, 0, 0, 1, -1, 1],
-    }
-
-
 def _record_exactness(record: dict[str, Any]) -> dict[str, bool]:
     sage = record.get("sage_normal_fan", {})
     m2 = record.get("macaulay2_toric_ideal", {})
@@ -918,6 +886,8 @@ def _klyachko_panel(vector_bundle_payload: dict[str, Any] | None, output_dir: Pa
 
 
 def _record_page(record: dict[str, Any], output_dir: Path, vector_bundle_payload: dict[str, Any] | None) -> tuple[Path, dict[str, Any]]:
+    if record.get("visualization_demo_only"):
+        raise ValueError("toric embedding reports require exact sidecars; visualization_demo_only records are rejected")
     record_id = str(record.get("record_id", "record"))
     points = _exponents(record)
     biases = _biases(record, points.shape[0])
@@ -933,7 +903,6 @@ def _record_page(record: dict[str, Any], output_dir: Path, vector_bundle_payload
         "exponent_count": int(points.shape[0]),
         "exponent_dim": int(points.shape[1]),
         "bias_source": "record" if any(key in record for key in ("biases", "valuation_biases", "exponent_biases")) else "zero_valuation_default",
-        "visualization_demo_only": bool(record.get("visualization_demo_only", False)),
         "miller_sturmfels_staircase": {
             key: value
             for key, value in _staircase_metadata(points).items()
@@ -942,18 +911,10 @@ def _record_page(record: dict[str, Any], output_dir: Path, vector_bundle_payload
     }
     _write_json(json_path, summary)
     klyachko_html, _ = _klyachko_panel(vector_bundle_payload, output_dir)
-    demo_banner = (
-        "<div class='unavailable'><strong>Visualization demo sidecar:</strong> "
-        + html.escape(str(record.get("demo_note", "This record is deterministic demonstration data, not a checkpoint-derived metric.")))
-        + "</div>"
-        if record.get("visualization_demo_only")
-        else ""
-    )
     body = f"""<!doctype html><html><head><meta charset="utf-8"><title>{html.escape(record_id)} Toric Embedding</title><style>{CSS}</style></head>
 <body><main>
 <section class="hero"><h1>{html.escape(record_id)} Tropical-To-Toric Embedding Report</h1>
 <p>This page visualizes the exact finite sidecar that embeds rationalized tropical ring attention into toric geometry.  It does not claim the full Transformer is toric.</p>
-{demo_banner}
 <p><a class="pill" href="../index.html">index</a><a class="pill" href="{html.escape(json_path.name)}">summary JSON</a></p></section>
 <section class="grid">
 <div class="card"><h2>Exactness And Conventions</h2>
