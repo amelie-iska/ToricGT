@@ -1,0 +1,405 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Purpose and high-level architecture}{5}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Model family.}{5}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Core invariants.}{5}{section*.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces ToricGT architecture and training program. Typed graph tokens carry node, edge, endpoint, structural, tropical, toric phase, and optional BGG-certificate features. The encoder combines ordinary attention, tropical ring attention, Soft-MoE adapters, and low-rank certificate probes. Training combines supervised graph losses, BPB or language-model loss, GFlowNet trajectory balance, GraphCG disentanglement, and Toric BGG homological consistency.}}{6}{figure.caption.3}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:architecture}{{1}{6}{ToricGT architecture and training program. Typed graph tokens carry node, edge, endpoint, structural, tropical, toric phase, and optional BGG-certificate features. The encoder combines ordinary attention, tropical ring attention, Soft-MoE adapters, and low-rank certificate probes. Training combines supervised graph losses, BPB or language-model loss, GFlowNet trajectory balance, GraphCG disentanglement, and Toric BGG homological consistency}{figure.caption.3}{}}
+\newlabel{fig:architecture@cref}{{[figure][1][]1}{[1][5][]6}}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Typed attributed graph domains}{7}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Graph objects}{7}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Tokenization as an equivariant construction}{8}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Token maps}{8}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Attention and block equivariance}{9}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Universal graph-to-graph approximation}{10}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Tropical ring attention and semiring reasoning}{11}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Max-plus heads with provenance}{11}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Dynamic-programming gates}{12}{subsection.5.2}\protected@file@percent }
+\citation{fu2025toricrelu}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Tropical reasoning diagnostics. Left: a shortest-path-style active predecessor path. Right: a piecewise-linear tropical envelope whose active face and margin provide a direct explanation of a discrete decision.}}{13}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:tropical-active}{{2}{13}{Tropical reasoning diagnostics. Left: a shortest-path-style active predecessor path. Right: a piecewise-linear tropical envelope whose active face and margin provide a direct explanation of a discrete decision}{figure.caption.5}{}}
+\newlabel{fig:tropical-active@cref}{{[figure][2][]2}{[1][13][]13}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Toric geometry of neural-network charts}{13}{section.6}\protected@file@percent }
+\citation{cox2011toric}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Minimal toric dictionary}{14}{subsection.6.1}\protected@file@percent }
+\newlabel{thm:active-normal-fan}{{6.2}{14}{Active faces are normal-fan cells}{definition.6.2}{}}
+\newlabel{thm:active-normal-fan@cref}{{[theorem][2][6]6.2}{[1][14][]14}}
+\citation{fu2025toricrelu}
+\citation{zhang2018tropical}
+\citation{brandenburg2024real}
+\citation{haase2023lattice}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Toric-geometric interpretation of ToricGT tropical subcomputations. A graph-token hidden state is scored by affine candidates. Their exponent vectors form a Newton polytope; its normal fan partitions hidden space into active regions. Active faces and bend numbers become diagnostics for reasoning decisions and future toric auxiliary losses.}}{15}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:toric-geometry-toricgt}{{3}{15}{Toric-geometric interpretation of ToricGT tropical subcomputations. A graph-token hidden state is scored by affine candidates. Their exponent vectors form a Newton polytope; its normal fan partitions hidden space into active regions. Active faces and bend numbers become diagnostics for reasoning decisions and future toric auxiliary losses}{figure.caption.6}{}}
+\newlabel{fig:toric-geometry-toricgt@cref}{{[figure][3][]3}{[1][15][]15}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}ReLU fans, Cartier data, and ToricGT diagnostics}{16}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Moment features and compact toric regularization}{17}{subsection.6.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Toric auxiliary losses for training}{17}{subsection.6.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Embedding tropical ring attention into toric varieties}{18}{subsection.6.5}\protected@file@percent }
+\newlabel{subsec:tropical-ring-attention-toric-embedding}{{6.5}{18}{Embedding tropical ring attention into toric varieties}{subsection.6.5}{}}
+\newlabel{subsec:tropical-ring-attention-toric-embedding@cref}{{[subsection][5][6]6.5}{[1][18][]18}}
+\newlabel{prop:attention-initial-degeneration}{{6.9}{19}{Tropical attention provenance as an initial degeneration}{definition.6.9}{}}
+\newlabel{prop:attention-initial-degeneration@cref}{{[proposition][9][6]6.9}{[1][19][]19}}
+\citation{tevelev2007compactifications}
+\citation{tevelev2007compactifications}
+\newlabel{thm:tropical-attention-toric-sidecar}{{6.10}{20}{Toric sidecar for tropical ring attention}{definition.6.10}{}}
+\newlabel{thm:tropical-attention-toric-sidecar@cref}{{[theorem][10][6]6.10}{[1][20][]20}}
+\citation{fultonsturmfels1994intersection}
+\citation{katz2009tropicalintersection}
+\citation{maclaganrincon2018tropicalideals}
+\citation{maclaganrincon2020balanced}
+\citation{millersturmfels2005cca}
+\@writefile{toc}{\contentsline {paragraph}{Divisors, Chow classes, and intersection metrics.}{21}{section*.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Toric ideals and Miller-Sturmfels staircases.}{21}{section*.8}\protected@file@percent }
+\citation{khanmaclagan2024tropicalbundles}
+\citation{junminchevatolliver2023tropicalschemes}
+\citation{kavehmanon2023toricbundles}
+\citation{m2tropical2019}
+\@writefile{toc}{\contentsline {paragraph}{Vector bundles, sheaves, and Klyachko losses.}{22}{section*.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{CAS-reproducible audit contract.}{23}{section*.10}\protected@file@percent }
+\citation{bgg1976category}
+\citation{braden2012hypertoric}
+\citation{braden2016qcsr}
+\citation{brownerman2022tate}
+\citation{banks2025multigradedbgg}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Toric BGG structure as trainable supervision}{24}{section.7}\protected@file@percent }
+\newlabel{sec:toric-bgg}{{7}{24}{Toric BGG structure as trainable supervision}{section.7}{}}
+\newlabel{sec:toric-bgg@cref}{{[section][7][]7}{[1][23][]24}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Three BGG inputs and what they contribute}{24}{subsection.7.1}\protected@file@percent }
+\newlabel{def:hw-skeleton}{{7.1}{24}{Highest-weight training skeleton}{definition.7.1}{}}
+\newlabel{def:hw-skeleton@cref}{{[definition][1][7]7.1}{[1][24][]24}}
+\citation{kowalenko2022oriented}
+\newlabel{def:hypertoric-certificate}{{7.2}{25}{Hypertoric arrangement certificate}{definition.7.2}{}}
+\newlabel{def:hypertoric-certificate@cref}{{[definition][2][7]7.2}{[1][25][]25}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Finite proxy algebras}{25}{subsection.7.2}\protected@file@percent }
+\newlabel{def:incidence-proxy}{{7.3}{25}{Incidence proxy algebra}{definition.7.3}{}}
+\newlabel{def:incidence-proxy@cref}{{[definition][3][7]7.3}{[1][25][]25}}
+\newlabel{prop:incidence-factors}{{7.4}{25}{Projective factors in the incidence proxy}{definition.7.4}{}}
+\newlabel{prop:incidence-factors@cref}{{[proposition][4][7]7.4}{[1][25][]25}}
+\newlabel{def:standard-mask}{{7.5}{26}{Standard-attention mask}{definition.7.5}{}}
+\newlabel{def:standard-mask@cref}{{[definition][5][7]7.5}{[1][26][]26}}
+\newlabel{lem:std-mask-equiv}{{7.6}{26}{Standard masks are equivariant under poset automorphisms}{definition.7.6}{}}
+\newlabel{lem:std-mask-equiv@cref}{{[lemma][6][7]7.6}{[1][26][]26}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}The multigraded BGG differential}{26}{subsection.7.3}\protected@file@percent }
+\newlabel{def:multigraded-bgg-diff}{{7.7}{26}{Multigraded BGG differential}{definition.7.7}{}}
+\newlabel{def:multigraded-bgg-diff@cref}{{[definition][7][7]7.7}{[1][26][]26}}
+\newlabel{lem:bgg-d2}{{7.8}{27}{BGG differential squares to zero}{definition.7.8}{}}
+\newlabel{lem:bgg-d2@cref}{{[lemma][8][7]7.8}{[1][26][]27}}
+\newlabel{ex:bgg-two-var}{{7.9}{27}{A two-variable computation}{definition.7.9}{}}
+\newlabel{ex:bgg-two-var@cref}{{[example][9][7]7.9}{[1][27][]27}}
+\newlabel{def:resolution-loss}{{7.10}{27}{Resolution-consistency loss}{definition.7.10}{}}
+\newlabel{def:resolution-loss@cref}{{[definition][10][7]7.10}{[1][27][]27}}
+\newlabel{prop:stable-chain-map}{{7.11}{27}{Stable chain-map supervision}{definition.7.11}{}}
+\newlabel{prop:stable-chain-map@cref}{{[proposition][11][7]7.11}{[1][27][]27}}
+\citation{matusevich2005homological}
+\citation{schulze2009hypergeometric}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.4}Gale duality and Koszul dual curricula}{28}{subsection.7.4}\protected@file@percent }
+\newlabel{def:gale-pair}{{7.12}{28}{Gale-dual training pair}{definition.7.12}{}}
+\newlabel{def:gale-pair@cref}{{[definition][12][7]7.12}{[1][28][]28}}
+\newlabel{lem:basis-complementarity}{{7.13}{28}{Basis complementarity}{definition.7.13}{}}
+\newlabel{lem:basis-complementarity@cref}{{[lemma][13][7]7.13}{[1][28][]28}}
+\newlabel{def:gale-loss}{{7.14}{28}{Gale-dual consistency loss}{definition.7.14}{}}
+\newlabel{def:gale-loss@cref}{{[definition][14][7]7.14}{[1][28][]28}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.5}Euler-Koszul probes and toric module theory}{28}{subsection.7.5}\protected@file@percent }
+\newlabel{def:euler-koszul-cert}{{7.15}{28}{Toric module and Euler-Koszul certificate}{definition.7.15}{}}
+\newlabel{def:euler-koszul-cert@cref}{{[definition][15][7]7.15}{[1][28][]28}}
+\newlabel{prop:euler-koszul}{{7.16}{29}{Commuting Euler operators give a Koszul complex}{definition.7.16}{}}
+\newlabel{prop:euler-koszul@cref}{{[proposition][16][7]7.16}{[1][29][]29}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.6}Embedding-space realization: BGG signatures for GraphCG and memory}{29}{subsection.7.6}\protected@file@percent }
+\newlabel{def:bgg-signature}{{7.17}{29}{Toric BGG trajectory signature}{definition.7.17}{}}
+\newlabel{def:bgg-signature@cref}{{[definition][17][7]7.17}{[1][29][]29}}
+\citation{lu2026assistantaxis}
+\citation{schreiber2026tropicalquivers}
+\newlabel{prop:analogy-signature}{{7.18}{30}{Analogy invariance of exact BGG signatures}{definition.7.18}{}}
+\newlabel{prop:analogy-signature@cref}{{[proposition][18][7]7.18}{[1][29][]30}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.7}Behavior protocols from toric-tropical corridors and algebraic certificates}{30}{subsection.7.7}\protected@file@percent }
+\newlabel{subsec:behavior-corridors-bgg}{{7.7}{30}{Behavior protocols from toric-tropical corridors and algebraic certificates}{subsection.7.7}{}}
+\newlabel{subsec:behavior-corridors-bgg@cref}{{[subsection][7][7]7.7}{[1][30][]30}}
+\newlabel{eq:bgg-behavior-projection}{{7.29}{31}{Behavior protocols from toric-tropical corridors and algebraic certificates}{equation.7.29}{}}
+\newlabel{eq:bgg-behavior-projection@cref}{{[equation][29][7]7.29}{[1][31][]31}}
+\@writefile{toc}{\contentsline {paragraph}{Affine toric and Stanley--Reisner behavior constraints.}{31}{section*.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Free resolutions, Fitting gates, and DG-algebra structure.}{32}{section*.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Graph-of-thought, memory, and analogy.}{32}{section*.13}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Graph-of-thought trajectory as a directed branch/merge DAG. Each vertex represents a reasoning-step simplicial complex with hidden state, behavior alcove, toric/tropical chamber, and certificate signature. Branch fan-out explores alternatives; merge fan-in reconciles or selects them.}}{33}{figure.caption.14}\protected@file@percent }
+\newlabel{fig:got-branch-merge-dag}{{4}{33}{Graph-of-thought trajectory as a directed branch/merge DAG. Each vertex represents a reasoning-step simplicial complex with hidden state, behavior alcove, toric/tropical chamber, and certificate signature. Branch fan-out explores alternatives; merge fan-in reconciles or selects them}{figure.caption.14}{}}
+\newlabel{fig:got-branch-merge-dag@cref}{{[figure][4][]4}{[1][33][]33}}
+\@writefile{toc}{\contentsline {paragraph}{Why the algebra can improve BPB and behavior.}{34}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Computable protocol.}{34}{section*.16}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.8}Losses used in training}{34}{subsection.7.8}\protected@file@percent }
+\newlabel{def:koszul-residual}{{7.21}{35}{Koszul-linearity residual}{definition.7.21}{}}
+\newlabel{def:koszul-residual@cref}{{[definition][21][7]7.21}{[1][35][]35}}
+\newlabel{def:signature-distillation}{{7.22}{35}{Signature distillation loss}{definition.7.22}{}}
+\newlabel{def:signature-distillation@cref}{{[definition][22][7]7.22}{[1][35][]35}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.9}Why this can improve BPB}{35}{subsection.7.9}\protected@file@percent }
+\newlabel{prop:bpb-mixture}{{7.23}{35}{Safe interpolation bound for BPB heads}{definition.7.23}{}}
+\newlabel{prop:bpb-mixture@cref}{{[proposition][23][7]7.23}{[1][35][]35}}
+\gdef \LT@i {\LT@entry 
+    {1}{115.34666pt}\LT@entry 
+    {1}{143.53082pt}\LT@entry 
+    {1}{181.11209pt}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.10}Train-time computation}{36}{subsection.7.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.11}Integration with the existing architecture}{37}{subsection.7.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Tropical heads.}{37}{section*.17}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{GraphCG axes.}{37}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Analogical trajectory memory.}{37}{section*.19}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Soft-MoE routing.}{37}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Parameter-Golf BPB training.}{37}{section*.21}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Toric BGG supervision for ToricGT. Hypertoric arrangements, oriented matroids, and multigraded BGG/Tate resolutions generate finite certificates. Low-rank probes attach those certificates to graph-token hidden states, GraphCG concept axes, GFlowNet trajectories, and retrieval memory. The deployable BPB model keeps only components that improve validation log score under the artifact budget.}}{38}{figure.caption.22}\protected@file@percent }
+\newlabel{fig:toric-bgg-map}{{5}{38}{Toric BGG supervision for ToricGT. Hypertoric arrangements, oriented matroids, and multigraded BGG/Tate resolutions generate finite certificates. Low-rank probes attach those certificates to graph-token hidden states, GraphCG concept axes, GFlowNet trajectories, and retrieval memory. The deployable BPB model keeps only components that improve validation log score under the artifact budget}{figure.caption.22}{}}
+\newlabel{fig:toric-bgg-map@cref}{{[figure][5][]5}{[1][37][]38}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.12}Metrics}{38}{subsection.7.12}\protected@file@percent }
+\newlabel{def:tbg-metrics}{{7.24}{38}{Toric BGG evaluation metrics}{definition.7.24}{}}
+\newlabel{def:tbg-metrics@cref}{{[definition][24][7]7.24}{[1][38][]38}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.13}A staged training protocol}{39}{subsection.7.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Rotation algebras, noncommutative tori, and spiral projections}{39}{section.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.1}Finite Weyl pairs and normal forms}{39}{subsection.8.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.2}Higher noncommutative tori}{40}{subsection.8.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.3}Infinite spiral projection}{41}{subsection.8.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Infinite spiral-projection diagnostic for the rotation algebra and noncommutative torus. The cylinder shows irrational rotation by $\alpha $; the torus projection visualizes dense phase winding and finite phase-channel truncations.}}{42}{figure.caption.23}\protected@file@percent }
+\newlabel{fig:spiral}{{6}{42}{Infinite spiral-projection diagnostic for the rotation algebra and noncommutative torus. The cylinder shows irrational rotation by $\alpha $; the torus projection visualizes dense phase winding and finite phase-channel truncations}{figure.caption.23}{}}
+\newlabel{fig:spiral@cref}{{[figure][6][]6}{[1][41][]42}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.4}Trace supervision}{42}{subsection.8.4}\protected@file@percent }
+\citation{gesenius1910}
+\citation{waltke1990}
+\citation{joüon2006}
+\citation{koskenniemi1983}
+\citation{beesley2003}
+\citation{yona2008}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Hebrew roots as graph-structured morphology}{43}{section.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.1}Why Hebrew morphology belongs in ToricGT}{43}{subsection.9.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces A root-template graph for K-T-B. The actual graph record can also store Hebrew glyphs and source spans; the figure uses transliteration for directional readability.}}{44}{figure.caption.24}\protected@file@percent }
+\newlabel{fig:hebrew-root}{{7}{44}{A root-template graph for K-T-B. The actual graph record can also store Hebrew glyphs and source spans; the figure uses transliteration for directional readability}{figure.caption.24}{}}
+\newlabel{fig:hebrew-root@cref}{{[figure][7][]7}{[1][43][]44}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.2}Graph construction algorithm}{44}{subsection.9.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.3}Hebrew morphology losses}{45}{subsection.9.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.4}Tropical alignment for root extraction}{45}{subsection.9.4}\protected@file@percent }
+\gdef \LT@ii {\LT@entry 
+    {1}{120.04164pt}\LT@entry 
+    {1}{162.32504pt}\LT@entry 
+    {1}{171.71498pt}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.5}Hebrew graph tasks}{46}{subsection.9.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {10}Reasoning capacity and visualization contract}{46}{section.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}Embedding-space GFlowNet fine-tuning}{47}{section.11}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Reasoning capacity as a composition of graph-token routing, algebraic transport, tropical inference, and graph-level output. The model should expose checks at each stage rather than returning only an answer string.}}{48}{figure.caption.25}\protected@file@percent }
+\newlabel{fig:reasoning-capacity}{{8}{48}{Reasoning capacity as a composition of graph-token routing, algebraic transport, tropical inference, and graph-level output. The model should expose checks at each stage rather than returning only an answer string}{figure.caption.25}{}}
+\newlabel{fig:reasoning-capacity@cref}{{[figure][8][]8}{[1][46][]48}}
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Visualization dashboard targets. The dashboard should make reasoning behavior falsifiable: a good scalar metric is not sufficient if equivariance, phase, active-face, morphology, or diversity diagnostics fail.}}{49}{figure.caption.26}\protected@file@percent }
+\newlabel{fig:viz-dashboard}{{9}{49}{Visualization dashboard targets. The dashboard should make reasoning behavior falsifiable: a good scalar metric is not sufficient if equivariance, phase, active-face, morphology, or diversity diagnostics fail}{figure.caption.26}{}}
+\newlabel{fig:viz-dashboard@cref}{{[figure][9][]9}{[1][47][]49}}
+\@writefile{toc}{\contentsline {section}{\numberline {12}Anticipative reasoning-trajectory memory}{49}{section.12}\protected@file@percent }
+\citation{han2025polarquant}
+\@writefile{toc}{\contentsline {section}{\numberline {13}Interleaving PolarQuant with ToricGT ring attention}{50}{section.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.1}Applicability}{50}{subsection.13.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Current training implementation.}{51}{section*.27}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.2}Recursive polar transform}{51}{subsection.13.2}\protected@file@percent }
+\citation{han2025polarquant}
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.3}Polar ring cache}{52}{subsection.13.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces PolarQuant interleaving with ring attention. Each key-value block is randomly preconditioned, recursively transformed to polar coordinates, angle-quantized, packed, and dequantized only when the block reaches a query device.}}{53}{figure.caption.28}\protected@file@percent }
+\newlabel{fig:polar-ring}{{10}{53}{PolarQuant interleaving with ring attention. Each key-value block is randomly preconditioned, recursively transformed to polar coordinates, angle-quantized, packed, and dequantized only when the block reaches a query device}{figure.caption.28}{}}
+\newlabel{fig:polar-ring@cref}{{[figure][10][]10}{[1][52][]53}}
+\citation{puigcerver2024softmoe}
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.4}Memory accounting}{54}{subsection.13.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {14}Soft-MoE ToricGT blocks}{54}{section.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.1}Motivation and placement}{54}{subsection.14.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.2}Equations}{54}{subsection.14.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces Soft-MoE ToricGT block. Graph tokens are softly dispatched into slot mixtures, typed experts process the slots, and combine weights project expert outputs back to the original token stream. The same equations handle node, edge, proof, Hebrew, tropical, and toric tokens when masks and type channels are equivariant.}}{55}{figure.caption.29}\protected@file@percent }
+\newlabel{fig:soft-moe-toricgt}{{11}{55}{Soft-MoE ToricGT block. Graph tokens are softly dispatched into slot mixtures, typed experts process the slots, and combine weights project expert outputs back to the original token stream. The same equations handle node, edge, proof, Hebrew, tropical, and toric tokens when masks and type channels are equivariant}{figure.caption.29}{}}
+\newlabel{fig:soft-moe-toricgt@cref}{{[figure][11][]11}{[1][54][]55}}
+\gdef \LT@iii {\LT@entry 
+    {1}{115.34666pt}\LT@entry 
+    {1}{157.6229pt}\LT@entry 
+    {1}{181.11209pt}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.3}Typed expert bank for ToricGT}{56}{subsection.14.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.4}Implementation details}{57}{subsection.14.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.5}Prefix-causal Soft-MoE for language-model scoring}{57}{subsection.14.5}\protected@file@percent }
+\citation{openai2026paramgolf}
+\citation{openai2026paramgolf}
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.6}Soft-MoE regularizers and diagnostics}{59}{subsection.14.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {15}Parameter-Golf constrained ToricGT}{59}{section.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.1}Contest constraints as engineering axioms}{59}{subsection.15.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {12}{\ignorespaces Parameter-Golf protocol for ToricGT. The full graph-to-graph model remains the research model. The contest-facing model is a micro language model distilled from graph-reasoning traces, equipped with byte-safe Soft-MoE adapters, trained under the wallclock budget, and exported as a single self-contained artifact with exact byte accounting and prequential BPB validation.}}{60}{figure.caption.30}\protected@file@percent }
+\newlabel{fig:param-golf-pipeline}{{12}{60}{Parameter-Golf protocol for ToricGT. The full graph-to-graph model remains the research model. The contest-facing model is a micro language model distilled from graph-reasoning traces, equipped with byte-safe Soft-MoE adapters, trained under the wallclock budget, and exported as a single self-contained artifact with exact byte accounting and prequential BPB validation}{figure.caption.30}{}}
+\newlabel{fig:param-golf-pipeline@cref}{{[figure][12][]12}{[1][59][]60}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.2}Prequential BPB validity}{60}{subsection.15.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Metric taxonomy and SP1024 conversion.}{61}{section*.31}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{OAI baseline transfers to causal TokenGT.}{62}{section*.32}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Byte-scored TokenGT hybrid objective.}{62}{section*.33}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.3}Random-order graph autoregressive projection}{63}{subsection.15.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.4}Byte-safe embedding-space GFlowNet actions}{64}{subsection.15.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.5}Relative Kolmogorov diagnostics and analogical helper transfer}{65}{subsection.15.5}\protected@file@percent }
+\citation{liu2024graphcg}
+\citation{minegishi2026analogy}
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.6}GraphCG bases and directed topological analogies}{66}{subsection.15.6}\protected@file@percent }
+\citation{edelsbrunner2002topological}
+\citation{zomorodian2005computing}
+\citation{carlsson2009topology}
+\@writefile{lof}{\contentsline {figure}{\numberline {13}{\ignorespaces GraphCG supplies a steerable concept chart; ToricGT builds directed persistent complexes in that chart and learns soft analogical maps between local reasoning complexes. The maps are functor-like, but they also carry filtered simplicial, chain-map, and persistence-module structure.}}{69}{figure.caption.34}\protected@file@percent }
+\newlabel{fig:graphcg-topology-analogy}{{13}{69}{GraphCG supplies a steerable concept chart; ToricGT builds directed persistent complexes in that chart and learns soft analogical maps between local reasoning complexes. The maps are functor-like, but they also carry filtered simplicial, chain-map, and persistence-module structure}{figure.caption.34}{}}
+\newlabel{fig:graphcg-topology-analogy@cref}{{[figure][13][]13}{[1][68][]69}}
+\citation{cohensteiner2007stability}
+\citation{chazal2016structure}
+\citation{mohamed2016dec}
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.7}DEC conservative reasoning flow}{70}{subsection.15.7}\protected@file@percent }
+\citation{campello2013density}
+\citation{campello2015hierarchical}
+\citation{mcinnes2017hdbscan}
+\@writefile{lof}{\contentsline {figure}{\numberline {14}{\ignorespaces DEC-inspired conservative audits for graph-of-thought reasoning. A directed local reasoning complex supplies a discrete 1-form; divergence, circulation, Hodge-weighted energy, and wedge/interior consistency become finite diagnostics and low-weight training signals.}}{72}{figure.caption.35}\protected@file@percent }
+\newlabel{fig:dec-conservative-reasoning}{{14}{72}{DEC-inspired conservative audits for graph-of-thought reasoning. A directed local reasoning complex supplies a discrete 1-form; divergence, circulation, Hodge-weighted energy, and wedge/interior consistency become finite diagnostics and low-weight training signals}{figure.caption.35}{}}
+\newlabel{fig:dec-conservative-reasoning@cref}{{[figure][14][]14}{[1][71][]72}}
+\@writefile{lof}{\contentsline {figure}{\numberline {15}{\ignorespaces Irrational toric phase projection of a branch/merge reasoning DAG. Vertices lie on a nonrepeating toric phase scaffold; local Vietoris--Rips edges reveal step-level simplicial structure; colored directed edges distinguish branch fan-out, merge fan-in, and analogical transport.}}{73}{figure.caption.36}\protected@file@percent }
+\newlabel{fig:toric-phase-simplicial}{{15}{73}{Irrational toric phase projection of a branch/merge reasoning DAG. Vertices lie on a nonrepeating toric phase scaffold; local Vietoris--Rips edges reveal step-level simplicial structure; colored directed edges distinguish branch fan-out, merge fan-in, and analogical transport}{figure.caption.36}{}}
+\newlabel{fig:toric-phase-simplicial@cref}{{[figure][15][]15}{[1][73][]73}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.8}Micro-ToricGT language-model design}{74}{subsection.15.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.9}Soft-MoE under a 16 MB artifact cap}{75}{subsection.15.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.10}Distillation from ToricGT to the contest LM}{76}{subsection.15.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.11}Artifact packing and runtime implementation}{76}{subsection.15.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.12}Contest record folder checklist}{77}{subsection.15.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.13}Pragmatic risk controls}{77}{subsection.15.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.14}Checkpoint triage and activation gates}{77}{subsection.15.14}\protected@file@percent }
+\newlabel{subsec:checkpoint-triage}{{15.14}{77}{Checkpoint triage and activation gates}{subsection.15.14}{}}
+\newlabel{subsec:checkpoint-triage@cref}{{[subsection][14][15]15.14}{[1][77][]77}}
+\@writefile{toc}{\contentsline {section}{\numberline {16}Datasets, synthetic families, and leakage control}{78}{section.16}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.1}Training mixture}{78}{subsection.16.1}\protected@file@percent }
+\gdef \LT@iv {\LT@entry 
+    {1}{124.74377pt}\LT@entry 
+    {1}{124.74377pt}\LT@entry 
+    {1}{77.76541pt}\LT@entry 
+    {1}{138.83586pt}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.2}Normalized record schema}{80}{subsection.16.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.3}Graph conversion policy}{80}{subsection.16.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.4}Leakage-resistant splitting}{80}{subsection.16.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.5}Output layout and commands}{81}{subsection.16.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.6}Expected scale and license handling}{82}{subsection.16.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.7}Synthetic generator specifications}{82}{subsection.16.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Rotation words.}{82}{section*.37}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Higher tori.}{82}{section*.38}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Hebrew roots.}{82}{section*.39}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Tropical algorithms.}{82}{section*.40}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {17}Model, losses, and training schedule}{82}{section.17}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {17.1}Architecture}{82}{subsection.17.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {17.2}Composite objective}{83}{subsection.17.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {17.3}Schedule}{83}{subsection.17.3}\protected@file@percent }
+\gdef \LT@v {\LT@entry 
+    {1}{162.32504pt}\LT@entry 
+    {1}{275.06166pt}}
+\@writefile{toc}{\contentsline {section}{\numberline {18}Evaluation and ablations}{84}{section.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {19}Implementation blueprint}{84}{section.19}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {20}Discussion and limits}{85}{section.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {21}Fine-tuning, evaluation, and ablation protocol}{86}{section.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.1}Checkpoint audit before retraining}{86}{subsection.21.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.2}Toric data curriculum}{86}{subsection.21.2}\protected@file@percent }
+\citation{schreiber2022multiparameter}
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.3}Affine toric charts and Koszul persistence modules}{87}{subsection.21.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.4}Combinatorial commutative-algebra bridge for training}{88}{subsection.21.4}\protected@file@percent }
+\citation{schreiber2022multiparameter}
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.5}Varieties of complexes, derived comparison, and resolution strata}{90}{subsection.21.5}\protected@file@percent }
+\newlabel{subsec:varieties-of-complexes}{{21.5}{90}{Varieties of complexes, derived comparison, and resolution strata}{subsection.21.5}{}}
+\newlabel{subsec:varieties-of-complexes@cref}{{[subsection][5][21]21.5}{[1][90][]90}}
+\@writefile{toc}{\contentsline {paragraph}{From a reasoning window to a multigraded persistence module.}{91}{section*.41}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Presentation spaces and Fitting invariants.}{91}{section*.42}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Varieties of complexes.}{91}{section*.43}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Buchsbaum--Eisenbud exactness and multiplier audits.}{92}{section*.44}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Comparing complexes in the derived category.}{93}{section*.45}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Variety-of-complexes loss.}{93}{section*.46}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{How the comparison is used in ToricGT.}{93}{section*.47}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Pseudocode.}{94}{section*.48}\protected@file@percent }
+\citation{humphreys1990reflection}
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.6}Ablation discipline}{95}{subsection.21.6}\protected@file@percent }
+\newlabel{subsec:ablation-discipline}{{21.6}{95}{Ablation discipline}{subsection.21.6}{}}
+\newlabel{subsec:ablation-discipline@cref}{{[subsection][6][21]21.6}{[1][95][]95}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.7}Affine Coxeter, braid, and toric phase foliations}{95}{subsection.21.7}\protected@file@percent }
+\citation{slepian1978prolate}
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.8}Slepian concentration on toric leaves}{96}{subsection.21.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.9}Fine-tuning objective}{97}{subsection.21.9}\protected@file@percent }
+\citation{lahlou2023continuous}
+\citation{yao2023tree}
+\citation{besta2023graph}
+\citation{bi2024forest}
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.10}Continuous GFlowNets on toric charts}{98}{subsection.21.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.11}Embedding-space Forest-of-Thought}{98}{subsection.21.11}\protected@file@percent }
+\citation{madan2023subtb}
+\citation{fotopoulos2024tropnnc}
+\@writefile{toc}{\contentsline {subsection}{\numberline {21.12}Retraining protocol}{100}{subsection.21.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {22}Conclusion}{101}{section.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Additional proof details}{101}{appendix.A}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}Hybrid universal approximation}{101}{subsection.A.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Softmax perturbation with quantized keys}{101}{subsection.A.2}\protected@file@percent }
+\gdef \LT@vi {\LT@entry 
+    {1}{143.53082pt}\LT@entry 
+    {1}{129.43875pt}\LT@entry 
+    {1}{176.41711pt}}
+\@writefile{toc}{\contentsline {section}{\numberline {B}Graph record schema}{102}{appendix.B}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {C}Recommended hyperparameters}{102}{appendix.C}\protected@file@percent }
+\bibcite{fu2025toricrelu}{1}
+\bibcite{zhang2018tropical}{2}
+\bibcite{brandenburg2024real}{3}
+\bibcite{haase2023lattice}{4}
+\bibcite{fotopoulos2024tropnnc}{5}
+\bibcite{cox2011toric}{6}
+\bibcite{maclagan2012intro}{7}
+\bibcite{maclaganrincon2018tropicalideals}{8}
+\bibcite{maclaganrincon2020balanced}{9}
+\bibcite{m2tropical2019}{10}
+\bibcite{khanmaclagan2024tropicalbundles}{11}
+\bibcite{junminchevatolliver2023tropicalschemes}{12}
+\bibcite{kavehmanon2023toricbundles}{13}
+\bibcite{schock2024quasilinear}{14}
+\bibcite{tevelev2007compactifications}{15}
+\bibcite{fultonsturmfels1994intersection}{16}
+\bibcite{katz2009tropicalintersection}{17}
+\bibcite{millersturmfels2005cca}{18}
+\bibcite{schreiber2022multiparameter}{19}
+\bibcite{liu2024graphcg}{20}
+\bibcite{minegishi2026analogy}{21}
+\bibcite{lu2026assistantaxis}{22}
+\bibcite{schreiber2026tropicalquivers}{23}
+\bibcite{edelsbrunner2002topological}{24}
+\bibcite{zomorodian2005computing}{25}
+\bibcite{carlsson2009topology}{26}
+\bibcite{cohensteiner2007stability}{27}
+\bibcite{chazal2016structure}{28}
+\bibcite{mohamed2016dec}{29}
+\bibcite{campello2013density}{30}
+\bibcite{campello2015hierarchical}{31}
+\bibcite{mcinnes2017hdbscan}{32}
+\bibcite{vaswani2017attention}{33}
+\bibcite{yun2020transformers}{34}
+\bibcite{kim2022tokengt}{35}
+\bibcite{liu2023ring}{36}
+\bibcite{hashemi2025tropical}{37}
+\bibcite{rieffel1981rotation}{38}
+\bibcite{slepian1978prolate}{39}
+\bibcite{rieffel1988projective}{40}
+\bibcite{humphreys1990reflection}{41}
+\bibcite{pimsner1980embedding}{42}
+\bibcite{connes1980cstar}{43}
+\bibcite{yao2023tree}{44}
+\bibcite{besta2023graph}{45}
+\bibcite{bi2024forest}{46}
+\bibcite{bengio2023gflownet}{47}
+\bibcite{malkin2022trajectory}{48}
+\bibcite{madan2023subtb}{49}
+\bibcite{lahlou2023continuous}{50}
+\bibcite{hoffmann2022chinchilla}{51}
+\bibcite{puigcerver2024softmoe}{52}
+\bibcite{openai2026paramgolf}{53}
+\bibcite{han2025polarquant}{54}
+\bibcite{gesenius1910}{55}
+\bibcite{waltke1990}{56}
+\bibcite{joüon2006}{57}
+\bibcite{koskenniemi1983}{58}
+\bibcite{beesley2003}{59}
+\bibcite{yona2008}{60}
+\bibcite{bgg1976category}{61}
+\bibcite{bgs1996koszul}{62}
+\bibcite{braden2012hypertoric}{63}
+\bibcite{braden2016qcsr}{64}
+\bibcite{kowalenko2022oriented}{65}
+\bibcite{brownerman2022tate}{66}
+\bibcite{braden2006torickoszul}{67}
+\bibcite{matusevich2005homological}{68}
+\bibcite{schulze2009hypergeometric}{69}
+\bibcite{banks2025multigradedbgg}{70}
+\gdef \@abspage@last{107}
