@@ -19,6 +19,7 @@ import json
 import math
 import os
 import re
+import shutil
 import shlex
 import subprocess
 import sys
@@ -776,6 +777,34 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=env_truthy("TORICGT_STOP_ON_TARGET", "0"),
         help="Stop early when a run reaches target BPB. Disabled by default so the campaign can select the best out of the exact run budget.",
+    )
+    parser.add_argument(
+        "--final-full-train-best",
+        action="store_true",
+        default=env_truthy("TORICGT_FINAL_FULL_TRAIN_BEST", "0"),
+        help="After the exact short-run sweep completes, launch one fresh longer run using the best profile/settings from the sweep.",
+    )
+    parser.add_argument(
+        "--final-full-train-steps",
+        type=int,
+        default=int(os.environ.get("TORICGT_FINAL_FULL_TRAIN_STEPS", "25000")),
+        help="Iteration count for --final-full-train-best. Uses the same full training shard set, but does not stop at the short gate length.",
+    )
+    parser.add_argument(
+        "--upload-best-short-to-hf",
+        action="store_true",
+        default=env_truthy("TORICGT_UPLOAD_BEST_SHORT_TO_HF", "0"),
+        help="After the exact short-run sweep completes, upload the best short-run checkpoint and int8 artifact to Hugging Face.",
+    )
+    parser.add_argument(
+        "--hf-checkpoint-repo",
+        default=os.environ.get("TORICGT_HF_CHECKPOINT_REPO", "AmelieSchreiber/toricgt-checkpoints"),
+        help="Hugging Face model repo for --upload-best-short-to-hf. Defaults to the existing ToricGT checkpoint repo.",
+    )
+    parser.add_argument(
+        "--hf-token-file",
+        default=os.environ.get("TORICGT_HF_TOKEN_FILE", "keys.txt"),
+        help="Local file containing an hf_* token. The token is read into the environment and never printed.",
     )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -1748,12 +1777,17 @@ def write_meta_analysis(notes_dir: Path, history: list[dict[str, object]], args:
                 sidecar=f"{row['mean_sidecar_loss']:.6g}" if isinstance(row.get("mean_sidecar_loss"), (int, float)) else "n/a",
             )
         )
+    analysis_gate_sentence = (
+        "Use strict exact analysis as a gate. A failed GUDHI/Sage/Macaulay2 or screenshot bundle blocks the next run unless a retry succeeds."
+        if bool(args.strict_analysis)
+        else "Keep analyses non-blocking for this sweep. A failed GUDHI/Sage/Macaulay2 or screenshot bundle should be recorded, but it must not prevent the configured run budget from completing."
+    )
     recommendations = [
         "Keep `TRAIN_SEQ_LEN=1024` and `grad_accum_steps=8`; those are the current speed and memory controls.",
         "Keep every advanced metric family enabled in logging. Sweep training pressure through profile weights, not by disabling observability.",
         "Reject profiles that improve auxiliary diagnostics while worsening exported int8 BPB or pushing the artifact near the 16,000,000-byte cap.",
         "Favor the best BPB profile and its nearest LR/auxiliary-weight neighbors for the follow-up phase; do not jump to high auxiliary weights unless BPB and artifact margin justify it.",
-        "Use strict exact analysis as a gate. A failed GUDHI/Sage/Macaulay2 or screenshot bundle blocks the next run unless a retry succeeds.",
+        analysis_gate_sentence,
     ]
     if best_profile:
         recommendations.append(f"Current best evidence favors `{best_profile}` as the anchor for the next hyperparameter neighborhood.")
@@ -1845,6 +1879,241 @@ def write_meta_analysis(notes_dir: Path, history: list[dict[str, object]], args:
     ]
     planning_path.write_text("\n".join(planning_lines), encoding="utf-8")
     return meta_path
+
+
+def best_completed_row(history: list[dict[str, object]]) -> dict[str, object] | None:
+    rows = completed_campaign_rows(history)
+    finite_rows = [
+        row
+        for row in rows
+        if math.isfinite(metric_bpb(row.get("metrics", {}) if isinstance(row.get("metrics"), dict) else {}))
+    ]
+    if not finite_rows:
+        return None
+    return min(finite_rows, key=lambda row: metric_bpb(row.get("metrics", {}) if isinstance(row.get("metrics"), dict) else {}))
+
+
+def read_hf_token(token_file: Path) -> str:
+    if not token_file.exists():
+        raise FileNotFoundError(f"HF token file does not exist: {token_file}")
+    text = token_file.read_text(encoding="utf-8", errors="replace")
+    match = re.search(r"hf_[A-Za-z0-9_\\-]+", text)
+    if not match:
+        raise RuntimeError(f"HF token file did not contain an hf_* token: {token_file}")
+    return match.group(0)
+
+
+def copy_if_exists(src: Path, dst: Path) -> bool:
+    if not src.exists():
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    return True
+
+
+def upload_best_short_checkpoint_to_hf(
+    args: argparse.Namespace,
+    notes_dir: Path,
+    best: dict[str, object],
+    *,
+    phase: str,
+) -> int:
+    repo = Path(args.repo_root).resolve()
+    metrics = best.get("metrics", {})
+    if not isinstance(metrics, dict):
+        return 1
+    run_id = str(best.get("run_id", "unknown-run"))
+    profile = str(best.get("profile", "unknown-profile"))
+    checkpoint = Path(str(metrics.get("checkpoint_path") or ""))
+    train_log = Path(str(metrics.get("path") or ""))
+    run_dir = train_log.parent if train_log.exists() else repo / "runs" / "oai_sidecar" / run_id
+    staging = repo / "outputs" / "hf_toricgt_checkpoints" / f"{phase}-{run_id}"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True, exist_ok=True)
+
+    copied: list[str] = []
+    if copy_if_exists(checkpoint, staging / "checkpoints" / checkpoint.name):
+        copied.append(f"checkpoints/{checkpoint.name}")
+    for filename in ("final_model.int8.ptz", "final_model.pt", "train.log"):
+        src = run_dir / filename
+        if copy_if_exists(src, staging / filename):
+            copied.append(filename)
+    for src in sorted((run_dir / "logs").glob("*")) if (run_dir / "logs").exists() else []:
+        if src.is_file() and copy_if_exists(src, staging / "logs" / src.name):
+            copied.append(f"logs/{src.name}")
+
+    (staging / "RUN_ID.txt").write_text(run_id + "\n", encoding="utf-8")
+    card_lines = [
+        "# ToricGT Checkpoint",
+        "",
+        f"- uploaded UTC: `{utc_iso()}`",
+        f"- source campaign: `{args.campaign_id}`",
+        f"- source phase: `{phase}`",
+        f"- selected run: `{run_id}`",
+        f"- profile: `{profile}`",
+        f"- profile rationale: `{profile_by_name(profile).rationale if profile_by_name(profile) else 'profile not found in current table'}`",
+        f"- checkpoint step: `{metrics.get('checkpoint_step')}`",
+        f"- train BPB: `{metrics.get('train_bpb')}`",
+        f"- validation BPB: `{metrics.get('val_bpb')}`",
+        f"- int8+zlib round-trip BPB: `{metrics.get('final_int8_bpb')}`",
+        f"- compressed artifact bytes: `{metrics.get('artifact_bytes')}`",
+        f"- checkpoint path in source workspace: `{metrics.get('checkpoint_path')}`",
+        "",
+        "## Selection Rule",
+        "",
+        "This artifact was selected as the best completed short run in the configured fixed-budget sweep, using exported/int8 BPB when available and validation BPB otherwise. No hard target threshold was used for early stopping.",
+        "",
+        "## Active Techniques",
+        "",
+        "- deterministic ConvexTok-2048 tokenization",
+        "- first-class TokenGT graphification of FineWeb with OAI-only sequential flattening for BPB scoring",
+        "- tokenization-DAG, min-plus/tropical path, and toric vocabulary-face features",
+        "- graph-output score correction and calibration",
+        "- embedding-space GFlowNet and Forest-of-Thought heads",
+        "- multi-token prediction",
+        "- full-rank GraphCG, trajectory-memory retrieval, toric geometry, vector-bundle 1D-cone/sheaf, Toric BGG category-O, Koszul persistence, combinatorial toric commutative algebra, and derived-signature metrics/losses",
+        "",
+        "## Copied Files",
+        "",
+        *[f"- `{item}`" for item in copied],
+        "",
+    ]
+    (staging / "README.md").write_text("\n".join(card_lines), encoding="utf-8")
+
+    hf_bin = shutil.which("hf") or "/home/iska/.local/bin/hf"
+    token_file = Path(args.hf_token_file)
+    if not token_file.is_absolute():
+        token_file = repo / token_file
+    upload_report = notes_dir / f"{phase}-HF-UPLOAD-{utc_stamp()}.md"
+    try:
+        token = read_hf_token(token_file)
+        env = dict(os.environ)
+        env["HF_TOKEN"] = token
+        create = subprocess.run(
+            [hf_bin, "repos", "create", str(args.hf_checkpoint_repo), "--type", "model", "--exist-ok"],
+            cwd=repo,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        upload = subprocess.run(
+            [
+                hf_bin,
+                "upload",
+                str(args.hf_checkpoint_repo),
+                str(staging),
+                ".",
+                "--type",
+                "model",
+                "--commit-message",
+                f"Upload best ToricGT short sweep checkpoint {run_id}",
+            ],
+            cwd=repo,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        status = 0 if create.returncode == 0 and upload.returncode == 0 else 1
+        upload_report.write_text(
+            "\n".join(
+                [
+                    "# Hugging Face Best Short-Run Upload",
+                    "",
+                    f"- generated UTC: `{utc_iso()}`",
+                    f"- repo: `{args.hf_checkpoint_repo}`",
+                    f"- run: `{run_id}`",
+                    f"- staging: `{staging}`",
+                    f"- create return code: `{create.returncode}`",
+                    f"- upload return code: `{upload.returncode}`",
+                    "",
+                    "## Upload Output",
+                    "",
+                    "```text",
+                    upload.stdout.strip(),
+                    "```",
+                    "",
+                    "## Upload Errors",
+                    "",
+                    "```text",
+                    upload.stderr.strip(),
+                    "```",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        if status == 0:
+            print(f"[{utc_iso()}] uploaded best short checkpoint {run_id} to {args.hf_checkpoint_repo}", flush=True)
+        else:
+            print(f"[{utc_iso()}] HF upload failed for {run_id}; see {upload_report}", flush=True)
+        return status
+    except Exception as exc:
+        upload_report.write_text(
+            f"# Hugging Face Upload Failed\n\n- generated UTC: `{utc_iso()}`\n- run: `{run_id}`\n- error: `{type(exc).__name__}: {exc}`\n",
+            encoding="utf-8",
+        )
+        print(f"[{utc_iso()}] HF upload failed for {run_id}: {type(exc).__name__}: {exc}", flush=True)
+        return 1
+
+
+def launch_best_full_training(
+    args: argparse.Namespace,
+    notes_dir: Path,
+    best: dict[str, object],
+    *,
+    run_index: int,
+) -> int:
+    profile = profile_by_name(str(best.get("profile", "")))
+    if profile is None:
+        raise RuntimeError(f"best run profile is not available in current profile table: {best.get('profile')}")
+    env_overrides = best.get("env_overrides_used", {})
+    if not isinstance(env_overrides, dict):
+        env_overrides = {}
+    full_run_id = short_run_id(f"{args.campaign_id}-bestfull", run_index, profile.name)
+    original_steps = int(args.steps_per_run)
+    args.steps_per_run = int(args.final_full_train_steps)
+    selection_note = notes_dir / f"BEST-SETTINGS-FULL-TRAIN-{utc_stamp()}.md"
+    selection_note.write_text(
+        "\n".join(
+            [
+                "# Best Settings Full Training Launch",
+                "",
+                f"- generated UTC: `{utc_iso()}`",
+                f"- selected short run: `{best.get('run_id')}`",
+                f"- selected profile: `{profile.name}`",
+                f"- selected BPB: `{metric_bpb(best.get('metrics', {}) if isinstance(best.get('metrics'), dict) else {})}`",
+                f"- full run id: `{full_run_id}`",
+                f"- full steps: `{args.steps_per_run}`",
+                f"- full data path: `{args.fineweb_data}`",
+                f"- tokenizer path: `{args.tokenizer_path}`",
+                "",
+                "## Selected Short-Run Metrics",
+                "",
+                "```json",
+                json.dumps(best.get("metrics", {}), indent=2, sort_keys=True),
+                "```",
+                "",
+                "## Selected Adaptive Overrides",
+                "",
+                "```json",
+                json.dumps(env_overrides, indent=2, sort_keys=True),
+                "```",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        print(
+            f"[{utc_iso()}] launching full-data best-settings run {full_run_id} for {args.steps_per_run} steps from {best.get('run_id')}",
+            flush=True,
+        )
+        return launch_training(args, full_run_id, profile, run_index, env_overrides={str(k): str(v) for k, v in env_overrides.items()})
+    finally:
+        args.steps_per_run = original_steps
 
 
 def main() -> None:
@@ -2034,8 +2303,18 @@ def main() -> None:
             )
             print(f"[{utc_iso()}] target reached by {run_id}: {bpb:.6f}", flush=True)
             return
-    best = min(history, key=lambda row: metric_bpb(row.get("metrics", {}) if isinstance(row.get("metrics"), dict) else {}))
-    final_meta = write_meta_analysis(notes_dir, history, args, phase="final-25-run")
+    best = best_completed_row(history)
+    if best is None:
+        best = min(history, key=lambda row: metric_bpb(row.get("metrics", {}) if isinstance(row.get("metrics"), dict) else {}))
+    final_meta = write_meta_analysis(notes_dir, history, args, phase=f"final-{total_runs}-run")
+    hf_upload_returncode: int | None = None
+    if args.upload_best_short_to_hf:
+        hf_upload_returncode = upload_best_short_checkpoint_to_hf(
+            args,
+            notes_dir,
+            best,
+            phase=f"best-of-{total_runs}-short-runs",
+        )
     synopsis = notes_dir / f"CAMPAIGN-SYNOPSIS-{utc_stamp()}.md"
     synopsis.write_text(
         "\n".join(
@@ -2044,8 +2323,9 @@ def main() -> None:
                 "",
                 f"- campaign: `{args.campaign_id}`",
                 f"- target BPB: `{args.target_bpb}`",
-                f"- runs completed: `{len(history)}`",
+                f"- runs completed: `{len(completed_campaign_rows(history))}`",
                 f"- best run: `{best.get('run_id')}`",
+                f"- HF upload return code: `{hf_upload_returncode}`",
                 f"- final meta-analysis: `{final_meta}`",
                 f"- best metrics:",
                 "",
@@ -2053,12 +2333,31 @@ def main() -> None:
                 json.dumps(best.get("metrics", {}), indent=2, sort_keys=True),
                 "```",
                 "",
-                "The campaign exhausted its configured exact run budget. Inspect the final meta-analysis and the best-run checkpoint before starting another campaign.",
+                "The short-run campaign exhausted its configured exact run budget. The best-run checkpoint is the selected short-run artifact.",
                 "",
             ]
         ),
         encoding="utf-8",
     )
+    if args.final_full_train_best:
+        final_returncode = launch_best_full_training(args, notes_dir, best, run_index=total_runs + 1)
+        final_state = {
+            "campaign_id": args.campaign_id,
+            "updated_utc": utc_iso(),
+            "short_run_budget": total_runs,
+            "short_runs_completed": len(completed_campaign_rows(history)),
+            "best_short_run": best.get("run_id"),
+            "best_short_metrics": best.get("metrics", {}),
+            "hf_upload_returncode": hf_upload_returncode,
+            "final_full_train_steps": int(args.final_full_train_steps),
+            "final_full_train_returncode": final_returncode,
+        }
+        write_state(notes_dir / "final_full_train_state.json", final_state)
+        print(
+            f"[{utc_iso()}] best-settings full training completed with return code {final_returncode}",
+            flush=True,
+        )
+        return
     print(f"[{utc_iso()}] campaign exhausted; synopsis {synopsis}", flush=True)
 
 
