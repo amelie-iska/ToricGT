@@ -49,14 +49,15 @@ IMAGE_SOURCES = {
 INTERACTIVE_REPORTS = {
     "branching_reasoning": {
         "source": "outputs/smoke_oai_full_iteration_analysis_2/branching_reasoning_report",
-        "entry": "branching_reasoning_trajectory.html",
-        "title": "Interactive Simplex Trajectory",
+        "entry": "index.html",
+        "title": "Simplex Trajectory Report",
         "summary": (
-            "Full graph-of-thought reasoning trajectory with 3D PCA display coordinates, "
-            "radius and reasoning-level sliders, token hover/click panels, one-dimensional "
-            "simplex edges, optional filled 2-simplices, and analogy gates."
+            "Potato-safe graph-of-thought trajectory report with exact summary metrics, "
+            "static screenshots of the full and per-step filtered simplicial complexes, "
+            "analogical memory maps, vectorized persistent-homology panels, and links to "
+            "the generated analysis artifacts."
         ),
-        "features": "radius slider · reasoning-level slider · token hover/click · 3D PCA · simplex maps",
+        "features": "static first · exact metrics · screenshots · 3D PCA · simplex maps · PH panels",
         "embed": False,
     },
     "gudhi_persistence": {
@@ -277,6 +278,12 @@ def copy_interactive_reports(repo: Path, docs: Path, analysis_dir: Path | None =
         if dst.exists():
             shutil.rmtree(dst)
         shutil.copytree(src, dst)
+        if key == "branching_reasoning":
+            write_branching_reasoning_lite_report(dst)
+        if key == "gudhi_persistence":
+            enhance_gudhi_persistence_report(dst)
+        if key == "toric_embedding":
+            write_toric_embedding_lite_report(dst)
         copied[key] = {
             "href": f"page_interactive/{key}/{entry}",
             "title": str(spec["title"]),
@@ -286,6 +293,220 @@ def copy_interactive_reports(repo: Path, docs: Path, analysis_dir: Path | None =
         }
     scrub_public_report_paths(out_dir, repo)
     return copied
+
+
+def enhance_gudhi_persistence_report(dst: Path) -> None:
+    extra_css = """
+/* ToricGT GitHub Pages low-resource layout polish. */
+main{width:min(1420px,calc(100vw - 24px));max-width:1420px;padding-inline:12px}
+.hero,.card,.panel{overflow:hidden}
+.plot{overflow-x:auto;overflow-y:hidden;border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;padding:6px}
+.plot>div{min-width:980px;max-width:none}
+.tablewrap{max-width:100%;overflow:auto}
+pre{max-height:min(72vh,720px);overflow:auto;font-size:12px;line-height:1.4}
+details[open] pre{box-shadow:inset 0 0 0 1px rgba(55,232,255,.10)}
+svg.xygrid{max-height:82vh;object-fit:contain}
+@media(max-width:760px){main{width:100%;padding:10px}.plot>div{min-width:760px}h1{font-size:22px}.grid{grid-template-columns:1fr}}
+"""
+    for path in dst.glob("records/*.html"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "ToricGT GitHub Pages low-resource layout polish" not in text:
+            text = text.replace("</style>", extra_css + "\n</style>", 1)
+        text = text.replace("<div class=\"plot\"><div style=\"height:1180px; width:100%;\">", "<div class=\"plot\"><div style=\"height:980px; width:100%;\">")
+        text = text.replace("<h2>Plotly Feature Panel</h2>", "<h2>Vectorized PH Feature Panel</h2>")
+        path.write_text(text, encoding="utf-8")
+
+
+def write_branching_reasoning_lite_report(dst: Path) -> None:
+    original_index = dst / "index.html"
+    text = original_index.read_text(encoding="utf-8", errors="replace") if original_index.exists() else ""
+    metrics = re.findall(r"<div class='metric'><span>(.*?)</span><span>(.*?)</span></div>", text, flags=re.DOTALL)
+    metric_rows = []
+    for name, value in metrics:
+        metric_rows.append(
+            "<tr><th>"
+            + html.escape(re.sub(r"<.*?>", "", name).strip())
+            + "</th><td>"
+            + html.escape(re.sub(r"<.*?>", "", value).strip())
+            + "</td></tr>"
+        )
+    if not metric_rows:
+        metric_rows = [
+            "<tr><th>report mode</th><td>static low-resource summary</td></tr>",
+            "<tr><th>source</th><td>generated branching reasoning analysis bundle</td></tr>",
+        ]
+    screenshot_specs = [
+        ("summary.png", "Summary Dashboard", "Summary screenshot generated from the exact branching-reasoning payload."),
+        (
+            "full_trajectory_filtered_complex.png",
+            "Full Trajectory Filtered Simplicial Complex",
+            "3D PCA display of the full reasoning trajectory with one-dimensional simplex edges and reasoning-level structure.",
+        ),
+        (
+            "selected_step_simplex_tree_tokens.png",
+            "Selected Step Simplex Tree and Tokens",
+            "Per-step simplex tree view with token metadata, NLL coloring, and local filtered-complex evidence.",
+        ),
+        (
+            "analogical_memory_simplex_tree_map.png",
+            "Analogical Memory Simplex-Tree Map",
+            "Source and retrieved memory structures with simplex-map evidence and PH similarity gates.",
+        ),
+        (
+            "vectorized_ph_features.png",
+            "Vectorized Persistent-Homology Features",
+            "Persistence landscapes, images, entropy, and vectorized comparisons used for analogy gating.",
+        ),
+    ]
+    cards = []
+    for filename, title, caption in screenshot_specs:
+        path = dst / "static_screenshots" / filename
+        if not path.exists():
+            continue
+        cards.append(
+            f"""
+            <figure class="shot">
+              <a href="static_screenshots/{html.escape(filename)}"><img loading="lazy" decoding="async" src="static_screenshots/{html.escape(filename)}" alt="{html.escape(title)}"></a>
+              <figcaption><strong>{html.escape(title)}</strong><span>{html.escape(caption)}</span></figcaption>
+            </figure>
+            """
+        )
+    for heavy in ("branching_reasoning_trajectory.html", "branching_reasoning_payload.json"):
+        path = dst / heavy
+        if path.exists():
+            path.unlink()
+    (dst / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema": "toricgt.branching_reasoning_lite.v1",
+                "entry": "index.html",
+                "mode": "low_resource_static",
+                "removed_heavy_browser_payload_count": 2,
+                "static_screenshots": [
+                    f"static_screenshots/{filename}"
+                    for filename, _, _ in screenshot_specs
+                    if (dst / "static_screenshots" / filename).exists()
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    static_manifest = dst / "static_screenshots" / "manifest.json"
+    if static_manifest.exists():
+        static_data = load_json(static_manifest)
+        static_data.pop("payload_json", None)
+        static_data.pop("source_html", None)
+        static_data["mode"] = "static_screenshot_evidence"
+        static_manifest.write_text(json.dumps(static_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (dst / "index.html").write_text(
+        f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Branching Reasoning Trajectory Report</title>
+  <style>
+    :root{{color-scheme:dark;--bg:#030712;--panel:#07111f;--line:rgba(55,232,255,.28);--text:#e8fbff;--muted:#9fb1c9;--cyan:#37e8ff;--gold:#ffd166}}
+    *{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at top left,#092238 0,#030712 42rem);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
+    main{{max-width:1180px;margin:0 auto;padding:28px 18px 64px}}a{{color:var(--cyan)}}.hero,.panel,.shot{{background:linear-gradient(180deg,rgba(11,23,40,.96),rgba(5,13,25,.98));border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.28)}}
+    .hero,.panel{{padding:18px;margin:14px 0}}h1{{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}}h2{{margin:0 0 12px}}p{{color:var(--muted);line-height:1.55}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}}
+    table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(159,177,201,.16);padding:9px;text-align:left;vertical-align:top}}th{{color:#bdeeff;width:42%}}td{{color:#fff}}
+    .shot{{margin:0;overflow:hidden}}.shot img{{display:block;width:100%;height:auto;background:#020713}}.shot figcaption{{display:grid;gap:5px;padding:12px 14px}}.shot span{{color:var(--muted);line-height:1.45}}.pill{{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}}
+    .note{{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}}
+  </style>
+</head>
+<body><main>
+  <section class="hero">
+    <h1>Branching Reasoning Trajectory Report</h1>
+    <p>This is the low-resource public entry point for the graph-of-thought simplex trajectory. It keeps the exact summary metrics and visual evidence while avoiding the large browser-side payload that can freeze older machines.</p>
+    <p><a class="pill" href="static_screenshots/index.html">Static screenshot audit</a><a class="pill" href="static_screenshots/contact_sheet.png">Contact sheet</a><a class="pill" href="manifest.json">Manifest</a></p>
+    <p class="note">The full slider/WebGL payload is intentionally not published as the default GitHub Pages artifact. It remains reproducible from the analysis output bundle; this page preserves the important measurements and rendered evidence without forcing a 100MB load.</p>
+  </section>
+  <section class="panel">
+    <h2>Exact Summary Metrics</h2>
+    <table><tbody>{''.join(metric_rows)}</tbody></table>
+  </section>
+  <section class="panel">
+    <h2>Visual Evidence</h2>
+    <div class="grid">{''.join(cards)}</div>
+  </section>
+</main></body></html>
+""",
+        encoding="utf-8",
+    )
+
+
+def write_toric_embedding_lite_report(dst: Path) -> None:
+    records_dir = dst / "records"
+    summaries = sorted(records_dir.glob("*_summary.json")) if records_dir.exists() else []
+    cards = []
+    for summary_path in summaries:
+        summary = load_json(summary_path)
+        record_id = str(summary.get("record_id", summary_path.stem.replace("_summary", "")))
+        exactness = summary.get("exactness", {}) if isinstance(summary.get("exactness"), dict) else {}
+        staircase = summary.get("miller_sturmfels_staircase", {}) if isinstance(summary.get("miller_sturmfels_staircase"), dict) else {}
+        minimal_generators = staircase.get("minimal_generators", [])
+        quotient_basis = staircase.get("quotient_basis", [])
+        adjacent = staircase.get("adjacent_lcm_layer", [])
+        cards.append(
+            f"""
+            <section class="card">
+              <h2>{html.escape(record_id)}</h2>
+              <table>
+                <tbody>
+                  <tr><th>exponents</th><td>{fmt(summary.get("exponent_count"), 0)}</td></tr>
+                  <tr><th>dimension</th><td>{fmt(summary.get("exponent_dim"), 0)}</td></tr>
+                  <tr><th>Sage normal fan exact</th><td>{html.escape(str(exactness.get("sage_normal_fan_exact", "unknown")))}</td></tr>
+                  <tr><th>Macaulay2 toric ideal exact</th><td>{html.escape(str(exactness.get("macaulay2_toric_ideal_exact", "unknown")))}</td></tr>
+                  <tr><th>minimal generators</th><td><code>{html.escape(json.dumps(minimal_generators))}</code></td></tr>
+                  <tr><th>quotient-basis lattice points</th><td>{fmt(len(quotient_basis), 0)}</td></tr>
+                  <tr><th>adjacent LCM corners</th><td>{fmt(len(adjacent), 0)}</td></tr>
+                </tbody>
+              </table>
+              <p><a class="pill" href="records/{html.escape(summary_path.name)}">summary JSON</a></p>
+            </section>
+            """
+        )
+    for html_record in records_dir.glob("*.html") if records_dir.exists() else []:
+        html_record.unlink()
+    if not cards:
+        cards.append("<section class='card'><h2>No record summaries found</h2><p>The toric embedding manifest was copied, but no small summary JSON was available.</p></section>")
+    (dst / "index.html").write_text(
+        f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ToricGT Tropical-To-Toric Embedding</title>
+  <style>
+    :root{{color-scheme:dark;--bg:#030712;--panel:#07111f;--line:rgba(55,232,255,.28);--text:#e8fbff;--muted:#9fb1c9;--cyan:#37e8ff;--gold:#ffd166}}
+    *{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at top left,#092238 0,#030712 42rem);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
+    main{{max-width:1180px;margin:0 auto;padding:28px 18px 64px}}a{{color:var(--cyan)}}.hero,.card,.panel{{background:linear-gradient(180deg,rgba(11,23,40,.96),rgba(5,13,25,.98));border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.28)}}
+    .hero,.panel{{padding:18px;margin:14px 0}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}}.card{{padding:16px}}h1{{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}}p{{color:var(--muted);line-height:1.55}}
+    table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(159,177,201,.16);padding:8px;text-align:left;vertical-align:top}}th{{color:#bdeeff;width:38%}}td{{color:#fff}}code{{color:#ffd166;white-space:pre-wrap;overflow-wrap:anywhere}}
+    img{{display:block;width:100%;border:1px solid rgba(55,232,255,.20);border-radius:8px;background:#020713}}.pill{{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}}
+    .note{{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}}
+  </style>
+</head>
+<body><main>
+  <section class="hero">
+    <h1>Tropical-To-Toric Embedding Report</h1>
+    <p>This low-resource page preserves the exact finite toric-embedding record summaries: exponent counts, Sage normal-fan status, Macaulay2 toric-ideal status, Miller-Sturmfels staircase generators, quotient-basis counts, and adjacent LCM data. The original large Plotly record is omitted from GitHub Pages so older browsers do not parse tens of megabytes of JavaScript.</p>
+    <p><a class="pill" href="manifest.json">manifest JSON</a></p>
+    <p class="note">The visual screenshot below is generated from the original audit. The small summary JSON files keep the reproducible algebraic evidence without forcing a heavy interactive plot.</p>
+  </section>
+  <section class="panel">
+    <h2>Rendered Audit Screenshot</h2>
+    <img loading="lazy" decoding="async" src="../../page_assets/toric_embedding.png" alt="Toric embedding audit screenshot">
+  </section>
+  <section class="grid">{''.join(cards)}</section>
+</main></body></html>
+""",
+        encoding="utf-8",
+    )
 
 
 def scrub_public_report_paths(root: Path, repo: Path) -> None:
@@ -572,6 +793,14 @@ def campaign_record_payload(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "run": str(row.get("run_id", f"run-{index}"))[-64:],
                 "profile": str(row.get("profile", f"run-{index}")),
                 "bpb": bpb,
+                "nll_loss": next(
+                    (
+                        float(metrics[key])
+                        for key in ("val_loss", "final_int8_loss", "train_loss")
+                        if isinstance(metrics.get(key), (int, float)) and math.isfinite(float(metrics[key]))
+                    ),
+                    None,
+                ),
                 "artifact": metrics.get("artifact_bytes"),
                 "train_bpb": metrics.get("train_bpb"),
                 "checkpoint_step": metrics.get("checkpoint_step", metrics.get("train_step")),
@@ -615,7 +844,7 @@ def tetrahedron_view_payload(records: list[dict[str, Any]], normalized: dict[str
         total = sum(weights)
         bary = [0.25, 0.25, 0.25, 0.25] if total <= 0 else [value / total for value in weights]
         xyz = [sum(bary[i] * vertices[i][dim] for i in range(4)) for dim in range(3)]
-        points.append({**record, "weights": bary, "xyz": xyz})
+        points.append({"record_index": record["index"], "weights": bary, "xyz": xyz})
     return {
         "id": str(spec["id"]),
         "title": str(spec["title"]),
@@ -637,9 +866,9 @@ def triangle_view_payload(records: list[dict[str, Any]], normalized: dict[str, l
         bary = [1 / 3, 1 / 3, 1 / 3] if total <= 0 else [value / total for value in weights]
         xy = [sum(bary[i] * vertices[i][dim] for i in range(3)) for dim in range(2)]
         balance = 1.0 - min(1.0, (sum((value - 1 / 3) ** 2 for value in bary) ** 0.5) / ((2 / 3) ** 0.5))
-        points.append({**record, "weights": bary, "xy": xy, "balance": balance})
+        points.append({"record_index": record["index"], "weights": bary, "xy": xy, "balance": balance})
     grid: list[dict[str, Any]] = []
-    resolution = 32
+    resolution = 20
     for i in range(resolution + 1):
         for j in range(resolution + 1 - i):
             a = i / resolution
@@ -658,6 +887,7 @@ def triangle_view_payload(records: list[dict[str, Any]], normalized: dict[str, l
         "vertices": vertices,
         "shade": str(spec.get("shade", "balanced metric support")),
         "grid": grid,
+        "grid_resolution": resolution,
         "points": points,
     }
 
@@ -679,30 +909,74 @@ def write_campaign_tetrahedron_report(docs: Path, rows: list[dict[str, Any]]) ->
         "triangles": triangles,
     }
     (out_dir / "campaign_tetrahedron.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    axis_ids = list(CAMPAIGN_METRIC_AXES)
+    raw_header = "".join(f"<th>{html.escape(CAMPAIGN_METRIC_AXES[axis]['label'])}</th>" for axis in axis_ids)
+    raw_rows = []
+    for record in records:
+        raw_rows.append(
+            "<tr>"
+            + f"<th>{record['index']}. {html.escape(record['profile'])}</th>"
+            + "".join(f"<td>{fmt(record['raw_values'].get(axis))}</td>" for axis in axis_ids)
+            + "</tr>"
+        )
     page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Campaign Metric Tetrahedra</title>
-<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
 :root{{color-scheme:dark;--bg:#030712;--panel:#071421;--line:rgba(70,231,255,.28);--text:#ecfbff;--muted:#9db8cf;--cyan:#46e7ff;--gold:#ffd166}}
-body{{margin:0;background:radial-gradient(circle at 10% 10%,rgba(70,231,255,.16),transparent 30rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
+*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 10% 10%,rgba(70,231,255,.16),transparent 30rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
 main{{max-width:1280px;margin:0 auto;padding:24px}}.panel{{border:1px solid var(--line);border-radius:10px;background:rgba(7,20,33,.86);padding:16px;margin:14px 0}}
-h1{{margin:0 0 8px}}p{{color:var(--muted);line-height:1.5}}.plot{{height:620px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713;margin-top:12px}}
-.plot.triangle{{height:500px}}.view-controls{{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin:8px 0 12px}}select{{width:100%;background:#020713;color:var(--text);border:1px solid rgba(70,231,255,.28);border-radius:8px;padding:10px}}label{{display:block;color:var(--muted);font-size:.9rem;margin-bottom:4px}}.metric-note{{font-size:.92rem;color:var(--muted);margin-top:8px}}code{{color:#7df5ff}}
-table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(157,184,207,.16);padding:8px;text-align:left}}td.num{{text-align:right;color:var(--gold)}}
+h1{{margin:0 0 8px}}p{{color:var(--muted);line-height:1.5}}.plot{{min-height:520px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713;margin-top:12px;overflow:hidden}}
+.plot.triangle{{min-height:420px}}.view-controls{{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin:8px 0 12px}}select{{width:100%;background:#020713;color:var(--text);border:1px solid rgba(70,231,255,.28);border-radius:8px;padding:10px}}label{{display:block;color:var(--muted);font-size:.9rem;margin-bottom:4px}}.metric-note{{font-size:.92rem;color:var(--muted);margin-top:8px}}code{{color:#7df5ff}}
+svg{{display:block;width:100%;height:auto}}.svg-label{{font-size:13px;fill:#ecfbff;paint-order:stroke;stroke:#020713;stroke-width:3px}}.svg-small{{font-size:11px;fill:#9db8cf}}.point-label{{font-size:11px;fill:#ecfbff;paint-order:stroke;stroke:#020713;stroke-width:3px}}.tetra-edge{{stroke:#46e7ff;stroke-width:2.5}}.tetra-face{{fill:rgba(70,231,255,.10);stroke:#46e7ff;stroke-width:1.5}}.triangle-cell{{stroke:none;opacity:.72}}.triangle-contour{{stroke:rgba(236,251,255,.18);stroke-width:.9;fill:none}}.run-point{{stroke:#fff;stroke-width:1.2;cursor:pointer}}.run-point:hover{{stroke:#ffd166;stroke-width:3px}}.details{{border:1px solid rgba(70,231,255,.16);border-radius:8px;background:#020713;padding:10px;margin-top:10px;color:#dff8ff;line-height:1.45}}
+table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(157,184,207,.16);padding:8px;text-align:left;vertical-align:top}}td.num{{text-align:right;color:var(--gold)}}.scroll{{overflow:auto;max-height:520px;border:1px solid rgba(70,231,255,.14);border-radius:8px}}.scroll table{{min-width:1100px}}.button{{border:1px solid var(--line);border-radius:999px;padding:8px 12px;background:rgba(70,231,255,.08);color:var(--text);font-weight:700;display:inline-block}}
 </style></head><body><main>
 <section class="panel"><h1>Campaign Metric Tetrahedra and Shaded Triangles</h1>
-<p>This page renders interactive tetrahedra and shaded metric triangles over completed campaign runs without mounting every Plotly view at once. Each tetrahedron uses four normalized axes. Each triangle uses three normalized axes; the blue background shading marks regions where the three metrics are jointly balanced, while run markers are colored by BPB and labeled by run index. Lower BPB is always better.</p>
+<p>This page is SVG-first and low-resource by default. It still shows every campaign metric view, all run labels, normalized tetrahedron/triangle geometry, raw metric tables, and hover/click details, but it does not load Plotly or WebGL.</p>
 <p><a href="campaign_tetrahedron.json">payload JSON</a></p></section>
 <section class="panel"><h2>Tetrahedron Views</h2><div class="view-controls"><div><label for="tetra_select">metric tetrahedron</label><select id="tetra_select"><option>loading...</option></select></div><span id="tetra_count" class="metric-note"></span></div><div id="tetra_plot" class="plot"></div><p id="tetra_caption" class="metric-note"></p></section>
 <section class="panel"><h2>Shaded Triangle Views</h2><p>Blue shading indicates the balanced-support region for the metric triple. Markers remain actual run observations; hover text reports profile, BPB, raw axis values, and barycentric weights.</p><div class="view-controls"><div><label for="triangle_select">metric triangle</label><select id="triangle_select"><option>loading...</option></select></div><span id="triangle_count" class="metric-note"></span></div><div id="triangle_plot" class="plot triangle"></div><p id="triangle_caption" class="metric-note"></p></section>
-<section class="panel"><h2>Run Table</h2><table><thead><tr><th>profile</th><th>run</th><th>BPB</th><th>artifact bytes</th><th>train BPB</th></tr></thead><tbody>
-{''.join(f"<tr><td>{html.escape(p['profile'])}</td><td>{html.escape(p['run'])}</td><td class='num'>{p['bpb']:.6f}</td><td class='num'>{fmt(p.get('artifact'),0)}</td><td class='num'>{fmt(p.get('train_bpb'))}</td></tr>" for p in records)}
+<section class="panel"><h2>Run Table</h2><table><thead><tr><th>profile</th><th>run</th><th>BPB</th><th>NLL/loss</th><th>artifact bytes</th><th>train BPB</th></tr></thead><tbody>
+{''.join(f"<tr><td>{html.escape(p['profile'])}</td><td>{html.escape(p['run'])}</td><td class='num'>{p['bpb']:.6f}</td><td class='num'>{fmt(p.get('nll_loss'))}</td><td class='num'>{fmt(p.get('artifact'),0)}</td><td class='num'>{fmt(p.get('train_bpb'))}</td></tr>" for p in records)}
 </tbody></table></section>
+<section class="panel"><h2>Raw Metric Detail</h2><p>All axis values used by the tetrahedra and triangles are retained here so the low-resource view does not discard the underlying evidence.</p><div class="scroll"><table><thead><tr><th>run</th>{raw_header}</tr></thead><tbody>{''.join(raw_rows)}</tbody></table></div></section>
 <script>
 let payload = null;
+let recordByIndex = new Map();
+function esc(value) {{
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch]));
+}}
+function fmtValue(value) {{
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.abs(value) >= 10000 ? Math.round(value).toLocaleString() : value.toFixed(4);
+  return value ?? 'missing';
+}}
+function recordFor(point) {{
+  return recordByIndex.get(point.record_index) || {{}};
+}}
 function axisRawText(point, axes) {{
-  return axes.map(axis => payload.axis_library[axis].label+': '+(point.raw_values[axis] ?? 'missing')).join('<br>');
+  const rec = recordFor(point);
+  return axes.map(axis => payload.axis_library[axis].label+': '+fmtValue(rec.raw_values?.[axis])).join('<br>');
+}}
+function pointTitle(point, axes) {{
+  const rec = recordFor(point);
+  return rec.profile+'\\nrun '+rec.run+'\\nBPB '+fmtValue(rec.bpb)+'\\nNLL/loss '+fmtValue(rec.nll_loss)+'\\nweights '+point.weights.map(w=>w.toFixed(3)).join(' / ')+'\\n'+axes.map(axis => payload.axis_library[axis].label+': '+fmtValue(rec.raw_values?.[axis])).join('\\n');
+}}
+function colorForBpb(value) {{
+  const vals = payload.records.map(r => r.bpb).filter(v => typeof v === 'number');
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const t = hi <= lo ? 0.5 : (value - lo) / (hi - lo);
+  const r = Math.round(255 * (0.18 + 0.72 * t));
+  const g = Math.round(230 * (0.78 - 0.52 * t));
+  const b = Math.round(115 * (0.28 + 0.38 * (1 - t)));
+  return `rgb(${{r}},${{g}},${{b}})`;
+}}
+function project3(v) {{
+  return [360 + v[0] * 150 + v[1] * 42, 270 - v[2] * 120 + v[1] * 34];
+}}
+function showDetails(id, point, axes) {{
+  const rec = recordFor(point);
+  const raw = axes.map(axis => `<tr><th>${{esc(payload.axis_library[axis].label)}}</th><td>${{esc(fmtValue(rec.raw_values?.[axis]))}}</td></tr>`).join('');
+  document.getElementById(id).innerHTML = `<strong>${{esc(rec.profile)}}</strong><br>run ${{esc(rec.run)}} · BPB ${{esc(fmtValue(rec.bpb))}} · NLL/loss ${{esc(fmtValue(rec.nll_loss))}} · weights ${{esc(point.weights.map(w=>w.toFixed(3)).join(' / '))}}<table>${{raw}}</table>`;
 }}
 function populateSelect(select, views) {{
   select.innerHTML = '';
@@ -716,29 +990,77 @@ function populateSelect(select, views) {{
 function renderTetra(view) {{
   const vertices = view.vertices;
   const edges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
-  const traces = [];
-  for (const [i,j] of edges) {{
-    traces.push({{type:'scatter3d', mode:'lines', x:[vertices[i][0],vertices[j][0]], y:[vertices[i][1],vertices[j][1]], z:[vertices[i][2],vertices[j][2]], line:{{color:'#46e7ff',width:5}}, hoverinfo:'skip', showlegend:false}});
-  }}
-  traces.push({{type:'mesh3d', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]), i:[0,0,0,1], j:[1,1,2,2], k:[2,3,3,3], opacity:0.09, color:'#46e7ff', hoverinfo:'skip', name:'tetrahedron faces'}});
-  traces.push({{type:'scatter3d', mode:'markers+text', name:'campaign runs', showlegend:false, x:view.points.map(p=>p.xyz[0]), y:view.points.map(p=>p.xyz[1]), z:view.points.map(p=>p.xyz[2]), text:view.points.map(p=>String(p.index)), customdata:view.points.map(p=>[p.profile,p.run,p.bpb,p.artifact,p.train_bpb,p.weights.map(w=>w.toFixed(3)).join(' / '),axisRawText(p, view.axes)]), marker:{{size:8,color:view.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,colorbar:{{title:'BPB'}},line:{{color:'white',width:1}}}}, hovertemplate:'%{{customdata[0]}}<br>run %{{customdata[1]}}<br>BPB %{{customdata[2]:.6f}}<br>artifact %{{customdata[3]}}<br>train BPB %{{customdata[4]}}<br>weights %{{customdata[5]}}<br>%{{customdata[6]}}<extra></extra>'}});
-  traces.push({{type:'scatter3d', mode:'text', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]+0.08), text:view.labels, textfont:{{color:'#ecfbff',size:14}}, hoverinfo:'skip', showlegend:false}});
-  Plotly.react('tetra_plot', traces, {{template:'plotly_dark', title:{{text:view.title,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', scene:{{aspectmode:'data', camera:{{eye:{{x:1.55,y:1.35,z:1.15}}}}, xaxis:{{visible:false}}, yaxis:{{visible:false}}, zaxis:{{visible:false}}, bgcolor:'#020713'}}, margin:{{l:0,r:0,t:42,b:0}}}}, {{responsive:true}});
+  const pv = vertices.map(project3);
+  const faces = [[0,1,2],[0,1,3],[0,2,3],[1,2,3]].map(face => `<polygon class="tetra-face" points="${{face.map(i=>pv[i].join(',')).join(' ')}}" />`).join('');
+  const edgeSvg = edges.map(([i,j]) => `<line class="tetra-edge" x1="${{pv[i][0]}}" y1="${{pv[i][1]}}" x2="${{pv[j][0]}}" y2="${{pv[j][1]}}" />`).join('');
+  const labels = pv.map((p,i) => `<text class="svg-label" text-anchor="middle" x="${{p[0]}}" y="${{p[1]-12}}">${{esc(view.labels[i])}}</text>`).join('');
+  const points = view.points.map(point => {{
+    const rec = recordFor(point);
+    const [x,y] = project3(point.xyz);
+    return `<g><circle class="run-point" cx="${{x}}" cy="${{y}}" r="8" fill="${{colorForBpb(rec.bpb)}}" onclick="showDetails('tetra_details', payload.tetrahedra[document.getElementById('tetra_select').value].points.find(p=>p.record_index===${{point.record_index}}), payload.tetrahedra[document.getElementById('tetra_select').value].axes)"><title>${{esc(pointTitle(point, view.axes))}}</title></circle><text class="point-label" x="${{x+10}}" y="${{y+4}}">${{point.record_index}}</text></g>`;
+  }}).join('');
+  document.getElementById('tetra_plot').innerHTML = `<svg viewBox="0 0 720 540" role="img" aria-label="${{esc(view.title)}}">${{faces}}${{edgeSvg}}${{labels}}${{points}}</svg><div id="tetra_details" class="details">Hover a run marker for details; click it to pin exact raw axis values.</div>`;
   document.getElementById('tetra_caption').innerHTML = 'Axes: '+view.axes.map(axis => payload.axis_library[axis].label).join(' · ');
 }}
 function renderTriangle(view) {{
   const boundary = [...view.vertices, view.vertices[0]];
-  const traces = [
-    {{type:'scatter', mode:'markers', x:view.grid.map(g=>g.x), y:view.grid.map(g=>g.y), marker:{{size:9,color:view.grid.map(g=>g.shade),colorscale:'Blues',opacity:0.68,colorbar:{{title:'blue balance'}}}}, hoverinfo:'skip', showlegend:false}},
-    {{type:'scatter', mode:'lines', x:boundary.map(v=>v[0]), y:boundary.map(v=>v[1]), line:{{color:'#46e7ff',width:3}}, hoverinfo:'skip', showlegend:false}},
-    {{type:'scatter', mode:'markers+text', name:'campaign runs', showlegend:false, x:view.points.map(p=>p.xy[0]), y:view.points.map(p=>p.xy[1]), text:view.points.map(p=>String(p.index)), textposition:'top center', customdata:view.points.map(p=>[p.profile,p.run,p.bpb,p.weights.map(w=>w.toFixed(3)).join(' / '),p.balance.toFixed(3),axisRawText(p, view.axes)]), marker:{{size:13,color:view.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,line:{{color:'#ecfbff',width:1}},colorbar:{{title:'BPB'}}}}, hovertemplate:'%{{customdata[0]}}<br>run %{{customdata[1]}}<br>BPB %{{customdata[2]:.6f}}<br>weights %{{customdata[3]}}<br>balance %{{customdata[4]}}<br>%{{customdata[5]}}<extra></extra>'}},
-    {{type:'scatter', mode:'text', x:view.vertices.map(v=>v[0]), y:view.vertices.map(v=>v[1]), text:view.labels, textfont:{{color:'#ecfbff',size:13}}, hoverinfo:'skip', showlegend:false}},
-  ];
-  Plotly.react('triangle_plot', traces, {{template:'plotly_dark', title:{{text:view.title+' · '+view.shade,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', xaxis:{{visible:false,range:[0,1]}}, yaxis:{{visible:false,range:[0,1]}}, margin:{{l:12,r:12,t:42,b:12}}}}, {{responsive:true}});
+  const map2 = p => [70 + p[0] * 580, 370 - p[1] * 330];
+  const res = view.grid_resolution || 20;
+  function shadeFromBary(a,b,c) {{
+    const balance = 1.0 - Math.min(1.0, Math.sqrt((a-1/3)**2 + (b-1/3)**2 + (c-1/3)**2) / Math.sqrt(2/3));
+    const synergy = 3 * Math.cbrt(Math.max(0, a*b*c));
+    return Math.max(0, Math.min(1, 0.55 * balance + 0.45 * synergy));
+  }}
+  function shadeColor(shade) {{
+    const r = Math.round(7 + 18 * shade);
+    const g = Math.round(45 + 118 * shade);
+    const b = Math.round(88 + 154 * shade);
+    return `rgb(${{r}},${{g}},${{b}})`;
+  }}
+  function baryToXY(a,b,c) {{
+    return map2([
+      a * view.vertices[0][0] + b * view.vertices[1][0] + c * view.vertices[2][0],
+      a * view.vertices[0][1] + b * view.vertices[1][1] + c * view.vertices[2][1],
+    ]);
+  }}
+  const cells = [];
+  for (let i = 0; i < res; i++) {{
+    for (let j = 0; j < res - i; j++) {{
+      const a = i / res, b0 = j / res, c = 1 - a - b0;
+      const a1 = (i + 1) / res, b1 = j / res, c1 = 1 - a1 - b1;
+      const a2 = i / res, b2 = (j + 1) / res, c2 = 1 - a2 - b2;
+      const p0 = baryToXY(a,b0,c), p1 = baryToXY(a1,b1,c1), p2 = baryToXY(a2,b2,c2);
+      const s = shadeFromBary((a+a1+a2)/3, (b0+b1+b2)/3, (c+c1+c2)/3);
+      cells.push(`<polygon class="triangle-cell" points="${{p0.join(',')}} ${{p1.join(',')}} ${{p2.join(',')}}" fill="${{shadeColor(s)}}"><title>balanced support shade ${{s.toFixed(3)}}</title></polygon>`);
+      if (i + j < res - 1) {{
+        const a3 = (i + 1) / res, b3 = (j + 1) / res, c3 = 1 - a3 - b3;
+        const p3 = baryToXY(a3,b3,c3);
+        const s2 = shadeFromBary((a1+a2+a3)/3, (b1+b2+b3)/3, (c1+c2+c3)/3);
+        cells.push(`<polygon class="triangle-cell" points="${{p1.join(',')}} ${{p3.join(',')}} ${{p2.join(',')}}" fill="${{shadeColor(s2)}}"><title>balanced support shade ${{s2.toFixed(3)}}</title></polygon>`);
+      }}
+    }}
+  }}
+  const grid = cells.join('');
+  const b = boundary.map(map2);
+  const boundarySvg = `<polyline points="${{b.map(p=>p.join(',')).join(' ')}}" fill="none" stroke="#46e7ff" stroke-width="3"/>`;
+  const labels = view.vertices.map((v,i) => {{ const [x,y] = map2(v); return `<text class="svg-label" text-anchor="middle" x="${{x}}" y="${{y-12}}">${{esc(view.labels[i])}}</text>`; }}).join('');
+  const contours = [0.25, 0.50, 0.75].map(t => {{
+    const pA = baryToXY(t,(1-t)/2,(1-t)/2);
+    const pB = baryToXY((1-t)/2,t,(1-t)/2);
+    const pC = baryToXY((1-t)/2,(1-t)/2,t);
+    return `<polyline class="triangle-contour" points="${{pA.join(',')}} ${{pB.join(',')}} ${{pC.join(',')}} ${{pA.join(',')}}" />`;
+  }}).join('');
+  const points = view.points.map(point => {{
+    const rec = recordFor(point);
+    const [x,y] = map2(point.xy);
+    return `<g><circle class="run-point" cx="${{x}}" cy="${{y}}" r="9" fill="${{colorForBpb(rec.bpb)}}" onclick="showDetails('triangle_details', payload.triangles[document.getElementById('triangle_select').value].points.find(p=>p.record_index===${{point.record_index}}), payload.triangles[document.getElementById('triangle_select').value].axes)"><title>${{esc(pointTitle(point, view.axes))}}</title></circle><text class="point-label" x="${{x+11}}" y="${{y+4}}">${{point.record_index}}</text></g>`;
+  }}).join('');
+  document.getElementById('triangle_plot').innerHTML = `<svg viewBox="0 0 720 420" role="img" aria-label="${{esc(view.title)}}">${{grid}}${{contours}}${{boundarySvg}}${{labels}}${{points}}</svg><div id="triangle_details" class="details">Hover a run marker for BPB/NLL details; click it to pin exact raw axis values. NLL/loss stays in this panel and in the table so it does not overlap the metric geometry.</div>`;
   document.getElementById('triangle_caption').innerHTML = 'Axes: '+view.axes.map(axis => payload.axis_library[axis].label).join(' · ')+' · shade: '+view.shade;
 }}
 function initCampaignViews(data) {{
   payload = data;
+  recordByIndex = new Map(payload.records.map(record => [record.index, record]));
   const tetraSelect = document.getElementById('tetra_select');
   const triangleSelect = document.getElementById('triangle_select');
   populateSelect(tetraSelect, payload.tetrahedra);
@@ -905,7 +1227,7 @@ METHOD_CSS = """
 main{max-width:1240px;margin:0 auto;padding:28px 20px 64px}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .hero,.panel,.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(11,27,43,.92),rgba(7,20,33,.88));box-shadow:0 24px 80px rgba(0,0,0,.38)}
 .hero{padding:24px;margin-bottom:18px}.panel{padding:18px;margin:18px 0}.grid{display:grid;gap:16px}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:repeat(3,minmax(0,1fr))}
-h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.card{padding:16px;min-height:220px}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
+h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.metric-note{font-size:.94rem;color:var(--muted);line-height:1.5}.card{padding:16px;min-height:0;overflow-wrap:anywhere}.card p{margin-bottom:0}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}.callout{border-left:3px solid var(--gold);background:rgba(255,209,102,.08);border-radius:12px;padding:12px 14px;color:#ffe8a8}.detail-panel{border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:14px;margin-top:12px;min-height:180px}.detail-panel strong{color:#fff}.svg-button{cursor:pointer}.svg-button:hover{filter:drop-shadow(0 0 10px rgba(255,209,102,.75))}.method-list{margin:0;padding-left:1.1rem}.method-list li{margin:0 0 .65rem}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
 """
 
 
@@ -913,7 +1235,6 @@ def method_report_shell(title: str, eyebrow: str, body: str) -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
-<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>{METHOD_CSS}</style></head><body><main>
 <section class="hero"><div class="eyebrow">{html.escape(eyebrow)}</div><h1>{html.escape(title)}</h1></section>
 {body}
@@ -925,18 +1246,95 @@ def write_fot_method_report(docs: Path, copied: dict[str, str]) -> dict[str, str
     out = docs / "page_interactive" / "fot_method"
     out.mkdir(parents=True, exist_ok=True)
     image = "../../" + copied.get("fot_reference", "")
-    payload = {
-        "nodes": [
-            {"id": "root", "tree": 0, "x": 0, "y": 0, "z": 0, "kind": "prompt"},
-            {"id": "t0a", "tree": 0, "x": 1, "y": 1.2, "z": .2, "kind": "branch"},
-            {"id": "t0b", "tree": 0, "x": 1, "y": -.9, "z": -.15, "kind": "branch"},
-            {"id": "t1a", "tree": 1, "x": 2.1, "y": 1.7, "z": .7, "kind": "tree"},
-            {"id": "t1b", "tree": 1, "x": 2.3, "y": .1, "z": -.25, "kind": "tree"},
-            {"id": "t2a", "tree": 2, "x": 3.4, "y": -.4, "z": .6, "kind": "tree"},
-            {"id": "vote", "tree": 3, "x": 4.6, "y": .25, "z": .1, "kind": "consensus"},
-        ],
-        "edges": [["root", "t0a"], ["root", "t0b"], ["t0a", "t1a"], ["t0a", "t1b"], ["t0b", "t2a"], ["t1a", "vote"], ["t1b", "vote"], ["t2a", "vote"]],
+    fot_nodes = {
+        "root": (68, 210, "#ffd166", "prompt root; initializes the embedding-space forest"),
+        "t0a": (178, 112, "#46e7ff", "tree 0 branch; high fan margin, medium BPB delta"),
+        "t0b": (178, 296, "#46e7ff", "tree 0 branch; exploratory graph edit"),
+        "t1a": (328, 66, "#a78bfa", "tree 1 branch; retrieved analogy and topological stability"),
+        "t1b": (332, 202, "#a78bfa", "tree 1 branch; correction branch"),
+        "t2a": (470, 292, "#ff5fa2", "tree 2 branch; diversity-preserving candidate"),
+        "vote": (610, 178, "#88ff86", "forest consensus; candidate selected by BPB-delta reward"),
     }
+    fot_edges = [
+        ("root", "t0a", "spawn tree branch"),
+        ("root", "t0b", "spawn exploratory branch"),
+        ("t0a", "t1a", "expand promising branch"),
+        ("t0a", "t1b", "self-correction branch"),
+        ("t0b", "t2a", "independent tree expansion"),
+        ("t1a", "vote", "consensus edge"),
+        ("t1b", "vote", "consensus edge"),
+        ("t2a", "vote", "minority but diverse vote"),
+    ]
+    edge_svg = []
+    for a, b, label in fot_edges:
+        x1, y1, _, _ = fot_nodes[a]
+        x2, y2, _, _ = fot_nodes[b]
+        edge_svg.append(
+            f'<path d="M{x1} {y1} C{(x1+x2)//2} {y1-42}, {(x1+x2)//2} {y2+42}, {x2} {y2}" '
+            f'fill="none" stroke="#46e7ff" stroke-width="4" stroke-opacity=".72"><title>{html.escape(label)}</title></path>'
+        )
+    node_svg = []
+    for node_id, (x, y, color, label) in fot_nodes.items():
+        node_svg.append(
+            f'<circle id="fot-node-{html.escape(node_id)}" data-node="{html.escape(node_id)}" class="svg-button" '
+            f'cx="{x}" cy="{y}" r="18" fill="{color}" stroke="#ecfbff" stroke-width="1.5" role="button" '
+            f'aria-label="Reveal FoT tree for {html.escape(label)}" '
+            f'tabindex="0">'
+            f'<title>{html.escape(label)}</title></circle>'
+            f'<text x="{x}" y="{y+40}" fill="#ecfbff" font-size="16" text-anchor="middle">{html.escape(node_id)}</text>'
+        )
+    fot_detail_payload = {
+        "root": {
+            "title": "Prompt Root",
+            "role": "Initial graph state before the forest is expanded.",
+            "tree": [["prompt", "token graph"], ["prompt", "retrieval query"], ["token graph", "byte flattening"]],
+            "metrics": {"reward seed": "BPB prior + graph validity", "fan": "no wall crossing yet", "memory": "query only"},
+        },
+        "t0a": {
+            "title": "High-Margin Branch",
+            "role": "First tree branch with the best early tropical fan margin.",
+            "tree": [["t0a", "local edit"], ["t0a", "analogy probe"], ["local edit", "candidate answer"], ["analogy probe", "memory support"]],
+            "metrics": {"reward": "positive BPB-delta", "fan margin": "high", "PH gate": "medium-high"},
+        },
+        "t0b": {
+            "title": "Exploratory Branch",
+            "role": "Diversity branch retained to avoid early collapse into one reasoning path.",
+            "tree": [["t0b", "alternate graph edge"], ["t0b", "low-rank toric probe"], ["alternate graph edge", "candidate answer"]],
+            "metrics": {"reward": "uncertain", "diversity": "high", "correction need": "medium"},
+        },
+        "t1a": {
+            "title": "Retrieved-Analogy Branch",
+            "role": "Branch that uses memory retrieval after simplex-map and PH similarity checks.",
+            "tree": [["t1a", "simplex map"], ["t1a", "PH vector gate"], ["simplex map", "memory trajectory"], ["PH vector gate", "retrieval score"]],
+            "metrics": {"full map": "strong", "PH cosine": "high", "memory": "accepted"},
+        },
+        "t1b": {
+            "title": "Self-Correction Branch",
+            "role": "Correction branch for a candidate whose byte likelihood improved but certificate pressure was weak.",
+            "tree": [["t1b", "certificate check"], ["t1b", "graph repair"], ["certificate check", "BGG/Koszul probe"], ["graph repair", "candidate answer"]],
+            "metrics": {"reward": "mixed", "certificate": "improved", "BPB": "small positive"},
+        },
+        "t2a": {
+            "title": "Independent Tree Expansion",
+            "role": "Separate thought tree that preserves forest-level diversity and can outvote brittle local branches.",
+            "tree": [["t2a", "alternate token DAG"], ["t2a", "toric wall crossing"], ["alternate token DAG", "flattened output"], ["toric wall crossing", "fan audit"]],
+            "metrics": {"diversity": "high", "fan crossing": "controlled", "reward": "candidate"},
+        },
+        "vote": {
+            "title": "Forest Consensus",
+            "role": "Consensus node that chooses a compact output path from branch rewards and structural gates.",
+            "tree": [["vote", "best BPB branch"], ["vote", "certificate-safe branch"], ["vote", "diversity backup"], ["best BPB branch", "final graph"], ["certificate-safe branch", "final graph"]],
+            "metrics": {"selection": "BPB-delta first", "fallback": "structural gates", "output": "graph plus optional flattening"},
+        },
+    }
+    forest_svg = f"""
+<svg viewBox="0 0 700 390" role="img" aria-label="Forest-of-Thought embedding-space forest diagram">
+  <rect x="8" y="8" width="684" height="374" rx="18" fill="#020713" stroke="rgba(70,231,255,.30)"/>
+  <defs><marker id="fotArrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#46e7ff"/></marker></defs>
+  <g marker-end="url(#fotArrow)">{''.join(edge_svg)}</g>
+  <g>{''.join(node_svg)}</g>
+</svg>
+"""
     body = f"""
 <section class="panel">
   <p class="lead">Forest-of-Thought (FoT) scales reasoning by running several thought trees, activating promising branches sparsely, correcting weak branches, and using consensus over the forest. In ToricGT the same idea is moved from prompt strings into embedding space: each branch is a graph-valued hidden trajectory, each edge is a graph edit or continuous displacement, and branch rewards are tied to BPB delta, verifier score, topological stability, and toric fan margins.</p>
@@ -944,7 +1342,7 @@ def write_fot_method_report(docs: Path, copied: dict[str, str]) -> dict[str, str
 </section>
 <section class="grid two">
   <article class="panel"><h2>FoT Reference Diagram</h2>{f'<img class="source-img" src="{html.escape(image)}" alt="Forest-of-Thought paper diagram">' if image != "../../" else '<p>Local FoT paper image not found.</p>'}</article>
-  <article class="panel"><h2>Embedding-Space Adaptation</h2><div id="fotPlot" class="plot"></div></article>
+  <article class="panel"><h2>Embedding-Space Adaptation</h2><p class="metric-note">Click or keyboard-select a vertex to reveal its local thought tree and branch metrics. The SVG is a lightweight projection; the training controller works in the original embedding coordinates.</p>{forest_svg}<div id="fotDetail" class="detail-panel">Click a vertex to reveal the local thought tree, branch role, and training signals for that node.</div></article>
 </section>
 <section class="grid three">
   <article class="card"><h3>State</h3><p>Each state is <span class="accent">s=(G,H,Σ,μ,M)</span>: a reasoning graph, hidden table, toric/fan chart, moment coordinate, and memory pointer.</p></article>
@@ -953,14 +1351,53 @@ def write_fot_method_report(docs: Path, copied: dict[str, str]) -> dict[str, str
 </section>
 <section class="panel"><h2>Training Equation</h2><div class="equation">L<sub>FoT</sub> = (log Z + Σ<sub>t</sub> log p<sub>F</sub>(s<sub>t+1</sub>|s<sub>t</sub>) − log R(x) − Σ<sub>t</sub> log p<sub>B</sub>(s<sub>t</sub>|s<sub>t+1</sub>))<sup>2</sup>, with R(x)=exp((ΔBPB + α·diversity + β·fan_margin − γ·certificate_error)/τ).</div></section>
 <script>
-const payload = {json.dumps(payload)};
-const byId = Object.fromEntries(payload.nodes.map(n => [n.id, n]));
-const edgeTraces = payload.edges.map(e => {{
-  const a = byId[e[0]], b = byId[e[1]];
-  return {{type:'scatter3d',mode:'lines',x:[a.x,b.x],y:[a.y,b.y],z:[a.z,b.z],line:{{color:'#46e7ff',width:5}},hoverinfo:'skip',showlegend:false}};
+const fotDetails = {json.dumps(fot_detail_payload)};
+function escapeHtml(value) {{
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch]));
+}}
+function renderMiniTree(edges) {{
+  const nodes = Array.from(new Set(edges.flat()));
+  const levels = new Map();
+  levels.set(nodes[0], 0);
+  for (const [a,b] of edges) levels.set(b, Math.max(levels.get(b) || 0, (levels.get(a) || 0) + 1));
+  const byLevel = {{}};
+  for (const node of nodes) {{
+    const level = levels.get(node) || 0;
+    (byLevel[level] ||= []).push(node);
+  }}
+  const positions = {{}};
+  for (const [levelText, items] of Object.entries(byLevel)) {{
+    const level = Number(levelText);
+    items.forEach((node, idx) => {{
+      positions[node] = [72 + level * 185, 72 + (idx - (items.length - 1) / 2) * 86];
+    }});
+  }}
+  const edgeSvg = edges.map(([a,b]) => {{
+    const p = positions[a], q = positions[b];
+    return `<line x1="${{p[0]}}" y1="${{p[1]}}" x2="${{q[0]}}" y2="${{q[1]}}" stroke="#46e7ff" stroke-width="3" stroke-opacity=".72" />`;
+  }}).join('');
+  const nodeSvg = nodes.map(node => {{
+    const p = positions[node];
+    return `<g><circle cx="${{p[0]}}" cy="${{p[1]}}" r="15" fill="#ffd166" stroke="#ecfbff"/><text x="${{p[0]}}" y="${{p[1]+34}}" text-anchor="middle" fill="#ecfbff" font-size="13">${{escapeHtml(node)}}</text></g>`;
+  }}).join('');
+  return `<svg viewBox="0 0 560 260" role="img" aria-label="Local FoT thought tree"><rect x="8" y="8" width="544" height="244" rx="14" fill="#071421" stroke="rgba(70,231,255,.20)"/>${{edgeSvg}}${{nodeSvg}}</svg>`;
+}}
+function renderFotDetail(id) {{
+  const detail = fotDetails[id];
+  if (!detail) return;
+  const metrics = Object.entries(detail.metrics || {{}}).map(([k,v]) => `<tr><th>${{escapeHtml(k)}}</th><td>${{escapeHtml(v)}}</td></tr>`).join('');
+  document.getElementById('fotDetail').innerHTML = `<strong>${{escapeHtml(detail.title)}}</strong><p>${{escapeHtml(detail.role)}}</p>${{renderMiniTree(detail.tree || [])}}<table class="mini-table"><tbody>${{metrics}}</tbody></table>`;
+}}
+document.querySelectorAll('[data-node]').forEach(node => {{
+  node.addEventListener('click', () => renderFotDetail(node.dataset.node));
+  node.addEventListener('keydown', event => {{
+    if (event.key === 'Enter' || event.key === ' ') {{
+      event.preventDefault();
+      renderFotDetail(node.dataset.node);
+    }}
+  }});
 }});
-const nodeTrace = {{type:'scatter3d',mode:'markers+text',x:payload.nodes.map(n=>n.x),y:payload.nodes.map(n=>n.y),z:payload.nodes.map(n=>n.z),text:payload.nodes.map(n=>n.id),customdata:payload.nodes.map(n=>[n.kind,n.tree]),marker:{{size:9,color:payload.nodes.map(n=>n.tree),colorscale:'Viridis',line:{{color:'#fff',width:1}}}},hovertemplate:'%{{text}}<br>kind %{{customdata[0]}}<br>tree %{{customdata[1]}}<extra></extra>'}};
-Plotly.newPlot('fotPlot',[...edgeTraces,nodeTrace],{{template:'plotly_dark',paper_bgcolor:'#020713',plot_bgcolor:'#020713',scene:{{bgcolor:'#020713'}},margin:{{l:0,r:0,t:10,b:0}}}},{{responsive:true}});
+renderFotDetail('root');
 </script>
 """
     (out / "index.html").write_text(method_report_shell("Forest-of-Thought Reasoning", "Embedding-space reasoning forest", body), encoding="utf-8")
@@ -977,7 +1414,6 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
     out = docs / "page_interactive" / "convextok_method"
     out.mkdir(parents=True, exist_ok=True)
     sample = "byte graphs!"
-    nodes = [{"id": idx, "prefix": sample[:idx]} for idx in range(len(sample) + 1)]
     edges = [
         *[
             {
@@ -999,23 +1435,103 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
         {"i": 5, "j": 12, "token": "graphs!", "kind": "selected rounded token", "cost": 0.18, "lp": 0.82, "selected": True, "lane": 3},
         {"i": 0, "j": 12, "token": "byte graphs!", "kind": "LP-relaxation long-span candidate", "cost": 0.53, "lp": 0.35, "selected": False, "lane": 4},
     ]
-    payload = {
-        "sample_text": sample,
-        "nodes": nodes,
-        "edges": edges,
-        "selected_path": [[0, 5], [5, 12]],
-        "note": (
-            "Vertices are byte boundaries. Edges are possible tokens spanning byte intervals. "
-            "The highlighted selected path is the rounded tokenizer segmentation used for BPB scoring; "
-            "LP scores are retained as graph edge features and lower-bound/regret diagnostics."
-        ),
-    }
+    width, height = 820, 480
+    margin_x, baseline = 62, 340
+    step_x = (width - 2 * margin_x) / len(sample)
+
+    def x_at(idx: int) -> float:
+        return margin_x + step_x * idx
+
+    def edge_color(edge: dict[str, Any]) -> str:
+        if edge["selected"]:
+            return "#88ff86"
+        if "LP-relaxation" in edge["kind"]:
+            return "#ffd166"
+        if "fallback" in edge["kind"]:
+            return "rgba(70,231,255,.58)"
+        return "#a78bfa"
+
+    edge_paths: list[str] = []
+    edge_labels: list[str] = []
+    for edge in edges:
+        x1, x2 = x_at(edge["i"]), x_at(edge["j"])
+        mid = (x1 + x2) / 2
+        span = edge["j"] - edge["i"]
+        if "fallback" in edge["kind"]:
+            control_y = baseline + 34
+            label_y = baseline + 62
+            stroke_width = 2
+            dash = ""
+        else:
+            control_y = baseline - (46 + 12 * span + 22 * edge["lane"])
+            label_y = control_y - 10
+            stroke_width = 7 if edge["selected"] else 4
+            dash = ' stroke-dasharray="8 8"' if "LP-relaxation" in edge["kind"] else ""
+        selected = "yes" if edge["selected"] else "no"
+        title = (
+            f"token {edge['token']!r}; span [{edge['i']},{edge['j']}]; "
+            f"{edge['kind']}; cost {edge['cost']:.3f}; LP {edge['lp']:.2f}; selected {selected}"
+        )
+        edge_paths.append(
+            f'<path d="M{x1:.1f} {baseline:.1f} Q{mid:.1f} {control_y:.1f} {x2:.1f} {baseline:.1f}" '
+            f'fill="none" stroke="{edge_color(edge)}" stroke-width="{stroke_width}" stroke-linecap="round"{dash}>'
+            f'<title>{html.escape(title)}</title></path>'
+        )
+        if "fallback" not in edge["kind"]:
+            edge_labels.append(
+                f'<text x="{mid:.1f}" y="{label_y:.1f}" fill="{edge_color(edge)}" font-size="15" text-anchor="middle">'
+                f'{html.escape(edge["token"])}</text>'
+            )
+    node_svg = []
+    for idx in range(len(sample) + 1):
+        node_svg.append(
+            f'<circle cx="{x_at(idx):.1f}" cy="{baseline}" r="9" fill="#46e7ff" stroke="#ecfbff" stroke-width="1.2">'
+            f'<title>byte boundary {idx}; prefix {html.escape(repr(sample[:idx]))}</title></circle>'
+            f'<text x="{x_at(idx):.1f}" y="{baseline + 28}" fill="#9db8cf" font-size="13" text-anchor="middle">{idx}</text>'
+        )
+    char_svg = []
+    for idx, ch in enumerate(sample):
+        char_label = "space" if ch == " " else ch
+        char_svg.append(
+            f'<text x="{(x_at(idx)+x_at(idx+1))/2:.1f}" y="{baseline + 48}" fill="#ecfbff" font-size="13" text-anchor="middle">'
+            f'{html.escape(char_label)}</text>'
+        )
+    edge_rows = "\n".join(
+        "<tr>"
+        f"<td>{edge['i']}→{edge['j']}</td>"
+        f"<td><code>{html.escape(edge['token'])}</code></td>"
+        f"<td>{html.escape(edge['kind'])}</td>"
+        f"<td>{edge['cost']:.3f}</td>"
+        f"<td>{edge['lp']:.2f}</td>"
+        f"<td>{'yes' if edge['selected'] else 'no'}</td>"
+        "</tr>"
+        for edge in edges
+    )
+    dag_svg = f"""
+<svg viewBox="0 0 {width} {height}" role="img" aria-label="ConvexTok byte-boundary tokenization DAG">
+  <rect x="8" y="8" width="{width-16}" height="{height-16}" rx="18" fill="#020713" stroke="rgba(70,231,255,.30)"/>
+  <text x="32" y="42" fill="#ffd166" font-size="20">{html.escape(sample)}</text>
+  <text x="32" y="70" fill="#9db8cf" font-size="15">Vertices are byte boundaries; arcs are candidate tokens. Hover arcs and vertices for exact edge metadata.</text>
+  <line x1="{margin_x}" y1="{baseline}" x2="{width-margin_x}" y2="{baseline}" stroke="rgba(236,251,255,.32)" stroke-width="2"/>
+  <g>{''.join(edge_paths)}</g>
+  <g>{''.join(edge_labels)}</g>
+  <g>{''.join(node_svg)}</g>
+  <g>{''.join(char_svg)}</g>
+  <g font-size="14">
+    <rect x="32" y="392" width="16" height="8" fill="#88ff86"/><text x="56" y="401" fill="#bdd6e8">selected rounded path</text>
+    <rect x="244" y="392" width="16" height="8" fill="#a78bfa"/><text x="268" y="401" fill="#bdd6e8">priced vocabulary token</text>
+    <rect x="496" y="392" width="16" height="8" fill="#ffd166"/><text x="520" y="401" fill="#bdd6e8">LP-relaxation support</text>
+    <rect x="32" y="422" width="16" height="8" fill="#46e7ff"/><text x="56" y="431" fill="#bdd6e8">free byte fallback</text>
+  </g>
+</svg>
+"""
     body = f"""
 <section class="panel">
-  <p class="lead">ConvexTok turns tokenizer construction into a shortest-path and sparse linear-programming problem over a byte-boundary DAG. ToricGT uses the tokenization DAG as first-class graph structure: boundary vertices are graph nodes, candidate substrings are priced edges, LP scores become edge features, and the selected token path is a tropical min-plus dynamic program.</p>
-  <p><a href="https://arxiv.org/abs/2605.22821">ConvexTok preprint requested in the training notes</a> · <a href="https://github.com/openai/parameter-golf">OpenAI Parameter Golf</a></p>
+  <p class="lead">ConvexTok turns tokenizer construction into a shortest-path and sparse linear-programming problem over a byte-boundary DAG. ToricGT uses that DAG as real model input: byte boundaries are nodes, candidate substrings are edges, LP relaxation scores are edge features, and the final segmentation is the selected path used for BPB scoring.</p>
+  <p><a href="https://arxiv.org/abs/2605.22821">ConvexTok preprint</a> · <a href="https://github.com/openai/parameter-golf">OpenAI Parameter Golf</a></p>
+  <p class="callout">The key point is not merely “a different tokenizer.” The tokenization computation is itself a graph-structured dynamic program, so it matches TokenGT-style graphification instead of being hidden preprocessing.</p>
 </section>
-<section class="panel"><h2>Tokenization DAG</h2><div id="dagPlot" class="plot" style="height:680px"></div><p class="metric-note">Curved arcs span byte intervals. Cyan bottom arcs are fallback byte edges, violet arcs are priced candidate tokens, gold arcs are LP-relaxation support, and green arcs are the selected rounded token path. The model receives the same structure as TokenGT-style node/edge features; BPB is still scored on the flattened selected path.</p></section>
+<section class="panel"><h2>Tokenization DAG</h2>{dag_svg}<p class="metric-note">Curved arcs span byte intervals. Cyan bottom arcs are fallback byte edges, violet arcs are priced candidate tokens, gold arcs are LP-relaxation support, and green arcs are the selected rounded token path. The model receives the same structure as TokenGT-style node/edge features; BPB is still scored on the flattened selected path.</p></section>
 <section class="grid two">
   <article class="panel"><h2>Equations</h2>
     <div class="equation">D[j] = min<sub>(i,j,t)∈E</sub> D[i] + w<sub>t</sub></div>
@@ -1027,52 +1543,16 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
       <tr><th>Tropical path</th><td>The rounded segmentation is a min-plus path through the DAG; active edges form a tropical curve inside the tokenizer graph.</td></tr>
     </tbody></table>
   </article>
+  <article class="panel"><h2>Candidate Edge Metadata</h2><table class="mini-table"><thead><tr><th>span</th><th>token</th><th>kind</th><th>cost</th><th>LP</th><th>selected</th></tr></thead><tbody>{edge_rows}</tbody></table></article>
 </section>
 <section class="grid three">
-  <article class="card"><h3>BPB Use</h3><p>FineWeb is graphified, but OAI scoring still uses the optional flattening path so the byte objective remains primary.</p></article>
-  <article class="card"><h3>Toric Use</h3><p>Candidate-token exponent and LP-score features define active faces; the selected path is audited as a tropical curve embedded into a toric chart.</p></article>
-  <article class="card"><h3>OOD Use</h3><p>Because substring choices are graph paths, the model sees reusable local graph grammar rather than opaque token IDs only.</p></article>
+  <article class="card"><h3>1. BPB Use</h3><p>FineWeb is graphified, but the OAI scoring path still flattens the selected token path. This keeps the byte objective primary while letting the model learn node/edge structure around the tokenizer.</p></article>
+  <article class="card"><h3>2. Tropical Use</h3><p>The dynamic program <span class="accent">D[j]=min(D[i]+w)</span> is min-plus computation. Active edges, margins, and path regret become tropical diagnostics instead of opaque tokenizer side effects.</p></article>
+  <article class="card"><h3>3. Toric Use</h3><p>Candidate-token exponents and LP scores define active faces of a tokenization polytope. Those faces are embedded into toric charts for fan, one-dimensional-cone, divisor, and sheaf-style audits.</p></article>
+  <article class="card"><h3>4. Graph Use</h3><p>Boundary nodes, candidate-token edges, endpoint offsets, edge ranks, selected-path flags, and LP scores are TokenGT-style features. The graph is causal left-to-right for FineWeb.</p></article>
+  <article class="card"><h3>5. Regret Use</h3><p>The LP lower bound gives a tokenizer-regret metric: if rounded path length is close to the LP optimum, BPB problems are more likely model-bound; otherwise tokenizer vocabulary or rounding is suspect.</p></article>
+  <article class="card"><h3>6. OOD Use</h3><p>Because substring choices are graph paths, the model sees reusable local graph grammar rather than isolated token IDs. That is the bridge to graph-structured biological and 3D tokenizers later.</p></article>
 </section>
-<script>
-const payload = {json.dumps(payload)};
-function arcPoints(edge) {{
-  const n = 42;
-  const span = edge.j - edge.i;
-  const base = edge.kind.includes('fallback') ? -0.15 : 0.02;
-  const height = edge.kind.includes('fallback') ? -0.16 : (0.38 + 0.10 * span + 0.13 * edge.lane);
-  const xs = [], ys = [];
-  for (let k = 0; k < n; k++) {{
-    const t = k / (n - 1);
-    xs.push(edge.i + span * t);
-    ys.push(base + height * Math.sin(Math.PI * t));
-  }}
-  return [xs, ys];
-}}
-function edgeStyle(edge) {{
-  if (edge.selected) return {{color:'#88ff86', width:7, dash:'solid'}};
-  if (edge.kind.includes('LP-relaxation')) return {{color:'#ffd166', width:4, dash:'dash'}};
-  if (edge.kind.includes('fallback')) return {{color:'rgba(70,231,255,.58)', width:2.5, dash:'solid'}};
-  return {{color:'#a78bfa', width:4, dash:'solid'}};
-}}
-function edgeTrace(edge) {{
-  const [x, y] = arcPoints(edge);
-  const style = edgeStyle(edge);
-  return {{type:'scatter',mode:'lines',x,y,line:style,name:edge.kind,legendgroup:edge.kind,showlegend:false,customdata:x.map(() => [edge.token, edge.kind, edge.cost, edge.lp, edge.i, edge.j, edge.selected]),hovertemplate:'token <b>%{{customdata[0]}}</b><br>%{{customdata[1]}}<br>span [%{{customdata[4]}}, %{{customdata[5]}}]<br>cost %{{customdata[2]:.3f}} · LP %{{customdata[3]:.2f}}<br>selected %{{customdata[6]}}<extra></extra>'}};
-}}
-function edgeLabel(edge) {{
-  const span = edge.j - edge.i;
-  const x = (edge.i + edge.j) / 2;
-  const y = edge.kind.includes('fallback') ? -0.36 : (0.20 + 0.10 * span + 0.13 * edge.lane);
-  return {{type:'scatter',mode:'text',x:[x],y:[y],text:[edge.token === ' ' ? 'space' : edge.token],textfont:{{color:edge.selected?'#88ff86':(edge.kind.includes('LP-relaxation')?'#ffd166':'#ecfbff'),size:edge.selected?15:11}},hoverinfo:'skip',showlegend:false}};
-}}
-const traces = [];
-for (const edge of payload.edges) traces.push(edgeTrace(edge));
-for (const edge of payload.edges.filter(e => !e.kind.includes('fallback'))) traces.push(edgeLabel(edge));
-traces.push({{type:'scatter',mode:'lines',x:payload.nodes.map(n=>n.id),y:payload.nodes.map(_=>0),line:{{color:'rgba(236,251,255,.32)',width:2}},hoverinfo:'skip',showlegend:false}});
-traces.push({{type:'scatter',mode:'markers+text',x:payload.nodes.map(n=>n.id),y:payload.nodes.map(_=>0),text:payload.nodes.map(n=>String(n.id)),textposition:'bottom center',customdata:payload.nodes.map(n=>[n.id,n.prefix]),marker:{{size:11,color:'#46e7ff',line:{{color:'#ecfbff',width:1}}}},hovertemplate:'byte boundary %{{customdata[0]}}<br>prefix “%{{customdata[1]}}”<extra></extra>',name:'byte boundaries'}});
-traces.push({{type:'scatter',mode:'markers',x:payload.edges.filter(e=>e.selected).map(e=>e.j),y:payload.edges.filter(e=>e.selected).map(_=>0.02),marker:{{symbol:'triangle-right',size:16,color:'#88ff86'}},hovertemplate:'selected path boundary<extra></extra>',name:'selected path arrows'}});
-Plotly.newPlot('dagPlot', traces, {{template:'plotly_dark',paper_bgcolor:'#020713',plot_bgcolor:'#020713',xaxis:{{title:'byte boundary index',zeroline:false,gridcolor:'rgba(157,184,207,.16)',range:[-0.4,12.4]}},yaxis:{{title:'candidate-token arcs',zeroline:false,gridcolor:'rgba(157,184,207,.12)',range:[-0.55,2.35]}},margin:{{l:54,r:18,t:34,b:52}},annotations:[{{xref:'paper',yref:'paper',x:0.015,y:0.99,text:payload.sample_text,showarrow:false,font:{{color:'#ffd166',size:16}}}}]}}, {{responsive:true}});
-</script>
 """
     (out / "index.html").write_text(method_report_shell("ConvexTok Tokenization Geometry", "Tokenizer as tropical DAG and toric chart", body), encoding="utf-8")
     return {
@@ -1087,6 +1567,13 @@ Plotly.newPlot('dagPlot', traces, {{template:'plotly_dark',paper_bgcolor:'#02071
 def write_bgg_method_report(docs: Path, best_metrics: dict[str, Any]) -> dict[str, str]:
     out = docs / "page_interactive" / "bgg_method"
     out.mkdir(parents=True, exist_ok=True)
+    copied_out = docs / "page_interactive" / "bgg_category_o"
+    copied_out.mkdir(parents=True, exist_ok=True)
+    copied_report = load_json(copied_out / "bgg_category_o_report.json")
+    copied_metrics = copied_report.get("metrics", {}) if isinstance(copied_report.get("metrics"), dict) else {}
+    copied_provenance = copied_report.get("metric_provenance", {}) if isinstance(copied_report.get("metric_provenance"), dict) else {}
+    copied_gates = copied_report.get("gates", {}) if isinstance(copied_report.get("gates"), dict) else {}
+    unavailable = copied_report.get("unavailable", []) if isinstance(copied_report.get("unavailable"), list) else []
     metrics = {
         "toric_bgg_loss": best_metrics.get("toric_bgg_loss"),
         "koszul_persistence_loss": best_metrics.get("koszul_persistence_loss"),
@@ -1094,34 +1581,60 @@ def write_bgg_method_report(docs: Path, best_metrics: dict[str, Any]) -> dict[st
         "toric_cca_topology_loss": best_metrics.get("toric_cca_topology_loss"),
     }
     table = "".join(f"<tr><th>{html.escape(k)}</th><td>{fmt(v,6)}</td></tr>" for k, v in metrics.items())
+    exact_rows = []
+    exact_keys = [
+        ("toric_bgg_d2_residual", "Boundary-square residual for sparse finite differentials. Low means the predicted differential behaves like a chain-complex map with d²=0."),
+        ("toric_bgg_standard_leakage", "Attention mass outside the standard-filtration mask. Low means hidden standard-object routing respects the poset."),
+        ("toric_bgg_koszul_linearity_residual", "Deviation from the expected Koszul degree profile. Low means the finite BGG/Koszul proxy is degree-consistent."),
+        ("toric_bgg_gale_dual_consistency", "Agreement between an arrangement certificate and its Gale-dual signature. High consistency supports dual-curriculum transfer."),
+        ("toric_bgg_signature_smoothness", "Variation of the BGG signature along the reasoning trajectory. Low values indicate stable categorical coordinates."),
+        ("toric_bgg_standard_entropy", "Entropy of standard-label assignments. It detects collapse to one standard object or diffuse unusable labels."),
+    ]
+    for key, meaning in exact_keys:
+        value = copied_metrics.get(key)
+        status = "unavailable in copied run" if key in unavailable or value is None else fmt(value, 6)
+        exact_rows.append(
+            f"<tr><th>{html.escape(key)}</th><td>{html.escape(status)}</td><td>{html.escape(copied_provenance.get(key, 'not recorded'))}</td><td>{html.escape(meaning)}</td></tr>"
+        )
+    gate_rows = "".join(f"<tr><th>{html.escape(str(k))}</th><td>{fmt(v, 4)}</td></tr>" for k, v in copied_gates.items())
     body = f"""
 <section class="panel">
   <p class="lead">The Toric BGG layer is a finite certificate system: it never claims the model contains a literal abelian category. It attaches small sign-vector posets, standard-filtration masks, sparse differentials, Koszul degree profiles, Gale-dual labels, and derived signatures to training records. Late-phase weights remain small so BPB stays primary.</p>
+  <p class="callout">This page combines the hand-written method explainer with the generated Category O audit. If a metric is listed as unavailable, that does not mean the method is absent; it means the copied public run did not emit the exact finite certificate required to compute that metric. The late gate is intentionally conservative.</p>
 </section>
 <section class="grid two">
   <article class="panel"><h2>Finite Category-O Skeleton</h2>
-  <svg viewBox="0 0 640 420" aria-label="BGG poset and chain complex">
+  <svg viewBox="0 0 700 460" aria-label="BGG poset and chain complex">
     <defs><marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#46e7ff"/></marker></defs>
-    <rect x="20" y="20" width="600" height="380" rx="14" fill="#020713" stroke="rgba(70,231,255,.32)"/>
+    <rect x="20" y="20" width="660" height="420" rx="14" fill="#020713" stroke="rgba(70,231,255,.32)"/>
     <g stroke="#46e7ff" stroke-width="3" marker-end="url(#arr)" fill="none">
-      <path d="M110 340 L210 250 L310 340"/><path d="M210 250 L310 160 L410 250"/><path d="M310 340 L410 250 L510 340"/><path d="M310 160 L410 70"/>
+      <path d="M110 360 L225 270 L340 360"/><path d="M225 270 L350 170 L475 270"/><path d="M340 360 L475 270 L590 360"/><path d="M350 170 L475 80"/>
     </g>
     <g fill="#ffd166" stroke="#fff" stroke-width="1.5">
-      <circle cx="110" cy="340" r="18"/><circle cx="310" cy="340" r="18"/><circle cx="510" cy="340" r="18"/><circle cx="210" cy="250" r="18"/><circle cx="410" cy="250" r="18"/><circle cx="310" cy="160" r="18"/><circle cx="410" cy="70" r="18"/>
+      <circle cx="110" cy="360" r="20"/><circle cx="340" cy="360" r="20"/><circle cx="590" cy="360" r="20"/><circle cx="225" cy="270" r="20"/><circle cx="475" cy="270" r="20"/><circle cx="350" cy="170" r="20"/><circle cx="475" cy="80" r="20"/>
     </g>
-    <g fill="#ecfbff" font-size="18" text-anchor="middle"><text x="110" y="346">Lα</text><text x="310" y="346">Lβ</text><text x="510" y="346">Lγ</text><text x="210" y="256">Δα</text><text x="410" y="256">Δβ</text><text x="310" y="166">P</text><text x="410" y="76">C</text></g>
-    <text x="52" y="58" fill="#9db8cf" font-size="18">standard objects, covers, and differentials</text>
-    <text x="52" y="382" fill="#88ff86" font-size="18">losses: d²≈0 · standard leakage · Gale dual · Koszul profile</text>
+    <g fill="#ecfbff" font-size="18" text-anchor="middle"><text x="110" y="366">Lα</text><text x="340" y="366">Lβ</text><text x="590" y="366">Lγ</text><text x="225" y="276">Δα</text><text x="475" y="276">Δβ</text><text x="350" y="176">P</text><text x="475" y="86">C</text></g>
+    <text x="52" y="58" fill="#9db8cf" font-size="18">highest-weight finite skeleton: simples L, standards Δ, projectives P, complex C</text>
+    <text x="52" y="398" fill="#88ff86" font-size="16">checks: d²=0 · standard masks · Gale dual</text>
+    <text x="52" y="420" fill="#88ff86" font-size="16">Koszul degree profile · signature smoothness</text>
   </svg></article>
-  <article class="panel"><h2>Best-Run BGG Metrics</h2><table class="mini-table"><tbody>{table}</tbody></table><div class="equation">d(m⊗ξ)=Σᵢ xᵢm⊗eᵢ∧ξ, so d²=0 by commutativity of xᵢ and anti-commutativity of eᵢ.</div></article>
+  <article class="panel"><h2>Best-Run BGG-Adjacent Losses</h2><table class="mini-table"><tbody>{table}</tbody></table><div class="equation">d(m⊗ξ)=Σᵢ xᵢm⊗eᵢ∧ξ. The square vanishes because xᵢxⱼ=xⱼxᵢ while eᵢ∧eⱼ=-eⱼ∧eᵢ.</div></article>
+</section>
+<section class="grid two">
+  <article class="panel"><h2>Generated Audit Gates</h2><table class="mini-table"><tbody>{gate_rows or '<tr><th>gates</th><td>not emitted in copied run</td></tr>'}</tbody></table><p>A late gate of 1 means exact certificate metrics are expected only in late-phase or certificate-bearing records, avoiding noisy penalties during BPB-first early training.</p></article>
+  <article class="panel"><h2>How It Affects Training</h2><ul class="method-list"><li><strong>Weight up carefully:</strong> improves standard-object routing and homological consistency when records carry exact certificates.</li><li><strong>Weight down early:</strong> prevents sparse certificate losses from dominating byte likelihood before BPB stabilizes.</li><li><strong>Use as audit:</strong> unavailable exact metrics should trigger data/certificate instrumentation review, not a blind loss increase.</li></ul></article>
+</section>
+<section class="panel"><h2>Resolution and Standard-Filtration Metrics</h2><table class="mini-table"><thead><tr><th>metric</th><th>value/status</th><th>provenance</th><th>meaning</th></tr></thead><tbody>{''.join(exact_rows)}</tbody></table>
 </section>
 """
-    (out / "index.html").write_text(method_report_shell("Toric BGG Category O", "Finite homological certificates", body), encoding="utf-8")
+    content = method_report_shell("Toric BGG Category O", "Finite homological certificates", body)
+    (out / "index.html").write_text(content, encoding="utf-8")
+    (copied_out / "index.html").write_text(content, encoding="utf-8")
     return {
-        "href": "page_interactive/bgg_method/index.html",
-        "title": "Toric BGG Category O Method",
-        "summary": "Finite highest-weight skeletons, standard masks, BGG differentials, Gale duality, Koszul checks, and best-run metric table.",
-        "features": "category O skeleton · d² residual · Gale dual · Koszul profile",
+        "href": "page_interactive/bgg_category_o/index.html",
+        "title": "Toric BGG Category O",
+        "summary": "Combined Category O explainer and generated audit table for finite highest-weight skeletons, standard masks, BGG differentials, Gale duality, and Koszul checks.",
+        "features": "category O skeleton · d² residual · standard masks · Gale dual · Koszul profile",
         "embed": "0",
     }
 
@@ -1131,16 +1644,46 @@ def write_theory_gallery_report(docs: Path) -> dict[str, str]:
     out.mkdir(parents=True, exist_ok=True)
     body = """
 <section class="panel">
-  <p class="lead">This gallery connects the visual mathematics behind ToricGT: tropical ring attention, toric fans, Young tableaux and Schur functors, tensor/wedge/symmetric products, multiparameter persistence modules, and thought-control dynamics. The diagrams are didactic illustrations generated for this page, not copied from textbooks.</p>
+  <p class="lead">This gallery is the conceptual map for the ToricGT training stack. It connects tropical dynamic programming, toric embeddings, tableau combinatorics, tensor operations, multiparameter persistence, intersection-style certificates, and control of reasoning trajectories. Every diagram is a lightweight inline SVG with accompanying text so the page stays readable on older hardware.</p>
   <p><a href="../../assets/2210.11433v1.pdf">Multiparameter persistence PDF</a> · <a href="../../assets/ergodic-theory.pdf">Ergodic theory reference</a> · <a href="https://github.com/amelie-iska/Tropical_Quivers_of_Archs/blob/main/tropical_quiver_research_program.tex">Tropical Quivers of Archs</a></p>
 </section>
 <section class="grid two">
-  <article class="card"><h3>Tropical Ring Attention → Toric Fan</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g transform="translate(128 150)" stroke="#46e7ff" stroke-width="3"><line x1="0" y1="0" x2="100" y2="-75"/><line x1="0" y1="0" x2="108" y2="70"/><line x1="0" y1="0" x2="-92" y2="80"/><line x1="0" y1="0" x2="-80" y2="-82"/></g><polyline points="255,210 315,112 372,148 430,64" fill="none" stroke="#ffd166" stroke-width="6"/><text x="30" y="36" fill="#ecfbff">Yᵢc=maxⱼ(Sᵢⱼ+Vⱼc)</text><text x="255" y="248" fill="#9db8cf">active face gives cone chart</text></svg></article>
-  <article class="card"><h3>Young Tableaux, Schur Functors</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g transform="translate(42 60)" fill="rgba(70,231,255,.18)" stroke="#46e7ff"><rect x="0" y="0" width="48" height="48"/><rect x="48" y="0" width="48" height="48"/><rect x="96" y="0" width="48" height="48"/><rect x="0" y="48" width="48" height="48"/><rect x="48" y="48" width="48" height="48"/><rect x="0" y="96" width="48" height="48"/></g><g fill="#ecfbff" font-size="24" text-anchor="middle"><text x="66" y="92">1</text><text x="114" y="92">2</text><text x="162" y="92">4</text><text x="66" y="140">2</text><text x="114" y="140">3</text><text x="66" y="188">4</text></g><text x="245" y="96" fill="#ffd166" font-size="24">LλE = (∧λ₁E ⊗ ⋯ ⊗ ∧λₛE)/R</text><text x="245" y="145" fill="#9db8cf" font-size="18">standard monomial bases for<br/>coordinate rings of complexes</text></svg></article>
-  <article class="card"><h3>Tensor, Wedge, Symmetric, Shuffle</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><text x="44" y="70" fill="#ecfbff" font-size="26">V⊗W</text><text x="44" y="132" fill="#88ff86" font-size="26">∧²V: v⊗w − w⊗v</text><text x="44" y="194" fill="#ffd166" font-size="26">Sym²V: v⊗w + w⊗v</text><path d="M315 62 C390 30 410 120 470 84" fill="none" stroke="#ff5fa2" stroke-width="5"/><path d="M315 162 C390 210 420 120 470 182" fill="none" stroke="#46e7ff" stroke-width="5" stroke-dasharray="8 8"/><text x="308" y="244" fill="#9db8cf">shuffle relations organize representation channels</text></svg></article>
-  <article class="card"><h3>F₂[x_level,y_radius] Persistence Module</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g stroke="rgba(157,184,207,.28)"><path d="M70 240 H450"/><path d="M70 200 H450"/><path d="M70 160 H450"/><path d="M70 120 H450"/><path d="M70 80 H450"/><path d="M90 60 V255"/><path d="M150 60 V255"/><path d="M210 60 V255"/><path d="M270 60 V255"/><path d="M330 60 V255"/><path d="M390 60 V255"/></g><path d="M90 240 L90 120 L150 120 L150 80 L270 80 L270 60 L450 60 L450 240 Z" fill="rgba(255,209,102,.25)" stroke="#ffd166" stroke-width="4"/><circle cx="150" cy="120" r="8" fill="#46e7ff"/><circle cx="270" cy="80" r="8" fill="#ff5fa2"/><text x="70" y="278" fill="#9db8cf">level</text><text x="20" y="72" fill="#9db8cf">radius</text></svg></article>
-  <article class="card"><h3>Thought Alcove Control</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g stroke="#46e7ff" stroke-width="2"><path d="M80 250 L260 40 L450 250"/><path d="M80 250 H450"/><path d="M170 145 H355"/></g><path d="M110 222 C180 170 230 212 280 126 S375 124 420 82" fill="none" stroke="#88ff86" stroke-width="6"/><circle cx="280" cy="126" r="9" fill="#ffd166"/><text x="56" y="36" fill="#ecfbff">control u(t) keeps trajectory inside stable fan alcoves</text><text x="84" y="282" fill="#9db8cf">Lyapunov / ergodic / optimal-control audits</text></svg></article>
-  <article class="card"><h3>Schubert/Toric Intersection Heuristic</h3><svg viewBox="0 0 520 300"><rect width="520" height="300" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><circle cx="180" cy="150" r="88" fill="rgba(70,231,255,.16)" stroke="#46e7ff" stroke-width="4"/><circle cx="300" cy="150" r="88" fill="rgba(255,95,162,.16)" stroke="#ff5fa2" stroke-width="4"/><circle cx="240" cy="95" r="88" fill="rgba(255,209,102,.13)" stroke="#ffd166" stroke-width="4"/><text x="182" y="154" fill="#ecfbff" text-anchor="middle">σλ</text><text x="303" y="154" fill="#ecfbff" text-anchor="middle">σμ</text><text x="240" y="96" fill="#ecfbff" text-anchor="middle">Dρ</text><text x="112" y="260" fill="#9db8cf">intersection numbers become certificate features</text></svg></article>
+  <article class="card">
+    <h3>Tropical Ring Attention Embedded In A Toric Fan</h3>
+    <svg viewBox="0 0 620 340"><rect width="620" height="340" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g transform="translate(160 178)" stroke="#46e7ff" stroke-width="3"><line x1="0" y1="0" x2="120" y2="-88"/><line x1="0" y1="0" x2="128" y2="78"/><line x1="0" y1="0" x2="-108" y2="92"/><line x1="0" y1="0" x2="-96" y2="-95"/><line x1="0" y1="0" x2="8" y2="-130"/></g><polyline points="325,250 390,125 462,160 538,72" fill="none" stroke="#ffd166" stroke-width="7"/><circle cx="390" cy="125" r="8" fill="#88ff86"/><text x="30" y="44" fill="#ecfbff" font-size="22">Yᵢc = maxⱼ(Sᵢⱼ + Vⱼc)</text><text x="310" y="294" fill="#9db8cf" font-size="16">active affine candidate → Newton face → normal cone chart</text></svg>
+    <p>Tropical attention is piecewise-linear. The active candidate set is a face of a lifted Newton polytope, and the corresponding normal cone is the toric chart used by the audits.</p>
+    <p><strong>Training use:</strong> fan-margin, active-face stability, toric embedding metrics, and BPB-safe routing diagnostics.</p>
+  </article>
+  <article class="card">
+    <h3>Young Tableaux And Schur-Style Coordinates</h3>
+    <svg viewBox="0 0 620 340"><rect width="620" height="340" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g transform="translate(48 62)" fill="rgba(70,231,255,.18)" stroke="#46e7ff" stroke-width="2"><rect x="0" y="0" width="54" height="54"/><rect x="54" y="0" width="54" height="54"/><rect x="108" y="0" width="54" height="54"/><rect x="0" y="54" width="54" height="54"/><rect x="54" y="54" width="54" height="54"/><rect x="0" y="108" width="54" height="54"/></g><g fill="#ecfbff" font-size="25" text-anchor="middle"><text x="75" y="98">1</text><text x="129" y="98">2</text><text x="183" y="98">4</text><text x="75" y="152">2</text><text x="129" y="152">3</text><text x="75" y="206">4</text></g><text x="260" y="93" fill="#ffd166" font-size="24">LλE from symmetrizers</text><text x="260" y="132" fill="#ecfbff" font-size="18">row symmetries + column antisymmetries</text><text x="260" y="176" fill="#9db8cf" font-size="17">tensor channels · wedge features</text><text x="260" y="202" fill="#9db8cf" font-size="17">standard monomial bases</text></svg>
+    <p>Tableaux encode structured bases for polynomial and exterior constructions. They are useful when graph-token features behave like tensor products but need symmetry constraints.</p>
+    <p><strong>Training use:</strong> candidate future losses for symmetrizer/shuffle consistency and combinatorial certificate compression.</p>
+  </article>
+  <article class="card">
+    <h3>Tensor, Wedge, Symmetric, And Shuffle Relations</h3>
+    <svg viewBox="0 0 620 340"><rect width="620" height="340" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><text x="42" y="74" fill="#ecfbff" font-size="27">V ⊗ W</text><text x="42" y="136" fill="#88ff86" font-size="25">∧²V: v⊗w − w⊗v</text><text x="42" y="198" fill="#ffd166" font-size="25">Sym²V: v⊗w + w⊗v</text><path d="M370 72 C450 30 480 128 560 86" fill="none" stroke="#ff5fa2" stroke-width="5"/><path d="M370 178 C452 236 492 134 560 194" fill="none" stroke="#46e7ff" stroke-width="5" stroke-dasharray="9 8"/><text x="42" y="266" fill="#9db8cf" font-size="17">Shuffle maps tell the model which feature products should commute, anticommute, or decompose.</text></svg>
+    <p>Graph-token reasoning creates many pairwise and higher-order feature products. Algebraic symmetry gives a principled way to constrain which products should be identified or separated.</p>
+    <p><strong>Training use:</strong> low-rank probes for wedge/symmetric consistency and future Schur-functor-inspired regularizers.</p>
+  </article>
+  <article class="card">
+    <h3>F₂[x_level,y_radius] Persistence Modules</h3>
+    <svg viewBox="0 0 620 340"><rect width="620" height="340" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g stroke="rgba(157,184,207,.28)"><path d="M82 270 H540"/><path d="M82 225 H540"/><path d="M82 180 H540"/><path d="M82 135 H540"/><path d="M82 90 H540"/><path d="M112 62 V286"/><path d="M184 62 V286"/><path d="M256 62 V286"/><path d="M328 62 V286"/><path d="M400 62 V286"/><path d="M472 62 V286"/></g><path d="M112 270 L112 135 L184 135 L184 90 L328 90 L328 62 L540 62 L540 270 Z" fill="rgba(255,209,102,.25)" stroke="#ffd166" stroke-width="4"/><circle cx="184" cy="135" r="8" fill="#46e7ff"/><circle cx="328" cy="90" r="8" fill="#ff5fa2"/><text x="82" y="312" fill="#9db8cf" font-size="17">reasoning level</text><text x="18" y="78" fill="#9db8cf" font-size="17">radius</text></svg>
+    <p>The full reasoning trajectory can be filtered by reasoning level and embedding radius. Algebraically, this is a two-parameter persistence module over F₂[x_level,y_radius].</p>
+    <p><strong>Training use:</strong> GUDHI landscapes/images/entropy, simplex-map gates for analogical memory, and Macaulay2 resolution checks.</p>
+  </article>
+  <article class="card">
+    <h3>Thought Alcove Control</h3>
+    <svg viewBox="0 0 620 340"><rect width="620" height="340" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><g stroke="#46e7ff" stroke-width="2"><path d="M100 280 L310 45 L520 280"/><path d="M100 280 H520"/><path d="M205 162 H410"/></g><path d="M132 250 C220 185 260 235 330 142 S450 130 500 84" fill="none" stroke="#88ff86" stroke-width="7"/><circle cx="330" cy="142" r="10" fill="#ffd166"/><text x="46" y="40" fill="#ecfbff" font-size="20">control u(t) keeps trajectories inside stable fan alcoves</text><text x="78" y="318" fill="#9db8cf" font-size="16">Lyapunov, ergodic, and optimal-control diagnostics</text></svg>
+    <p>Reasoning paths move through fan cells. A stable path should cross walls for reasons tied to the task, not because the latent state is noisy.</p>
+    <p><strong>Training use:</strong> fan-margin scheduling, branch pruning, FoT reward shaping, and future control-theoretic audits.</p>
+  </article>
+  <article class="card">
+    <h3>Intersection And Divisor Certificates</h3>
+    <svg viewBox="0 0 620 340"><rect width="620" height="340" rx="14" fill="#020713" stroke="rgba(70,231,255,.28)"/><circle cx="220" cy="170" r="92" fill="rgba(70,231,255,.16)" stroke="#46e7ff" stroke-width="4"/><circle cx="360" cy="170" r="92" fill="rgba(255,95,162,.16)" stroke="#ff5fa2" stroke-width="4"/><circle cx="290" cy="108" r="92" fill="rgba(255,209,102,.13)" stroke="#ffd166" stroke-width="4"/><text x="222" y="174" fill="#ecfbff" text-anchor="middle" font-size="22">σλ</text><text x="363" y="174" fill="#ecfbff" text-anchor="middle" font-size="22">σμ</text><text x="290" y="108" fill="#ecfbff" text-anchor="middle" font-size="22">Dρ</text><text x="92" y="286" fill="#9db8cf" font-size="17">intersection-style numbers become compact certificate features</text></svg>
+    <p>Toric divisors, one-dimensional cones, and intersection numbers provide compact summaries of how a local piecewise-linear decision bends across walls.</p>
+    <p><strong>Training use:</strong> toric vector-bundle one-dimensional-cone CE, sheaf compatibility, and divisor/fan audit metrics.</p>
+  </article>
 </section>
 """
     (out / "index.html").write_text(method_report_shell("Advanced Geometry Gallery", "Combinatorics, topology, and control", body), encoding="utf-8")
@@ -1157,7 +1700,7 @@ def write_method_reports(docs: Path, copied: dict[str, str], best_metrics: dict[
     reports = {
         "fot_method": write_fot_method_report(docs, copied),
         "convextok_method": write_convextok_method_report(docs),
-        "bgg_method": write_bgg_method_report(docs, best_metrics),
+        "bgg_category_o": write_bgg_method_report(docs, best_metrics),
         "theory_gallery": write_theory_gallery_report(docs),
     }
     return reports
@@ -1216,7 +1759,7 @@ def build_html(
             gallery.append(
                 f"""
                 <figure class="gallery-card">
-                  <img src="{html.escape(copied[key])}" alt="{html.escape(title)}">
+                  <img loading="lazy" decoding="async" src="{html.escape(copied[key])}" alt="{html.escape(title)}">
                   <figcaption><strong>{html.escape(title)}</strong><span>{html.escape(caption)}</span></figcaption>
                 </figure>
                 """
@@ -1236,7 +1779,7 @@ def build_html(
                 <p>{html.escape(summary)}</p>
                 <span>{html.escape(features)}</span>
               </div>
-              <a class="button" href="{html.escape(href)}">Open interactive report</a>
+              <a class="button" href="{html.escape(href)}">Open report</a>
             </article>
             """
         )
@@ -1411,7 +1954,7 @@ def build_html(
         </div>
       </div>
       <div class="hero-visual" aria-label="Animated toric fan visualization">
-        {f'<img src="{html.escape(hero)}" alt="ToricGT visual backdrop">' if hero else ''}
+        {f'<img loading="eager" decoding="async" src="{html.escape(hero)}" alt="ToricGT visual backdrop">' if hero else ''}
         <div class="fan">
           <svg viewBox="0 0 520 380" role="img" aria-label="Tropical active faces embedded in a toric fan">
             <defs>
@@ -1543,7 +2086,7 @@ def build_html(
     <section class="wrap">
       <div class="section-head">
         <h2>Interactive Analysis Lab</h2>
-        <p>The full generated reports are bundled into the page, not flattened to screenshots. They retain Plotly rotation, hover/click token details, radius sliders, reasoning-level sliders, simplex-tree maps, vectorized PH panels, CAS links, and tetrahedron views.</p>
+        <p>The generated reports are static-first and low-resource by default. They retain exact metrics, screenshot evidence, raw tables, hover/click details where cheap, CAS links, simplex-map summaries, vectorized PH panels, and tetrahedron/triangle views without forcing giant payloads or WebGL on first load.</p>
       </div>
       <div class="grid interactive-grid">
         {''.join(interactive_cards)}
@@ -1646,7 +2189,7 @@ def main() -> int:
     rows = completed_rows(state, current_campaign_only=True)
     best = best_row(rows)
     best_metrics = best.get("metrics", {}) if best else {}
-    interactive = {**write_method_reports(docs, copied, best_metrics), **interactive}
+    interactive = {**interactive, **write_method_reports(docs, copied, best_metrics)}
     tetra = write_campaign_tetrahedron_report(docs, rows)
     if tetra:
         interactive = {"campaign_tetrahedron": tetra, **interactive}

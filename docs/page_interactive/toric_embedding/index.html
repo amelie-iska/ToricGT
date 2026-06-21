@@ -1,42 +1,45 @@
-<!doctype html><html><head><meta charset="utf-8"><title>ToricGT Tropical-To-Toric Embedding Visualizations</title><style>
-:root{color-scheme:dark;--bg:#030712;--panel:#07111f;--panel2:#0b1728;--text:#e8fbff;--muted:#9fb1c9;--cyan:#37e8ff;--mag:#ff4fd8;--green:#8cff6a;--amber:#ffd166;--bad:#ff7b9c;--border:rgba(55,232,255,.28)}
-body{margin:0;background:radial-gradient(circle at top left,#092238 0,#030712 44rem);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-main{max-width:1320px;margin:0 auto;padding:32px 24px 72px}
-a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
-.hero,.panel,.card{background:linear-gradient(180deg,rgba(11,23,40,.96),rgba(5,13,25,.98));border:1px solid var(--border);border-radius:8px;box-shadow:0 18px 50px rgba(0,0,0,.28)}
-.hero{padding:24px;margin-bottom:18px}.panel,.card{padding:16px;margin-bottom:16px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
-h1{margin:0 0 8px;font-size:29px;letter-spacing:0}h2{margin:0 0 10px;font-size:18px;letter-spacing:0}h3{margin:14px 0 8px;font-size:14px;color:#dff9ff}
-p{color:var(--muted);line-height:1.55}
-.metric{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(145,168,183,.14);padding:7px 0}
-.metric span:first-child{color:var(--muted)}.metric span:last-child{text-align:right;color:white;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
-.pill{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(55,232,255,.07);color:#dff9ff}
-.ok{color:var(--green)}.bad{color:var(--bad)}.warn{color:var(--amber)}
-pre{white-space:pre-wrap;overflow:auto;max-height:520px;background:#020713;border:1px solid rgba(145,168,183,.18);border-radius:8px;padding:14px;color:#dff8ff}
-.plot{border:1px solid rgba(55,232,255,.14);border-radius:8px;overflow:hidden;background:#020713;margin:10px 0}
-.unavailable{border:1px dashed rgba(255,209,102,.45);border-radius:8px;padding:12px;background:rgba(255,209,102,.06);color:#ffe8a8}
-.diagram{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 0}
-.box{border:1px solid rgba(55,232,255,.32);background:rgba(55,232,255,.07);border-radius:8px;padding:10px 12px;min-width:110px;text-align:center}
-.arrow{color:var(--cyan);font-size:24px}
-.small{font-size:12px;color:var(--muted)}
-details{border:1px solid rgba(145,168,183,.18);border-radius:8px;margin:10px 0;background:#020713}
-summary{cursor:pointer;color:var(--cyan);padding:10px 12px}
-details pre{border:0;border-top:1px solid rgba(145,168,183,.18);border-radius:0;margin:0;max-height:520px}
-.statusgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:12px 0}
-.statuscard,.diffcard{border:1px solid rgba(55,232,255,.20);border-radius:8px;background:rgba(55,232,255,.045);padding:10px 12px}
-.statuscard strong,.diffcard strong{display:block;color:#dff9ff;margin-bottom:4px}
-.diffgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin:12px 0}
-.modulechain{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;margin:12px 0}
-.modulebox{border:1px solid rgba(255,79,216,.28);background:rgba(255,79,216,.06);border-radius:8px;padding:10px 12px;min-width:116px;text-align:center}
-</style></head>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ToricGT Tropical-To-Toric Embedding</title>
+  <style>
+    :root{color-scheme:dark;--bg:#030712;--panel:#07111f;--line:rgba(55,232,255,.28);--text:#e8fbff;--muted:#9fb1c9;--cyan:#37e8ff;--gold:#ffd166}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top left,#092238 0,#030712 42rem);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}
+    main{max-width:1180px;margin:0 auto;padding:28px 18px 64px}a{color:var(--cyan)}.hero,.card,.panel{background:linear-gradient(180deg,rgba(11,23,40,.96),rgba(5,13,25,.98));border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.28)}
+    .hero,.panel{padding:18px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.card{padding:16px}h1{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}p{color:var(--muted);line-height:1.55}
+    table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{border-bottom:1px solid rgba(159,177,201,.16);padding:8px;text-align:left;vertical-align:top}th{color:#bdeeff;width:38%}td{color:#fff}code{color:#ffd166;white-space:pre-wrap;overflow-wrap:anywhere}
+    img{display:block;width:100%;border:1px solid rgba(55,232,255,.20);border-radius:8px;background:#020713}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}
+    .note{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}
+  </style>
+</head>
 <body><main>
-<section class="hero"><h1>ToricGT Tropical-To-Toric Embedding Visualizations</h1>
-<p>Visual audit pages for exact finite sidecars embedding tropical ring attention into toric geometry.  Panels show initial degenerations, Newton polytopes, normal fans, toric orbit strata, monomial staircases, toric ideals, free resolutions, and optional Klyachko vector-bundle/sheaf certificates.</p>
-<p><a class="pill" href="manifest.json">manifest JSON</a><span class="pill warn">no vector-bundle certificate requested</span></p></section>
-<section class="grid"><section class="card"><h2>record_000</h2>
-<div class="metric"><span>exponents</span><span>8</span></div>
-<div class="metric"><span>dimension</span><span>2</span></div>
-<div class="metric"><span>Sage exact</span><span>True</span></div>
-<div class="metric"><span>Macaulay2 exact</span><span>True</span></div>
-<p><a class="pill" href="records/record_000_toric_embedding.html">open report</a><a class="pill" href="records/record_000_toric_embedding_summary.json">summary JSON</a></p></section></section>
+  <section class="hero">
+    <h1>Tropical-To-Toric Embedding Report</h1>
+    <p>This low-resource page preserves the exact finite toric-embedding record summaries: exponent counts, Sage normal-fan status, Macaulay2 toric-ideal status, Miller-Sturmfels staircase generators, quotient-basis counts, and adjacent LCM data. The original large Plotly record is omitted from GitHub Pages so older browsers do not parse tens of megabytes of JavaScript.</p>
+    <p><a class="pill" href="manifest.json">manifest JSON</a></p>
+    <p class="note">The visual screenshot below is generated from the original audit. The small summary JSON files keep the reproducible algebraic evidence without forcing a heavy interactive plot.</p>
+  </section>
+  <section class="panel">
+    <h2>Rendered Audit Screenshot</h2>
+    <img loading="lazy" decoding="async" src="../../page_assets/toric_embedding.png" alt="Toric embedding audit screenshot">
+  </section>
+  <section class="grid">
+            <section class="card">
+              <h2>record_000</h2>
+              <table>
+                <tbody>
+                  <tr><th>exponents</th><td>8</td></tr>
+                  <tr><th>dimension</th><td>2</td></tr>
+                  <tr><th>Sage normal fan exact</th><td>True</td></tr>
+                  <tr><th>Macaulay2 toric ideal exact</th><td>True</td></tr>
+                  <tr><th>minimal generators</th><td><code>[[6, 0], [0, 12]]</code></td></tr>
+                  <tr><th>quotient-basis lattice points</th><td>72</td></tr>
+                  <tr><th>adjacent LCM corners</th><td>1</td></tr>
+                </tbody>
+              </table>
+              <p><a class="pill" href="records/record_000_toric_embedding_summary.json">summary JSON</a></p>
+            </section>
+            </section>
 </main></body></html>

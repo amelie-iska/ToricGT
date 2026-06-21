@@ -1,14 +1,13 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Forest-of-Thought Reasoning</title>
-<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#030712;--panel:#071421;--panel2:#0b1b2b;--line:rgba(70,231,255,.28);--text:#ecfbff;--muted:#9db8cf;--cyan:#46e7ff;--gold:#ffd166;--pink:#ff5fa2;--green:#88ff86;--violet:#a78bfa}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 12% 10%,rgba(70,231,255,.18),transparent 30rem),radial-gradient(circle at 86% 6%,rgba(255,95,162,.13),transparent 24rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 main{max-width:1240px;margin:0 auto;padding:28px 20px 64px}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .hero,.panel,.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(11,27,43,.92),rgba(7,20,33,.88));box-shadow:0 24px 80px rgba(0,0,0,.38)}
 .hero{padding:24px;margin-bottom:18px}.panel{padding:18px;margin:18px 0}.grid{display:grid;gap:16px}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:repeat(3,minmax(0,1fr))}
-h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.card{padding:16px;min-height:220px}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
+h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.metric-note{font-size:.94rem;color:var(--muted);line-height:1.5}.card{padding:16px;min-height:0;overflow-wrap:anywhere}.card p{margin-bottom:0}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}.callout{border-left:3px solid var(--gold);background:rgba(255,209,102,.08);border-radius:12px;padding:12px 14px;color:#ffe8a8}.detail-panel{border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:14px;margin-top:12px;min-height:180px}.detail-panel strong{color:#fff}.svg-button{cursor:pointer}.svg-button:hover{filter:drop-shadow(0 0 10px rgba(255,209,102,.75))}.method-list{margin:0;padding-left:1.1rem}.method-list li{margin:0 0 .65rem}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
 </style></head><body><main>
 <section class="hero"><div class="eyebrow">Embedding-space reasoning forest</div><h1>Forest-of-Thought Reasoning</h1></section>
 
@@ -18,7 +17,14 @@ h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spa
 </section>
 <section class="grid two">
   <article class="panel"><h2>FoT Reference Diagram</h2><img class="source-img" src="../../page_assets/fot_reference.png" alt="Forest-of-Thought paper diagram"></article>
-  <article class="panel"><h2>Embedding-Space Adaptation</h2><div id="fotPlot" class="plot"></div></article>
+  <article class="panel"><h2>Embedding-Space Adaptation</h2><p class="metric-note">Click or keyboard-select a vertex to reveal its local thought tree and branch metrics. The SVG is a lightweight projection; the training controller works in the original embedding coordinates.</p>
+<svg viewBox="0 0 700 390" role="img" aria-label="Forest-of-Thought embedding-space forest diagram">
+  <rect x="8" y="8" width="684" height="374" rx="18" fill="#020713" stroke="rgba(70,231,255,.30)"/>
+  <defs><marker id="fotArrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#46e7ff"/></marker></defs>
+  <g marker-end="url(#fotArrow)"><path d="M68 210 C123 168, 123 154, 178 112" fill="none" stroke="#46e7ff" stroke-width="4" stroke-opacity=".72"><title>spawn tree branch</title></path><path d="M68 210 C123 168, 123 338, 178 296" fill="none" stroke="#46e7ff" stroke-width="4" stroke-opacity=".72"><title>spawn exploratory branch</title></path><path d="M178 112 C253 70, 253 108, 328 66" fill="none" stroke="#46e7ff" stroke-width="4" stroke-opacity=".72"><title>expand promising branch</title></path><path d="M178 112 C255 70, 255 244, 332 202" fill="none" stroke="#46e7ff" stroke-width="4" stroke-opacity=".72"><title>self-correction branch</title></path><path d="M178 296 C324 254, 324 334, 470 292" fill="none" stroke="#46e7ff" stroke-width="4" stroke-opacity=".72"><title>independent tree expansion</title></path><path d="M328 66 C469 24, 469 220, 610 178" fill="none" stroke="#46e7ff" stroke-width="4" stroke-opacity=".72"><title>consensus edge</title></path><path d="M332 202 C471 160, 471 220, 610 178" fill="none" stroke="#46e7ff" stroke-width="4" stroke-opacity=".72"><title>consensus edge</title></path><path d="M470 292 C540 250, 540 220, 610 178" fill="none" stroke="#46e7ff" stroke-width="4" stroke-opacity=".72"><title>minority but diverse vote</title></path></g>
+  <g><circle id="fot-node-root" data-node="root" class="svg-button" cx="68" cy="210" r="18" fill="#ffd166" stroke="#ecfbff" stroke-width="1.5" role="button" aria-label="Reveal FoT tree for prompt root; initializes the embedding-space forest" tabindex="0"><title>prompt root; initializes the embedding-space forest</title></circle><text x="68" y="250" fill="#ecfbff" font-size="16" text-anchor="middle">root</text><circle id="fot-node-t0a" data-node="t0a" class="svg-button" cx="178" cy="112" r="18" fill="#46e7ff" stroke="#ecfbff" stroke-width="1.5" role="button" aria-label="Reveal FoT tree for tree 0 branch; high fan margin, medium BPB delta" tabindex="0"><title>tree 0 branch; high fan margin, medium BPB delta</title></circle><text x="178" y="152" fill="#ecfbff" font-size="16" text-anchor="middle">t0a</text><circle id="fot-node-t0b" data-node="t0b" class="svg-button" cx="178" cy="296" r="18" fill="#46e7ff" stroke="#ecfbff" stroke-width="1.5" role="button" aria-label="Reveal FoT tree for tree 0 branch; exploratory graph edit" tabindex="0"><title>tree 0 branch; exploratory graph edit</title></circle><text x="178" y="336" fill="#ecfbff" font-size="16" text-anchor="middle">t0b</text><circle id="fot-node-t1a" data-node="t1a" class="svg-button" cx="328" cy="66" r="18" fill="#a78bfa" stroke="#ecfbff" stroke-width="1.5" role="button" aria-label="Reveal FoT tree for tree 1 branch; retrieved analogy and topological stability" tabindex="0"><title>tree 1 branch; retrieved analogy and topological stability</title></circle><text x="328" y="106" fill="#ecfbff" font-size="16" text-anchor="middle">t1a</text><circle id="fot-node-t1b" data-node="t1b" class="svg-button" cx="332" cy="202" r="18" fill="#a78bfa" stroke="#ecfbff" stroke-width="1.5" role="button" aria-label="Reveal FoT tree for tree 1 branch; correction branch" tabindex="0"><title>tree 1 branch; correction branch</title></circle><text x="332" y="242" fill="#ecfbff" font-size="16" text-anchor="middle">t1b</text><circle id="fot-node-t2a" data-node="t2a" class="svg-button" cx="470" cy="292" r="18" fill="#ff5fa2" stroke="#ecfbff" stroke-width="1.5" role="button" aria-label="Reveal FoT tree for tree 2 branch; diversity-preserving candidate" tabindex="0"><title>tree 2 branch; diversity-preserving candidate</title></circle><text x="470" y="332" fill="#ecfbff" font-size="16" text-anchor="middle">t2a</text><circle id="fot-node-vote" data-node="vote" class="svg-button" cx="610" cy="178" r="18" fill="#88ff86" stroke="#ecfbff" stroke-width="1.5" role="button" aria-label="Reveal FoT tree for forest consensus; candidate selected by BPB-delta reward" tabindex="0"><title>forest consensus; candidate selected by BPB-delta reward</title></circle><text x="610" y="218" fill="#ecfbff" font-size="16" text-anchor="middle">vote</text></g>
+</svg>
+<div id="fotDetail" class="detail-panel">Click a vertex to reveal the local thought tree, branch role, and training signals for that node.</div></article>
 </section>
 <section class="grid three">
   <article class="card"><h3>State</h3><p>Each state is <span class="accent">s=(G,H,Σ,μ,M)</span>: a reasoning graph, hidden table, toric/fan chart, moment coordinate, and memory pointer.</p></article>
@@ -27,14 +33,53 @@ h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spa
 </section>
 <section class="panel"><h2>Training Equation</h2><div class="equation">L<sub>FoT</sub> = (log Z + Σ<sub>t</sub> log p<sub>F</sub>(s<sub>t+1</sub>|s<sub>t</sub>) − log R(x) − Σ<sub>t</sub> log p<sub>B</sub>(s<sub>t</sub>|s<sub>t+1</sub>))<sup>2</sup>, with R(x)=exp((ΔBPB + α·diversity + β·fan_margin − γ·certificate_error)/τ).</div></section>
 <script>
-const payload = {"nodes": [{"id": "root", "tree": 0, "x": 0, "y": 0, "z": 0, "kind": "prompt"}, {"id": "t0a", "tree": 0, "x": 1, "y": 1.2, "z": 0.2, "kind": "branch"}, {"id": "t0b", "tree": 0, "x": 1, "y": -0.9, "z": -0.15, "kind": "branch"}, {"id": "t1a", "tree": 1, "x": 2.1, "y": 1.7, "z": 0.7, "kind": "tree"}, {"id": "t1b", "tree": 1, "x": 2.3, "y": 0.1, "z": -0.25, "kind": "tree"}, {"id": "t2a", "tree": 2, "x": 3.4, "y": -0.4, "z": 0.6, "kind": "tree"}, {"id": "vote", "tree": 3, "x": 4.6, "y": 0.25, "z": 0.1, "kind": "consensus"}], "edges": [["root", "t0a"], ["root", "t0b"], ["t0a", "t1a"], ["t0a", "t1b"], ["t0b", "t2a"], ["t1a", "vote"], ["t1b", "vote"], ["t2a", "vote"]]};
-const byId = Object.fromEntries(payload.nodes.map(n => [n.id, n]));
-const edgeTraces = payload.edges.map(e => {
-  const a = byId[e[0]], b = byId[e[1]];
-  return {type:'scatter3d',mode:'lines',x:[a.x,b.x],y:[a.y,b.y],z:[a.z,b.z],line:{color:'#46e7ff',width:5},hoverinfo:'skip',showlegend:false};
+const fotDetails = {"root": {"title": "Prompt Root", "role": "Initial graph state before the forest is expanded.", "tree": [["prompt", "token graph"], ["prompt", "retrieval query"], ["token graph", "byte flattening"]], "metrics": {"reward seed": "BPB prior + graph validity", "fan": "no wall crossing yet", "memory": "query only"}}, "t0a": {"title": "High-Margin Branch", "role": "First tree branch with the best early tropical fan margin.", "tree": [["t0a", "local edit"], ["t0a", "analogy probe"], ["local edit", "candidate answer"], ["analogy probe", "memory support"]], "metrics": {"reward": "positive BPB-delta", "fan margin": "high", "PH gate": "medium-high"}}, "t0b": {"title": "Exploratory Branch", "role": "Diversity branch retained to avoid early collapse into one reasoning path.", "tree": [["t0b", "alternate graph edge"], ["t0b", "low-rank toric probe"], ["alternate graph edge", "candidate answer"]], "metrics": {"reward": "uncertain", "diversity": "high", "correction need": "medium"}}, "t1a": {"title": "Retrieved-Analogy Branch", "role": "Branch that uses memory retrieval after simplex-map and PH similarity checks.", "tree": [["t1a", "simplex map"], ["t1a", "PH vector gate"], ["simplex map", "memory trajectory"], ["PH vector gate", "retrieval score"]], "metrics": {"full map": "strong", "PH cosine": "high", "memory": "accepted"}}, "t1b": {"title": "Self-Correction Branch", "role": "Correction branch for a candidate whose byte likelihood improved but certificate pressure was weak.", "tree": [["t1b", "certificate check"], ["t1b", "graph repair"], ["certificate check", "BGG/Koszul probe"], ["graph repair", "candidate answer"]], "metrics": {"reward": "mixed", "certificate": "improved", "BPB": "small positive"}}, "t2a": {"title": "Independent Tree Expansion", "role": "Separate thought tree that preserves forest-level diversity and can outvote brittle local branches.", "tree": [["t2a", "alternate token DAG"], ["t2a", "toric wall crossing"], ["alternate token DAG", "flattened output"], ["toric wall crossing", "fan audit"]], "metrics": {"diversity": "high", "fan crossing": "controlled", "reward": "candidate"}}, "vote": {"title": "Forest Consensus", "role": "Consensus node that chooses a compact output path from branch rewards and structural gates.", "tree": [["vote", "best BPB branch"], ["vote", "certificate-safe branch"], ["vote", "diversity backup"], ["best BPB branch", "final graph"], ["certificate-safe branch", "final graph"]], "metrics": {"selection": "BPB-delta first", "fallback": "structural gates", "output": "graph plus optional flattening"}}};
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function renderMiniTree(edges) {
+  const nodes = Array.from(new Set(edges.flat()));
+  const levels = new Map();
+  levels.set(nodes[0], 0);
+  for (const [a,b] of edges) levels.set(b, Math.max(levels.get(b) || 0, (levels.get(a) || 0) + 1));
+  const byLevel = {};
+  for (const node of nodes) {
+    const level = levels.get(node) || 0;
+    (byLevel[level] ||= []).push(node);
+  }
+  const positions = {};
+  for (const [levelText, items] of Object.entries(byLevel)) {
+    const level = Number(levelText);
+    items.forEach((node, idx) => {
+      positions[node] = [72 + level * 185, 72 + (idx - (items.length - 1) / 2) * 86];
+    });
+  }
+  const edgeSvg = edges.map(([a,b]) => {
+    const p = positions[a], q = positions[b];
+    return `<line x1="${p[0]}" y1="${p[1]}" x2="${q[0]}" y2="${q[1]}" stroke="#46e7ff" stroke-width="3" stroke-opacity=".72" />`;
+  }).join('');
+  const nodeSvg = nodes.map(node => {
+    const p = positions[node];
+    return `<g><circle cx="${p[0]}" cy="${p[1]}" r="15" fill="#ffd166" stroke="#ecfbff"/><text x="${p[0]}" y="${p[1]+34}" text-anchor="middle" fill="#ecfbff" font-size="13">${escapeHtml(node)}</text></g>`;
+  }).join('');
+  return `<svg viewBox="0 0 560 260" role="img" aria-label="Local FoT thought tree"><rect x="8" y="8" width="544" height="244" rx="14" fill="#071421" stroke="rgba(70,231,255,.20)"/>${edgeSvg}${nodeSvg}</svg>`;
+}
+function renderFotDetail(id) {
+  const detail = fotDetails[id];
+  if (!detail) return;
+  const metrics = Object.entries(detail.metrics || {}).map(([k,v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('');
+  document.getElementById('fotDetail').innerHTML = `<strong>${escapeHtml(detail.title)}</strong><p>${escapeHtml(detail.role)}</p>${renderMiniTree(detail.tree || [])}<table class="mini-table"><tbody>${metrics}</tbody></table>`;
+}
+document.querySelectorAll('[data-node]').forEach(node => {
+  node.addEventListener('click', () => renderFotDetail(node.dataset.node));
+  node.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      renderFotDetail(node.dataset.node);
+    }
+  });
 });
-const nodeTrace = {type:'scatter3d',mode:'markers+text',x:payload.nodes.map(n=>n.x),y:payload.nodes.map(n=>n.y),z:payload.nodes.map(n=>n.z),text:payload.nodes.map(n=>n.id),customdata:payload.nodes.map(n=>[n.kind,n.tree]),marker:{size:9,color:payload.nodes.map(n=>n.tree),colorscale:'Viridis',line:{color:'#fff',width:1}},hovertemplate:'%{text}<br>kind %{customdata[0]}<br>tree %{customdata[1]}<extra></extra>'};
-Plotly.newPlot('fotPlot',[...edgeTraces,nodeTrace],{template:'plotly_dark',paper_bgcolor:'#020713',plot_bgcolor:'#020713',scene:{bgcolor:'#020713'},margin:{l:0,r:0,t:10,b:0}},{responsive:true});
+renderFotDetail('root');
 </script>
 
 </main></body></html>

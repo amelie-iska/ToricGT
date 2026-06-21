@@ -1,27 +1,61 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Campaign Metric Tetrahedra</title>
-<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#030712;--panel:#071421;--line:rgba(70,231,255,.28);--text:#ecfbff;--muted:#9db8cf;--cyan:#46e7ff;--gold:#ffd166}
-body{margin:0;background:radial-gradient(circle at 10% 10%,rgba(70,231,255,.16),transparent 30rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 10%,rgba(70,231,255,.16),transparent 30rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}
 main{max-width:1280px;margin:0 auto;padding:24px}.panel{border:1px solid var(--line);border-radius:10px;background:rgba(7,20,33,.86);padding:16px;margin:14px 0}
-h1{margin:0 0 8px}p{color:var(--muted);line-height:1.5}.plot{height:620px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713;margin-top:12px}
-.plot.triangle{height:500px}.view-controls{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin:8px 0 12px}select{width:100%;background:#020713;color:var(--text);border:1px solid rgba(70,231,255,.28);border-radius:8px;padding:10px}label{display:block;color:var(--muted);font-size:.9rem;margin-bottom:4px}.metric-note{font-size:.92rem;color:var(--muted);margin-top:8px}code{color:#7df5ff}
-table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{border-bottom:1px solid rgba(157,184,207,.16);padding:8px;text-align:left}td.num{text-align:right;color:var(--gold)}
+h1{margin:0 0 8px}p{color:var(--muted);line-height:1.5}.plot{min-height:520px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713;margin-top:12px;overflow:hidden}
+.plot.triangle{min-height:420px}.view-controls{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin:8px 0 12px}select{width:100%;background:#020713;color:var(--text);border:1px solid rgba(70,231,255,.28);border-radius:8px;padding:10px}label{display:block;color:var(--muted);font-size:.9rem;margin-bottom:4px}.metric-note{font-size:.92rem;color:var(--muted);margin-top:8px}code{color:#7df5ff}
+svg{display:block;width:100%;height:auto}.svg-label{font-size:13px;fill:#ecfbff;paint-order:stroke;stroke:#020713;stroke-width:3px}.svg-small{font-size:11px;fill:#9db8cf}.point-label{font-size:11px;fill:#ecfbff;paint-order:stroke;stroke:#020713;stroke-width:3px}.tetra-edge{stroke:#46e7ff;stroke-width:2.5}.tetra-face{fill:rgba(70,231,255,.10);stroke:#46e7ff;stroke-width:1.5}.triangle-cell{stroke:none;opacity:.72}.triangle-contour{stroke:rgba(236,251,255,.18);stroke-width:.9;fill:none}.run-point{stroke:#fff;stroke-width:1.2;cursor:pointer}.run-point:hover{stroke:#ffd166;stroke-width:3px}.details{border:1px solid rgba(70,231,255,.16);border-radius:8px;background:#020713;padding:10px;margin-top:10px;color:#dff8ff;line-height:1.45}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{border-bottom:1px solid rgba(157,184,207,.16);padding:8px;text-align:left;vertical-align:top}td.num{text-align:right;color:var(--gold)}.scroll{overflow:auto;max-height:520px;border:1px solid rgba(70,231,255,.14);border-radius:8px}.scroll table{min-width:1100px}.button{border:1px solid var(--line);border-radius:999px;padding:8px 12px;background:rgba(70,231,255,.08);color:var(--text);font-weight:700;display:inline-block}
 </style></head><body><main>
 <section class="panel"><h1>Campaign Metric Tetrahedra and Shaded Triangles</h1>
-<p>This page renders interactive tetrahedra and shaded metric triangles over completed campaign runs without mounting every Plotly view at once. Each tetrahedron uses four normalized axes. Each triangle uses three normalized axes; the blue background shading marks regions where the three metrics are jointly balanced, while run markers are colored by BPB and labeled by run index. Lower BPB is always better.</p>
+<p>This page is SVG-first and low-resource by default. It still shows every campaign metric view, all run labels, normalized tetrahedron/triangle geometry, raw metric tables, and hover/click details, but it does not load Plotly or WebGL.</p>
 <p><a href="campaign_tetrahedron.json">payload JSON</a></p></section>
 <section class="panel"><h2>Tetrahedron Views</h2><div class="view-controls"><div><label for="tetra_select">metric tetrahedron</label><select id="tetra_select"><option>loading...</option></select></div><span id="tetra_count" class="metric-note"></span></div><div id="tetra_plot" class="plot"></div><p id="tetra_caption" class="metric-note"></p></section>
 <section class="panel"><h2>Shaded Triangle Views</h2><p>Blue shading indicates the balanced-support region for the metric triple. Markers remain actual run observations; hover text reports profile, BPB, raw axis values, and barycentric weights.</p><div class="view-controls"><div><label for="triangle_select">metric triangle</label><select id="triangle_select"><option>loading...</option></select></div><span id="triangle_count" class="metric-note"></span></div><div id="triangle_plot" class="plot triangle"></div><p id="triangle_caption" class="metric-note"></p></section>
-<section class="panel"><h2>Run Table</h2><table><thead><tr><th>profile</th><th>run</th><th>BPB</th><th>artifact bytes</th><th>train BPB</th></tr></thead><tbody>
-<tr><td>convextok2048_det_tropical_toric_bpb</td><td>0717Z-r001-convextok2048_det_tropical_toric_bpb-20260621T040718Z</td><td class='num'>0.565125</td><td class='num'>15,180,494</td><td class='num'>1.0058</td></tr><tr><td>gate1500_fast_main_lr_light_graphcg</td><td>40717Z-r004-gate1500_fast_main_lr_light_graphcg-20260621T101734Z</td><td class='num'>0.669255</td><td class='num'>15,287,974</td><td class='num'>0.9026</td></tr><tr><td>gate1500_fast_main_lr_aux_conflict_recovery</td><td>005-gate1500_fast_main_lr_aux_conflict_recovery-20260621T120339Z</td><td class='num'>0.718665</td><td class='num'>15,525,100</td><td class='num'>0.8295</td></tr><tr><td>gate1500_structural_toric_heavy</td><td>21T040717Z-r006-gate1500_structural_toric_heavy-20260621T135410Z</td><td class='num'>0.658505</td><td class='num'>14,400,139</td><td class='num'>0.8738</td></tr><tr><td>gate1500_bgg_memory_probe</td><td>20260621T040717Z-r007-gate1500_bgg_memory_probe-20260621T144834Z</td><td class='num'>0.689378</td><td class='num'>14,589,172</td><td class='num'>0.8316</td></tr><tr><td>gate2500_experimental_family_selective</td><td>17Z-r008-gate2500_experimental_family_selective-20260621T154110Z</td><td class='num'>0.495333</td><td class='num'>12,202,796</td><td class='num'>0.5036</td></tr><tr><td>gate2500_fast_bpb_low_aux</td><td>20260621T040717Z-r009-gate2500_fast_bpb_low_aux-20260621T161926Z</td><td class='num'>0.497956</td><td class='num'>12,199,688</td><td class='num'>0.5056</td></tr><tr><td>large_batch_lower_lr_sidecar_light</td><td>040717Z-r010-large_batch_lower_lr_sidecar_light-20260621T164928Z</td><td class='num'>0.536639</td><td class='num'>10,125,693</td><td class='num'>0.5316</td></tr>
+<section class="panel"><h2>Run Table</h2><table><thead><tr><th>profile</th><th>run</th><th>BPB</th><th>NLL/loss</th><th>artifact bytes</th><th>train BPB</th></tr></thead><tbody>
+<tr><td>convextok2048_det_tropical_toric_bpb</td><td>0717Z-r001-convextok2048_det_tropical_toric_bpb-20260621T040718Z</td><td class='num'>0.565125</td><td class='num'>0.9599</td><td class='num'>15,180,494</td><td class='num'>1.0058</td></tr><tr><td>gate1500_fast_main_lr_light_graphcg</td><td>40717Z-r004-gate1500_fast_main_lr_light_graphcg-20260621T101734Z</td><td class='num'>0.669255</td><td class='num'>1.1383</td><td class='num'>15,287,974</td><td class='num'>0.9026</td></tr><tr><td>gate1500_fast_main_lr_aux_conflict_recovery</td><td>005-gate1500_fast_main_lr_aux_conflict_recovery-20260621T120339Z</td><td class='num'>0.718665</td><td class='num'>1.2220</td><td class='num'>15,525,100</td><td class='num'>0.8295</td></tr><tr><td>gate1500_structural_toric_heavy</td><td>21T040717Z-r006-gate1500_structural_toric_heavy-20260621T135410Z</td><td class='num'>0.658505</td><td class='num'>1.1188</td><td class='num'>14,400,139</td><td class='num'>0.8738</td></tr><tr><td>gate1500_bgg_memory_probe</td><td>20260621T040717Z-r007-gate1500_bgg_memory_probe-20260621T144834Z</td><td class='num'>0.689378</td><td class='num'>1.1706</td><td class='num'>14,589,172</td><td class='num'>0.8316</td></tr><tr><td>gate2500_experimental_family_selective</td><td>17Z-r008-gate2500_experimental_family_selective-20260621T154110Z</td><td class='num'>0.495333</td><td class='num'>0.8380</td><td class='num'>12,202,796</td><td class='num'>0.5036</td></tr><tr><td>gate2500_fast_bpb_low_aux</td><td>20260621T040717Z-r009-gate2500_fast_bpb_low_aux-20260621T161926Z</td><td class='num'>0.497956</td><td class='num'>0.8428</td><td class='num'>12,199,688</td><td class='num'>0.5056</td></tr><tr><td>large_batch_lower_lr_sidecar_light</td><td>040717Z-r010-large_batch_lower_lr_sidecar_light-20260621T164928Z</td><td class='num'>0.536639</td><td class='num'>0.8870</td><td class='num'>10,125,693</td><td class='num'>0.5316</td></tr>
 </tbody></table></section>
+<section class="panel"><h2>Raw Metric Detail</h2><p>All axis values used by the tetrahedra and triangles are retained here so the low-resource view does not discard the underlying evidence.</p><div class="scroll"><table><thead><tr><th>run</th><th>low BPB</th><th>compact artifact</th><th>low train BPB</th><th>TokenGT graph fit</th><th>graph LM fit</th><th>MTP fit</th><th>FoT fit</th><th>FoT reward</th><th>GFlowNet fit</th><th>GFlowNet reward</th><th>GraphCG disentanglement</th><th>analogy retrieval fit</th><th>memory retrieval fit</th><th>toric geometry fit</th><th>1D-cone sheaf fit</th><th>Toric BGG fit</th><th>Koszul persistence fit</th><th>toric CCA topology fit</th><th>derived signature fit</th></tr></thead><tbody><tr><th>1. convextok2048_det_tropical_toric_bpb</th><td>0.5651</td><td>15,180,494</td><td>1.0058</td><td>0.9730</td><td>pending</td><td>8.6822</td><td>5.9557</td><td>0.4068</td><td>0.0186</td><td>0.2919</td><td>0.0111</td><td>0.0631</td><td>1.4844</td><td>3.6422</td><td>0.6424</td><td>0.1467</td><td>0.0463</td><td>0.5636</td><td>1.6691</td></tr><tr><th>2. gate1500_fast_main_lr_light_graphcg</th><td>0.6693</td><td>15,287,974</td><td>0.9026</td><td>1.0853</td><td>pending</td><td>10.4973</td><td>4.9614</td><td>0.5363</td><td>0.2858</td><td>0.3011</td><td>0.0111</td><td>0.0643</td><td>1.1287</td><td>4.2993</td><td>0.6601</td><td>0.1341</td><td>0.0454</td><td>0.2442</td><td>2.6345</td></tr><tr><th>3. gate1500_fast_main_lr_aux_conflict_recovery</th><td>0.7187</td><td>15,525,100</td><td>0.8295</td><td>1.0152</td><td>pending</td><td>11.1189</td><td>4.8632</td><td>0.5383</td><td>0.0000</td><td>0.2224</td><td>0.0126</td><td>0.0618</td><td>0.9417</td><td>4.1481</td><td>0.6290</td><td>0.1374</td><td>0.0476</td><td>0.3439</td><td>1.9042</td></tr><tr><th>4. gate1500_structural_toric_heavy</th><td>0.6585</td><td>14,400,139</td><td>0.8738</td><td>0.9932</td><td>0.4289</td><td>11.1003</td><td>4.8458</td><td>0.5555</td><td>0.0155</td><td>0.3005</td><td>0.0122</td><td>0.0623</td><td>0.9804</td><td>4.2157</td><td>0.6260</td><td>0.1146</td><td>0.0481</td><td>1.7954</td><td>2.0799</td></tr><tr><th>5. gate1500_bgg_memory_probe</th><td>0.6894</td><td>14,589,172</td><td>0.8316</td><td>1.0304</td><td>0.4342</td><td>10.3133</td><td>4.7761</td><td>0.5719</td><td>0.0039</td><td>0.2267</td><td>0.0168</td><td>0.0584</td><td>0.8793</td><td>4.3342</td><td>0.6424</td><td>0.1169</td><td>0.0517</td><td>0.2384</td><td>1.9154</td></tr><tr><th>6. gate2500_experimental_family_selective</th><td>0.4953</td><td>12,202,796</td><td>0.5036</td><td>1.1628</td><td>0.3687</td><td>11.4870</td><td>5.0274</td><td>0.5375</td><td>1.7157</td><td>0.2221</td><td>0.0114</td><td>0.0648</td><td>1.1407</td><td>5.8850</td><td>0.7043</td><td>0.1650</td><td>0.0454</td><td>1.0460</td><td>3.2432</td></tr><tr><th>7. gate2500_fast_bpb_low_aux</th><td>0.4980</td><td>12,199,688</td><td>0.5056</td><td>1.4557</td><td>0.3598</td><td>11.6274</td><td>4.8819</td><td>0.5332</td><td>1.1192</td><td>0.2226</td><td>0.0112</td><td>0.0653</td><td>1.0438</td><td>7.0952</td><td>0.7199</td><td>0.1587</td><td>0.0448</td><td>0.3602</td><td>3.0483</td></tr><tr><th>8. large_batch_lower_lr_sidecar_light</th><td>0.5366</td><td>10,125,693</td><td>0.5316</td><td>1.0902</td><td>0.4101</td><td>12.2975</td><td>5.3631</td><td>0.5116</td><td>1.5744</td><td>0.2283</td><td>0.0110</td><td>0.0654</td><td>1.2168</td><td>7.6142</td><td>0.7321</td><td>0.1521</td><td>0.0443</td><td>0.8281</td><td>3.2431</td></tr></tbody></table></div></section>
 <script>
 let payload = null;
+let recordByIndex = new Map();
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function fmtValue(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.abs(value) >= 10000 ? Math.round(value).toLocaleString() : value.toFixed(4);
+  return value ?? 'missing';
+}
+function recordFor(point) {
+  return recordByIndex.get(point.record_index) || {};
+}
 function axisRawText(point, axes) {
-  return axes.map(axis => payload.axis_library[axis].label+': '+(point.raw_values[axis] ?? 'missing')).join('<br>');
+  const rec = recordFor(point);
+  return axes.map(axis => payload.axis_library[axis].label+': '+fmtValue(rec.raw_values?.[axis])).join('<br>');
+}
+function pointTitle(point, axes) {
+  const rec = recordFor(point);
+  return rec.profile+'\nrun '+rec.run+'\nBPB '+fmtValue(rec.bpb)+'\nNLL/loss '+fmtValue(rec.nll_loss)+'\nweights '+point.weights.map(w=>w.toFixed(3)).join(' / ')+'\n'+axes.map(axis => payload.axis_library[axis].label+': '+fmtValue(rec.raw_values?.[axis])).join('\n');
+}
+function colorForBpb(value) {
+  const vals = payload.records.map(r => r.bpb).filter(v => typeof v === 'number');
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const t = hi <= lo ? 0.5 : (value - lo) / (hi - lo);
+  const r = Math.round(255 * (0.18 + 0.72 * t));
+  const g = Math.round(230 * (0.78 - 0.52 * t));
+  const b = Math.round(115 * (0.28 + 0.38 * (1 - t)));
+  return `rgb(${r},${g},${b})`;
+}
+function project3(v) {
+  return [360 + v[0] * 150 + v[1] * 42, 270 - v[2] * 120 + v[1] * 34];
+}
+function showDetails(id, point, axes) {
+  const rec = recordFor(point);
+  const raw = axes.map(axis => `<tr><th>${esc(payload.axis_library[axis].label)}</th><td>${esc(fmtValue(rec.raw_values?.[axis]))}</td></tr>`).join('');
+  document.getElementById(id).innerHTML = `<strong>${esc(rec.profile)}</strong><br>run ${esc(rec.run)} · BPB ${esc(fmtValue(rec.bpb))} · NLL/loss ${esc(fmtValue(rec.nll_loss))} · weights ${esc(point.weights.map(w=>w.toFixed(3)).join(' / '))}<table>${raw}</table>`;
 }
 function populateSelect(select, views) {
   select.innerHTML = '';
@@ -35,29 +69,77 @@ function populateSelect(select, views) {
 function renderTetra(view) {
   const vertices = view.vertices;
   const edges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
-  const traces = [];
-  for (const [i,j] of edges) {
-    traces.push({type:'scatter3d', mode:'lines', x:[vertices[i][0],vertices[j][0]], y:[vertices[i][1],vertices[j][1]], z:[vertices[i][2],vertices[j][2]], line:{color:'#46e7ff',width:5}, hoverinfo:'skip', showlegend:false});
-  }
-  traces.push({type:'mesh3d', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]), i:[0,0,0,1], j:[1,1,2,2], k:[2,3,3,3], opacity:0.09, color:'#46e7ff', hoverinfo:'skip', name:'tetrahedron faces'});
-  traces.push({type:'scatter3d', mode:'markers+text', name:'campaign runs', showlegend:false, x:view.points.map(p=>p.xyz[0]), y:view.points.map(p=>p.xyz[1]), z:view.points.map(p=>p.xyz[2]), text:view.points.map(p=>String(p.index)), customdata:view.points.map(p=>[p.profile,p.run,p.bpb,p.artifact,p.train_bpb,p.weights.map(w=>w.toFixed(3)).join(' / '),axisRawText(p, view.axes)]), marker:{size:8,color:view.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,colorbar:{title:'BPB'},line:{color:'white',width:1}}, hovertemplate:'%{customdata[0]}<br>run %{customdata[1]}<br>BPB %{customdata[2]:.6f}<br>artifact %{customdata[3]}<br>train BPB %{customdata[4]}<br>weights %{customdata[5]}<br>%{customdata[6]}<extra></extra>'});
-  traces.push({type:'scatter3d', mode:'text', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]+0.08), text:view.labels, textfont:{color:'#ecfbff',size:14}, hoverinfo:'skip', showlegend:false});
-  Plotly.react('tetra_plot', traces, {template:'plotly_dark', title:{text:view.title,font:{color:'#ecfbff'}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', scene:{aspectmode:'data', camera:{eye:{x:1.55,y:1.35,z:1.15}}, xaxis:{visible:false}, yaxis:{visible:false}, zaxis:{visible:false}, bgcolor:'#020713'}, margin:{l:0,r:0,t:42,b:0}}, {responsive:true});
+  const pv = vertices.map(project3);
+  const faces = [[0,1,2],[0,1,3],[0,2,3],[1,2,3]].map(face => `<polygon class="tetra-face" points="${face.map(i=>pv[i].join(',')).join(' ')}" />`).join('');
+  const edgeSvg = edges.map(([i,j]) => `<line class="tetra-edge" x1="${pv[i][0]}" y1="${pv[i][1]}" x2="${pv[j][0]}" y2="${pv[j][1]}" />`).join('');
+  const labels = pv.map((p,i) => `<text class="svg-label" text-anchor="middle" x="${p[0]}" y="${p[1]-12}">${esc(view.labels[i])}</text>`).join('');
+  const points = view.points.map(point => {
+    const rec = recordFor(point);
+    const [x,y] = project3(point.xyz);
+    return `<g><circle class="run-point" cx="${x}" cy="${y}" r="8" fill="${colorForBpb(rec.bpb)}" onclick="showDetails('tetra_details', payload.tetrahedra[document.getElementById('tetra_select').value].points.find(p=>p.record_index===${point.record_index}), payload.tetrahedra[document.getElementById('tetra_select').value].axes)"><title>${esc(pointTitle(point, view.axes))}</title></circle><text class="point-label" x="${x+10}" y="${y+4}">${point.record_index}</text></g>`;
+  }).join('');
+  document.getElementById('tetra_plot').innerHTML = `<svg viewBox="0 0 720 540" role="img" aria-label="${esc(view.title)}">${faces}${edgeSvg}${labels}${points}</svg><div id="tetra_details" class="details">Hover a run marker for details; click it to pin exact raw axis values.</div>`;
   document.getElementById('tetra_caption').innerHTML = 'Axes: '+view.axes.map(axis => payload.axis_library[axis].label).join(' · ');
 }
 function renderTriangle(view) {
   const boundary = [...view.vertices, view.vertices[0]];
-  const traces = [
-    {type:'scatter', mode:'markers', x:view.grid.map(g=>g.x), y:view.grid.map(g=>g.y), marker:{size:9,color:view.grid.map(g=>g.shade),colorscale:'Blues',opacity:0.68,colorbar:{title:'blue balance'}}, hoverinfo:'skip', showlegend:false},
-    {type:'scatter', mode:'lines', x:boundary.map(v=>v[0]), y:boundary.map(v=>v[1]), line:{color:'#46e7ff',width:3}, hoverinfo:'skip', showlegend:false},
-    {type:'scatter', mode:'markers+text', name:'campaign runs', showlegend:false, x:view.points.map(p=>p.xy[0]), y:view.points.map(p=>p.xy[1]), text:view.points.map(p=>String(p.index)), textposition:'top center', customdata:view.points.map(p=>[p.profile,p.run,p.bpb,p.weights.map(w=>w.toFixed(3)).join(' / '),p.balance.toFixed(3),axisRawText(p, view.axes)]), marker:{size:13,color:view.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,line:{color:'#ecfbff',width:1},colorbar:{title:'BPB'}}, hovertemplate:'%{customdata[0]}<br>run %{customdata[1]}<br>BPB %{customdata[2]:.6f}<br>weights %{customdata[3]}<br>balance %{customdata[4]}<br>%{customdata[5]}<extra></extra>'},
-    {type:'scatter', mode:'text', x:view.vertices.map(v=>v[0]), y:view.vertices.map(v=>v[1]), text:view.labels, textfont:{color:'#ecfbff',size:13}, hoverinfo:'skip', showlegend:false},
-  ];
-  Plotly.react('triangle_plot', traces, {template:'plotly_dark', title:{text:view.title+' · '+view.shade,font:{color:'#ecfbff'}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', xaxis:{visible:false,range:[0,1]}, yaxis:{visible:false,range:[0,1]}, margin:{l:12,r:12,t:42,b:12}}, {responsive:true});
+  const map2 = p => [70 + p[0] * 580, 370 - p[1] * 330];
+  const res = view.grid_resolution || 20;
+  function shadeFromBary(a,b,c) {
+    const balance = 1.0 - Math.min(1.0, Math.sqrt((a-1/3)**2 + (b-1/3)**2 + (c-1/3)**2) / Math.sqrt(2/3));
+    const synergy = 3 * Math.cbrt(Math.max(0, a*b*c));
+    return Math.max(0, Math.min(1, 0.55 * balance + 0.45 * synergy));
+  }
+  function shadeColor(shade) {
+    const r = Math.round(7 + 18 * shade);
+    const g = Math.round(45 + 118 * shade);
+    const b = Math.round(88 + 154 * shade);
+    return `rgb(${r},${g},${b})`;
+  }
+  function baryToXY(a,b,c) {
+    return map2([
+      a * view.vertices[0][0] + b * view.vertices[1][0] + c * view.vertices[2][0],
+      a * view.vertices[0][1] + b * view.vertices[1][1] + c * view.vertices[2][1],
+    ]);
+  }
+  const cells = [];
+  for (let i = 0; i < res; i++) {
+    for (let j = 0; j < res - i; j++) {
+      const a = i / res, b0 = j / res, c = 1 - a - b0;
+      const a1 = (i + 1) / res, b1 = j / res, c1 = 1 - a1 - b1;
+      const a2 = i / res, b2 = (j + 1) / res, c2 = 1 - a2 - b2;
+      const p0 = baryToXY(a,b0,c), p1 = baryToXY(a1,b1,c1), p2 = baryToXY(a2,b2,c2);
+      const s = shadeFromBary((a+a1+a2)/3, (b0+b1+b2)/3, (c+c1+c2)/3);
+      cells.push(`<polygon class="triangle-cell" points="${p0.join(',')} ${p1.join(',')} ${p2.join(',')}" fill="${shadeColor(s)}"><title>balanced support shade ${s.toFixed(3)}</title></polygon>`);
+      if (i + j < res - 1) {
+        const a3 = (i + 1) / res, b3 = (j + 1) / res, c3 = 1 - a3 - b3;
+        const p3 = baryToXY(a3,b3,c3);
+        const s2 = shadeFromBary((a1+a2+a3)/3, (b1+b2+b3)/3, (c1+c2+c3)/3);
+        cells.push(`<polygon class="triangle-cell" points="${p1.join(',')} ${p3.join(',')} ${p2.join(',')}" fill="${shadeColor(s2)}"><title>balanced support shade ${s2.toFixed(3)}</title></polygon>`);
+      }
+    }
+  }
+  const grid = cells.join('');
+  const b = boundary.map(map2);
+  const boundarySvg = `<polyline points="${b.map(p=>p.join(',')).join(' ')}" fill="none" stroke="#46e7ff" stroke-width="3"/>`;
+  const labels = view.vertices.map((v,i) => { const [x,y] = map2(v); return `<text class="svg-label" text-anchor="middle" x="${x}" y="${y-12}">${esc(view.labels[i])}</text>`; }).join('');
+  const contours = [0.25, 0.50, 0.75].map(t => {
+    const pA = baryToXY(t,(1-t)/2,(1-t)/2);
+    const pB = baryToXY((1-t)/2,t,(1-t)/2);
+    const pC = baryToXY((1-t)/2,(1-t)/2,t);
+    return `<polyline class="triangle-contour" points="${pA.join(',')} ${pB.join(',')} ${pC.join(',')} ${pA.join(',')}" />`;
+  }).join('');
+  const points = view.points.map(point => {
+    const rec = recordFor(point);
+    const [x,y] = map2(point.xy);
+    return `<g><circle class="run-point" cx="${x}" cy="${y}" r="9" fill="${colorForBpb(rec.bpb)}" onclick="showDetails('triangle_details', payload.triangles[document.getElementById('triangle_select').value].points.find(p=>p.record_index===${point.record_index}), payload.triangles[document.getElementById('triangle_select').value].axes)"><title>${esc(pointTitle(point, view.axes))}</title></circle><text class="point-label" x="${x+11}" y="${y+4}">${point.record_index}</text></g>`;
+  }).join('');
+  document.getElementById('triangle_plot').innerHTML = `<svg viewBox="0 0 720 420" role="img" aria-label="${esc(view.title)}">${grid}${contours}${boundarySvg}${labels}${points}</svg><div id="triangle_details" class="details">Hover a run marker for BPB/NLL details; click it to pin exact raw axis values. NLL/loss stays in this panel and in the table so it does not overlap the metric geometry.</div>`;
   document.getElementById('triangle_caption').innerHTML = 'Axes: '+view.axes.map(axis => payload.axis_library[axis].label).join(' · ')+' · shade: '+view.shade;
 }
 function initCampaignViews(data) {
   payload = data;
+  recordByIndex = new Map(payload.records.map(record => [record.index, record]));
   const tetraSelect = document.getElementById('tetra_select');
   const triangleSelect = document.getElementById('triangle_select');
   populateSelect(tetraSelect, payload.tetrahedra);

@@ -1,10 +1,13 @@
 {
-  "analogy_emitted": true,
-  "edges": 511,
-  "index_html": "index.html",
-  "nodes": 512,
-  "payload_json": "branching_reasoning_payload.json",
-  "schema": "toricgt.branching_reasoning_visual_report.v1",
-  "source_mode": "checkpoint_embedding_payload",
-  "trajectory_html": "branching_reasoning_trajectory.html"
+  "entry": "index.html",
+  "mode": "low_resource_static",
+  "removed_heavy_browser_payload_count": 2,
+  "schema": "toricgt.branching_reasoning_lite.v1",
+  "static_screenshots": [
+    "static_screenshots/summary.png",
+    "static_screenshots/full_trajectory_filtered_complex.png",
+    "static_screenshots/selected_step_simplex_tree_tokens.png",
+    "static_screenshots/analogical_memory_simplex_tree_map.png",
+    "static_screenshots/vectorized_ph_features.png"
+  ]
 }

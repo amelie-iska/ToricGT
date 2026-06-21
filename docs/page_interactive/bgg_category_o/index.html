@@ -1,139 +1,43 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Toric BGG Category O Report</title><style>
-:root { color-scheme: dark; --bg:#030712; --panel:#07111f; --text:#e8fbff; --muted:#91a8b7; --cyan:#37e8ff; --magenta:#ff4fd8; --green:#8cff6a; --border:rgba(55,232,255,.28); }
-body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:radial-gradient(circle at top left,#092238 0,var(--bg) 42rem); color:var(--text); }
-main { max-width:1180px; margin:0 auto; padding:32px 24px 64px; }
-.hero,.card,.panel { background:linear-gradient(180deg,rgba(11,23,40,.94),rgba(5,13,25,.96)); border:1px solid var(--border); border-radius:8px; box-shadow:0 18px 50px rgba(0,0,0,.28); }
-.hero,.card,.panel { padding:18px; margin-bottom:16px; }
-.grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
-h1 { margin:0 0 8px; font-size:28px; letter-spacing:0; } h2 { margin:0 0 10px; font-size:18px; letter-spacing:0; }
-p { color:var(--muted); line-height:1.55; }
-a { color:var(--cyan); text-decoration:none; } a:hover { text-decoration:underline; }
-.metric { display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid rgba(145,168,183,.14); padding:7px 0; }
-.metric span:first-child { color:var(--muted); }
-.metric span:last-child { color:white; overflow-wrap:anywhere; text-align:right; font-variant-numeric:tabular-nums; }
-.badge { display:inline-block; border:1px solid rgba(140,255,106,.35); border-radius:999px; color:#d9ffd2; background:rgba(140,255,106,.11); padding:4px 8px; font-size:12px; margin:2px 4px 2px 0; }
-.badge.off { border-color:rgba(255,79,216,.45); color:#ffd8f7; background:rgba(255,79,216,.12); }
-pre { white-space:pre-wrap; overflow-x:auto; background:#020713; border:1px solid rgba(145,168,183,.18); border-radius:8px; padding:14px; color:#dff8ff; }
-.links { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
-.pill { border:1px solid var(--border); border-radius:999px; padding:6px 10px; background:rgba(55,232,255,.07); }
-</style></head>
-<body><main>
-<section class="hero">
-  <h1>Toric BGG Category O Report</h1>
-  <p>Finite Category O/BGG diagnostics with explicit certificate provenance.  When a checkpoint sidecar and hidden-state payload are supplied, the trained Toric BGG probe is evaluated directly on that payload.</p>
-  <div><span class="badge">exact_certificate_available: 1.0</span><span class="badge">exact_finite_chain_provenance: 1.0</span><span class="badge">late_gate_required: 1.0</span></div>
-  <div class="links"><a class="pill" href="bgg_category_o_report.json">report JSON</a></div>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toric BGG Category O</title>
+<style>
+:root{color-scheme:dark;--bg:#030712;--panel:#071421;--panel2:#0b1b2b;--line:rgba(70,231,255,.28);--text:#ecfbff;--muted:#9db8cf;--cyan:#46e7ff;--gold:#ffd166;--pink:#ff5fa2;--green:#88ff86;--violet:#a78bfa}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 12% 10%,rgba(70,231,255,.18),transparent 30rem),radial-gradient(circle at 86% 6%,rgba(255,95,162,.13),transparent 24rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1240px;margin:0 auto;padding:28px 20px 64px}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+.hero,.panel,.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(11,27,43,.92),rgba(7,20,33,.88));box-shadow:0 24px 80px rgba(0,0,0,.38)}
+.hero{padding:24px;margin-bottom:18px}.panel{padding:18px;margin:18px 0}.grid{display:grid;gap:16px}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.metric-note{font-size:.94rem;color:var(--muted);line-height:1.5}.card{padding:16px;min-height:0;overflow-wrap:anywhere}.card p{margin-bottom:0}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}.callout{border-left:3px solid var(--gold);background:rgba(255,209,102,.08);border-radius:12px;padding:12px 14px;color:#ffe8a8}.detail-panel{border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:14px;margin-top:12px;min-height:180px}.detail-panel strong{color:#fff}.svg-button{cursor:pointer}.svg-button:hover{filter:drop-shadow(0 0 10px rgba(255,209,102,.75))}.method-list{margin:0;padding-left:1.1rem}.method-list li{margin:0 0 .65rem}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
+</style></head><body><main>
+<section class="hero"><div class="eyebrow">Finite homological certificates</div><h1>Toric BGG Category O</h1></section>
+
+<section class="panel">
+  <p class="lead">The Toric BGG layer is a finite certificate system: it never claims the model contains a literal abelian category. It attaches small sign-vector posets, standard-filtration masks, sparse differentials, Koszul degree profiles, Gale-dual labels, and derived signatures to training records. Late-phase weights remain small so BPB stays primary.</p>
+  <p class="callout">This page combines the hand-written method explainer with the generated Category O audit. If a metric is listed as unavailable, that does not mean the method is absent; it means the copied public run did not emit the exact finite certificate required to compute that metric. The late gate is intentionally conservative.</p>
 </section>
-<section class="grid">
-  <div class="card"><h2>Resolution And Standard Filtration</h2><div class="metric"><span>toric_bgg_d2_residual</span><span>0.0326139 <span class="badge">available</span><br><small>exact_finite_chain_complex_boundary_square</small></span></div><div class="metric"><span>toric_bgg_standard_leakage</span><span>0.403288 <span class="badge">available</span><br><small>exact_finite_chain_poset_standard_mask</small></span></div></div>
-  <div class="card"><h2>Koszul, Gale, And Signature</h2><div class="metric"><span>toric_bgg_koszul_linearity_residual</span><span>0 <span class="badge">available</span><br><small>exact_finite_koszul_degree_profile</small></span></div><div class="metric"><span>toric_bgg_gale_dual_consistency</span><span>0 <span class="badge">available</span><br><small>finite_gale_dual_signature_pair</small></span></div><div class="metric"><span>toric_bgg_signature_smoothness</span><span>0 <span class="badge">available</span><br><small>finite_bgg_signature_path</small></span></div><div class="metric"><span>toric_bgg_standard_entropy</span><span>0.982606 <span class="badge">available</span><br><small>finite_standard_label_distribution</small></span></div></div>
+<section class="grid two">
+  <article class="panel"><h2>Finite Category-O Skeleton</h2>
+  <svg viewBox="0 0 700 460" aria-label="BGG poset and chain complex">
+    <defs><marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#46e7ff"/></marker></defs>
+    <rect x="20" y="20" width="660" height="420" rx="14" fill="#020713" stroke="rgba(70,231,255,.32)"/>
+    <g stroke="#46e7ff" stroke-width="3" marker-end="url(#arr)" fill="none">
+      <path d="M110 360 L225 270 L340 360"/><path d="M225 270 L350 170 L475 270"/><path d="M340 360 L475 270 L590 360"/><path d="M350 170 L475 80"/>
+    </g>
+    <g fill="#ffd166" stroke="#fff" stroke-width="1.5">
+      <circle cx="110" cy="360" r="20"/><circle cx="340" cy="360" r="20"/><circle cx="590" cy="360" r="20"/><circle cx="225" cy="270" r="20"/><circle cx="475" cy="270" r="20"/><circle cx="350" cy="170" r="20"/><circle cx="475" cy="80" r="20"/>
+    </g>
+    <g fill="#ecfbff" font-size="18" text-anchor="middle"><text x="110" y="366">Lα</text><text x="340" y="366">Lβ</text><text x="590" y="366">Lγ</text><text x="225" y="276">Δα</text><text x="475" y="276">Δβ</text><text x="350" y="176">P</text><text x="475" y="86">C</text></g>
+    <text x="52" y="58" fill="#9db8cf" font-size="18">highest-weight finite skeleton: simples L, standards Δ, projectives P, complex C</text>
+    <text x="52" y="398" fill="#88ff86" font-size="16">checks: d²=0 · standard masks · Gale dual</text>
+    <text x="52" y="420" fill="#88ff86" font-size="16">Koszul degree profile · signature smoothness</text>
+  </svg></article>
+  <article class="panel"><h2>Best-Run BGG-Adjacent Losses</h2><table class="mini-table"><tbody><tr><th>toric_bgg_loss</th><td>0.164997</td></tr><tr><th>koszul_persistence_loss</th><td>0.045398</td></tr><tr><th>derived_signature_loss</th><td>3.243159</td></tr><tr><th>toric_cca_topology_loss</th><td>1.045991</td></tr></tbody></table><div class="equation">d(m⊗ξ)=Σᵢ xᵢm⊗eᵢ∧ξ. The square vanishes because xᵢxⱼ=xⱼxᵢ while eᵢ∧eⱼ=-eⱼ∧eᵢ.</div></article>
 </section>
-<section class="panel"><h2>Raw Metrics</h2><pre>{
-  &quot;analogy_loss&quot;: 0.064827,
-  &quot;artifact_bytes&quot;: 12202796,
-  &quot;checkpoint&quot;: &quot;ToricGT/checkpoints/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z_step_001000.pt&quot;,
-  &quot;checkpoint_path&quot;: &quot;ToricGT/checkpoints/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z_step_001000.pt&quot;,
-  &quot;checkpoint_paths&quot;: [
-    {
-      &quot;path&quot;: &quot;ToricGT/checkpoints/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z_step_001000.pt&quot;,
-      &quot;step&quot;: 1000,
-      &quot;val_bpb&quot;: 0.4924
-    }
-  ],
-  &quot;checkpoint_step&quot;: 1000,
-  &quot;derived_signature_loss&quot;: 3.243159,
-  &quot;embedding_npz&quot;: &quot;outputs/github_pages_best_checkpoint_long_manual_20260621T182232Z/geometry/embeddings/oai_ckpt_tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z_step_001000_batch000_row00.npz&quot;,
-  &quot;exists&quot;: 1,
-  &quot;final_int8_bpb&quot;: 0.49533264,
-  &quot;final_int8_loss&quot;: 0.84296158,
-  &quot;graph_lm_bpb&quot;: 0.2962,
-  &quot;graph_lm_loss&quot;: 0.368675,
-  &quot;graph_lm_weight&quot;: 0.08,
-  &quot;graphcg_loss&quot;: 0.011413,
-  &quot;koszul_persistence_loss&quot;: 0.045398,
-  &quot;latest_train&quot;: {
-    &quot;analogy&quot;: 0.064827,
-    &quot;bgg&quot;: 0.164997,
-    &quot;graph_lm_bpb&quot;: 0.2962,
-    &quot;graph_lm_loss&quot;: 0.368675,
-    &quot;graph_lm_weight&quot;: 0.08,
-    &quot;graphcg&quot;: 0.011413,
-    &quot;koszul&quot;: 0.045398,
-    &quot;loss&quot;: 0.8558,
-    &quot;memory&quot;: 1.140689,
-    &quot;sidecar&quot;: 0.000144,
-    &quot;step&quot;: 1000,
-    &quot;tokengt&quot;: 1.16281,
-    &quot;toric&quot;: 5.884988,
-    &quot;train_bpb&quot;: 0.5036,
-    &quot;train_bpt&quot;: 1.2346
-  },
-  &quot;latest_val&quot;: {
-    &quot;bpb&quot;: 0.4924,
-    &quot;loss&quot;: 0.838,
-    &quot;step&quot;: 1000
-  },
-  &quot;memory_loss&quot;: 1.140689,
-  &quot;oai_fot_diversity&quot;: 0.2617,
-  &quot;oai_fot_entropy&quot;: 0.9999,
-  &quot;oai_fot_loss&quot;: 5.027384,
-  &quot;oai_fot_reward&quot;: 0.5375,
-  &quot;oai_gflownet_entropy&quot;: 0.964,
-  &quot;oai_gflownet_loss&quot;: 1.715701,
-  &quot;oai_gflownet_reward&quot;: 0.2221,
-  &quot;oai_mtp_loss&quot;: 11.48704,
-  &quot;oai_mtp_weight&quot;: 0.003,
-  &quot;path&quot;: &quot;ToricGT/runs/oai_sidecar/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z/train.log&quot;,
-  &quot;probe_missing_state_keys&quot;: [],
-  &quot;profile&quot;: &quot;gate2500_experimental_family_selective&quot;,
-  &quot;run_id&quot;: &quot;tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z&quot;,
-  &quot;selected_bpb&quot;: 0.49533264,
-  &quot;sidecar_loss&quot;: 0.000144,
-  &quot;source&quot;: &quot;metrics_json+trained_checkpoint_toric_bgg_probe&quot;,
-  &quot;tokengt_graph_loss&quot;: 1.16281,
-  &quot;toric_bgg_d2_residual&quot;: 0.03261389583349228,
-  &quot;toric_bgg_exact_certificate_available&quot;: 1.0,
-  &quot;toric_bgg_gale_dual_consistency&quot;: 0.0,
-  &quot;toric_bgg_koszul_linearity_residual&quot;: 0.0,
-  &quot;toric_bgg_late_gate_required&quot;: 1.0,
-  &quot;toric_bgg_loss&quot;: 0.1334359496831894,
-  &quot;toric_bgg_probe_source&quot;: {
-    &quot;checkpoint&quot;: &quot;ToricGT/checkpoints/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z_step_001000.pt&quot;,
-    &quot;embedding_npz&quot;: &quot;outputs/github_pages_best_checkpoint_long_manual_20260621T182232Z/geometry/embeddings/oai_ckpt_tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z_step_001000_batch000_row00.npz&quot;,
-    &quot;probe_missing_state_keys&quot;: [],
-    &quot;source&quot;: &quot;trained_checkpoint_toric_bgg_probe_on_hidden_states&quot;,
-    &quot;toric_bgg_d2_residual&quot;: 0.03261389583349228,
-    &quot;toric_bgg_exact_certificate_available&quot;: 1.0,
-    &quot;toric_bgg_gale_dual_consistency&quot;: 0.0,
-    &quot;toric_bgg_koszul_linearity_residual&quot;: 0.0,
-    &quot;toric_bgg_late_gate_required&quot;: 1.0,
-    &quot;toric_bgg_loss&quot;: 0.1334359496831894,
-    &quot;toric_bgg_provenance_exact_finite_chain&quot;: 1.0,
-    &quot;toric_bgg_resolution_consistency&quot;: 0.9684162139892578,
-    &quot;toric_bgg_signature_smoothness&quot;: 0.0,
-    &quot;toric_bgg_standard_allowed_mass&quot;: 0.5967117547988892,
-    &quot;toric_bgg_standard_entropy&quot;: 0.9826063513755798,
-    &quot;toric_bgg_standard_leakage&quot;: 0.40328821539878845
-  },
-  &quot;toric_bgg_provenance_exact_finite_chain&quot;: 1.0,
-  &quot;toric_bgg_resolution_consistency&quot;: 0.9684162139892578,
-  &quot;toric_bgg_signature_smoothness&quot;: 0.0,
-  &quot;toric_bgg_standard_allowed_mass&quot;: 0.5967117547988892,
-  &quot;toric_bgg_standard_entropy&quot;: 0.9826063513755798,
-  &quot;toric_bgg_standard_leakage&quot;: 0.40328821539878845,
-  &quot;toric_cca_topology_loss&quot;: 1.045991,
-  &quot;toric_geometry_loss&quot;: 5.884988,
-  &quot;toric_vector_bundle_1d_cone_ce_loss&quot;: 0.704291,
-  &quot;train_bpb&quot;: 0.5036,
-  &quot;train_bpt&quot;: 1.2346,
-  &quot;train_log&quot;: &quot;ToricGT/runs/oai_sidecar/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z/train.log&quot;,
-  &quot;train_loss&quot;: 0.8558,
-  &quot;train_rows&quot;: [],
-  &quot;train_step&quot;: 1000,
-  &quot;val_bpb&quot;: 0.4924,
-  &quot;val_loss&quot;: 0.838,
-  &quot;val_rows&quot;: [],
-  &quot;val_step&quot;: 1000
-}</pre></section>
+<section class="grid two">
+  <article class="panel"><h2>Generated Audit Gates</h2><table class="mini-table"><tbody><tr><th>exact_certificate_available</th><td>1.0000</td></tr><tr><th>exact_finite_chain_provenance</th><td>1.0000</td></tr><tr><th>late_gate_required</th><td>1.0000</td></tr></tbody></table><p>A late gate of 1 means exact certificate metrics are expected only in late-phase or certificate-bearing records, avoiding noisy penalties during BPB-first early training.</p></article>
+  <article class="panel"><h2>How It Affects Training</h2><ul class="method-list"><li><strong>Weight up carefully:</strong> improves standard-object routing and homological consistency when records carry exact certificates.</li><li><strong>Weight down early:</strong> prevents sparse certificate losses from dominating byte likelihood before BPB stabilizes.</li><li><strong>Use as audit:</strong> unavailable exact metrics should trigger data/certificate instrumentation review, not a blind loss increase.</li></ul></article>
+</section>
+<section class="panel"><h2>Resolution and Standard-Filtration Metrics</h2><table class="mini-table"><thead><tr><th>metric</th><th>value/status</th><th>provenance</th><th>meaning</th></tr></thead><tbody><tr><th>toric_bgg_d2_residual</th><td>0.032614</td><td>exact_finite_chain_complex_boundary_square</td><td>Boundary-square residual for sparse finite differentials. Low means the predicted differential behaves like a chain-complex map with d²=0.</td></tr><tr><th>toric_bgg_standard_leakage</th><td>0.403288</td><td>exact_finite_chain_poset_standard_mask</td><td>Attention mass outside the standard-filtration mask. Low means hidden standard-object routing respects the poset.</td></tr><tr><th>toric_bgg_koszul_linearity_residual</th><td>0.000000</td><td>exact_finite_koszul_degree_profile</td><td>Deviation from the expected Koszul degree profile. Low means the finite BGG/Koszul proxy is degree-consistent.</td></tr><tr><th>toric_bgg_gale_dual_consistency</th><td>0.000000</td><td>finite_gale_dual_signature_pair</td><td>Agreement between an arrangement certificate and its Gale-dual signature. High consistency supports dual-curriculum transfer.</td></tr><tr><th>toric_bgg_signature_smoothness</th><td>0.000000</td><td>finite_bgg_signature_path</td><td>Variation of the BGG signature along the reasoning trajectory. Low values indicate stable categorical coordinates.</td></tr><tr><th>toric_bgg_standard_entropy</th><td>0.982606</td><td>finite_standard_label_distribution</td><td>Entropy of standard-label assignments. It detects collapse to one standard object or diffuse unusable labels.</td></tr></tbody></table>
+</section>
+
 </main></body></html>

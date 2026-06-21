@@ -159,7 +159,7 @@
         </div>
       </div>
       <div class="hero-visual" aria-label="Animated toric fan visualization">
-        <img src="page_assets/logo.png" alt="ToricGT visual backdrop">
+        <img loading="eager" decoding="async" src="page_assets/logo.png" alt="ToricGT visual backdrop">
         <div class="fan">
           <svg viewBox="0 0 520 380" role="img" aria-label="Tropical active faces embedded in a toric fan">
             <defs>
@@ -382,52 +382,52 @@
       <div class="grid gallery">
 
                 <figure class="gallery-card">
-                  <img src="page_assets/architecture.png" alt="Architecture">
+                  <img loading="lazy" decoding="async" src="page_assets/architecture.png" alt="Architecture">
                   <figcaption><strong>Architecture</strong><span>Graph-token, tropical, toric, FoT, and BPB paths in one training system.</span></figcaption>
                 </figure>
 
                 <figure class="gallery-card">
-                  <img src="page_assets/tropical.png" alt="Tropical Active Faces">
+                  <img loading="lazy" decoding="async" src="page_assets/tropical.png" alt="Tropical Active Faces">
                   <figcaption><strong>Tropical Active Faces</strong><span>Max-plus attention exposes active predecessors, margins, and normal-fan cells.</span></figcaption>
                 </figure>
 
                 <figure class="gallery-card">
-                  <img src="page_assets/graphcg.png" alt="GraphCG + Topology">
+                  <img loading="lazy" decoding="async" src="page_assets/graphcg.png" alt="GraphCG + Topology">
                   <figcaption><strong>GraphCG + Topology</strong><span>Disentangled concept axes meet vectorized persistent homology and retrieval.</span></figcaption>
                 </figure>
 
                 <figure class="gallery-card">
-                  <img src="page_assets/branching.png" alt="Branching Reasoning">
+                  <img loading="lazy" decoding="async" src="page_assets/branching.png" alt="Branching Reasoning">
                   <figcaption><strong>Branching Reasoning</strong><span>Forest/graph-of-thought branches merge through retrieval and BPB-delta rewards.</span></figcaption>
                 </figure>
 
                 <figure class="gallery-card">
-                  <img src="page_assets/trajectory.png" alt="Trajectory Complex">
+                  <img loading="lazy" decoding="async" src="page_assets/trajectory.png" alt="Trajectory Complex">
                   <figcaption><strong>Trajectory Complex</strong><span>Filtered simplicial complexes reveal token-level reasoning structure.</span></figcaption>
                 </figure>
 
                 <figure class="gallery-card">
-                  <img src="page_assets/analogy.png" alt="Analogy Maps">
+                  <img loading="lazy" decoding="async" src="page_assets/analogy.png" alt="Analogy Maps">
                   <figcaption><strong>Analogy Maps</strong><span>Memory retrieval is gated by simplex-tree maps and PH feature similarity.</span></figcaption>
                 </figure>
 
                 <figure class="gallery-card">
-                  <img src="page_assets/vectorized_ph.png" alt="Vectorized PH">
+                  <img loading="lazy" decoding="async" src="page_assets/vectorized_ph.png" alt="Vectorized PH">
                   <figcaption><strong>Vectorized PH</strong><span>Landscapes, images, entropy, and persistence vectors become auditable features.</span></figcaption>
                 </figure>
 
                 <figure class="gallery-card">
-                  <img src="page_assets/cas.png" alt="CAS Sidecar">
+                  <img loading="lazy" decoding="async" src="page_assets/cas.png" alt="CAS Sidecar">
                   <figcaption><strong>CAS Sidecar</strong><span>Sage/Macaulay2-backed algebraic certificates validate toric and module data.</span></figcaption>
                 </figure>
 
                 <figure class="gallery-card">
-                  <img src="page_assets/toric_embedding.png" alt="Toric Embedding">
+                  <img loading="lazy" decoding="async" src="page_assets/toric_embedding.png" alt="Toric Embedding">
                   <figcaption><strong>Toric Embedding</strong><span>Tropical ring attention is embedded into toric charts for fan/cone audits.</span></figcaption>
                 </figure>
 
                 <figure class="gallery-card">
-                  <img src="page_assets/bgg.png" alt="BGG Category O">
+                  <img loading="lazy" decoding="async" src="page_assets/bgg.png" alt="BGG Category O">
                   <figcaption><strong>BGG Category O</strong><span>Finite Toric BGG certificates track standards, differentials, and homological consistency.</span></figcaption>
                 </figure>
 
@@ -437,7 +437,7 @@
     <section class="wrap">
       <div class="section-head">
         <h2>Interactive Analysis Lab</h2>
-        <p>The full generated reports are bundled into the page, not flattened to screenshots. They retain Plotly rotation, hover/click token details, radius sliders, reasoning-level sliders, simplex-tree maps, vectorized PH panels, CAS links, and tetrahedron views.</p>
+        <p>The generated reports are static-first and low-resource by default. They retain exact metrics, screenshot evidence, raw tables, hover/click details where cheap, CAS links, simplex-map summaries, vectorized PH panels, and tetrahedron/triangle views without forcing giant payloads or WebGL on first load.</p>
       </div>
       <div class="grid interactive-grid">
 
@@ -447,52 +447,16 @@
                 <p>Interactive gallery over completed run metrics: multiple tetrahedra plus blue-shaded triangle views for BPB, graph/FoT, toric, topology, BGG, memory, and compactness metrics.</p>
                 <span>metric tetrahedra · shaded triangles · run labels · BPB color scale · hover raw metrics</span>
               </div>
-              <a class="button" href="page_interactive/campaign_tetrahedron/index.html">Open interactive report</a>
+              <a class="button" href="page_interactive/campaign_tetrahedron/index.html">Open report</a>
             </article>
 
             <article class="interactive-card">
               <div>
-                <h3>Forest-of-Thought Method</h3>
-                <p>Dark-mode FoT explanation and interactive embedding-space forest diagram adapted to ToricGT’s graph-valued hidden trajectories.</p>
-                <span>multiple thought trees · sparse activation · self-correction · BPB-delta reward</span>
+                <h3>Simplex Trajectory Report</h3>
+                <p>Potato-safe graph-of-thought trajectory report with exact summary metrics, static screenshots of the full and per-step filtered simplicial complexes, analogical memory maps, vectorized persistent-homology panels, and links to the generated analysis artifacts.</p>
+                <span>static first · exact metrics · screenshots · 3D PCA · simplex maps · PH panels</span>
               </div>
-              <a class="button" href="page_interactive/fot_method/index.html">Open interactive report</a>
-            </article>
-
-            <article class="interactive-card">
-              <div>
-                <h3>ConvexTok Tokenization Geometry</h3>
-                <p>Interactive byte-boundary DAG, min-plus equations, LP tokenizer-regret interpretation, and ToricGT TokenGT graphification links.</p>
-                <span>LP lower bound · min-plus DP · tokenization DAG · tokenizer regret</span>
-              </div>
-              <a class="button" href="page_interactive/convextok_method/index.html">Open interactive report</a>
-            </article>
-
-            <article class="interactive-card">
-              <div>
-                <h3>Toric BGG Category O Method</h3>
-                <p>Finite highest-weight skeletons, standard masks, BGG differentials, Gale duality, Koszul checks, and best-run metric table.</p>
-                <span>category O skeleton · d² residual · Gale dual · Koszul profile</span>
-              </div>
-              <a class="button" href="page_interactive/bgg_method/index.html">Open interactive report</a>
-            </article>
-
-            <article class="interactive-card">
-              <div>
-                <h3>Advanced Geometry Gallery</h3>
-                <p>Dark-mode diagrams for tropical ring attention, toric fans, Young tableaux, tensor products, persistence modules, and control theory.</p>
-                <span>Young tableaux · Schur functors · F2[x,y] modules · thought alcoves</span>
-              </div>
-              <a class="button" href="page_interactive/theory_gallery/index.html">Open interactive report</a>
-            </article>
-
-            <article class="interactive-card">
-              <div>
-                <h3>Interactive Simplex Trajectory</h3>
-                <p>Full graph-of-thought reasoning trajectory with 3D PCA display coordinates, radius and reasoning-level sliders, token hover/click panels, one-dimensional simplex edges, optional filled 2-simplices, and analogy gates.</p>
-                <span>radius slider · reasoning-level slider · token hover/click · 3D PCA · simplex maps</span>
-              </div>
-              <a class="button" href="page_interactive/branching_reasoning/branching_reasoning_trajectory.html">Open interactive report</a>
+              <a class="button" href="page_interactive/branching_reasoning/index.html">Open report</a>
             </article>
 
             <article class="interactive-card">
@@ -501,7 +465,7 @@
                 <p>Exact simplex-tree persistent homology, persistence landscapes/images/entropy, vectorized PH features, and Macaulay2 F2[x_level,y_radius] artifacts.</p>
                 <span>PH records · landscapes/images · entropy · Macaulay2 links</span>
               </div>
-              <a class="button" href="page_interactive/gudhi_persistence/index.html">Open interactive report</a>
+              <a class="button" href="page_interactive/gudhi_persistence/index.html">Open report</a>
             </article>
 
             <article class="interactive-card">
@@ -510,7 +474,7 @@
                 <p>Tropical ring-attention embeddings into toric charts, one-dimensional cones, Miller-Sturmfels staircase modules, staircase overlays, and fan diagnostics.</p>
                 <span>toric charts · staircases · normal fans · one-dimensional cones</span>
               </div>
-              <a class="button" href="page_interactive/toric_embedding/index.html">Open interactive report</a>
+              <a class="button" href="page_interactive/toric_embedding/index.html">Open report</a>
             </article>
 
             <article class="interactive-card">
@@ -519,16 +483,16 @@
                 <p>Sage/Macaulay2-backed module, resolution, syzygy, and derived-signature evidence generated for the embedding audits.</p>
                 <span>resolutions · syzygies · CAS records · derived signatures</span>
               </div>
-              <a class="button" href="page_interactive/cas_sidecar/index.html">Open interactive report</a>
+              <a class="button" href="page_interactive/cas_sidecar/index.html">Open report</a>
             </article>
 
             <article class="interactive-card">
               <div>
                 <h3>Toric BGG Category O</h3>
-                <p>Finite category-O certificates, standard-filtration checks, sparse differentials, Gale-dual signals, and homological consistency metrics.</p>
-                <span>standard filtrations · differentials · Gale duality · category O</span>
+                <p>Combined Category O explainer and generated audit table for finite highest-weight skeletons, standard masks, BGG differentials, Gale duality, and Koszul checks.</p>
+                <span>category O skeleton · d² residual · standard masks · Gale dual · Koszul profile</span>
               </div>
-              <a class="button" href="page_interactive/bgg_category_o/index.html">Open interactive report</a>
+              <a class="button" href="page_interactive/bgg_category_o/index.html">Open report</a>
             </article>
 
             <article class="interactive-card">
@@ -537,7 +501,34 @@
                 <p>Klyachko-style vector-bundle and sheaf compatibility evidence over one-dimensional cones and adjacent fan neighborhoods.</p>
                 <span>1D-cone filtrations · sheaf CE · fan-neighborhood compatibility</span>
               </div>
-              <a class="button" href="page_interactive/toric_vector_bundle/index.html">Open interactive report</a>
+              <a class="button" href="page_interactive/toric_vector_bundle/index.html">Open report</a>
+            </article>
+
+            <article class="interactive-card">
+              <div>
+                <h3>Forest-of-Thought Method</h3>
+                <p>Dark-mode FoT explanation and interactive embedding-space forest diagram adapted to ToricGT’s graph-valued hidden trajectories.</p>
+                <span>multiple thought trees · sparse activation · self-correction · BPB-delta reward</span>
+              </div>
+              <a class="button" href="page_interactive/fot_method/index.html">Open report</a>
+            </article>
+
+            <article class="interactive-card">
+              <div>
+                <h3>ConvexTok Tokenization Geometry</h3>
+                <p>Interactive byte-boundary DAG, min-plus equations, LP tokenizer-regret interpretation, and ToricGT TokenGT graphification links.</p>
+                <span>LP lower bound · min-plus DP · tokenization DAG · tokenizer regret</span>
+              </div>
+              <a class="button" href="page_interactive/convextok_method/index.html">Open report</a>
+            </article>
+
+            <article class="interactive-card">
+              <div>
+                <h3>Advanced Geometry Gallery</h3>
+                <p>Dark-mode diagrams for tropical ring attention, toric fans, Young tableaux, tensor products, persistence modules, and control theory.</p>
+                <span>Young tableaux · Schur functors · F2[x,y] modules · thought alcoves</span>
+              </div>
+              <a class="button" href="page_interactive/theory_gallery/index.html">Open report</a>
             </article>
 
       </div>

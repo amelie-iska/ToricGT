@@ -19,28 +19,21 @@
     "tropical": "page_assets/tropical.png",
     "vectorized_ph": "page_assets/vectorized_ph.png"
   },
-  "generated_utc": "2026-06-21 20:55:55 UTC",
+  "generated_utc": "2026-06-21 21:35:03 UTC",
   "interactive_reports": {
     "bgg_category_o": {
       "embed": "0",
-      "features": "standard filtrations \u00b7 differentials \u00b7 Gale duality \u00b7 category O",
+      "features": "category O skeleton \u00b7 d\u00b2 residual \u00b7 standard masks \u00b7 Gale dual \u00b7 Koszul profile",
       "href": "page_interactive/bgg_category_o/index.html",
-      "summary": "Finite category-O certificates, standard-filtration checks, sparse differentials, Gale-dual signals, and homological consistency metrics.",
+      "summary": "Combined Category O explainer and generated audit table for finite highest-weight skeletons, standard masks, BGG differentials, Gale duality, and Koszul checks.",
       "title": "Toric BGG Category O"
-    },
-    "bgg_method": {
-      "embed": "0",
-      "features": "category O skeleton \u00b7 d\u00b2 residual \u00b7 Gale dual \u00b7 Koszul profile",
-      "href": "page_interactive/bgg_method/index.html",
-      "summary": "Finite highest-weight skeletons, standard masks, BGG differentials, Gale duality, Koszul checks, and best-run metric table.",
-      "title": "Toric BGG Category O Method"
     },
     "branching_reasoning": {
       "embed": "0",
-      "features": "radius slider \u00b7 reasoning-level slider \u00b7 token hover/click \u00b7 3D PCA \u00b7 simplex maps",
-      "href": "page_interactive/branching_reasoning/branching_reasoning_trajectory.html",
-      "summary": "Full graph-of-thought reasoning trajectory with 3D PCA display coordinates, radius and reasoning-level sliders, token hover/click panels, one-dimensional simplex edges, optional filled 2-simplices, and analogy gates.",
-      "title": "Interactive Simplex Trajectory"
+      "features": "static first \u00b7 exact metrics \u00b7 screenshots \u00b7 3D PCA \u00b7 simplex maps \u00b7 PH panels",
+      "href": "page_interactive/branching_reasoning/index.html",
+      "summary": "Potato-safe graph-of-thought trajectory report with exact summary metrics, static screenshots of the full and per-step filtered simplicial complexes, analogical memory maps, vectorized persistent-homology panels, and links to the generated analysis artifacts.",
+      "title": "Simplex Trajectory Report"
     },
     "campaign_tetrahedron": {
       "embed": "0",
