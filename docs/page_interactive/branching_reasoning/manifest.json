@@ -1,5 +1,6 @@
 {
   "entry": "index.html",
+  "interactive_payload": "branching_reasoning_interactive.json",
   "mode": "low_resource_static",
   "removed_heavy_browser_payload_count": 2,
   "schema": "toricgt.branching_reasoning_lite.v1",

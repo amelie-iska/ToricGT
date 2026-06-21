@@ -10,7 +10,7 @@
     main{max-width:1180px;margin:0 auto;padding:28px 18px 64px}a{color:var(--cyan)}.hero,.card,.panel{background:linear-gradient(180deg,rgba(11,23,40,.96),rgba(5,13,25,.98));border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.28)}
     .hero,.panel{padding:18px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.card{padding:16px}h1{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}p{color:var(--muted);line-height:1.55}
     table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{border-bottom:1px solid rgba(159,177,201,.16);padding:8px;text-align:left;vertical-align:top}th{color:#bdeeff;width:38%}td{color:#fff}code{color:#ffd166;white-space:pre-wrap;overflow-wrap:anywhere}
-    img{display:block;width:100%;border:1px solid rgba(55,232,255,.20);border-radius:8px;background:#020713}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}
+    img{display:block;width:100%;border:1px solid rgba(55,232,255,.20);border-radius:8px;background:#020713}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0 14px}button,select{border:1px solid var(--line);background:rgba(55,232,255,.08);color:var(--text);border-radius:999px;padding:8px 12px;font-weight:800}svg{width:100%;height:auto;border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713}.detail{border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;padding:12px;margin-top:10px;color:#dff8ff}
     .note{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}
   </style>
 </head>
@@ -24,6 +24,13 @@
   <section class="panel">
     <h2>Rendered Audit Screenshot</h2>
     <img loading="lazy" decoding="async" src="../../page_assets/toric_embedding.png" alt="Toric embedding audit screenshot">
+  </section>
+  <section class="panel">
+    <h2>Interactive Miller-Sturmfels Staircase</h2>
+    <p>This compact viewer restores interaction from the large toric report without loading Plotly. The overhead mode shows the quotient-basis lattice points under the staircase; the projected 3D mode lifts adjacent module layers by small heights so the toric module geometry is visible without losing the familiar xy-grid view.</p>
+    <div class="controls"><select id="recordSelect"></select><button id="view2d" type="button">Overhead xy Grid</button><button id="view3d" type="button">Projected 3D Layers</button><button id="idealToggle" type="button">Toggle Ideal Region</button></div>
+    <svg id="staircaseSvg" viewBox="0 0 980 560" role="img" aria-label="Interactive Miller-Sturmfels monomial staircase"></svg>
+    <div id="staircaseDetail" class="detail">Click a lattice point, generator, or LCM corner for exact monomial data.</div>
   </section>
   <section class="grid">
             <section class="card">
@@ -42,4 +49,77 @@
               <p><a class="pill" href="records/record_000_toric_embedding_summary.json">summary JSON</a></p>
             </section>
             </section>
+  <script>
+const staircaseSvg = document.getElementById('staircaseSvg');
+const recordSelect = document.getElementById('recordSelect');
+const detail = document.getElementById('staircaseDetail');
+let toricData = null, viewMode = '2d', showIdeal = true;
+function esc(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+function point2d(x,y,scale,margin,height) { return [margin + x*scale, height - margin - y*scale]; }
+function point3d(x,y,z,scale,margin,height) { return [margin + x*scale + z*18, height - margin - y*scale - z*16]; }
+function setDetail(html) { detail.innerHTML = html; }
+function drawStaircase() {
+  if (!toricData) return;
+  const rec = toricData.records[Number(recordSelect.value || 0)];
+  const basis = rec.quotient_basis || [];
+  const gens = rec.minimal_generators || [];
+  const adjacent = rec.adjacent_lcm_layer || [];
+  const win = rec.window || {};
+  const xMax = Math.max(win.x_max || 0, ...basis.map(p=>p[0]), ...gens.map(p=>p[0]), ...adjacent.map(a=>a.lcm_corner?.[0] || 0), 8) + 1;
+  const yMax = Math.max(win.y_max || 0, ...basis.map(p=>p[1]), ...gens.map(p=>p[1]), ...adjacent.map(a=>a.lcm_corner?.[1] || 0), 8) + 1;
+  const width=980, height=560, margin=66, scale=Math.min((width-2*margin)/xMax, (height-2*margin)/yMax);
+  const project = viewMode === '3d' ? (x,y,z=0)=>point3d(x,y,z,scale,margin,height) : (x,y,z=0)=>point2d(x,y,scale,margin,height);
+  let html = `<rect width="${width}" height="${height}" rx="14" fill="#020713"/>`;
+  html += `<g stroke="rgba(157,184,207,.18)" stroke-width="1">`;
+  for (let x=0; x<=xMax; x++) { const a=project(x,0,0), b=project(x,yMax,0); html += `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/>`; }
+  for (let y=0; y<=yMax; y++) { const a=project(0,y,0), b=project(xMax,y,0); html += `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/>`; }
+  html += `</g>`;
+  if (showIdeal) {
+    for (const [gx,gy] of gens) {
+      const a=project(gx,gy,viewMode==='3d'?0.18:0), b=project(xMax,gy,viewMode==='3d'?0.18:0), c=project(xMax,yMax,viewMode==='3d'?0.18:0), d=project(gx,yMax,viewMode==='3d'?0.18:0);
+      html += `<polygon points="${a.join(',')} ${b.join(',')} ${c.join(',')} ${d.join(',')}" fill="rgba(255,209,102,.11)" stroke="rgba(255,209,102,.28)"/>`;
+    }
+  }
+  for (const [x,y] of basis) {
+    const z = viewMode === '3d' ? ((x + y) % 3) * 0.06 : 0;
+    const p=project(x,y,z);
+    html += `<circle class="basis-point" data-x="${x}" data-y="${y}" cx="${p[0]}" cy="${p[1]}" r="${viewMode==='3d'?4.2:3.7}" fill="#ecfbff" opacity=".88"><title>x^${x} y^${y} basis monomial</title></circle>`;
+  }
+  for (const [i,g] of gens.entries()) {
+    const p=project(g[0],g[1],viewMode==='3d'?0.35:0);
+    html += `<circle class="gen-point" data-index="${i}" cx="${p[0]}" cy="${p[1]}" r="9" fill="#ffd166" stroke="#ecfbff"><title>minimal generator x^${g[0]} y^${g[1]}</title></circle>`;
+    html += `<text x="${p[0]+12}" y="${p[1]-8}" fill="#ffd166" font-size="15">m${i+1}</text>`;
+  }
+  for (const a of adjacent) {
+    const c=a.lcm_corner || [0,0], p=project(c[0],c[1],viewMode==='3d'?0.55:0);
+    html += `<rect class="lcm-point" data-index="${a.index || 0}" x="${p[0]-8}" y="${p[1]-8}" width="16" height="16" rx="3" fill="#ff5fa2" stroke="#ecfbff"><title>adjacent LCM corner x^${c[0]} y^${c[1]}</title></rect>`;
+  }
+  html += `<text x="28" y="34" fill="#ecfbff" font-size="18">${esc(rec.record_id)} · ${viewMode === '3d' ? 'projected 3D module layers' : 'overhead xy-grid staircase'}</text>`;
+  html += `<text x="28" y="528" fill="#9db8cf" font-size="14">white = monomial basis of S/I · gold = minimal generators · pink = adjacent LCM corners · shaded = ideal region</text>`;
+  staircaseSvg.innerHTML = html;
+  staircaseSvg.querySelectorAll('.basis-point').forEach(el => el.addEventListener('click', () => setDetail(`<strong>basis monomial</strong><br>x^${el.dataset.x} y^${el.dataset.y} lies outside the monomial ideal and represents a basis element of S/I.`)));
+  staircaseSvg.querySelectorAll('.gen-point').forEach(el => {
+    el.addEventListener('click', () => {
+      const g = gens[Number(el.dataset.index)];
+      setDetail(`<strong>minimal generator m${Number(el.dataset.index)+1}</strong><br>x^${g[0]} y^${g[1]} generates a shifted positive orthant inside the monomial ideal.`);
+    });
+  });
+  staircaseSvg.querySelectorAll('.lcm-point').forEach(el => {
+    el.addEventListener('click', () => {
+      const a = adjacent[Number(el.dataset.index)] || adjacent[0];
+      const c = a.lcm_corner || [0,0];
+      setDetail(`<strong>adjacent LCM corner</strong><br>x^${c[0]} y^${c[1]} is the least common multiple corner for adjacent generators in the two-step Miller-Sturmfels inclusion-exclusion view.`);
+    });
+  });
+}
+fetch('toric_embedding_interactive.json').then(r => r.json()).then(data => {
+  toricData = data;
+  recordSelect.innerHTML = data.records.map((r,i)=>`<option value="${i}">${esc(r.record_id)}</option>`).join('');
+  recordSelect.addEventListener('change', drawStaircase);
+  document.getElementById('view2d').addEventListener('click', () => { viewMode='2d'; drawStaircase(); });
+  document.getElementById('view3d').addEventListener('click', () => { viewMode='3d'; drawStaircase(); });
+  document.getElementById('idealToggle').addEventListener('click', () => { showIdeal=!showIdeal; drawStaircase(); });
+  drawStaircase();
+}).catch(error => { detail.textContent = 'Compact toric interactive payload unavailable: '+error; });
+  </script>
 </main></body></html>

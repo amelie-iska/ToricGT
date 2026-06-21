@@ -319,6 +319,66 @@ svg.xygrid{max-height:82vh;object-fit:contain}
 
 def write_branching_reasoning_lite_report(dst: Path) -> None:
     original_index = dst / "index.html"
+    payload_path = dst / "branching_reasoning_payload.json"
+    compact_payload_written = False
+    if payload_path.exists():
+        try:
+            payload = load_json(payload_path)
+            compact_nodes = []
+            for node in payload.get("nodes", []):
+                pca = node.get("pca", [0, 0, 0])
+                compact_nodes.append(
+                    {
+                        "id": int(node.get("id", len(compact_nodes))),
+                        "label": str(node.get("label", node.get("id", len(compact_nodes)))),
+                        "x": round(float(pca[0] if len(pca) > 0 else 0.0), 5),
+                        "y": round(float(pca[1] if len(pca) > 1 else 0.0), 5),
+                        "z": round(float(pca[2] if len(pca) > 2 else 0.0), 5),
+                        "level": int(node.get("level", 0) or 0),
+                        "nll": round(float(node.get("nll", 0.0) or 0.0), 4),
+                        "branch": int(node.get("branch", 0) or 0),
+                        "kind": str(node.get("node_kind", "node")),
+                    }
+                )
+
+            def compact_pair_edges(rows: list[Any]) -> list[list[int]]:
+                out: list[list[int]] = []
+                for row in rows:
+                    if isinstance(row, (list, tuple)) and len(row) >= 2:
+                        out.append([int(row[0]), int(row[1])])
+                return out
+
+            radius_edges: list[list[float]] = []
+            for row in payload.get("edge_births", []):
+                if isinstance(row, (list, tuple)) and len(row) >= 4:
+                    radius_edges.append([int(row[0]), int(row[1]), int(row[2]), round(float(row[3]), 4)])
+            triangles: list[list[float]] = []
+            for row in payload.get("triangles", []):
+                if isinstance(row, (list, tuple)) and len(row) >= 4:
+                    triangles.append([int(row[0]), int(row[1]), int(row[2]), round(float(row[3]), 4)])
+            compact_payload = {
+                "schema": "toricgt.branching_reasoning_interactive_compact.v1",
+                "source_mode": payload.get("source_mode", "unknown"),
+                "nodes": compact_nodes,
+                "dag_edges": compact_pair_edges(payload.get("dag_edges", [])),
+                "reasoning_edges": compact_pair_edges(payload.get("reasoning_order_edges", [])),
+                "radius_edges": radius_edges,
+                "triangles": triangles,
+                "radius_values": [round(float(v), 4) for v in payload.get("radius_values", [])],
+                "analogy": {
+                    "status": payload.get("analogy", {}).get("analogy_status"),
+                    "confidence": payload.get("analogy", {}).get("analogy_confidence_score"),
+                    "emitted": payload.get("analogy", {}).get("analogy_emitted"),
+                    "decision_summary": payload.get("analogy", {}).get("decision_summary"),
+                },
+            }
+            (dst / "branching_reasoning_interactive.json").write_text(
+                json.dumps(compact_payload, separators=(",", ":"), sort_keys=True),
+                encoding="utf-8",
+            )
+            compact_payload_written = True
+        except Exception as exc:
+            (dst / "branching_reasoning_interactive_error.txt").write_text(str(exc), encoding="utf-8")
     text = original_index.read_text(encoding="utf-8", errors="replace") if original_index.exists() else ""
     metrics = re.findall(r"<div class='metric'><span>(.*?)</span><span>(.*?)</span></div>", text, flags=re.DOTALL)
     metric_rows = []
@@ -382,6 +442,7 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
                 "entry": "index.html",
                 "mode": "low_resource_static",
                 "removed_heavy_browser_payload_count": 2,
+                "interactive_payload": "branching_reasoning_interactive.json" if compact_payload_written else None,
                 "static_screenshots": [
                     f"static_screenshots/{filename}"
                     for filename, _, _ in screenshot_specs
@@ -415,7 +476,7 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
     .hero,.panel{{padding:18px;margin:14px 0}}h1{{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}}h2{{margin:0 0 12px}}p{{color:var(--muted);line-height:1.55}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}}
     table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(159,177,201,.16);padding:9px;text-align:left;vertical-align:top}}th{{color:#bdeeff;width:42%}}td{{color:#fff}}
     .shot{{margin:0;overflow:hidden}}.shot img{{display:block;width:100%;height:auto;background:#020713}}.shot figcaption{{display:grid;gap:5px;padding:12px 14px}}.shot span{{color:var(--muted);line-height:1.45}}.pill{{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}}
-    .note{{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}}
+    .note{{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}}.controls{{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:10px 0 14px}}.controls label{{display:grid;gap:4px;color:var(--muted);font-size:.9rem}}.controls input{{accent-color:var(--cyan)}}button{{border:1px solid var(--line);background:rgba(55,232,255,.08);color:var(--text);border-radius:999px;padding:8px 12px;font-weight:800}}canvas{{width:100%;height:auto;border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;display:block}}.detail{{border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;padding:12px;margin-top:10px;color:#dff8ff}}
   </style>
 </head>
 <body><main>
@@ -430,9 +491,116 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
     <table><tbody>{''.join(metric_rows)}</tbody></table>
   </section>
   <section class="panel">
+    <h2>Interactive 3D PCA Trajectory</h2>
+    <p>This viewer restores the useful interaction from the full report without shipping hidden embeddings or the 50MB browser payload. It uses compact PCA coordinates, all reasoning/DAG edges, radius-born one-dimensional simplex edges, and sampled 2-simplices from the exact analysis payload.</p>
+    <div class="controls">
+      <label>reasoning level <input id="levelRange" type="range" min="0" max="1" value="1"></label>
+      <label>radius <input id="radiusRange" type="range" min="0" max="1" value="0"></label>
+      <label>rotation <input id="rotRange" type="range" min="-120" max="120" value="28"></label>
+      <label><input id="radiusEdgesToggle" type="checkbox" checked> radius simplex edges</label>
+      <label><input id="triToggle" type="checkbox"> 2-simplices</label>
+    </div>
+    <canvas id="trajectoryCanvas" width="1120" height="640"></canvas>
+    <div id="trajectoryDetail" class="detail">Move over or click a point to inspect the reasoning node, NLL, branch, and level.</div>
+  </section>
+  <section class="panel">
     <h2>Visual Evidence</h2>
     <div class="grid">{''.join(cards)}</div>
   </section>
+  <script>
+const canvas = document.getElementById('trajectoryCanvas');
+const ctx = canvas.getContext('2d');
+const levelRange = document.getElementById('levelRange');
+const radiusRange = document.getElementById('radiusRange');
+const rotRange = document.getElementById('rotRange');
+const detail = document.getElementById('trajectoryDetail');
+const edgeToggle = document.getElementById('radiusEdgesToggle');
+const triToggle = document.getElementById('triToggle');
+let compact = null;
+let projected = [];
+let projectedById = new Map();
+function esc(value) {{ return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch])); }}
+function colorForNll(nll, minNll, maxNll) {{
+  const t = Math.max(0, Math.min(1, (nll - minNll) / Math.max(1e-6, maxNll - minNll)));
+  const r = Math.round(70 + 185 * t), g = Math.round(230 - 120 * t), b = Math.round(255 - 200 * t);
+  return `rgb(${{r}},${{g}},${{b}})`;
+}}
+function project(node, angle, bounds) {{
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const x = node.x * c - node.z * s;
+  const z = node.x * s + node.z * c;
+  const y = node.y - 0.22 * z;
+  const px = 76 + (x - bounds.minX) / Math.max(1e-6, bounds.maxX - bounds.minX) * (canvas.width - 152);
+  const py = canvas.height - 70 - (y - bounds.minY) / Math.max(1e-6, bounds.maxY - bounds.minY) * (canvas.height - 140);
+  return {{px, py, depth:z}};
+}}
+function draw() {{
+  if (!compact) return;
+  const maxLevel = Number(levelRange.value);
+  const radiusIndex = Number(radiusRange.value);
+  const radius = compact.radius_values[Math.min(radiusIndex, compact.radius_values.length - 1)] ?? 0;
+  const angle = Number(rotRange.value) * Math.PI / 180;
+  const visible = compact.nodes.filter(n => n.level <= maxLevel);
+  const rotated = visible.map(n => {{
+    const c = Math.cos(angle), s = Math.sin(angle);
+    return {{x:n.x*c-n.z*s, y:n.y-0.22*(n.x*s+n.z*c)}};
+  }});
+  const bounds = {{
+    minX: Math.min(...rotated.map(p=>p.x)), maxX: Math.max(...rotated.map(p=>p.x)),
+    minY: Math.min(...rotated.map(p=>p.y)), maxY: Math.max(...rotated.map(p=>p.y))
+  }};
+  const byId = new Map(compact.nodes.map(n => [n.id, n]));
+  const visibleIds = new Set(visible.map(n => n.id));
+  projected = compact.nodes.map(n => ({{...project(n, angle, bounds), node:n}}));
+  projectedById = new Map(projected.map(p => [p.node.id, p]));
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#020713'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle = 'rgba(157,184,207,.18)'; ctx.lineWidth = 1;
+  for (let i=0;i<7;i++) {{ const y=70+i*(canvas.height-140)/6; ctx.beginPath(); ctx.moveTo(60,y); ctx.lineTo(canvas.width-60,y); ctx.stroke(); }}
+  function line(a,b,color,width) {{
+    const pa = projectedById.get(Number(a)), pb = projectedById.get(Number(b));
+    if (!pa || !pb || !visibleIds.has(pa.node.id) || !visibleIds.has(pb.node.id)) return;
+    ctx.strokeStyle=color; ctx.lineWidth=width; ctx.beginPath(); ctx.moveTo(pa.px, pa.py); ctx.lineTo(pb.px, pb.py); ctx.stroke();
+  }}
+  for (const [a,b] of compact.reasoning_edges) line(a,b,'rgba(255,209,102,.52)',1.2);
+  for (const [a,b] of compact.dag_edges) line(a,b,'rgba(70,231,255,.45)',1.1);
+  if (edgeToggle.checked) for (const [a,b,l,birth] of compact.radius_edges) if (l <= maxLevel && birth <= radius) line(a,b,'rgba(136,255,134,.12)',0.65);
+  if (triToggle.checked) {{
+    ctx.fillStyle='rgba(167,139,250,.10)';
+    for (const [a,b,c,birth] of compact.triangles) if (birth <= radius && visibleIds.has(a) && visibleIds.has(b) && visibleIds.has(c)) {{
+      const pa=projected[a], pb=projected[b], pc=projected[c]; if (!pa||!pb||!pc) continue;
+      ctx.beginPath(); ctx.moveTo(pa.px,pa.py); ctx.lineTo(pb.px,pb.py); ctx.lineTo(pc.px,pc.py); ctx.closePath(); ctx.fill();
+    }}
+  }}
+  const nlls = visible.map(n => n.nll), minNll = Math.min(...nlls), maxNll = Math.max(...nlls);
+  for (const p of projected.filter(p => visibleIds.has(p.node.id)).sort((a,b)=>a.depth-b.depth)) {{
+    ctx.fillStyle = colorForNll(p.node.nll, minNll, maxNll);
+    ctx.strokeStyle = '#ecfbff'; ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.arc(p.px, p.py, 4.5, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  }}
+  ctx.fillStyle='#ecfbff'; ctx.font='16px system-ui'; ctx.fillText(`level ≤ ${{maxLevel}} · radius ${{radius.toFixed(3)}} · nodes ${{visible.length}} · compact native viewer`, 22, 34);
+}}
+function nearest(event) {{
+  const rect = canvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * canvas.width / rect.width;
+  const y = (event.clientY - rect.top) * canvas.height / rect.height;
+  let best=null, bd=Infinity;
+  for (const p of projected) {{
+    const d=(p.px-x)**2+(p.py-y)**2;
+    if (d<bd) {{bd=d; best=p;}}
+  }}
+  if (best && bd < 400) detail.innerHTML = `<strong>${{esc(best.node.label)}} / id ${{best.node.id}}</strong><br>level ${{best.node.level}} · branch ${{best.node.branch}} · NLL ${{best.node.nll.toFixed(4)}} · kind ${{esc(best.node.kind)}}`;
+}}
+fetch('branching_reasoning_interactive.json').then(r => r.json()).then(data => {{
+  compact = data;
+  const maxLevel = Math.max(...compact.nodes.map(n => n.level));
+  levelRange.max = maxLevel; levelRange.value = maxLevel;
+  radiusRange.max = Math.max(0, compact.radius_values.length - 1); radiusRange.value = Math.max(0, Math.floor((compact.radius_values.length - 1) / 3));
+  [levelRange, radiusRange, rotRange, edgeToggle, triToggle].forEach(el => el.addEventListener('input', draw));
+  canvas.addEventListener('mousemove', nearest); canvas.addEventListener('click', nearest);
+  draw();
+}}).catch(error => {{ detail.textContent = 'Compact interactive payload unavailable: '+error; }});
+  </script>
 </main></body></html>
 """,
         encoding="utf-8",
@@ -443,6 +611,7 @@ def write_toric_embedding_lite_report(dst: Path) -> None:
     records_dir = dst / "records"
     summaries = sorted(records_dir.glob("*_summary.json")) if records_dir.exists() else []
     cards = []
+    interactive_records: list[dict[str, Any]] = []
     for summary_path in summaries:
         summary = load_json(summary_path)
         record_id = str(summary.get("record_id", summary_path.stem.replace("_summary", "")))
@@ -451,6 +620,19 @@ def write_toric_embedding_lite_report(dst: Path) -> None:
         minimal_generators = staircase.get("minimal_generators", [])
         quotient_basis = staircase.get("quotient_basis", [])
         adjacent = staircase.get("adjacent_lcm_layer", [])
+        interactive_records.append(
+            {
+                "record_id": record_id,
+                "exponent_count": summary.get("exponent_count"),
+                "exponent_dim": summary.get("exponent_dim"),
+                "minimal_generators": minimal_generators,
+                "quotient_basis": quotient_basis,
+                "adjacent_lcm_layer": adjacent,
+                "staircase_threshold_by_x": staircase.get("staircase_threshold_by_x", []),
+                "window": staircase.get("window", {}),
+                "exactness": exactness,
+            }
+        )
         cards.append(
             f"""
             <section class="card">
@@ -472,6 +654,18 @@ def write_toric_embedding_lite_report(dst: Path) -> None:
         )
     for html_record in records_dir.glob("*.html") if records_dir.exists() else []:
         html_record.unlink()
+    if interactive_records:
+        (dst / "toric_embedding_interactive.json").write_text(
+            json.dumps(
+                {
+                    "schema": "toricgt.toric_embedding_interactive_compact.v1",
+                    "records": interactive_records,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
     if not cards:
         cards.append("<section class='card'><h2>No record summaries found</h2><p>The toric embedding manifest was copied, but no small summary JSON was available.</p></section>")
     (dst / "index.html").write_text(
@@ -487,7 +681,7 @@ def write_toric_embedding_lite_report(dst: Path) -> None:
     main{{max-width:1180px;margin:0 auto;padding:28px 18px 64px}}a{{color:var(--cyan)}}.hero,.card,.panel{{background:linear-gradient(180deg,rgba(11,23,40,.96),rgba(5,13,25,.98));border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.28)}}
     .hero,.panel{{padding:18px;margin:14px 0}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}}.card{{padding:16px}}h1{{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}}p{{color:var(--muted);line-height:1.55}}
     table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(159,177,201,.16);padding:8px;text-align:left;vertical-align:top}}th{{color:#bdeeff;width:38%}}td{{color:#fff}}code{{color:#ffd166;white-space:pre-wrap;overflow-wrap:anywhere}}
-    img{{display:block;width:100%;border:1px solid rgba(55,232,255,.20);border-radius:8px;background:#020713}}.pill{{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}}
+    img{{display:block;width:100%;border:1px solid rgba(55,232,255,.20);border-radius:8px;background:#020713}}.pill{{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 8px 4px 0;background:rgba(55,232,255,.08);font-weight:700}}.controls{{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0 14px}}button,select{{border:1px solid var(--line);background:rgba(55,232,255,.08);color:var(--text);border-radius:999px;padding:8px 12px;font-weight:800}}svg{{width:100%;height:auto;border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713}}.detail{{border:1px solid rgba(55,232,255,.18);border-radius:10px;background:#020713;padding:12px;margin-top:10px;color:#dff8ff}}
     .note{{border-left:3px solid var(--gold);padding:10px 12px;background:rgba(255,209,102,.08);border-radius:8px;color:#ffe8a8}}
   </style>
 </head>
@@ -502,7 +696,87 @@ def write_toric_embedding_lite_report(dst: Path) -> None:
     <h2>Rendered Audit Screenshot</h2>
     <img loading="lazy" decoding="async" src="../../page_assets/toric_embedding.png" alt="Toric embedding audit screenshot">
   </section>
+  <section class="panel">
+    <h2>Interactive Miller-Sturmfels Staircase</h2>
+    <p>This compact viewer restores interaction from the large toric report without loading Plotly. The overhead mode shows the quotient-basis lattice points under the staircase; the projected 3D mode lifts adjacent module layers by small heights so the toric module geometry is visible without losing the familiar xy-grid view.</p>
+    <div class="controls"><select id="recordSelect"></select><button id="view2d" type="button">Overhead xy Grid</button><button id="view3d" type="button">Projected 3D Layers</button><button id="idealToggle" type="button">Toggle Ideal Region</button></div>
+    <svg id="staircaseSvg" viewBox="0 0 980 560" role="img" aria-label="Interactive Miller-Sturmfels monomial staircase"></svg>
+    <div id="staircaseDetail" class="detail">Click a lattice point, generator, or LCM corner for exact monomial data.</div>
+  </section>
   <section class="grid">{''.join(cards)}</section>
+  <script>
+const staircaseSvg = document.getElementById('staircaseSvg');
+const recordSelect = document.getElementById('recordSelect');
+const detail = document.getElementById('staircaseDetail');
+let toricData = null, viewMode = '2d', showIdeal = true;
+function esc(value) {{ return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch])); }}
+function point2d(x,y,scale,margin,height) {{ return [margin + x*scale, height - margin - y*scale]; }}
+function point3d(x,y,z,scale,margin,height) {{ return [margin + x*scale + z*18, height - margin - y*scale - z*16]; }}
+function setDetail(html) {{ detail.innerHTML = html; }}
+function drawStaircase() {{
+  if (!toricData) return;
+  const rec = toricData.records[Number(recordSelect.value || 0)];
+  const basis = rec.quotient_basis || [];
+  const gens = rec.minimal_generators || [];
+  const adjacent = rec.adjacent_lcm_layer || [];
+  const win = rec.window || {{}};
+  const xMax = Math.max(win.x_max || 0, ...basis.map(p=>p[0]), ...gens.map(p=>p[0]), ...adjacent.map(a=>a.lcm_corner?.[0] || 0), 8) + 1;
+  const yMax = Math.max(win.y_max || 0, ...basis.map(p=>p[1]), ...gens.map(p=>p[1]), ...adjacent.map(a=>a.lcm_corner?.[1] || 0), 8) + 1;
+  const width=980, height=560, margin=66, scale=Math.min((width-2*margin)/xMax, (height-2*margin)/yMax);
+  const project = viewMode === '3d' ? (x,y,z=0)=>point3d(x,y,z,scale,margin,height) : (x,y,z=0)=>point2d(x,y,scale,margin,height);
+  let html = `<rect width="${{width}}" height="${{height}}" rx="14" fill="#020713"/>`;
+  html += `<g stroke="rgba(157,184,207,.18)" stroke-width="1">`;
+  for (let x=0; x<=xMax; x++) {{ const a=project(x,0,0), b=project(x,yMax,0); html += `<line x1="${{a[0]}}" y1="${{a[1]}}" x2="${{b[0]}}" y2="${{b[1]}}"/>`; }}
+  for (let y=0; y<=yMax; y++) {{ const a=project(0,y,0), b=project(xMax,y,0); html += `<line x1="${{a[0]}}" y1="${{a[1]}}" x2="${{b[0]}}" y2="${{b[1]}}"/>`; }}
+  html += `</g>`;
+  if (showIdeal) {{
+    for (const [gx,gy] of gens) {{
+      const a=project(gx,gy,viewMode==='3d'?0.18:0), b=project(xMax,gy,viewMode==='3d'?0.18:0), c=project(xMax,yMax,viewMode==='3d'?0.18:0), d=project(gx,yMax,viewMode==='3d'?0.18:0);
+      html += `<polygon points="${{a.join(',')}} ${{b.join(',')}} ${{c.join(',')}} ${{d.join(',')}}" fill="rgba(255,209,102,.11)" stroke="rgba(255,209,102,.28)"/>`;
+    }}
+  }}
+  for (const [x,y] of basis) {{
+    const z = viewMode === '3d' ? ((x + y) % 3) * 0.06 : 0;
+    const p=project(x,y,z);
+    html += `<circle class="basis-point" data-x="${{x}}" data-y="${{y}}" cx="${{p[0]}}" cy="${{p[1]}}" r="${{viewMode==='3d'?4.2:3.7}}" fill="#ecfbff" opacity=".88"><title>x^${{x}} y^${{y}} basis monomial</title></circle>`;
+  }}
+  for (const [i,g] of gens.entries()) {{
+    const p=project(g[0],g[1],viewMode==='3d'?0.35:0);
+    html += `<circle class="gen-point" data-index="${{i}}" cx="${{p[0]}}" cy="${{p[1]}}" r="9" fill="#ffd166" stroke="#ecfbff"><title>minimal generator x^${{g[0]}} y^${{g[1]}}</title></circle>`;
+    html += `<text x="${{p[0]+12}}" y="${{p[1]-8}}" fill="#ffd166" font-size="15">m${{i+1}}</text>`;
+  }}
+  for (const a of adjacent) {{
+    const c=a.lcm_corner || [0,0], p=project(c[0],c[1],viewMode==='3d'?0.55:0);
+    html += `<rect class="lcm-point" data-index="${{a.index || 0}}" x="${{p[0]-8}}" y="${{p[1]-8}}" width="16" height="16" rx="3" fill="#ff5fa2" stroke="#ecfbff"><title>adjacent LCM corner x^${{c[0]}} y^${{c[1]}}</title></rect>`;
+  }}
+  html += `<text x="28" y="34" fill="#ecfbff" font-size="18">${{esc(rec.record_id)}} · ${{viewMode === '3d' ? 'projected 3D module layers' : 'overhead xy-grid staircase'}}</text>`;
+  html += `<text x="28" y="528" fill="#9db8cf" font-size="14">white = monomial basis of S/I · gold = minimal generators · pink = adjacent LCM corners · shaded = ideal region</text>`;
+  staircaseSvg.innerHTML = html;
+  staircaseSvg.querySelectorAll('.basis-point').forEach(el => el.addEventListener('click', () => setDetail(`<strong>basis monomial</strong><br>x^${{el.dataset.x}} y^${{el.dataset.y}} lies outside the monomial ideal and represents a basis element of S/I.`)));
+  staircaseSvg.querySelectorAll('.gen-point').forEach(el => {{
+    el.addEventListener('click', () => {{
+      const g = gens[Number(el.dataset.index)];
+      setDetail(`<strong>minimal generator m${{Number(el.dataset.index)+1}}</strong><br>x^${{g[0]}} y^${{g[1]}} generates a shifted positive orthant inside the monomial ideal.`);
+    }});
+  }});
+  staircaseSvg.querySelectorAll('.lcm-point').forEach(el => {{
+    el.addEventListener('click', () => {{
+      const a = adjacent[Number(el.dataset.index)] || adjacent[0];
+      const c = a.lcm_corner || [0,0];
+      setDetail(`<strong>adjacent LCM corner</strong><br>x^${{c[0]}} y^${{c[1]}} is the least common multiple corner for adjacent generators in the two-step Miller-Sturmfels inclusion-exclusion view.`);
+    }});
+  }});
+}}
+fetch('toric_embedding_interactive.json').then(r => r.json()).then(data => {{
+  toricData = data;
+  recordSelect.innerHTML = data.records.map((r,i)=>`<option value="${{i}}">${{esc(r.record_id)}}</option>`).join('');
+  recordSelect.addEventListener('change', drawStaircase);
+  document.getElementById('view2d').addEventListener('click', () => {{ viewMode='2d'; drawStaircase(); }});
+  document.getElementById('view3d').addEventListener('click', () => {{ viewMode='3d'; drawStaircase(); }});
+  document.getElementById('idealToggle').addEventListener('click', () => {{ showIdeal=!showIdeal; drawStaircase(); }});
+  drawStaircase();
+}}).catch(error => {{ detail.textContent = 'Compact toric interactive payload unavailable: '+error; }});
+  </script>
 </main></body></html>
 """,
         encoding="utf-8",
@@ -1227,7 +1501,7 @@ METHOD_CSS = """
 main{max-width:1240px;margin:0 auto;padding:28px 20px 64px}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .hero,.panel,.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(11,27,43,.92),rgba(7,20,33,.88));box-shadow:0 24px 80px rgba(0,0,0,.38)}
 .hero{padding:24px;margin-bottom:18px}.panel{padding:18px;margin:18px 0}.grid{display:grid;gap:16px}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:repeat(3,minmax(0,1fr))}
-h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.metric-note{font-size:.94rem;color:var(--muted);line-height:1.5}.card{padding:16px;min-height:0;overflow-wrap:anywhere}.card p{margin-bottom:0}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}.callout{border-left:3px solid var(--gold);background:rgba(255,209,102,.08);border-radius:12px;padding:12px 14px;color:#ffe8a8}.detail-panel{border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:14px;margin-top:12px;min-height:180px}.detail-panel strong{color:#fff}.svg-button{cursor:pointer}.svg-button:hover{filter:drop-shadow(0 0 10px rgba(255,209,102,.75))}.method-list{margin:0;padding-left:1.1rem}.method-list li{margin:0 0 .65rem}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
+h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spacing:0}h2{font-size:clamp(1.35rem,3vw,2.2rem);margin:0 0 12px}h3{margin:0 0 8px}.lead,p,li{color:#bdd6e8;line-height:1.62}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.15em;font-weight:800;font-size:.78rem}.equation{font-family:"STIX Two Text",Cambria,Georgia,serif;color:#fff;background:#020713;border:1px solid rgba(157,184,207,.18);border-radius:12px;padding:12px 14px;overflow:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(70,231,255,.08);font-size:.9rem}.metric-note{font-size:.94rem;color:var(--muted);line-height:1.5}.card{padding:16px;min-height:0;overflow-wrap:anywhere}.card p{margin-bottom:0}svg{max-width:100%}.plot{height:560px;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713}.source-img{width:100%;max-height:360px;object-fit:contain;border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:10px}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{border-bottom:1px solid rgba(157,184,207,.16);padding:9px;text-align:left;vertical-align:top}.mini-table th{color:#9fdcff}.accent{color:var(--gold);font-weight:800}.callout{border-left:3px solid var(--gold);background:rgba(255,209,102,.08);border-radius:12px;padding:12px 14px;color:#ffe8a8}.detail-panel{border:1px solid rgba(70,231,255,.18);border-radius:14px;background:#020713;padding:14px;margin-top:12px;min-height:180px}.detail-panel strong{color:#fff}.svg-button,.clickable{cursor:pointer}.svg-button:hover,.clickable:hover{filter:drop-shadow(0 0 10px rgba(255,209,102,.75))}.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0 14px}.controls button,.controls select{border:1px solid var(--line);background:rgba(70,231,255,.08);color:var(--text);border-radius:999px;padding:8px 12px;font-weight:800}.controls label{display:grid;gap:4px;color:var(--muted);font-size:.86rem}.controls input[type=range]{width:min(320px,72vw);accent-color:var(--cyan)}.hidden{display:none!important}.method-list{margin:0;padding-left:1.1rem}.method-list li{margin:0 0 .65rem}@media(max-width:900px){.two,.three{grid-template-columns:1fr}.plot{height:420px}}
 """
 
 
@@ -1413,7 +1687,7 @@ renderFotDetail('root');
 def write_convextok_method_report(docs: Path) -> dict[str, str]:
     out = docs / "page_interactive" / "convextok_method"
     out.mkdir(parents=True, exist_ok=True)
-    sample = "byte graphs!"
+    sample = "token graph"
     edges = [
         *[
             {
@@ -1428,14 +1702,13 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
             }
             for idx in range(len(sample))
         ],
-        {"i": 0, "j": 4, "token": "byte", "kind": "priced vocabulary token", "cost": 0.31, "lp": 0.66, "selected": False, "lane": 1},
-        {"i": 0, "j": 5, "token": "byte ", "kind": "selected rounded token", "cost": 0.29, "lp": 0.78, "selected": True, "lane": 2},
-        {"i": 5, "j": 10, "token": "graph", "kind": "priced vocabulary token", "cost": 0.22, "lp": 0.54, "selected": False, "lane": 1},
-        {"i": 5, "j": 11, "token": "graphs", "kind": "priced vocabulary token", "cost": 0.20, "lp": 0.47, "selected": False, "lane": 2},
-        {"i": 5, "j": 12, "token": "graphs!", "kind": "selected rounded token", "cost": 0.18, "lp": 0.82, "selected": True, "lane": 3},
-        {"i": 0, "j": 12, "token": "byte graphs!", "kind": "LP-relaxation long-span candidate", "cost": 0.53, "lp": 0.35, "selected": False, "lane": 4},
+        {"i": 0, "j": 5, "token": "token", "kind": "selected rounded token", "cost": 0.27, "lp": 0.82, "selected": True, "lane": 2},
+        {"i": 0, "j": 6, "token": "token ", "kind": "priced vocabulary token", "cost": 0.35, "lp": 0.48, "selected": False, "lane": 1},
+        {"i": 6, "j": 11, "token": "graph", "kind": "selected rounded token", "cost": 0.21, "lp": 0.77, "selected": True, "lane": 2},
+        {"i": 6, "j": 10, "token": "grap", "kind": "priced vocabulary token", "cost": 0.29, "lp": 0.32, "selected": False, "lane": 1},
+        {"i": 0, "j": 11, "token": "token graph", "kind": "LP-relaxation long-span candidate", "cost": 0.49, "lp": 0.41, "selected": False, "lane": 4},
     ]
-    width, height = 820, 480
+    width, height = 900, 500
     margin_x, baseline = 62, 340
     step_x = (width - 2 * margin_x) / len(sample)
 
@@ -1452,8 +1725,8 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
         return "#a78bfa"
 
     edge_paths: list[str] = []
-    edge_labels: list[str] = []
-    for edge in edges:
+    edge_paths_3d: list[str] = []
+    for edge_index, edge in enumerate(edges):
         x1, x2 = x_at(edge["i"]), x_at(edge["j"])
         mid = (x1 + x2) / 2
         span = edge["j"] - edge["i"]
@@ -1462,9 +1735,9 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
             label_y = baseline + 62
             stroke_width = 2
             dash = ""
+            label = ""
         else:
             control_y = baseline - (46 + 12 * span + 22 * edge["lane"])
-            label_y = control_y - 10
             stroke_width = 7 if edge["selected"] else 4
             dash = ' stroke-dasharray="8 8"' if "LP-relaxation" in edge["kind"] else ""
         selected = "yes" if edge["selected"] else "no"
@@ -1474,20 +1747,32 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
         )
         edge_paths.append(
             f'<path d="M{x1:.1f} {baseline:.1f} Q{mid:.1f} {control_y:.1f} {x2:.1f} {baseline:.1f}" '
-            f'fill="none" stroke="{edge_color(edge)}" stroke-width="{stroke_width}" stroke-linecap="round"{dash}>'
+            f'class="clickable dag-edge" data-edge="{edge_index}" fill="none" stroke="{edge_color(edge)}" stroke-width="{stroke_width}" stroke-linecap="round"{dash}>'
             f'<title>{html.escape(title)}</title></path>'
         )
-        if "fallback" not in edge["kind"]:
-            edge_labels.append(
-                f'<text x="{mid:.1f}" y="{label_y:.1f}" fill="{edge_color(edge)}" font-size="15" text-anchor="middle">'
-                f'{html.escape(edge["token"])}</text>'
-            )
+        z1 = 42 * edge["lane"] if edge["lane"] > 0 else -22
+        z2 = z1
+        x1p, y1p = x1 + z1 * 0.45, baseline - z1 * 0.55
+        x2p, y2p = x2 + z2 * 0.45, baseline - z2 * 0.55
+        control_y3 = min(y1p, y2p) - (30 + 14 * span)
+        edge_paths_3d.append(
+            f'<path d="M{x1p:.1f} {y1p:.1f} Q{(x1p+x2p)/2:.1f} {control_y3:.1f} {x2p:.1f} {y2p:.1f}" '
+            f'class="clickable dag-edge" data-edge="{edge_index}" fill="none" stroke="{edge_color(edge)}" stroke-width="{stroke_width}" stroke-linecap="round"{dash}>'
+            f'<title>{html.escape(title)}</title></path>'
+        )
     node_svg = []
+    node_svg_3d = []
     for idx in range(len(sample) + 1):
         node_svg.append(
-            f'<circle cx="{x_at(idx):.1f}" cy="{baseline}" r="9" fill="#46e7ff" stroke="#ecfbff" stroke-width="1.2">'
+            f'<circle class="clickable dag-node" data-node="{idx}" cx="{x_at(idx):.1f}" cy="{baseline}" r="9" fill="#46e7ff" stroke="#ecfbff" stroke-width="1.2">'
             f'<title>byte boundary {idx}; prefix {html.escape(repr(sample[:idx]))}</title></circle>'
             f'<text x="{x_at(idx):.1f}" y="{baseline + 28}" fill="#9db8cf" font-size="13" text-anchor="middle">{idx}</text>'
+        )
+        xp, yp = x_at(idx) - 10, baseline + 12
+        node_svg_3d.append(
+            f'<circle class="clickable dag-node" data-node="{idx}" cx="{xp:.1f}" cy="{yp:.1f}" r="8" fill="#46e7ff" stroke="#ecfbff" stroke-width="1.2">'
+            f'<title>byte boundary {idx}; prefix {html.escape(repr(sample[:idx]))}</title></circle>'
+            f'<text x="{xp:.1f}" y="{yp + 24:.1f}" fill="#9db8cf" font-size="12" text-anchor="middle">{idx}</text>'
         )
     char_svg = []
     for idx, ch in enumerate(sample):
@@ -1508,13 +1793,12 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
         for edge in edges
     )
     dag_svg = f"""
-<svg viewBox="0 0 {width} {height}" role="img" aria-label="ConvexTok byte-boundary tokenization DAG">
+<svg id="dag2d" viewBox="0 0 {width} {height}" role="img" aria-label="ConvexTok byte-boundary tokenization DAG">
   <rect x="8" y="8" width="{width-16}" height="{height-16}" rx="18" fill="#020713" stroke="rgba(70,231,255,.30)"/>
-  <text x="32" y="42" fill="#ffd166" font-size="20">{html.escape(sample)}</text>
-  <text x="32" y="70" fill="#9db8cf" font-size="15">Vertices are byte boundaries; arcs are candidate tokens. Hover arcs and vertices for exact edge metadata.</text>
+  <text x="32" y="42" fill="#ffd166" font-size="20">sample string: {html.escape(sample)}</text>
+  <text x="32" y="70" fill="#9db8cf" font-size="15">Vertices are byte boundaries; arcs are candidate tokens. Click arcs and vertices for exact edge metadata.</text>
   <line x1="{margin_x}" y1="{baseline}" x2="{width-margin_x}" y2="{baseline}" stroke="rgba(236,251,255,.32)" stroke-width="2"/>
   <g>{''.join(edge_paths)}</g>
-  <g>{''.join(edge_labels)}</g>
   <g>{''.join(node_svg)}</g>
   <g>{''.join(char_svg)}</g>
   <g font-size="14">
@@ -1524,6 +1808,24 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
     <rect x="32" y="422" width="16" height="8" fill="#46e7ff"/><text x="56" y="431" fill="#bdd6e8">free byte fallback</text>
   </g>
 </svg>
+<svg id="dag3d" class="hidden" viewBox="0 0 {width} {height}" role="img" aria-label="ConvexTok projected 3D tokenization cost layers">
+  <rect x="8" y="8" width="{width-16}" height="{height-16}" rx="18" fill="#020713" stroke="rgba(70,231,255,.30)"/>
+  <text x="32" y="42" fill="#ffd166" font-size="20">projected 3D cost layers</text>
+  <text x="32" y="70" fill="#9db8cf" font-size="15">x = byte boundary, height = token span/layer, color = selected, priced, LP, or fallback edge.</text>
+  <g stroke="rgba(157,184,207,.20)" stroke-width="1">
+    <line x1="{margin_x-10}" y1="{baseline+12}" x2="{width-margin_x}" y2="{baseline+12}"/>
+    <line x1="{margin_x-10}" y1="{baseline+12}" x2="{margin_x+96}" y2="{baseline-116}"/>
+    <line x1="{margin_x-10}" y1="{baseline+12}" x2="{margin_x-10}" y2="{baseline-150}"/>
+  </g>
+  <g>{''.join(edge_paths_3d)}</g>
+  <g>{''.join(node_svg_3d)}</g>
+  <g font-size="14">
+    <rect x="32" y="392" width="16" height="8" fill="#88ff86"/><text x="56" y="401" fill="#bdd6e8">selected path</text>
+    <rect x="210" y="392" width="16" height="8" fill="#a78bfa"/><text x="234" y="401" fill="#bdd6e8">priced candidates</text>
+    <rect x="410" y="392" width="16" height="8" fill="#ffd166"/><text x="434" y="401" fill="#bdd6e8">LP-relaxation edge</text>
+    <rect x="630" y="392" width="16" height="8" fill="#46e7ff"/><text x="654" y="401" fill="#bdd6e8">fallback bytes</text>
+  </g>
+</svg>
 """
     body = f"""
 <section class="panel">
@@ -1531,7 +1833,12 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
   <p><a href="https://arxiv.org/abs/2605.22821">ConvexTok preprint</a> · <a href="https://github.com/openai/parameter-golf">OpenAI Parameter Golf</a></p>
   <p class="callout">The key point is not merely “a different tokenizer.” The tokenization computation is itself a graph-structured dynamic program, so it matches TokenGT-style graphification instead of being hidden preprocessing.</p>
 </section>
-<section class="panel"><h2>Tokenization DAG</h2>{dag_svg}<p class="metric-note">Curved arcs span byte intervals. Cyan bottom arcs are fallback byte edges, violet arcs are priced candidate tokens, gold arcs are LP-relaxation support, and green arcs are the selected rounded token path. The model receives the same structure as TokenGT-style node/edge features; BPB is still scored on the flattened selected path.</p></section>
+<section class="panel"><h2>Tokenization DAG</h2>
+  <div class="controls"><button type="button" id="showDag2d">Layered DAG</button><button type="button" id="showDag3d">Projected 3D Cost View</button></div>
+  {dag_svg}
+  <div id="dagDetail" class="detail-panel"><strong>Click an arc or boundary vertex.</strong><p>Edge metadata will appear here without loading any external plotting runtime.</p></div>
+  <p class="metric-note">Curved arcs span byte intervals. Cyan bottom arcs are fallback byte edges, violet arcs are priced candidate tokens, gold arcs are LP-relaxation support, and green arcs are the selected rounded token path. The model receives the same structure as TokenGT-style node/edge features; BPB is still scored on the flattened selected path.</p>
+</section>
 <section class="grid two">
   <article class="panel"><h2>Equations</h2>
     <div class="equation">D[j] = min<sub>(i,j,t)∈E</sub> D[i] + w<sub>t</sub></div>
@@ -1553,6 +1860,40 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
   <article class="card"><h3>5. Regret Use</h3><p>The LP lower bound gives a tokenizer-regret metric: if rounded path length is close to the LP optimum, BPB problems are more likely model-bound; otherwise tokenizer vocabulary or rounding is suspect.</p></article>
   <article class="card"><h3>6. OOD Use</h3><p>Because substring choices are graph paths, the model sees reusable local graph grammar rather than isolated token IDs. That is the bridge to graph-structured biological and 3D tokenizers later.</p></article>
 </section>
+<script>
+const dagEdges = {json.dumps(edges)};
+const sampleString = {json.dumps(sample)};
+function esc(value) {{
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch]));
+}}
+function showDag(which) {{
+  document.getElementById('dag2d').classList.toggle('hidden', which !== '2d');
+  document.getElementById('dag3d').classList.toggle('hidden', which !== '3d');
+}}
+function showEdgeDetail(index) {{
+  const e = dagEdges[Number(index)];
+  if (!e) return;
+  document.getElementById('dagDetail').innerHTML =
+    `<strong>${{esc(e.kind)}}</strong><table class="mini-table"><tbody>`+
+    `<tr><th>token</th><td><code>${{esc(e.token)}}</code></td></tr>`+
+    `<tr><th>span</th><td>${{e.i}} → ${{e.j}}</td></tr>`+
+    `<tr><th>cost</th><td>${{Number(e.cost).toFixed(3)}}</td></tr>`+
+    `<tr><th>LP mass</th><td>${{Number(e.lp).toFixed(2)}}</td></tr>`+
+    `<tr><th>selected rounded path</th><td>${{e.selected ? 'yes' : 'no'}}</td></tr>`+
+    `</tbody></table>`;
+}}
+function showNodeDetail(index) {{
+  const i = Number(index);
+  document.getElementById('dagDetail').innerHTML =
+    `<strong>byte boundary ${{i}}</strong><p>Prefix: <code>${{esc(sampleString.slice(0, i))}}</code></p>`+
+    `<p>Candidate token edges enter or leave this boundary in the tokenizer DAG. FineWeb BPB is scored after the selected path is flattened back to a sequence.</p>`;
+}}
+document.getElementById('showDag2d').addEventListener('click', () => showDag('2d'));
+document.getElementById('showDag3d').addEventListener('click', () => showDag('3d'));
+document.querySelectorAll('.dag-edge').forEach(el => el.addEventListener('click', () => showEdgeDetail(el.dataset.edge)));
+document.querySelectorAll('.dag-node').forEach(el => el.addEventListener('click', () => showNodeDetail(el.dataset.node)));
+showEdgeDetail(dagEdges.findIndex(e => e.selected));
+</script>
 """
     (out / "index.html").write_text(method_report_shell("ConvexTok Tokenization Geometry", "Tokenizer as tropical DAG and toric chart", body), encoding="utf-8")
     return {
