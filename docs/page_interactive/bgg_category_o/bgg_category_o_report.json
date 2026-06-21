@@ -1,7 +1,7 @@
 {
   "gates": {
-    "exact_certificate_available": 0.0,
-    "exact_finite_chain_provenance": 0.0,
+    "exact_certificate_available": 1.0,
+    "exact_finite_chain_provenance": 1.0,
     "late_gate_required": 1.0
   },
   "metric_provenance": {
@@ -15,21 +15,14 @@
     "toric_bgg_standard_leakage": "exact_finite_chain_poset_standard_mask"
   },
   "metrics": {
-    "toric_bgg_d2_residual": null,
-    "toric_bgg_gale_dual_consistency": null,
-    "toric_bgg_koszul_linearity_residual": null,
-    "toric_bgg_signature_smoothness": null,
-    "toric_bgg_standard_entropy": null,
-    "toric_bgg_standard_leakage": null
+    "toric_bgg_d2_residual": 0.03261389583349228,
+    "toric_bgg_gale_dual_consistency": 0.0,
+    "toric_bgg_koszul_linearity_residual": 0.0,
+    "toric_bgg_signature_smoothness": 0.0,
+    "toric_bgg_standard_entropy": 0.9826063513755798,
+    "toric_bgg_standard_leakage": 0.40328821539878845
   },
   "schema": "toricgt.bgg_category_o_report.v1",
-  "source": "metrics_json",
-  "unavailable": [
-    "toric_bgg_d2_residual",
-    "toric_bgg_standard_leakage",
-    "toric_bgg_koszul_linearity_residual",
-    "toric_bgg_gale_dual_consistency",
-    "toric_bgg_signature_smoothness",
-    "toric_bgg_standard_entropy"
-  ]
+  "source": "metrics_json+trained_checkpoint_toric_bgg_probe",
+  "unavailable": []
 }

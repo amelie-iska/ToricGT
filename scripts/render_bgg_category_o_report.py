@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +26,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from toricgt.toric_bgg import (  # noqa: E402
+    ToricBGGProbe,
     boundary_square_residual,
     standard_filtration_leakage,
     toric_bgg_metric_provenance,
@@ -66,11 +68,100 @@ EXPECTED_METRICS = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--metrics-json", default="", help="Optional training/analysis metrics JSON.")
+    parser.add_argument(
+        "--checkpoint",
+        default="",
+        help="Optional checkpoint containing the trained Toric BGG sidecar probe.",
+    )
+    parser.add_argument(
+        "--embedding-manifest",
+        default="",
+        help="Optional manifest emitted by extract_oai_sidecar_embeddings.py.",
+    )
+    parser.add_argument(
+        "--embedding-npz",
+        default="",
+        help="Optional direct hidden-state npz. Overrides --embedding-manifest.",
+    )
     parser.add_argument("--output-dir", required=True)
     return parser.parse_args()
 
 
-def read_metrics(path: Path | None) -> dict[str, Any]:
+def _manifest_first_npz(path: Path) -> Path:
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    base = path.parent.parent if path.name == "manifest.json" and path.parent.name == "embeddings" else path.parent
+    for section in ("payloads", "records"):
+        for record in manifest.get(section, []) or []:
+            rel = record.get("relative_npz") or record.get("npz") or record.get("npz_path")
+            if rel:
+                candidate = Path(rel)
+                if not candidate.is_absolute():
+                    candidate = base / candidate
+                if candidate.exists():
+                    return candidate
+    raise FileNotFoundError(f"no embedding npz found in {path}")
+
+
+def checkpoint_bgg_metrics(checkpoint: Path, embedding_npz: Path) -> dict[str, Any]:
+    """Evaluate the trained finite Toric BGG probe on extracted hidden states."""
+
+    ckpt = torch.load(checkpoint, map_location="cpu")
+    sidecar = ckpt.get("sidecar") if isinstance(ckpt, dict) else None
+    if not isinstance(sidecar, dict):
+        raise ValueError(f"{checkpoint} does not contain a sidecar state dict")
+    bgg_state = {
+        key.removeprefix("toric_bgg."): value
+        for key, value in sidecar.items()
+        if key.startswith("toric_bgg.")
+    }
+    if not bgg_state:
+        raise ValueError(f"{checkpoint} sidecar has no toric_bgg.* weights")
+    hidden_npz = np.load(embedding_npz, allow_pickle=False)
+    if "hidden" not in hidden_npz:
+        raise ValueError(f"{embedding_npz} does not contain a hidden array")
+    hidden = torch.from_numpy(hidden_npz["hidden"]).float().unsqueeze(0)
+    token_ids = None
+    if "token_ids" in hidden_npz:
+        token_ids = torch.from_numpy(hidden_npz["token_ids"]).long().unsqueeze(0)
+    probe = ToricBGGProbe(d_model=int(hidden.shape[-1]))
+    missing, unexpected = probe.load_state_dict(bgg_state, strict=False)
+    if unexpected:
+        raise ValueError(f"unexpected Toric BGG probe keys: {unexpected}")
+    probe.eval()
+    with torch.no_grad():
+        out = probe(hidden, target_tokens=token_ids)
+    metrics: dict[str, Any] = {
+        "source": "trained_checkpoint_toric_bgg_probe_on_hidden_states",
+        "checkpoint": str(checkpoint),
+        "embedding_npz": str(embedding_npz),
+        "probe_missing_state_keys": list(missing),
+    }
+    for key in EXPECTED_METRICS:
+        value = out.get(key)
+        if value is None:
+            continue
+        metrics[key] = float(value.detach().cpu().item())
+    for key in (
+        "toric_bgg_loss",
+        "toric_bgg_resolution_consistency",
+        "toric_bgg_standard_allowed_mass",
+        "toric_bgg_exact_certificate_available",
+        "toric_bgg_provenance_exact_finite_chain",
+        "toric_bgg_late_gate_required",
+    ):
+        value = out.get(key)
+        if value is not None:
+            metrics[key] = float(value.detach().cpu().item())
+    return metrics
+
+
+def read_metrics(
+    path: Path | None,
+    *,
+    checkpoint: Path | None = None,
+    embedding_manifest: Path | None = None,
+    embedding_npz: Path | None = None,
+) -> dict[str, Any]:
     if path is None:
         cert = toy_bgg_certificate()
         probs = torch.eye(3)
@@ -90,6 +181,20 @@ def read_metrics(path: Path | None) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must contain a JSON object")
+    missing = [key for key in EXPECTED_METRICS if payload.get(key) is None]
+    if missing and checkpoint is not None and (embedding_manifest is not None or embedding_npz is not None):
+        if embedding_npz is None:
+            assert embedding_manifest is not None
+            embedding_npz = _manifest_first_npz(embedding_manifest)
+        computed = checkpoint_bgg_metrics(checkpoint, embedding_npz)
+        merged = dict(payload)
+        for key, value in computed.items():
+            if key == "source":
+                continue
+            merged[key] = value
+        merged["source"] = f"{payload.get('source', 'metrics_json')}+trained_checkpoint_toric_bgg_probe"
+        merged["toric_bgg_probe_source"] = computed
+        return merged
     return payload
 
 
@@ -143,7 +248,7 @@ def write_report(metrics: dict[str, Any], output_dir: Path) -> tuple[Path, Path]
 <body><main>
 <section class="hero">
   <h1>Toric BGG Category O Report</h1>
-  <p>Finite Category O/BGG diagnostics with explicit certificate provenance.  Missing metrics are marked unavailable rather than replaced by proxy values.</p>
+  <p>Finite Category O/BGG diagnostics with explicit certificate provenance.  When a checkpoint sidecar and hidden-state payload are supplied, the trained Toric BGG probe is evaluated directly on that payload.</p>
   <div>{gates}</div>
   <div class="links"><a class="pill" href="bgg_category_o_report.json">report JSON</a></div>
 </section>
@@ -162,7 +267,15 @@ def write_report(metrics: dict[str, Any], output_dir: Path) -> tuple[Path, Path]
 def main() -> None:
     args = parse_args()
     metrics_path = Path(args.metrics_json) if args.metrics_json else None
-    metrics = read_metrics(metrics_path)
+    checkpoint = Path(args.checkpoint) if args.checkpoint else None
+    embedding_manifest = Path(args.embedding_manifest) if args.embedding_manifest else None
+    embedding_npz = Path(args.embedding_npz) if args.embedding_npz else None
+    metrics = read_metrics(
+        metrics_path,
+        checkpoint=checkpoint,
+        embedding_manifest=embedding_manifest,
+        embedding_npz=embedding_npz,
+    )
     html_path, report_json = write_report(metrics, Path(args.output_dir))
     print(json.dumps({"index_html": str(html_path), "report_json": str(report_json)}, indent=2, sort_keys=True))
 

@@ -21,13 +21,13 @@ pre { white-space:pre-wrap; overflow-x:auto; background:#020713; border:1px soli
 <body><main>
 <section class="hero">
   <h1>Toric BGG Category O Report</h1>
-  <p>Finite Category O/BGG diagnostics with explicit certificate provenance.  Missing metrics are marked unavailable rather than replaced by proxy values.</p>
-  <div><span class="badge off">exact_certificate_available: 0.0</span><span class="badge off">exact_finite_chain_provenance: 0.0</span><span class="badge">late_gate_required: 1.0</span></div>
+  <p>Finite Category O/BGG diagnostics with explicit certificate provenance.  When a checkpoint sidecar and hidden-state payload are supplied, the trained Toric BGG probe is evaluated directly on that payload.</p>
+  <div><span class="badge">exact_certificate_available: 1.0</span><span class="badge">exact_finite_chain_provenance: 1.0</span><span class="badge">late_gate_required: 1.0</span></div>
   <div class="links"><a class="pill" href="bgg_category_o_report.json">report JSON</a></div>
 </section>
 <section class="grid">
-  <div class="card"><h2>Resolution And Standard Filtration</h2><div class="metric"><span>toric_bgg_d2_residual</span><span>unavailable <span class="badge off">unavailable</span><br><small>exact_finite_chain_complex_boundary_square</small></span></div><div class="metric"><span>toric_bgg_standard_leakage</span><span>unavailable <span class="badge off">unavailable</span><br><small>exact_finite_chain_poset_standard_mask</small></span></div></div>
-  <div class="card"><h2>Koszul, Gale, And Signature</h2><div class="metric"><span>toric_bgg_koszul_linearity_residual</span><span>unavailable <span class="badge off">unavailable</span><br><small>exact_finite_koszul_degree_profile</small></span></div><div class="metric"><span>toric_bgg_gale_dual_consistency</span><span>unavailable <span class="badge off">unavailable</span><br><small>finite_gale_dual_signature_pair</small></span></div><div class="metric"><span>toric_bgg_signature_smoothness</span><span>unavailable <span class="badge off">unavailable</span><br><small>finite_bgg_signature_path</small></span></div><div class="metric"><span>toric_bgg_standard_entropy</span><span>unavailable <span class="badge off">unavailable</span><br><small>finite_standard_label_distribution</small></span></div></div>
+  <div class="card"><h2>Resolution And Standard Filtration</h2><div class="metric"><span>toric_bgg_d2_residual</span><span>0.0326139 <span class="badge">available</span><br><small>exact_finite_chain_complex_boundary_square</small></span></div><div class="metric"><span>toric_bgg_standard_leakage</span><span>0.403288 <span class="badge">available</span><br><small>exact_finite_chain_poset_standard_mask</small></span></div></div>
+  <div class="card"><h2>Koszul, Gale, And Signature</h2><div class="metric"><span>toric_bgg_koszul_linearity_residual</span><span>0 <span class="badge">available</span><br><small>exact_finite_koszul_degree_profile</small></span></div><div class="metric"><span>toric_bgg_gale_dual_consistency</span><span>0 <span class="badge">available</span><br><small>finite_gale_dual_signature_pair</small></span></div><div class="metric"><span>toric_bgg_signature_smoothness</span><span>0 <span class="badge">available</span><br><small>finite_bgg_signature_path</small></span></div><div class="metric"><span>toric_bgg_standard_entropy</span><span>0.982606 <span class="badge">available</span><br><small>finite_standard_label_distribution</small></span></div></div>
 </section>
 <section class="panel"><h2>Raw Metrics</h2><pre>{
   &quot;analogy_loss&quot;: 0.064827,
@@ -43,6 +43,7 @@ pre { white-space:pre-wrap; overflow-x:auto; background:#020713; border:1px soli
   ],
   &quot;checkpoint_step&quot;: 1000,
   &quot;derived_signature_loss&quot;: 3.243159,
+  &quot;embedding_npz&quot;: &quot;outputs/github_pages_best_checkpoint_long_manual_20260621T182232Z/geometry/embeddings/oai_ckpt_tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z_step_001000_batch000_row00.npz&quot;,
   &quot;exists&quot;: 1,
   &quot;final_int8_bpb&quot;: 0.49533264,
   &quot;final_int8_loss&quot;: 0.84296158,
@@ -84,12 +85,43 @@ pre { white-space:pre-wrap; overflow-x:auto; background:#020713; border:1px soli
   &quot;oai_mtp_loss&quot;: 11.48704,
   &quot;oai_mtp_weight&quot;: 0.003,
   &quot;path&quot;: &quot;ToricGT/runs/oai_sidecar/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z/train.log&quot;,
+  &quot;probe_missing_state_keys&quot;: [],
   &quot;profile&quot;: &quot;gate2500_experimental_family_selective&quot;,
   &quot;run_id&quot;: &quot;tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z&quot;,
   &quot;selected_bpb&quot;: 0.49533264,
   &quot;sidecar_loss&quot;: 0.000144,
+  &quot;source&quot;: &quot;metrics_json+trained_checkpoint_toric_bgg_probe&quot;,
   &quot;tokengt_graph_loss&quot;: 1.16281,
-  &quot;toric_bgg_loss&quot;: 0.164997,
+  &quot;toric_bgg_d2_residual&quot;: 0.03261389583349228,
+  &quot;toric_bgg_exact_certificate_available&quot;: 1.0,
+  &quot;toric_bgg_gale_dual_consistency&quot;: 0.0,
+  &quot;toric_bgg_koszul_linearity_residual&quot;: 0.0,
+  &quot;toric_bgg_late_gate_required&quot;: 1.0,
+  &quot;toric_bgg_loss&quot;: 0.1334359496831894,
+  &quot;toric_bgg_probe_source&quot;: {
+    &quot;checkpoint&quot;: &quot;ToricGT/checkpoints/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z/tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z_step_001000.pt&quot;,
+    &quot;embedding_npz&quot;: &quot;outputs/github_pages_best_checkpoint_long_manual_20260621T182232Z/geometry/embeddings/oai_ckpt_tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z_step_001000_batch000_row00.npz&quot;,
+    &quot;probe_missing_state_keys&quot;: [],
+    &quot;source&quot;: &quot;trained_checkpoint_toric_bgg_probe_on_hidden_states&quot;,
+    &quot;toric_bgg_d2_residual&quot;: 0.03261389583349228,
+    &quot;toric_bgg_exact_certificate_available&quot;: 1.0,
+    &quot;toric_bgg_gale_dual_consistency&quot;: 0.0,
+    &quot;toric_bgg_koszul_linearity_residual&quot;: 0.0,
+    &quot;toric_bgg_late_gate_required&quot;: 1.0,
+    &quot;toric_bgg_loss&quot;: 0.1334359496831894,
+    &quot;toric_bgg_provenance_exact_finite_chain&quot;: 1.0,
+    &quot;toric_bgg_resolution_consistency&quot;: 0.9684162139892578,
+    &quot;toric_bgg_signature_smoothness&quot;: 0.0,
+    &quot;toric_bgg_standard_allowed_mass&quot;: 0.5967117547988892,
+    &quot;toric_bgg_standard_entropy&quot;: 0.9826063513755798,
+    &quot;toric_bgg_standard_leakage&quot;: 0.40328821539878845
+  },
+  &quot;toric_bgg_provenance_exact_finite_chain&quot;: 1.0,
+  &quot;toric_bgg_resolution_consistency&quot;: 0.9684162139892578,
+  &quot;toric_bgg_signature_smoothness&quot;: 0.0,
+  &quot;toric_bgg_standard_allowed_mass&quot;: 0.5967117547988892,
+  &quot;toric_bgg_standard_entropy&quot;: 0.9826063513755798,
+  &quot;toric_bgg_standard_leakage&quot;: 0.40328821539878845,
   &quot;toric_cca_topology_loss&quot;: 1.045991,
   &quot;toric_geometry_loss&quot;: 5.884988,
   &quot;toric_vector_bundle_1d_cone_ce_loss&quot;: 0.704291,
@@ -104,4 +136,15 @@ pre { white-space:pre-wrap; overflow-x:auto; background:#020713; border:1px soli
   &quot;val_rows&quot;: [],
   &quot;val_step&quot;: 1000
 }</pre></section>
+<!-- toricgt-html-screenshot-link:start -->
+<section style="border:1px solid rgba(55,232,255,.32);background:rgba(7,17,31,.92);border-radius:8px;padding:14px;margin:16px 0;color:#e8fbff;font-family:Inter,system-ui,sans-serif">
+  <h2 style="margin:0 0 8px;font-size:18px;letter-spacing:0">Rendered HTML Screenshot Audit</h2>
+  <p style="margin:0 0 8px;color:#9fb1c9">Strict browser screenshots and contact sheet for this analysis bundle.</p>
+  <a style="color:#8dd6ff" href="../../../../../../../../../tmp/toricgt_bgg_shots/index.html">screenshot index</a>
+  <span style="color:#607089"> · </span>
+  <a style="color:#8dd6ff" href="../../../../../../../../../tmp/toricgt_bgg_shots/contact_sheet.png">contact sheet</a>
+  <span style="color:#607089"> · </span>
+  <a style="color:#8dd6ff" href="../../../../../../../../../tmp/toricgt_bgg_shots/manifest.json">screenshot manifest</a>
+</section>
+<!-- toricgt-html-screenshot-link:end -->
 </main></body></html>
