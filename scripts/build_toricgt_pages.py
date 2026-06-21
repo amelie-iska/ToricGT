@@ -324,9 +324,229 @@ def normalize(values: list[float]) -> list[float]:
     return [(value - lo) / (hi - lo) for value in values]
 
 
-def write_campaign_tetrahedron_report(docs: Path, rows: list[dict[str, Any]]) -> dict[str, str] | None:
-    usable: list[dict[str, Any]] = []
-    raw_axes = {"low_bpb": [], "compact": [], "graph_reasoning": [], "algebraic": []}
+CAMPAIGN_METRIC_AXES: dict[str, dict[str, Any]] = {
+    "low_bpb": {
+        "label": "low BPB",
+        "keys": ["__bpb__"],
+        "direction": "low",
+        "description": "Lower validation or final int8 BPB is the primary competition objective.",
+    },
+    "compact": {
+        "label": "compact artifact",
+        "keys": ["artifact_bytes"],
+        "direction": "low",
+        "description": "Smaller serialized artifact leaves more room under the 16MB competition budget.",
+    },
+    "train_bpb": {
+        "label": "low train BPB",
+        "keys": ["train_bpb"],
+        "direction": "low",
+        "description": "Training BPB is used when validation BPB is unavailable early in a run.",
+    },
+    "tokengt_graph": {
+        "label": "TokenGT graph fit",
+        "keys": ["tokengt_graph_loss"],
+        "direction": "low",
+        "description": "First-class graph tokenization pressure for node, edge, endpoint, distance, and ConvexTok-DAG structure.",
+    },
+    "graph_lm": {
+        "label": "graph LM fit",
+        "keys": ["graph_lm_loss"],
+        "direction": "low",
+        "description": "Graph-in/graph-out language-model objective before OAI FineWeb flattening for BPB scoring.",
+    },
+    "mtp": {
+        "label": "MTP fit",
+        "keys": ["oai_mtp_loss"],
+        "direction": "low",
+        "description": "Multi-token prediction pressure for early likelihood improvement.",
+    },
+    "fot": {
+        "label": "FoT fit",
+        "keys": ["oai_fot_loss"],
+        "direction": "low",
+        "description": "Embedding-space Forest-of-Thought branch objective.",
+    },
+    "fot_reward": {
+        "label": "FoT reward",
+        "keys": ["oai_fot_reward"],
+        "direction": "high",
+        "description": "Higher BPB-delta and diversity reward from Forest-of-Thought search.",
+    },
+    "gflownet": {
+        "label": "GFlowNet fit",
+        "keys": ["oai_gflownet_loss"],
+        "direction": "low",
+        "description": "Embedding-space GFlowNet trajectory-balance pressure.",
+    },
+    "gflownet_reward": {
+        "label": "GFlowNet reward",
+        "keys": ["oai_gflownet_reward"],
+        "direction": "high",
+        "description": "Higher reward for sampled graph-of-thought continuations.",
+    },
+    "graphcg": {
+        "label": "GraphCG disentanglement",
+        "keys": ["graphcg_loss"],
+        "direction": "low",
+        "description": "Full-rank concept-axis disentanglement pressure in embedding space.",
+    },
+    "analogy": {
+        "label": "analogy retrieval fit",
+        "keys": ["analogy_loss"],
+        "direction": "low",
+        "description": "Simplex-map and vectorized-persistent-homology analogy objective.",
+    },
+    "memory": {
+        "label": "memory retrieval fit",
+        "keys": ["memory_loss"],
+        "direction": "low",
+        "description": "Trajectory-memory retrieval pressure.",
+    },
+    "toric_geometry": {
+        "label": "toric geometry fit",
+        "keys": ["toric_geometry_loss"],
+        "direction": "low",
+        "description": "Tropical active-face embedding into toric charts and fan diagnostics.",
+    },
+    "toric_vector_bundle": {
+        "label": "1D-cone sheaf fit",
+        "keys": ["toric_vector_bundle_1d_cone_ce_loss"],
+        "direction": "low",
+        "description": "Toric vector-bundle/sheaf compatibility over one-dimensional cones.",
+    },
+    "toric_bgg": {
+        "label": "Toric BGG fit",
+        "keys": ["toric_bgg_loss"],
+        "direction": "low",
+        "description": "Finite category-O standard-filtration, differential, and Gale-dual supervision.",
+    },
+    "koszul": {
+        "label": "Koszul persistence fit",
+        "keys": ["koszul_persistence_loss"],
+        "direction": "low",
+        "description": "Koszul and filtered-persistence consistency pressure.",
+    },
+    "toric_cca": {
+        "label": "toric CCA topology fit",
+        "keys": ["toric_cca_topology_loss"],
+        "direction": "low",
+        "description": "Combinatorial commutative algebra, staircase, and topology diagnostics.",
+    },
+    "derived_signature": {
+        "label": "derived signature fit",
+        "keys": ["derived_signature_loss"],
+        "direction": "low",
+        "description": "Low-rank distilled signatures for resolutions, chain maps, and derived-category evidence.",
+    },
+}
+
+
+CAMPAIGN_TETRAHEDRON_SPECS: list[dict[str, Any]] = [
+    {
+        "id": "bpb_compact_graph_toric",
+        "title": "BPB, Compactness, Graph Fit, Toric Geometry",
+        "axes": ["low_bpb", "compact", "tokengt_graph", "toric_geometry"],
+    },
+    {
+        "id": "bpb_tokengt_fot_gflownet",
+        "title": "BPB, TokenGT, FoT, GFlowNet",
+        "axes": ["low_bpb", "tokengt_graph", "fot", "gflownet"],
+    },
+    {
+        "id": "bpb_graphlm_mtp_compact",
+        "title": "BPB, Graph-LM, MTP, Compactness",
+        "axes": ["low_bpb", "graph_lm", "mtp", "compact"],
+    },
+    {
+        "id": "bpb_graphcg_memory_analogy",
+        "title": "BPB, GraphCG, Memory, Analogy",
+        "axes": ["low_bpb", "graphcg", "memory", "analogy"],
+    },
+    {
+        "id": "bpb_bgg_koszul_derived",
+        "title": "BPB, Toric BGG, Koszul, Derived Signature",
+        "axes": ["low_bpb", "toric_bgg", "koszul", "derived_signature"],
+    },
+    {
+        "id": "bpb_toric_bundle_cca",
+        "title": "BPB, Toric Geometry, 1D-Cone Sheaf, CCA",
+        "axes": ["low_bpb", "toric_geometry", "toric_vector_bundle", "toric_cca"],
+    },
+    {
+        "id": "bpb_rewards_fot_gfn",
+        "title": "BPB, FoT Reward, GFlowNet Reward, Train BPB",
+        "axes": ["low_bpb", "fot_reward", "gflownet_reward", "train_bpb"],
+    },
+]
+
+
+CAMPAIGN_TRIANGLE_SPECS: list[dict[str, Any]] = [
+    {
+        "id": "bpb_tokengt_graphlm",
+        "title": "Low BPB / TokenGT / Graph-LM",
+        "axes": ["low_bpb", "tokengt_graph", "graph_lm"],
+        "shade": "balanced tri-metric support",
+    },
+    {
+        "id": "bpb_fot_gfn_rewards",
+        "title": "Low BPB / FoT Reward / GFlowNet Reward",
+        "axes": ["low_bpb", "fot_reward", "gflownet_reward"],
+        "shade": "joint reward-support region",
+    },
+    {
+        "id": "bpb_fot_gfn_losses",
+        "title": "Low BPB / FoT Fit / GFlowNet Fit",
+        "axes": ["low_bpb", "fot", "gflownet"],
+        "shade": "balanced search-fit region",
+    },
+    {
+        "id": "bpb_graphcg_analogy",
+        "title": "Low BPB / GraphCG / Analogy",
+        "axes": ["low_bpb", "graphcg", "analogy"],
+        "shade": "concept-analogy balance",
+    },
+    {
+        "id": "bpb_bgg_koszul",
+        "title": "Low BPB / Toric BGG / Koszul",
+        "axes": ["low_bpb", "toric_bgg", "koszul"],
+        "shade": "homological support balance",
+    },
+    {
+        "id": "bpb_toric_bundle_cca",
+        "title": "Low BPB / 1D-Cone Sheaf / CCA",
+        "axes": ["low_bpb", "toric_vector_bundle", "toric_cca"],
+        "shade": "toric sheaf-topology balance",
+    },
+    {
+        "id": "bpb_compact_train",
+        "title": "Low BPB / Compactness / Train BPB",
+        "axes": ["low_bpb", "compact", "train_bpb"],
+        "shade": "score-size-stability balance",
+    },
+]
+
+
+def campaign_axis_raw_value(metrics: dict[str, Any], axis: dict[str, Any]) -> float | None:
+    for key in axis.get("keys", []):
+        if key == "__bpb__":
+            value = metric_bpb(metrics)
+        else:
+            value = metrics.get(str(key))
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            return float(value)
+    return None
+
+
+def campaign_axis_score(metrics: dict[str, Any], axis: dict[str, Any]) -> float | None:
+    value = campaign_axis_raw_value(metrics, axis)
+    if value is None:
+        return None
+    return -value if axis.get("direction") == "low" else value
+
+
+def campaign_record_payload(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
     for index, row in enumerate(rows, start=1):
         metrics = row.get("metrics", {})
         if not isinstance(metrics, dict):
@@ -334,121 +554,197 @@ def write_campaign_tetrahedron_report(docs: Path, rows: list[dict[str, Any]]) ->
         bpb = metric_bpb(metrics)
         if not math.isfinite(bpb):
             continue
-        artifact = tetra_metric(metrics, ["artifact_bytes"], invert=True)
-        graph = tetra_metric(metrics, ["oai_fot_loss", "oai_gflownet_loss", "graph_lm_loss"], invert=True)
-        algebraic = tetra_metric(
-            metrics,
-            [
-                "toric_geometry_loss",
-                "toric_bgg_loss",
-                "koszul_persistence_loss",
-                "toric_cca_topology_loss",
-                "derived_signature_loss",
-            ],
-            invert=True,
+        raw_values: dict[str, float | None] = {}
+        scores: dict[str, float | None] = {}
+        for axis_id, axis in CAMPAIGN_METRIC_AXES.items():
+            raw_values[axis_id] = campaign_axis_raw_value(metrics, axis)
+            scores[axis_id] = campaign_axis_score(metrics, axis)
+        records.append(
+            {
+                "index": index,
+                "run": str(row.get("run_id", f"run-{index}"))[-64:],
+                "profile": str(row.get("profile", f"run-{index}")),
+                "bpb": bpb,
+                "artifact": metrics.get("artifact_bytes"),
+                "train_bpb": metrics.get("train_bpb"),
+                "checkpoint_step": metrics.get("checkpoint_step", metrics.get("train_step")),
+                "raw_values": raw_values,
+                "scores": scores,
+            }
         )
-        point = {
-            "run": str(row.get("run_id", f"run-{index}"))[-48:],
-            "profile": str(row.get("profile", f"run-{index}")),
-            "bpb": bpb,
-            "artifact": metrics.get("artifact_bytes"),
-            "train_bpb": metrics.get("train_bpb"),
-            "raw": {
-                "low_bpb": -bpb,
-                "compact": artifact,
-                "graph_reasoning": graph,
-                "algebraic": algebraic,
-            },
-        }
-        usable.append(point)
-        raw_axes["low_bpb"].append(float(point["raw"]["low_bpb"]))
-        raw_axes["compact"].append(float(artifact if artifact is not None else 0.0))
-        raw_axes["graph_reasoning"].append(float(graph if graph is not None else 0.0))
-        raw_axes["algebraic"].append(float(algebraic if algebraic is not None else 0.0))
-    if len(usable) < 2:
-        return None
-    normalized_axes = {key: normalize(values) for key, values in raw_axes.items()}
+    return records
+
+
+def normalize_axis_scores(records: list[dict[str, Any]]) -> dict[str, list[float]]:
+    normalized: dict[str, list[float]] = {}
+    for axis_id in CAMPAIGN_METRIC_AXES:
+        values = [record["scores"].get(axis_id) for record in records]
+        finite = [float(value) for value in values if isinstance(value, (int, float)) and math.isfinite(float(value))]
+        scaled = normalize(finite)
+        cursor = 0
+        out: list[float] = []
+        for value in values:
+            if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                out.append(float(scaled[cursor]))
+                cursor += 1
+            else:
+                out.append(0.0)
+        normalized[axis_id] = out
+    return normalized
+
+
+def tetrahedron_view_payload(records: list[dict[str, Any]], normalized: dict[str, list[float]], spec: dict[str, Any]) -> dict[str, Any]:
     vertices = [
-        [1.0, 1.0, 1.0],
-        [-1.0, -1.0, 1.0],
-        [-1.0, 1.0, -1.0],
-        [1.0, -1.0, -1.0],
+        [0.0, 0.0, 1.35],
+        [-1.18, -0.82, -0.42],
+        [1.18, -0.82, -0.42],
+        [0.0, 1.28, -0.42],
     ]
-    labels = [
-        "low BPB",
-        "compact artifact",
-        "graph/FoT pressure",
-        "toric algebraic pressure",
-    ]
-    points = []
-    for idx, point in enumerate(usable):
-        weights = [
-            normalized_axes["low_bpb"][idx],
-            normalized_axes["compact"][idx],
-            normalized_axes["graph_reasoning"][idx],
-            normalized_axes["algebraic"][idx],
-        ]
-        total = sum(max(0.0, value) for value in weights)
-        if total <= 0:
-            bary = [0.25, 0.25, 0.25, 0.25]
-        else:
-            bary = [max(0.0, value) / total for value in weights]
-        xyz = [
-            sum(bary[i] * vertices[i][dim] for i in range(4))
-            for dim in range(3)
-        ]
-        point["weights"] = bary
-        point["xyz"] = xyz
-        points.append(point)
-    out_dir = docs / "page_interactive" / "campaign_tetrahedron"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "title": "Campaign Metric Tetrahedron",
+    axes = [str(axis) for axis in spec["axes"]]
+    labels = [str(CAMPAIGN_METRIC_AXES[axis]["label"]) for axis in axes]
+    points: list[dict[str, Any]] = []
+    for idx, record in enumerate(records):
+        weights = [max(0.0, float(normalized.get(axis, [0.0] * len(records))[idx])) for axis in axes]
+        total = sum(weights)
+        bary = [0.25, 0.25, 0.25, 0.25] if total <= 0 else [value / total for value in weights]
+        xyz = [sum(bary[i] * vertices[i][dim] for i in range(4)) for dim in range(3)]
+        points.append({**record, "weights": bary, "xyz": xyz})
+    return {
+        "id": str(spec["id"]),
+        "title": str(spec["title"]),
+        "axes": axes,
         "labels": labels,
         "vertices": vertices,
         "points": points,
     }
+
+
+def triangle_view_payload(records: list[dict[str, Any]], normalized: dict[str, list[float]], spec: dict[str, Any]) -> dict[str, Any]:
+    vertices = [[0.50, 0.92], [0.08, 0.12], [0.92, 0.12]]
+    axes = [str(axis) for axis in spec["axes"]]
+    labels = [str(CAMPAIGN_METRIC_AXES[axis]["label"]) for axis in axes]
+    points: list[dict[str, Any]] = []
+    for idx, record in enumerate(records):
+        weights = [max(0.0, float(normalized.get(axis, [0.0] * len(records))[idx])) for axis in axes]
+        total = sum(weights)
+        bary = [1 / 3, 1 / 3, 1 / 3] if total <= 0 else [value / total for value in weights]
+        xy = [sum(bary[i] * vertices[i][dim] for i in range(3)) for dim in range(2)]
+        balance = 1.0 - min(1.0, (sum((value - 1 / 3) ** 2 for value in bary) ** 0.5) / ((2 / 3) ** 0.5))
+        points.append({**record, "weights": bary, "xy": xy, "balance": balance})
+    grid: list[dict[str, Any]] = []
+    resolution = 32
+    for i in range(resolution + 1):
+        for j in range(resolution + 1 - i):
+            a = i / resolution
+            b = j / resolution
+            c = 1.0 - a - b
+            bary = [a, b, c]
+            xy = [sum(bary[k] * vertices[k][dim] for k in range(3)) for dim in range(2)]
+            balance = 1.0 - min(1.0, (sum((value - 1 / 3) ** 2 for value in bary) ** 0.5) / ((2 / 3) ** 0.5))
+            synergy = (max(a, 0.0) * max(b, 0.0) * max(c, 0.0)) ** (1 / 3) * 3.0
+            grid.append({"x": xy[0], "y": xy[1], "shade": max(0.0, min(1.0, 0.55 * balance + 0.45 * synergy))})
+    return {
+        "id": str(spec["id"]),
+        "title": str(spec["title"]),
+        "axes": axes,
+        "labels": labels,
+        "vertices": vertices,
+        "shade": str(spec.get("shade", "balanced metric support")),
+        "grid": grid,
+        "points": points,
+    }
+
+
+def write_campaign_tetrahedron_report(docs: Path, rows: list[dict[str, Any]]) -> dict[str, str] | None:
+    records = campaign_record_payload(rows)
+    if len(records) < 2:
+        return None
+    normalized = normalize_axis_scores(records)
+    tetrahedra = [tetrahedron_view_payload(records, normalized, spec) for spec in CAMPAIGN_TETRAHEDRON_SPECS]
+    triangles = [triangle_view_payload(records, normalized, spec) for spec in CAMPAIGN_TRIANGLE_SPECS]
+    out_dir = docs / "page_interactive" / "campaign_tetrahedron"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "title": "Campaign Metric Tetrahedra and Shaded Triangles",
+        "axis_library": CAMPAIGN_METRIC_AXES,
+        "records": records,
+        "tetrahedra": tetrahedra,
+        "triangles": triangles,
+    }
     (out_dir / "campaign_tetrahedron.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Campaign Metric Tetrahedron</title>
+<title>Campaign Metric Tetrahedra</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
 :root{{color-scheme:dark;--bg:#030712;--panel:#071421;--line:rgba(70,231,255,.28);--text:#ecfbff;--muted:#9db8cf;--cyan:#46e7ff;--gold:#ffd166}}
 body{{margin:0;background:radial-gradient(circle at 10% 10%,rgba(70,231,255,.16),transparent 30rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
 main{{max-width:1280px;margin:0 auto;padding:24px}}.panel{{border:1px solid var(--line);border-radius:10px;background:rgba(7,20,33,.86);padding:16px;margin:14px 0}}
-h1{{margin:0 0 8px}}p{{color:var(--muted);line-height:1.5}}#plot{{height:720px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713}}
+h1{{margin:0 0 8px}}p{{color:var(--muted);line-height:1.5}}.plot{{height:620px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713;margin-top:12px}}
+.plot.triangle{{height:500px}}.gallery{{display:grid;grid-template-columns:1fr;gap:18px}}.metric-note{{font-size:.92rem;color:var(--muted);margin-top:8px}}code{{color:#7df5ff}}
 table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(157,184,207,.16);padding:8px;text-align:left}}td.num{{text-align:right;color:var(--gold)}}
 </style></head><body><main>
-<section class="panel"><h1>Campaign Metric Tetrahedron</h1>
-<p>This interactive tetrahedron uses completed campaign runs. The four vertices are low BPB, compact artifact size, graph/FoT pressure, and toric/algebraic pressure. Points are barycentric mixtures of normalized run metrics; hover text shows the run profile and BPB.</p>
+<section class="panel"><h1>Campaign Metric Tetrahedra and Shaded Triangles</h1>
+<p>This page now renders a gallery of interactive tetrahedra and shaded metric triangles over completed campaign runs. Each tetrahedron uses four normalized axes. Each triangle uses three normalized axes; the blue background shading marks regions where the three metrics are jointly balanced, while run markers are colored by BPB and labeled by run index. Lower BPB is always better.</p>
 <p><a href="campaign_tetrahedron.json">payload JSON</a></p></section>
-<section class="panel"><div id="plot"></div></section>
+<section class="panel"><h2>Tetrahedron Views</h2><div id="tetra_gallery" class="gallery"></div></section>
+<section class="panel"><h2>Shaded Triangle Views</h2><p>Blue shading indicates the balanced-support region for the metric triple. Markers remain actual run observations; hover text reports profile, BPB, raw axis values, and barycentric weights.</p><div id="triangle_gallery" class="gallery"></div></section>
 <section class="panel"><h2>Run Table</h2><table><thead><tr><th>profile</th><th>run</th><th>BPB</th><th>artifact bytes</th><th>train BPB</th></tr></thead><tbody>
-{''.join(f"<tr><td>{html.escape(p['profile'])}</td><td>{html.escape(p['run'])}</td><td class='num'>{p['bpb']:.6f}</td><td class='num'>{fmt(p.get('artifact'),0)}</td><td class='num'>{fmt(p.get('train_bpb'))}</td></tr>" for p in points)}
+{''.join(f"<tr><td>{html.escape(p['profile'])}</td><td>{html.escape(p['run'])}</td><td class='num'>{p['bpb']:.6f}</td><td class='num'>{fmt(p.get('artifact'),0)}</td><td class='num'>{fmt(p.get('train_bpb'))}</td></tr>" for p in records)}
 </tbody></table></section>
 <script>
 const payload = {json.dumps(payload)};
-const vertices = payload.vertices;
-const labels = payload.labels;
-const edges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
-const traces = [];
-for (const [i,j] of edges) {{
-  traces.push({{type:'scatter3d', mode:'lines', x:[vertices[i][0],vertices[j][0]], y:[vertices[i][1],vertices[j][1]], z:[vertices[i][2],vertices[j][2]], line:{{color:'#46e7ff',width:5}}, hoverinfo:'skip', showlegend:false}});
+function axisRawText(point, axes) {{
+  return axes.map(axis => payload.axis_library[axis].label+': '+(point.raw_values[axis] ?? 'missing')).join('<br>');
 }}
-traces.push({{type:'mesh3d', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]), i:[0,0,0,1], j:[1,1,2,2], k:[2,3,3,3], opacity:0.08, color:'#46e7ff', hoverinfo:'skip', name:'tetrahedron faces'}});
-traces.push({{type:'scatter3d', mode:'markers+text', name:'campaign runs', x:payload.points.map(p=>p.xyz[0]), y:payload.points.map(p=>p.xyz[1]), z:payload.points.map(p=>p.xyz[2]), text:payload.points.map((p,i)=>String(i+1)), customdata:payload.points.map(p=>[p.profile,p.run,p.bpb,p.artifact,p.train_bpb,p.weights.map(w=>w.toFixed(3)).join(' / ')]), marker:{{size:8,color:payload.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,colorbar:{{title:'BPB'}},line:{{color:'white',width:1}}}}, hovertemplate:'%{{customdata[0]}}<br>run %{{customdata[1]}}<br>BPB %{{customdata[2]:.6f}}<br>artifact %{{customdata[3]}}<br>train BPB %{{customdata[4]}}<br>barycentric weights %{{customdata[5]}}<extra></extra>'}});
-traces.push({{type:'scatter3d', mode:'text', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]+0.08), text:labels, textfont:{{color:'#ecfbff',size:14}}, hoverinfo:'skip', showlegend:false}});
-Plotly.newPlot('plot', traces, {{template:'plotly_dark', title:{{text:payload.title,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', scene:{{aspectmode:'data', xaxis:{{visible:false}}, yaxis:{{visible:false}}, zaxis:{{visible:false}}, bgcolor:'#020713'}}, margin:{{l:0,r:0,t:42,b:0}}}}, {{responsive:true}});
+function mountPlot(container, id, title, className) {{
+  const wrapper = document.createElement('section');
+  wrapper.className = 'panel';
+  const h = document.createElement('h3');
+  h.textContent = title;
+  const div = document.createElement('div');
+  div.id = id;
+  div.className = 'plot '+(className || '');
+  wrapper.appendChild(h);
+  wrapper.appendChild(div);
+  container.appendChild(wrapper);
+  return div;
+}}
+function renderTetra(view) {{
+  const div = mountPlot(document.getElementById('tetra_gallery'), 'tetra_'+view.id, view.title, '');
+  const vertices = view.vertices;
+  const edges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
+  const traces = [];
+  for (const [i,j] of edges) {{
+    traces.push({{type:'scatter3d', mode:'lines', x:[vertices[i][0],vertices[j][0]], y:[vertices[i][1],vertices[j][1]], z:[vertices[i][2],vertices[j][2]], line:{{color:'#46e7ff',width:5}}, hoverinfo:'skip', showlegend:false}});
+  }}
+  traces.push({{type:'mesh3d', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]), i:[0,0,0,1], j:[1,1,2,2], k:[2,3,3,3], opacity:0.09, color:'#46e7ff', hoverinfo:'skip', name:'tetrahedron faces'}});
+  traces.push({{type:'scatter3d', mode:'markers+text', name:'campaign runs', showlegend:false, x:view.points.map(p=>p.xyz[0]), y:view.points.map(p=>p.xyz[1]), z:view.points.map(p=>p.xyz[2]), text:view.points.map(p=>String(p.index)), customdata:view.points.map(p=>[p.profile,p.run,p.bpb,p.artifact,p.train_bpb,p.weights.map(w=>w.toFixed(3)).join(' / '),axisRawText(p, view.axes)]), marker:{{size:8,color:view.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,colorbar:{{title:'BPB'}},line:{{color:'white',width:1}}}}, hovertemplate:'%{{customdata[0]}}<br>run %{{customdata[1]}}<br>BPB %{{customdata[2]:.6f}}<br>artifact %{{customdata[3]}}<br>train BPB %{{customdata[4]}}<br>weights %{{customdata[5]}}<br>%{{customdata[6]}}<extra></extra>'}});
+  traces.push({{type:'scatter3d', mode:'text', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]+0.08), text:view.labels, textfont:{{color:'#ecfbff',size:14}}, hoverinfo:'skip', showlegend:false}});
+  Plotly.newPlot(div.id, traces, {{template:'plotly_dark', title:{{text:view.title,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', scene:{{aspectmode:'data', camera:{{eye:{{x:1.55,y:1.35,z:1.15}}}}, xaxis:{{visible:false}}, yaxis:{{visible:false}}, zaxis:{{visible:false}}, bgcolor:'#020713'}}, margin:{{l:0,r:0,t:42,b:0}}}}, {{responsive:true}});
+}}
+function renderTriangle(view) {{
+  const div = mountPlot(document.getElementById('triangle_gallery'), 'tri_'+view.id, view.title, 'triangle');
+  const boundary = [...view.vertices, view.vertices[0]];
+  const traces = [
+    {{type:'scatter', mode:'markers', x:view.grid.map(g=>g.x), y:view.grid.map(g=>g.y), marker:{{size:9,color:view.grid.map(g=>g.shade),colorscale:'Blues',opacity:0.68,colorbar:{{title:'blue balance'}}}}, hoverinfo:'skip', showlegend:false}},
+    {{type:'scatter', mode:'lines', x:boundary.map(v=>v[0]), y:boundary.map(v=>v[1]), line:{{color:'#46e7ff',width:3}}, hoverinfo:'skip', showlegend:false}},
+    {{type:'scatter', mode:'markers+text', name:'campaign runs', showlegend:false, x:view.points.map(p=>p.xy[0]), y:view.points.map(p=>p.xy[1]), text:view.points.map(p=>String(p.index)), textposition:'top center', customdata:view.points.map(p=>[p.profile,p.run,p.bpb,p.weights.map(w=>w.toFixed(3)).join(' / '),p.balance.toFixed(3),axisRawText(p, view.axes)]), marker:{{size:13,color:view.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,line:{{color:'#ecfbff',width:1}},colorbar:{{title:'BPB'}}}}, hovertemplate:'%{{customdata[0]}}<br>run %{{customdata[1]}}<br>BPB %{{customdata[2]:.6f}}<br>weights %{{customdata[3]}}<br>balance %{{customdata[4]}}<br>%{{customdata[5]}}<extra></extra>'}},
+    {{type:'scatter', mode:'text', x:view.vertices.map(v=>v[0]), y:view.vertices.map(v=>v[1]), text:view.labels, textfont:{{color:'#ecfbff',size:13}}, hoverinfo:'skip', showlegend:false}},
+  ];
+  Plotly.newPlot(div.id, traces, {{template:'plotly_dark', title:{{text:view.title+' · '+view.shade,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', xaxis:{{visible:false,range:[0,1]}}, yaxis:{{visible:false,range:[0,1]}}, margin:{{l:12,r:12,t:42,b:12}}}}, {{responsive:true}});
+}}
+payload.tetrahedra.forEach(renderTetra);
+payload.triangles.forEach(renderTriangle);
 </script></main></body></html>
 """
     page = "\n".join(line.rstrip() for line in page.splitlines()) + "\n"
     (out_dir / "index.html").write_text(page, encoding="utf-8")
     return {
         "href": "page_interactive/campaign_tetrahedron/index.html",
-        "title": "Campaign Metric Tetrahedron",
-        "summary": "Interactive tetrahedron over completed run metrics: low BPB, compact artifact, graph/FoT pressure, and toric/algebraic pressure.",
-        "features": "3-simplex/tetrahedron · campaign metrics · hover run table · BPB color scale",
+        "title": "Campaign Metric Tetrahedra and Triangles",
+        "summary": "Interactive gallery over completed run metrics: multiple tetrahedra plus blue-shaded triangle views for BPB, graph/FoT, toric, topology, BGG, memory, and compactness metrics.",
+        "features": "metric tetrahedra · shaded triangles · run labels · BPB color scale · hover raw metrics",
         "embed": "0",
     }
 
@@ -659,25 +955,56 @@ Plotly.newPlot('fotPlot',[...edgeTraces,nodeTrace],{{template:'plotly_dark',pape
 def write_convextok_method_report(docs: Path) -> dict[str, str]:
     out = docs / "page_interactive" / "convextok_method"
     out.mkdir(parents=True, exist_ok=True)
-    nodes = list(range(13))
+    sample = "byte graphs!"
+    nodes = [{"id": idx, "prefix": sample[:idx]} for idx in range(len(sample) + 1)]
     edges = [
-        (0, 1, "b", 1), (1, 2, "y", 1), (2, 3, "t", 1), (3, 4, "e", 1), (4, 5, " ", 1),
-        (5, 6, "g", 1), (6, 7, "r", 1), (7, 8, "a", 1), (8, 9, "p", 1), (9, 10, "h", 1),
-        (10, 11, "s", 1), (11, 12, "!", 1), (0, 4, "byte", .31), (5, 10, "graph", .22),
-        (5, 12, "graphs!", .18), (0, 12, "byte graphs!", .12),
+        *[
+            {
+                "i": idx,
+                "j": idx + 1,
+                "token": sample[idx : idx + 1],
+                "kind": "free byte fallback",
+                "cost": 1.0,
+                "lp": 0.0,
+                "selected": False,
+                "lane": -1,
+            }
+            for idx in range(len(sample))
+        ],
+        {"i": 0, "j": 4, "token": "byte", "kind": "priced vocabulary token", "cost": 0.31, "lp": 0.66, "selected": False, "lane": 1},
+        {"i": 0, "j": 5, "token": "byte ", "kind": "selected rounded token", "cost": 0.29, "lp": 0.78, "selected": True, "lane": 2},
+        {"i": 5, "j": 10, "token": "graph", "kind": "priced vocabulary token", "cost": 0.22, "lp": 0.54, "selected": False, "lane": 1},
+        {"i": 5, "j": 11, "token": "graphs", "kind": "priced vocabulary token", "cost": 0.20, "lp": 0.47, "selected": False, "lane": 2},
+        {"i": 5, "j": 12, "token": "graphs!", "kind": "selected rounded token", "cost": 0.18, "lp": 0.82, "selected": True, "lane": 3},
+        {"i": 0, "j": 12, "token": "byte graphs!", "kind": "LP-relaxation long-span candidate", "cost": 0.53, "lp": 0.35, "selected": False, "lane": 4},
     ]
-    payload = {"nodes": nodes, "edges": edges}
+    payload = {
+        "sample_text": sample,
+        "nodes": nodes,
+        "edges": edges,
+        "selected_path": [[0, 5], [5, 12]],
+        "note": (
+            "Vertices are byte boundaries. Edges are possible tokens spanning byte intervals. "
+            "The highlighted selected path is the rounded tokenizer segmentation used for BPB scoring; "
+            "LP scores are retained as graph edge features and lower-bound/regret diagnostics."
+        ),
+    }
     body = f"""
 <section class="panel">
   <p class="lead">ConvexTok turns tokenizer construction into a shortest-path and sparse linear-programming problem over a byte-boundary DAG. ToricGT uses the tokenization DAG as first-class graph structure: boundary vertices are graph nodes, candidate substrings are priced edges, LP scores become edge features, and the selected token path is a tropical min-plus dynamic program.</p>
   <p><a href="https://arxiv.org/abs/2605.22821">ConvexTok preprint requested in the training notes</a> · <a href="https://github.com/openai/parameter-golf">OpenAI Parameter Golf</a></p>
 </section>
+<section class="panel"><h2>Tokenization DAG</h2><div id="dagPlot" class="plot" style="height:680px"></div><p class="metric-note">Curved arcs span byte intervals. Cyan bottom arcs are fallback byte edges, violet arcs are priced candidate tokens, gold arcs are LP-relaxation support, and green arcs are the selected rounded token path. The model receives the same structure as TokenGT-style node/edge features; BPB is still scored on the flattened selected path.</p></section>
 <section class="grid two">
-  <article class="panel"><h2>Tokenization DAG</h2><div id="dagPlot" class="plot"></div></article>
   <article class="panel"><h2>Equations</h2>
     <div class="equation">D[j] = min<sub>(i,j,t)∈E</sub> D[i] + w<sub>t</sub></div>
     <div class="equation">min Σ<sub>e</sub> c<sub>e</sub>x<sub>e</sub> subject to flow conservation and x<sub>e</sub> ≤ y<sub>token(e)</sub>, Σ<sub>t</sub> y<sub>t</sub> ≤ B.</div>
     <p>The min-plus recurrence is tropical dynamic programming. The LP lower bound gives a tokenizer-regret metric: path length minus relaxed optimum. ToricGT can log this gap to decide whether BPB is tokenizer-bound or model-bound.</p>
+    <table class="mini-table"><tbody>
+      <tr><th>Boundary node</th><td>Byte offset in the source string; causal topological order is left to right.</td></tr>
+      <tr><th>Candidate edge</th><td>A token proposal from offset <code>i</code> to <code>j</code>, carrying byte length, token rank, price, LP score, and selected-path flags.</td></tr>
+      <tr><th>Tropical path</th><td>The rounded segmentation is a min-plus path through the DAG; active edges form a tropical curve inside the tokenizer graph.</td></tr>
+    </tbody></table>
   </article>
 </section>
 <section class="grid three">
@@ -687,13 +1014,43 @@ def write_convextok_method_report(docs: Path) -> dict[str, str]:
 </section>
 <script>
 const payload = {json.dumps(payload)};
-const xs = payload.nodes.map(i=>i), ys = payload.nodes.map(_=>0), zs = payload.nodes.map(_=>0);
-const edgeTraces = payload.edges.map(e => {{
-  const y = e[3] < .5 ? .65 : -.18;
-  return {{type:'scatter3d',mode:'lines',x:[e[0],e[1]],y:[y,y],z:[0,0],line:{{color:e[3]<.5?'#ffd166':'#46e7ff',width:e[3]<.5?7:3}},customdata:[[e[2],e[3]],[e[2],e[3]]],hovertemplate:'token %{{customdata[0]}}<br>LP/price %{{customdata[1]}}<extra></extra>',showlegend:false}};
-}});
-const nodeTrace = {{type:'scatter3d',mode:'markers+text',x:xs,y:ys,z:zs,text:payload.nodes.map(String),marker:{{size:7,color:'#88ff86'}},hovertemplate:'byte boundary %{{text}}<extra></extra>',name:'byte boundaries'}};
-Plotly.newPlot('dagPlot',[...edgeTraces,nodeTrace],{{template:'plotly_dark',paper_bgcolor:'#020713',plot_bgcolor:'#020713',scene:{{bgcolor:'#020713',xaxis:{{title:'byte boundary'}},yaxis:{{title:'candidate path layer'}},zaxis:{{visible:false}}}},margin:{{l:0,r:0,t:10,b:0}}}},{{responsive:true}});
+function arcPoints(edge) {{
+  const n = 42;
+  const span = edge.j - edge.i;
+  const base = edge.kind.includes('fallback') ? -0.15 : 0.02;
+  const height = edge.kind.includes('fallback') ? -0.16 : (0.38 + 0.10 * span + 0.13 * edge.lane);
+  const xs = [], ys = [];
+  for (let k = 0; k < n; k++) {{
+    const t = k / (n - 1);
+    xs.push(edge.i + span * t);
+    ys.push(base + height * Math.sin(Math.PI * t));
+  }}
+  return [xs, ys];
+}}
+function edgeStyle(edge) {{
+  if (edge.selected) return {{color:'#88ff86', width:7, dash:'solid'}};
+  if (edge.kind.includes('LP-relaxation')) return {{color:'#ffd166', width:4, dash:'dash'}};
+  if (edge.kind.includes('fallback')) return {{color:'rgba(70,231,255,.58)', width:2.5, dash:'solid'}};
+  return {{color:'#a78bfa', width:4, dash:'solid'}};
+}}
+function edgeTrace(edge) {{
+  const [x, y] = arcPoints(edge);
+  const style = edgeStyle(edge);
+  return {{type:'scatter',mode:'lines',x,y,line:style,name:edge.kind,legendgroup:edge.kind,showlegend:false,customdata:x.map(() => [edge.token, edge.kind, edge.cost, edge.lp, edge.i, edge.j, edge.selected]),hovertemplate:'token <b>%{{customdata[0]}}</b><br>%{{customdata[1]}}<br>span [%{{customdata[4]}}, %{{customdata[5]}}]<br>cost %{{customdata[2]:.3f}} · LP %{{customdata[3]:.2f}}<br>selected %{{customdata[6]}}<extra></extra>'}};
+}}
+function edgeLabel(edge) {{
+  const span = edge.j - edge.i;
+  const x = (edge.i + edge.j) / 2;
+  const y = edge.kind.includes('fallback') ? -0.36 : (0.20 + 0.10 * span + 0.13 * edge.lane);
+  return {{type:'scatter',mode:'text',x:[x],y:[y],text:[edge.token === ' ' ? 'space' : edge.token],textfont:{{color:edge.selected?'#88ff86':(edge.kind.includes('LP-relaxation')?'#ffd166':'#ecfbff'),size:edge.selected?15:11}},hoverinfo:'skip',showlegend:false}};
+}}
+const traces = [];
+for (const edge of payload.edges) traces.push(edgeTrace(edge));
+for (const edge of payload.edges.filter(e => !e.kind.includes('fallback'))) traces.push(edgeLabel(edge));
+traces.push({{type:'scatter',mode:'lines',x:payload.nodes.map(n=>n.id),y:payload.nodes.map(_=>0),line:{{color:'rgba(236,251,255,.32)',width:2}},hoverinfo:'skip',showlegend:false}});
+traces.push({{type:'scatter',mode:'markers+text',x:payload.nodes.map(n=>n.id),y:payload.nodes.map(_=>0),text:payload.nodes.map(n=>String(n.id)),textposition:'bottom center',customdata:payload.nodes.map(n=>[n.id,n.prefix]),marker:{{size:11,color:'#46e7ff',line:{{color:'#ecfbff',width:1}}}},hovertemplate:'byte boundary %{{customdata[0]}}<br>prefix “%{{customdata[1]}}”<extra></extra>',name:'byte boundaries'}});
+traces.push({{type:'scatter',mode:'markers',x:payload.edges.filter(e=>e.selected).map(e=>e.j),y:payload.edges.filter(e=>e.selected).map(_=>0.02),marker:{{symbol:'triangle-right',size:16,color:'#88ff86'}},hovertemplate:'selected path boundary<extra></extra>',name:'selected path arrows'}});
+Plotly.newPlot('dagPlot', traces, {{template:'plotly_dark',paper_bgcolor:'#020713',plot_bgcolor:'#020713',xaxis:{{title:'byte boundary index',zeroline:false,gridcolor:'rgba(157,184,207,.16)',range:[-0.4,12.4]}},yaxis:{{title:'candidate-token arcs',zeroline:false,gridcolor:'rgba(157,184,207,.12)',range:[-0.55,2.35]}},margin:{{l:54,r:18,t:34,b:52}},annotations:[{{xref:'paper',yref:'paper',x:0.015,y:0.99,text:payload.sample_text,showarrow:false,font:{{color:'#ffd166',size:16}}}}]}}, {{responsive:true}});
 </script>
 """
     (out / "index.html").write_text(method_report_shell("ConvexTok Tokenization Geometry", "Tokenizer as tropical DAG and toric chart", body), encoding="utf-8")

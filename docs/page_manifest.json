@@ -19,7 +19,7 @@
     "tropical": "page_assets/tropical.png",
     "vectorized_ph": "page_assets/vectorized_ph.png"
   },
-  "generated_utc": "2026-06-21 19:01:49 UTC",
+  "generated_utc": "2026-06-21 20:32:28 UTC",
   "interactive_reports": {
     "bgg_category_o": {
       "embed": "0",
@@ -44,10 +44,10 @@
     },
     "campaign_tetrahedron": {
       "embed": "0",
-      "features": "3-simplex/tetrahedron \u00b7 campaign metrics \u00b7 hover run table \u00b7 BPB color scale",
+      "features": "metric tetrahedra \u00b7 shaded triangles \u00b7 run labels \u00b7 BPB color scale \u00b7 hover raw metrics",
       "href": "page_interactive/campaign_tetrahedron/index.html",
-      "summary": "Interactive tetrahedron over completed run metrics: low BPB, compact artifact, graph/FoT pressure, and toric/algebraic pressure.",
-      "title": "Campaign Metric Tetrahedron"
+      "summary": "Interactive gallery over completed run metrics: multiple tetrahedra plus blue-shaded triangle views for BPB, graph/FoT, toric, topology, BGG, memory, and compactness metrics.",
+      "title": "Campaign Metric Tetrahedra and Triangles"
     },
     "cas_sidecar": {
       "embed": "0",
