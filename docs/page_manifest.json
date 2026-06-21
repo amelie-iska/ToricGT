@@ -17,6 +17,57 @@
     "tropical": "page_assets/tropical.png",
     "vectorized_ph": "page_assets/vectorized_ph.png"
   },
-  "generated_utc": "2026-06-21 16:57:20 UTC",
+  "generated_utc": "2026-06-21 17:13:39 UTC",
+  "interactive_reports": {
+    "bgg_category_o": {
+      "embed": "0",
+      "features": "standard filtrations \u00b7 differentials \u00b7 Gale duality \u00b7 category O",
+      "href": "page_interactive/bgg_category_o/index.html",
+      "summary": "Finite category-O certificates, standard-filtration checks, sparse differentials, Gale-dual signals, and homological consistency metrics.",
+      "title": "Toric BGG Category O"
+    },
+    "branching_reasoning": {
+      "embed": "1",
+      "features": "radius slider \u00b7 reasoning-level slider \u00b7 token hover/click \u00b7 3D PCA \u00b7 simplex maps",
+      "href": "page_interactive/branching_reasoning/branching_reasoning_trajectory.html",
+      "summary": "Full graph-of-thought reasoning trajectory with 3D PCA display coordinates, radius and reasoning-level sliders, token hover/click panels, one-dimensional simplex edges, optional filled 2-simplices, and analogy gates.",
+      "title": "Interactive Simplex Trajectory"
+    },
+    "campaign_tetrahedron": {
+      "embed": "0",
+      "features": "3-simplex/tetrahedron \u00b7 campaign metrics \u00b7 hover run table \u00b7 BPB color scale",
+      "href": "page_interactive/campaign_tetrahedron/index.html",
+      "summary": "Interactive tetrahedron over completed run metrics: low BPB, compact artifact, graph/FoT pressure, and toric/algebraic pressure.",
+      "title": "Campaign Metric Tetrahedron"
+    },
+    "cas_sidecar": {
+      "embed": "0",
+      "features": "resolutions \u00b7 syzygies \u00b7 CAS records \u00b7 derived signatures",
+      "href": "page_interactive/cas_sidecar/index.html",
+      "summary": "Sage/Macaulay2-backed module, resolution, syzygy, and derived-signature evidence generated for the embedding audits.",
+      "title": "CAS Algebra Sidecar"
+    },
+    "gudhi_persistence": {
+      "embed": "0",
+      "features": "PH records \u00b7 landscapes/images \u00b7 entropy \u00b7 Macaulay2 links",
+      "href": "page_interactive/gudhi_persistence/index.html",
+      "summary": "Exact simplex-tree persistent homology, persistence landscapes/images/entropy, vectorized PH features, and Macaulay2 F2[x_level,y_radius] artifacts.",
+      "title": "GUDHI Persistent Homology"
+    },
+    "toric_embedding": {
+      "embed": "0",
+      "features": "toric charts \u00b7 staircases \u00b7 vector bundles \u00b7 one-dimensional cones",
+      "href": "page_interactive/toric_embedding/index.html",
+      "summary": "Tropical ring-attention embeddings into toric charts, one-dimensional cones, Miller-Sturmfels staircase modules, vector-bundle/sheaf panels, and fan diagnostics.",
+      "title": "Toric Embedding and Staircases"
+    },
+    "toric_vector_bundle": {
+      "embed": "0",
+      "features": "1D-cone filtrations \u00b7 sheaf CE \u00b7 fan-neighborhood compatibility",
+      "href": "page_interactive/toric_vector_bundle/index.html",
+      "summary": "Klyachko-style vector-bundle and sheaf compatibility evidence over one-dimensional cones and adjacent fan neighborhoods.",
+      "title": "Toric Vector-Bundle Sheaf Audit"
+    }
+  },
   "parameter_golf_pr_url": null
 }

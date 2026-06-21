@@ -45,6 +45,76 @@ IMAGE_SOURCES = {
     "bgg": "outputs/smoke_oai_full_iteration_analysis_2/html_screenshots/screenshots/bgg_category_o_report__index__slice_00.png",
 }
 
+INTERACTIVE_REPORTS = {
+    "branching_reasoning": {
+        "source": "outputs/smoke_oai_full_iteration_analysis_2/branching_reasoning_report",
+        "entry": "branching_reasoning_trajectory.html",
+        "title": "Interactive Simplex Trajectory",
+        "summary": (
+            "Full graph-of-thought reasoning trajectory with 3D PCA display coordinates, "
+            "radius and reasoning-level sliders, token hover/click panels, one-dimensional "
+            "simplex edges, optional filled 2-simplices, and analogy gates."
+        ),
+        "features": "radius slider · reasoning-level slider · token hover/click · 3D PCA · simplex maps",
+        "embed": True,
+    },
+    "gudhi_persistence": {
+        "source": "outputs/smoke_oai_full_iteration_analysis_2/gudhi_persistence",
+        "entry": "index.html",
+        "title": "GUDHI Persistent Homology",
+        "summary": (
+            "Exact simplex-tree persistent homology, persistence landscapes/images/entropy, "
+            "vectorized PH features, and Macaulay2 F2[x_level,y_radius] artifacts."
+        ),
+        "features": "PH records · landscapes/images · entropy · Macaulay2 links",
+        "embed": False,
+    },
+    "toric_embedding": {
+        "source": "outputs/smoke_oai_full_iteration_analysis_2/toric_embedding_report",
+        "entry": "index.html",
+        "title": "Toric Embedding and Staircases",
+        "summary": (
+            "Tropical ring-attention embeddings into toric charts, one-dimensional cones, "
+            "Miller-Sturmfels staircase modules, vector-bundle/sheaf panels, and fan diagnostics."
+        ),
+        "features": "toric charts · staircases · vector bundles · one-dimensional cones",
+        "embed": False,
+    },
+    "cas_sidecar": {
+        "source": "outputs/smoke_oai_full_iteration_analysis_2/embedding_cas_sidecar",
+        "entry": "index.html",
+        "title": "CAS Algebra Sidecar",
+        "summary": (
+            "Sage/Macaulay2-backed module, resolution, syzygy, and derived-signature "
+            "evidence generated for the embedding audits."
+        ),
+        "features": "resolutions · syzygies · CAS records · derived signatures",
+        "embed": False,
+    },
+    "bgg_category_o": {
+        "source": "outputs/smoke_oai_full_iteration_analysis_2/bgg_category_o_report",
+        "entry": "index.html",
+        "title": "Toric BGG Category O",
+        "summary": (
+            "Finite category-O certificates, standard-filtration checks, sparse "
+            "differentials, Gale-dual signals, and homological consistency metrics."
+        ),
+        "features": "standard filtrations · differentials · Gale duality · category O",
+        "embed": False,
+    },
+    "toric_vector_bundle": {
+        "source": "outputs/smoke_oai_full_iteration_analysis_2/toric_vector_bundle_report",
+        "entry": "index.html",
+        "title": "Toric Vector-Bundle Sheaf Audit",
+        "summary": (
+            "Klyachko-style vector-bundle and sheaf compatibility evidence over "
+            "one-dimensional cones and adjacent fan neighborhoods."
+        ),
+        "features": "1D-cone filtrations · sheaf CE · fan-neighborhood compatibility",
+        "embed": False,
+    },
+}
+
 
 LOSS_DESCRIPTIONS = {
     "graphcg_loss": "Full-rank GraphCG pressure: disentangles latent concept axes so graph and byte objectives can expose stable directions rather than collapsing into one entangled basis.",
@@ -160,6 +230,195 @@ def copy_assets(repo: Path, docs: Path) -> dict[str, str]:
     return copied
 
 
+def copy_interactive_reports(repo: Path, docs: Path) -> dict[str, dict[str, str]]:
+    out_dir = docs / "page_interactive"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    copied: dict[str, dict[str, str]] = {}
+    for key, spec in INTERACTIVE_REPORTS.items():
+        src = repo / spec["source"]
+        entry = str(spec["entry"])
+        if not src.exists() or not (src / entry).exists():
+            continue
+        dst = out_dir / key
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+        copied[key] = {
+            "href": f"page_interactive/{key}/{entry}",
+            "title": str(spec["title"]),
+            "summary": str(spec["summary"]),
+            "features": str(spec["features"]),
+            "embed": "1" if spec.get("embed") else "0",
+        }
+    scrub_public_report_paths(out_dir, repo)
+    return copied
+
+
+def scrub_public_report_paths(root: Path, repo: Path) -> None:
+    text_suffixes = {".html", ".json", ".md", ".txt", ".m2", ".js", ".css"}
+    repo_text = str(repo.resolve())
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in text_suffixes:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        text = text.replace(repo_text + "/", "ToricGT/")
+        text = text.replace(repo_text, "ToricGT")
+        text = re.sub(r"/home/iska/miniconda3/envs/[^\"'<>\s]+", "local-cas-executable", text)
+        text = re.sub(r"/home/iska/Documents/amelie/bio/[^\"'<>\s]+", "local-experiment-artifact", text)
+        path.write_text(text, encoding="utf-8")
+
+
+def tetra_metric(metrics: dict[str, Any], keys: list[str], *, invert: bool = False) -> float | None:
+    for key in keys:
+        value = metrics.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            value = float(value)
+            return -value if invert else value
+    return None
+
+
+def normalize(values: list[float]) -> list[float]:
+    if not values:
+        return []
+    lo = min(values)
+    hi = max(values)
+    if hi <= lo:
+        return [0.5 for _ in values]
+    return [(value - lo) / (hi - lo) for value in values]
+
+
+def write_campaign_tetrahedron_report(docs: Path, rows: list[dict[str, Any]]) -> dict[str, str] | None:
+    usable: list[dict[str, Any]] = []
+    raw_axes = {"low_bpb": [], "compact": [], "graph_reasoning": [], "algebraic": []}
+    for index, row in enumerate(rows, start=1):
+        metrics = row.get("metrics", {})
+        if not isinstance(metrics, dict):
+            continue
+        bpb = metric_bpb(metrics)
+        if not math.isfinite(bpb):
+            continue
+        artifact = tetra_metric(metrics, ["artifact_bytes"], invert=True)
+        graph = tetra_metric(metrics, ["oai_fot_loss", "oai_gflownet_loss", "graph_lm_loss"], invert=True)
+        algebraic = tetra_metric(
+            metrics,
+            [
+                "toric_geometry_loss",
+                "toric_bgg_loss",
+                "koszul_persistence_loss",
+                "toric_cca_topology_loss",
+                "derived_signature_loss",
+            ],
+            invert=True,
+        )
+        point = {
+            "run": str(row.get("run_id", f"run-{index}"))[-48:],
+            "profile": str(row.get("profile", f"run-{index}")),
+            "bpb": bpb,
+            "artifact": metrics.get("artifact_bytes"),
+            "train_bpb": metrics.get("train_bpb"),
+            "raw": {
+                "low_bpb": -bpb,
+                "compact": artifact,
+                "graph_reasoning": graph,
+                "algebraic": algebraic,
+            },
+        }
+        usable.append(point)
+        raw_axes["low_bpb"].append(float(point["raw"]["low_bpb"]))
+        raw_axes["compact"].append(float(artifact if artifact is not None else 0.0))
+        raw_axes["graph_reasoning"].append(float(graph if graph is not None else 0.0))
+        raw_axes["algebraic"].append(float(algebraic if algebraic is not None else 0.0))
+    if len(usable) < 2:
+        return None
+    normalized_axes = {key: normalize(values) for key, values in raw_axes.items()}
+    vertices = [
+        [1.0, 1.0, 1.0],
+        [-1.0, -1.0, 1.0],
+        [-1.0, 1.0, -1.0],
+        [1.0, -1.0, -1.0],
+    ]
+    labels = [
+        "low BPB",
+        "compact artifact",
+        "graph/FoT pressure",
+        "toric algebraic pressure",
+    ]
+    points = []
+    for idx, point in enumerate(usable):
+        weights = [
+            normalized_axes["low_bpb"][idx],
+            normalized_axes["compact"][idx],
+            normalized_axes["graph_reasoning"][idx],
+            normalized_axes["algebraic"][idx],
+        ]
+        total = sum(max(0.0, value) for value in weights)
+        if total <= 0:
+            bary = [0.25, 0.25, 0.25, 0.25]
+        else:
+            bary = [max(0.0, value) / total for value in weights]
+        xyz = [
+            sum(bary[i] * vertices[i][dim] for i in range(4))
+            for dim in range(3)
+        ]
+        point["weights"] = bary
+        point["xyz"] = xyz
+        points.append(point)
+    out_dir = docs / "page_interactive" / "campaign_tetrahedron"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "title": "Campaign Metric Tetrahedron",
+        "labels": labels,
+        "vertices": vertices,
+        "points": points,
+    }
+    (out_dir / "campaign_tetrahedron.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campaign Metric Tetrahedron</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+:root{{color-scheme:dark;--bg:#030712;--panel:#071421;--line:rgba(70,231,255,.28);--text:#ecfbff;--muted:#9db8cf;--cyan:#46e7ff;--gold:#ffd166}}
+body{{margin:0;background:radial-gradient(circle at 10% 10%,rgba(70,231,255,.16),transparent 30rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
+main{{max-width:1280px;margin:0 auto;padding:24px}}.panel{{border:1px solid var(--line);border-radius:10px;background:rgba(7,20,33,.86);padding:16px;margin:14px 0}}
+h1{{margin:0 0 8px}}p{{color:var(--muted);line-height:1.5}}#plot{{height:720px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713}}
+table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(157,184,207,.16);padding:8px;text-align:left}}td.num{{text-align:right;color:var(--gold)}}
+</style></head><body><main>
+<section class="panel"><h1>Campaign Metric Tetrahedron</h1>
+<p>This interactive tetrahedron uses completed campaign runs. The four vertices are low BPB, compact artifact size, graph/FoT pressure, and toric/algebraic pressure. Points are barycentric mixtures of normalized run metrics; hover text shows the run profile and BPB.</p>
+<p><a href="campaign_tetrahedron.json">payload JSON</a></p></section>
+<section class="panel"><div id="plot"></div></section>
+<section class="panel"><h2>Run Table</h2><table><thead><tr><th>profile</th><th>run</th><th>BPB</th><th>artifact bytes</th><th>train BPB</th></tr></thead><tbody>
+{''.join(f"<tr><td>{html.escape(p['profile'])}</td><td>{html.escape(p['run'])}</td><td class='num'>{p['bpb']:.6f}</td><td class='num'>{fmt(p.get('artifact'),0)}</td><td class='num'>{fmt(p.get('train_bpb'))}</td></tr>" for p in points)}
+</tbody></table></section>
+<script>
+const payload = {json.dumps(payload)};
+const vertices = payload.vertices;
+const labels = payload.labels;
+const edges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
+const traces = [];
+for (const [i,j] of edges) {{
+  traces.push({{type:'scatter3d', mode:'lines', x:[vertices[i][0],vertices[j][0]], y:[vertices[i][1],vertices[j][1]], z:[vertices[i][2],vertices[j][2]], line:{{color:'#46e7ff',width:5}}, hoverinfo:'skip', showlegend:false}});
+}}
+traces.push({{type:'mesh3d', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]), i:[0,0,0,1], j:[1,1,2,2], k:[2,3,3,3], opacity:0.08, color:'#46e7ff', hoverinfo:'skip', name:'tetrahedron faces'}});
+traces.push({{type:'scatter3d', mode:'markers+text', name:'campaign runs', x:payload.points.map(p=>p.xyz[0]), y:payload.points.map(p=>p.xyz[1]), z:payload.points.map(p=>p.xyz[2]), text:payload.points.map((p,i)=>String(i+1)), customdata:payload.points.map(p=>[p.profile,p.run,p.bpb,p.artifact,p.train_bpb,p.weights.map(w=>w.toFixed(3)).join(' / ')]), marker:{{size:8,color:payload.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,colorbar:{{title:'BPB'}},line:{{color:'white',width:1}}}}, hovertemplate:'%{{customdata[0]}}<br>run %{{customdata[1]}}<br>BPB %{{customdata[2]:.6f}}<br>artifact %{{customdata[3]}}<br>train BPB %{{customdata[4]}}<br>barycentric weights %{{customdata[5]}}<extra></extra>'}});
+traces.push({{type:'scatter3d', mode:'text', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]+0.08), text:labels, textfont:{{color:'#ecfbff',size:14}}, hoverinfo:'skip', showlegend:false}});
+Plotly.newPlot('plot', traces, {{template:'plotly_dark', title:{{text:payload.title,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', scene:{{aspectmode:'data', xaxis:{{visible:false}}, yaxis:{{visible:false}}, zaxis:{{visible:false}}, bgcolor:'#020713'}}, margin:{{l:0,r:0,t:42,b:0}}}}, {{responsive:true}});
+</script></main></body></html>
+"""
+    page = "\n".join(line.rstrip() for line in page.splitlines()) + "\n"
+    (out_dir / "index.html").write_text(page, encoding="utf-8")
+    return {
+        "href": "page_interactive/campaign_tetrahedron/index.html",
+        "title": "Campaign Metric Tetrahedron",
+        "summary": "Interactive tetrahedron over completed run metrics: low BPB, compact artifact, graph/FoT pressure, and toric/algebraic pressure.",
+        "features": "3-simplex/tetrahedron · campaign metrics · hover run table · BPB color scale",
+        "embed": "0",
+    }
+
+
 def table_rows(metrics: dict[str, Any], keys: list[str]) -> str:
     rows = []
     for key in keys:
@@ -167,6 +426,110 @@ def table_rows(metrics: dict[str, Any], keys: list[str]) -> str:
             f"<tr><th>{html.escape(key)}</th><td>{fmt(metrics.get(key), 6 if 'loss' in key else 4)}</td></tr>"
         )
     return "\n".join(rows)
+
+
+def markdown_links_to_html(text: str, *, base_url: str = PARAMETER_GOLF_URL) -> str:
+    def replace(match: re.Match[str]) -> str:
+        label = html.escape(match.group(1))
+        href = match.group(2)
+        if href.startswith("records/"):
+            href = f"{base_url}/tree/main/{href}"
+        return f'<a href="{html.escape(href)}">{label}</a>'
+
+    escaped_chunks: list[str] = []
+    last = 0
+    for match in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", text):
+        escaped_chunks.append(html.escape(text[last : match.start()]))
+        escaped_chunks.append(replace(match))
+        last = match.end()
+    escaped_chunks.append(html.escape(text[last:]))
+    return "".join(escaped_chunks)
+
+
+def parse_parameter_golf_top5(repo: Path) -> list[dict[str, str]]:
+    readme = repo / "amelie-iska" / "parameter-golf" / "README.md"
+    if not readme.exists():
+        return []
+    rows: list[dict[str, str]] = []
+    in_leaderboard = False
+    for line in readme.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.strip() == "## Leaderboard":
+            in_leaderboard = True
+            continue
+        if in_leaderboard and line.startswith("#### "):
+            break
+        if not in_leaderboard or not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 6 or cells[0] == "Run" or set(cells[0]) <= {"-"}:
+            continue
+        rows.append(
+            {
+                "run": cells[0],
+                "score": cells[1],
+                "author": cells[2],
+                "summary": cells[3],
+                "date": cells[4],
+                "info": cells[5],
+            }
+        )
+        if len(rows) >= 5:
+            break
+    return rows
+
+
+def competition_table(repo: Path, best_metrics: dict[str, Any], pr_href: str) -> str:
+    official = parse_parameter_golf_top5(repo)
+    toricgt_score = fmt(best_metrics.get("final_int8_bpb"))
+    toricgt_val = fmt(best_metrics.get("val_bpb"))
+    toricgt_summary = (
+        "ToricGT ConvexTok-2048 with first-class TokenGT graphification, "
+        "OAI-only flattening, FoT/GFlowNet heads, MTP, GraphCG, toric/BGG/"
+        "Koszul/topological audits. Pending Parameter Golf PR review and "
+        "independent verification; local capped validation BPB "
+        f"{toricgt_val}."
+    )
+    rows = [
+        {
+            "rank": "pending",
+            "run": "ToricGT ConvexTok-2048 Graphified FoT",
+            "score": toricgt_score,
+            "author": "Amelie Schreiber",
+            "summary": toricgt_summary,
+            "date": "2026-06-21",
+            "info": f'<a href="{html.escape(HF_URL)}">checkpoint</a> · <a href="{html.escape(pr_href)}">PR/status</a>',
+            "class": "toricgt-row",
+        }
+    ]
+    for idx, row in enumerate(official, start=1):
+        rows.append(
+            {
+                "rank": str(idx),
+                "run": row["run"],
+                "score": row["score"],
+                "author": row["author"],
+                "summary": row["summary"],
+                "date": row["date"],
+                "info": markdown_links_to_html(row["info"]),
+                "class": "",
+            }
+        )
+    body = []
+    for row in rows:
+        body.append(
+            f"""
+            <tr class="{html.escape(row['class'])}">
+              <td>{html.escape(row['rank'])}</td>
+              <th>{html.escape(row['run'])}</th>
+              <td class="score-cell">{html.escape(row['score'])}</td>
+              <td>{html.escape(row['author'])}</td>
+              <td>{html.escape(row['summary'])}</td>
+              <td>{html.escape(row['date'])}</td>
+              <td>{row['info']}</td>
+            </tr>
+            """
+        )
+    return "\n".join(body)
 
 
 def run_history_json(rows: list[dict[str, Any]]) -> str:
@@ -195,7 +558,14 @@ def card(title: str, value: str, note: str) -> str:
     """
 
 
-def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_url: str, copied: dict[str, str]) -> str:
+def build_html(
+    repo: Path,
+    state_path: Path | None,
+    state: dict[str, Any],
+    pr_url: str,
+    copied: dict[str, str],
+    interactive: dict[str, dict[str, str]],
+) -> str:
     rows = completed_rows(state, current_campaign_only=True)
     best = best_row(rows)
     best_metrics = best.get("metrics", {}) if best else {}
@@ -206,6 +576,7 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
     pr_href = pr_url or PARAMETER_GOLF_URL
     hero = copied.get("logo") or copied.get("architecture") or ""
     history = run_history_json(rows)
+    competition_rows = competition_table(repo, best_metrics, pr_href)
     loss_items = []
     for key, desc in LOSS_DESCRIPTIONS.items():
         if key in best_metrics:
@@ -233,6 +604,35 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
                   <img src="{html.escape(copied[key])}" alt="{html.escape(title)}">
                   <figcaption><strong>{html.escape(title)}</strong><span>{html.escape(caption)}</span></figcaption>
                 </figure>
+                """
+            )
+    interactive_cards = []
+    embedded_reports = []
+    for key, report in interactive.items():
+        href = report["href"]
+        title = report["title"]
+        summary = report["summary"]
+        features = report["features"]
+        interactive_cards.append(
+            f"""
+            <article class="interactive-card">
+              <div>
+                <h3>{html.escape(title)}</h3>
+                <p>{html.escape(summary)}</p>
+                <span>{html.escape(features)}</span>
+              </div>
+              <a class="button" href="{html.escape(href)}">Open interactive report</a>
+            </article>
+            """
+        )
+        if report.get("embed") == "1":
+            embedded_reports.append(
+                f"""
+                <article class="panel interactive-embed">
+                  <h3>{html.escape(title)} Live Preview</h3>
+                  <p>Embedded directly from the generated HTML report; open it separately for full-screen slider and hover/click use.</p>
+                  <iframe src="{html.escape(href)}" title="{html.escape(title)}"></iframe>
+                </article>
                 """
             )
     return f"""<!doctype html>
@@ -318,6 +718,13 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
     .metric-table {{ width:100%; border-collapse:collapse; }}
     .metric-table th,.metric-table td {{ border-bottom:1px solid rgba(157,184,207,.16); padding:10px 8px; text-align:left; }}
     .metric-table th {{ color:#b8d4e8; font-weight:700; }}
+    .competition-table {{ width:100%; border-collapse:collapse; font-size:.92rem; }}
+    .competition-table th,.competition-table td {{ border-bottom:1px solid rgba(157,184,207,.16); padding:12px 10px; text-align:left; vertical-align:top; }}
+    .competition-table thead th {{ color:#9fdcff; text-transform:uppercase; letter-spacing:.07em; font-size:.76rem; }}
+    .competition-table tbody th {{ color:#e9fbff; min-width:210px; }}
+    .competition-table .score-cell {{ color:var(--gold); font-weight:900; white-space:nowrap; }}
+    .competition-table .toricgt-row {{ background:linear-gradient(90deg, rgba(70,231,255,.16), rgba(136,255,134,.08)); }}
+    .competition-note {{ margin:10px 0 0; color:var(--muted); line-height:1.5; }}
     .loss-list {{ list-style:none; padding:0; margin:0; display:grid; gap:10px; }}
     .loss-list li {{ border:1px solid rgba(70,231,255,.18); border-radius:14px; padding:12px; background:rgba(3,8,17,.34); }}
     .loss-list span {{ color:var(--cyan); font-weight:800; }}
@@ -333,6 +740,16 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
     .gallery-card img {{ display:block; width:100%; aspect-ratio: 16 / 9; object-fit:cover; background:#020711; }}
     .gallery-card figcaption {{ padding:14px 16px 16px; display:grid; gap:5px; }}
     .gallery-card figcaption span {{ color:var(--muted); line-height:1.45; }}
+    .interactive-grid {{ grid-template-columns: repeat(2, minmax(0,1fr)); }}
+    .interactive-card {{
+      border:1px solid var(--line); background:linear-gradient(180deg, rgba(11,27,43,.92), rgba(7,20,33,.86));
+      border-radius:20px; padding:18px; display:flex; gap:16px; justify-content:space-between; align-items:flex-start; min-height:190px;
+    }}
+    .interactive-card h3 {{ margin:0 0 10px; }}
+    .interactive-card p {{ color:#b8d1e2; line-height:1.5; margin:0 0 12px; }}
+    .interactive-card span {{ color:var(--gold); font-size:.86rem; }}
+    .interactive-card .button {{ white-space:nowrap; }}
+    .interactive-embed iframe {{ width:100%; height:min(72vh, 760px); border:1px solid rgba(70,231,255,.18); border-radius:14px; background:#020713; }}
     .concepts {{ grid-template-columns: repeat(4, minmax(0,1fr)); }}
     .concept {{ padding:18px; border:1px solid rgba(70,231,255,.22); background:rgba(7,20,33,.72); border-radius:18px; min-height:220px; position:relative; overflow:hidden; }}
     .concept h3 {{ margin:0 0 10px; }}
@@ -344,6 +761,8 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
     @media (max-width: 860px) {{
       .hero, .panels {{ grid-template-columns:1fr; }}
       .metrics, .concepts, .gallery {{ grid-template-columns:1fr; }}
+      .interactive-grid {{ grid-template-columns:1fr; }}
+      .interactive-card {{ flex-direction:column; }}
       nav {{ align-items:flex-start; flex-direction:column; padding:18px 0; }}
       .hero-visual {{ min-height: 320px; }}
     }}
@@ -432,6 +851,32 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
 
     <section class="wrap">
       <div class="section-head">
+        <h2>Competition Context</h2>
+        <p>Lower BPB is better. ToricGT is shown with the current local best exported run, followed by the official top five entries listed in the local OpenAI Parameter Golf clone.</p>
+      </div>
+      <article class="panel">
+        <table class="competition-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Run</th>
+              <th>BPB</th>
+              <th>Author</th>
+              <th>Summary</th>
+              <th>Date</th>
+              <th>Info</th>
+            </tr>
+          </thead>
+          <tbody>
+            {competition_rows}
+          </tbody>
+        </table>
+        <p class="competition-note">The ToricGT row is not claiming accepted leaderboard status. It is a pending experimental/non-record candidate until the Parameter Golf PR, tokenizer accounting, reproducibility checks, and official review are complete.</p>
+      </article>
+    </section>
+
+    <section class="wrap">
+      <div class="section-head">
         <h2>What Is Being Optimized</h2>
         <p>BPB stays primary. The advanced losses are small, evidence-weighted pressures that shape hidden graph structure, retrieval, toric/tropical geometry, and algebraic consistency without letting those objectives dominate byte likelihood.</p>
       </div>
@@ -479,6 +924,18 @@ def build_html(repo: Path, state_path: Path | None, state: dict[str, Any], pr_ur
         {''.join(gallery)}
       </div>
     </section>
+
+    <section class="wrap">
+      <div class="section-head">
+        <h2>Interactive Analysis Lab</h2>
+        <p>The full generated reports are bundled into the page, not flattened to screenshots. They retain Plotly rotation, hover/click token details, radius sliders, reasoning-level sliders, simplex-tree maps, vectorized PH panels, CAS links, and tetrahedron views.</p>
+      </div>
+      <div class="grid interactive-grid">
+        {''.join(interactive_cards)}
+      </div>
+    </section>
+
+    {''.join(embedded_reports)}
 
     <section class="wrap grid panels">
       <article class="panel">
@@ -550,7 +1007,13 @@ def main() -> int:
     state = load_json(state_path) if state_path else {}
     pr_url = find_pr_url(repo, args.parameter_golf_pr_url)
     copied = copy_assets(repo, docs)
-    html_text = build_html(repo, state_path, state, pr_url, copied)
+    interactive = copy_interactive_reports(repo, docs)
+    rows = completed_rows(state, current_campaign_only=True)
+    tetra = write_campaign_tetrahedron_report(docs, rows)
+    if tetra:
+        interactive = {"campaign_tetrahedron": tetra, **interactive}
+    html_text = build_html(repo, state_path, state, pr_url, copied, interactive)
+    html_text = "\n".join(line.rstrip() for line in html_text.splitlines()) + "\n"
     (docs / "index.html").write_text(html_text, encoding="utf-8")
     (docs / ".nojekyll").write_text("", encoding="utf-8")
     manifest = {
@@ -562,10 +1025,12 @@ def main() -> int:
         ),
         "parameter_golf_pr_url": pr_url or None,
         "copied_assets": copied,
+        "interactive_reports": interactive,
     }
     (docs / "page_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"wrote {docs / 'index.html'}")
     print(f"copied {len(copied)} assets")
+    print(f"copied {len(interactive)} interactive reports")
     return 0
 
 

@@ -81,6 +81,13 @@
     .metric-table { width:100%; border-collapse:collapse; }
     .metric-table th,.metric-table td { border-bottom:1px solid rgba(157,184,207,.16); padding:10px 8px; text-align:left; }
     .metric-table th { color:#b8d4e8; font-weight:700; }
+    .competition-table { width:100%; border-collapse:collapse; font-size:.92rem; }
+    .competition-table th,.competition-table td { border-bottom:1px solid rgba(157,184,207,.16); padding:12px 10px; text-align:left; vertical-align:top; }
+    .competition-table thead th { color:#9fdcff; text-transform:uppercase; letter-spacing:.07em; font-size:.76rem; }
+    .competition-table tbody th { color:#e9fbff; min-width:210px; }
+    .competition-table .score-cell { color:var(--gold); font-weight:900; white-space:nowrap; }
+    .competition-table .toricgt-row { background:linear-gradient(90deg, rgba(70,231,255,.16), rgba(136,255,134,.08)); }
+    .competition-note { margin:10px 0 0; color:var(--muted); line-height:1.5; }
     .loss-list { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
     .loss-list li { border:1px solid rgba(70,231,255,.18); border-radius:14px; padding:12px; background:rgba(3,8,17,.34); }
     .loss-list span { color:var(--cyan); font-weight:800; }
@@ -96,6 +103,16 @@
     .gallery-card img { display:block; width:100%; aspect-ratio: 16 / 9; object-fit:cover; background:#020711; }
     .gallery-card figcaption { padding:14px 16px 16px; display:grid; gap:5px; }
     .gallery-card figcaption span { color:var(--muted); line-height:1.45; }
+    .interactive-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .interactive-card {
+      border:1px solid var(--line); background:linear-gradient(180deg, rgba(11,27,43,.92), rgba(7,20,33,.86));
+      border-radius:20px; padding:18px; display:flex; gap:16px; justify-content:space-between; align-items:flex-start; min-height:190px;
+    }
+    .interactive-card h3 { margin:0 0 10px; }
+    .interactive-card p { color:#b8d1e2; line-height:1.5; margin:0 0 12px; }
+    .interactive-card span { color:var(--gold); font-size:.86rem; }
+    .interactive-card .button { white-space:nowrap; }
+    .interactive-embed iframe { width:100%; height:min(72vh, 760px); border:1px solid rgba(70,231,255,.18); border-radius:14px; background:#020713; }
     .concepts { grid-template-columns: repeat(4, minmax(0,1fr)); }
     .concept { padding:18px; border:1px solid rgba(70,231,255,.22); background:rgba(7,20,33,.72); border-radius:18px; min-height:220px; position:relative; overflow:hidden; }
     .concept h3 { margin:0 0 10px; }
@@ -107,6 +124,8 @@
     @media (max-width: 860px) {
       .hero, .panels { grid-template-columns:1fr; }
       .metrics, .concepts, .gallery { grid-template-columns:1fr; }
+      .interactive-grid { grid-template-columns:1fr; }
+      .interactive-card { flex-direction:column; }
       nav { align-items:flex-start; flex-direction:column; padding:18px 0; }
       .hero-visual { min-height: 320px; }
     }
@@ -169,34 +188,34 @@
         <h2>Best Completed Run</h2>
       </div>
       <div class="grid metrics">
-        
+
     <article class="metric-card">
       <span>Best int8 BPB</span>
       <strong>0.4953</strong>
       <p>final int8+zlib round-trip BPB</p>
     </article>
-    
-        
+
+
     <article class="metric-card">
       <span>Validation BPB</span>
       <strong>0.4924</strong>
       <p>score on the OAI FineWeb validation stream</p>
     </article>
-    
-        
+
+
     <article class="metric-card">
       <span>Train BPB</span>
       <strong>0.5036</strong>
       <p>latest train-side BPB in the selected run</p>
     </article>
-    
-        
+
+
     <article class="metric-card">
       <span>Compressed bytes</span>
       <strong>12,202,796</strong>
       <p>model artifact before code/dependency accounting</p>
     </article>
-    
+
       </div>
     </section>
 
@@ -221,6 +240,97 @@
 <tr><th>checkpoint_step</th><td>1000.0000</td></tr>
           </tbody>
         </table>
+      </article>
+    </section>
+
+    <section class="wrap">
+      <div class="section-head">
+        <h2>Competition Context</h2>
+        <p>Lower BPB is better. ToricGT is shown with the current local best exported run, followed by the official top five entries listed in the local OpenAI Parameter Golf clone.</p>
+      </div>
+      <article class="panel">
+        <table class="competition-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Run</th>
+              <th>BPB</th>
+              <th>Author</th>
+              <th>Summary</th>
+              <th>Date</th>
+              <th>Info</th>
+            </tr>
+          </thead>
+          <tbody>
+
+            <tr class="toricgt-row">
+              <td>pending</td>
+              <th>ToricGT ConvexTok-2048 Graphified FoT</th>
+              <td class="score-cell">0.4953</td>
+              <td>Amelie Schreiber</td>
+              <td>ToricGT ConvexTok-2048 with first-class TokenGT graphification, OAI-only flattening, FoT/GFlowNet heads, MTP, GraphCG, toric/BGG/Koszul/topological audits. Pending Parameter Golf PR review and independent verification; local capped validation BPB 0.4924.</td>
+              <td>2026-06-21</td>
+              <td><a href="https://huggingface.co/AmelieSchreiber/toricgt-checkpoints">checkpoint</a> · <a href="https://github.com/openai/parameter-golf">PR/status</a></td>
+            </tr>
+
+
+            <tr class="">
+              <td>1</td>
+              <th>Calib32 Token-Only N-gram + AsymLogit Stack</th>
+              <td class="score-cell">1.0565</td>
+              <td>codemath3000</td>
+              <td>On PR #2135: pre-cutoff PR #2130 architecture rerun on clean canonical CaseOps data with GPTQ_CALIBRATION_BATCHES=32; 3-seed mean 1.05651 under grace policy (p=0.014 vs PR #2014)</td>
+              <td>2026-05-01</td>
+              <td><a href="https://github.com/openai/parameter-golf/pull/2135">info</a></td>
+            </tr>
+
+
+            <tr class="">
+              <td>2</td>
+              <th>Progressive Context Growth + Short-Doc Score-First TTT</th>
+              <td class="score-cell">1.0576</td>
+              <td>simonbissonnette</td>
+              <td>On PR #2014: PR #1855/#1953 CaseOps stack with progressive context growth to 3k plus short-doc score-first TTT on the AWQ-lite/AsymLogit lineage; 3-seed mean 1.05759 (p=0.011 vs PR #1953)</td>
+              <td>2026-04-30</td>
+              <td><a href="https://github.com/openai/parameter-golf/pull/2014">info</a></td>
+            </tr>
+
+
+            <tr class="">
+              <td>3</td>
+              <th>Long-Context No-Q/V TTT + QK-Gain 5.25</th>
+              <td class="score-cell">1.0586</td>
+              <td>andrewbaggio1</td>
+              <td>On PR #1953: PR #1945 V21 base with 2560 eval/TTT context, no-Q/V TTT mask, TTT LR 0.75, and QK_GAIN_INIT=5.25; 3-seed mean 1.05855 (p=0.063 vs PR #1945 V21 v2)</td>
+              <td>2026-04-30</td>
+              <td><a href="https://github.com/openai/parameter-golf/pull/1953">info</a></td>
+            </tr>
+
+
+            <tr class="">
+              <td>4</td>
+              <th>AWQ-Lite GPTQ + AsymLogit on PR1855 Stack</th>
+              <td class="score-cell">1.0594</td>
+              <td>alertcat</td>
+              <td>On PR #1945 commit 70067534: PR #1855 stack plus PR #1908 AWQ-lite mixed GPTQ and PR #1923 AsymLogit; V21 v2 3-seed mean 1.05943 after strict seed-42 rerun (p=0.034 vs PR #1855)</td>
+              <td>2026-04-29</td>
+              <td><a href="https://github.com/openai/parameter-golf/pull/1945">info</a>, <a href="https://github.com/openai/parameter-golf/pull/1945/commits/7006753424886886bc27a17f839f6afd01962a08">commit</a></td>
+            </tr>
+
+
+            <tr class="">
+              <td>5</td>
+              <th>BOS-Fixed SmearGate + LQER + SparseAttnGate + 9-Hparam Stack</th>
+              <td class="score-cell">1.0611</td>
+              <td>codemath3000</td>
+              <td>On PR #1855: BOS-fixed #1797-derived stack with LQER, PR #1787 SparseAttnGate/PolarNS/FusedCE base, per-group lrzip compression, and 9 greedy hyperparameter overrides; submitted 3-seed mean 1.06108 with broader reproduction support (p=0.188 vs PR #1868 latest rerun)</td>
+              <td>2026-04-27</td>
+              <td><a href="https://github.com/openai/parameter-golf/pull/1855">info</a>, <a href="https://github.com/openai/parameter-golf/pull/1855#issuecomment-4336629746">repro</a></td>
+            </tr>
+
+          </tbody>
+        </table>
+        <p class="competition-note">The ToricGT row is not claiming accepted leaderboard status. It is a pending experimental/non-record candidate until the Parameter Golf PR, tokenizer accounting, reproducibility checks, and official review are complete.</p>
       </article>
     </section>
 
@@ -270,59 +380,140 @@
         <h2>Visual Evidence</h2>
       </div>
       <div class="grid gallery">
-        
+
                 <figure class="gallery-card">
                   <img src="page_assets/architecture.png" alt="Architecture">
                   <figcaption><strong>Architecture</strong><span>Graph-token, tropical, toric, FoT, and BPB paths in one training system.</span></figcaption>
                 </figure>
-                
+
                 <figure class="gallery-card">
                   <img src="page_assets/tropical.png" alt="Tropical Active Faces">
                   <figcaption><strong>Tropical Active Faces</strong><span>Max-plus attention exposes active predecessors, margins, and normal-fan cells.</span></figcaption>
                 </figure>
-                
+
                 <figure class="gallery-card">
                   <img src="page_assets/graphcg.png" alt="GraphCG + Topology">
                   <figcaption><strong>GraphCG + Topology</strong><span>Disentangled concept axes meet vectorized persistent homology and retrieval.</span></figcaption>
                 </figure>
-                
+
                 <figure class="gallery-card">
                   <img src="page_assets/branching.png" alt="Branching Reasoning">
                   <figcaption><strong>Branching Reasoning</strong><span>Forest/graph-of-thought branches merge through retrieval and BPB-delta rewards.</span></figcaption>
                 </figure>
-                
+
                 <figure class="gallery-card">
                   <img src="page_assets/trajectory.png" alt="Trajectory Complex">
                   <figcaption><strong>Trajectory Complex</strong><span>Filtered simplicial complexes reveal token-level reasoning structure.</span></figcaption>
                 </figure>
-                
+
                 <figure class="gallery-card">
                   <img src="page_assets/analogy.png" alt="Analogy Maps">
                   <figcaption><strong>Analogy Maps</strong><span>Memory retrieval is gated by simplex-tree maps and PH feature similarity.</span></figcaption>
                 </figure>
-                
+
                 <figure class="gallery-card">
                   <img src="page_assets/vectorized_ph.png" alt="Vectorized PH">
                   <figcaption><strong>Vectorized PH</strong><span>Landscapes, images, entropy, and persistence vectors become auditable features.</span></figcaption>
                 </figure>
-                
+
                 <figure class="gallery-card">
                   <img src="page_assets/cas.png" alt="CAS Sidecar">
                   <figcaption><strong>CAS Sidecar</strong><span>Sage/Macaulay2-backed algebraic certificates validate toric and module data.</span></figcaption>
                 </figure>
-                
+
                 <figure class="gallery-card">
                   <img src="page_assets/toric_embedding.png" alt="Toric Embedding">
                   <figcaption><strong>Toric Embedding</strong><span>Tropical ring attention is embedded into toric charts for fan/cone audits.</span></figcaption>
                 </figure>
-                
+
                 <figure class="gallery-card">
                   <img src="page_assets/bgg.png" alt="BGG Category O">
                   <figcaption><strong>BGG Category O</strong><span>Finite Toric BGG certificates track standards, differentials, and homological consistency.</span></figcaption>
                 </figure>
-                
+
       </div>
     </section>
+
+    <section class="wrap">
+      <div class="section-head">
+        <h2>Interactive Analysis Lab</h2>
+        <p>The full generated reports are bundled into the page, not flattened to screenshots. They retain Plotly rotation, hover/click token details, radius sliders, reasoning-level sliders, simplex-tree maps, vectorized PH panels, CAS links, and tetrahedron views.</p>
+      </div>
+      <div class="grid interactive-grid">
+
+            <article class="interactive-card">
+              <div>
+                <h3>Campaign Metric Tetrahedron</h3>
+                <p>Interactive tetrahedron over completed run metrics: low BPB, compact artifact, graph/FoT pressure, and toric/algebraic pressure.</p>
+                <span>3-simplex/tetrahedron · campaign metrics · hover run table · BPB color scale</span>
+              </div>
+              <a class="button" href="page_interactive/campaign_tetrahedron/index.html">Open interactive report</a>
+            </article>
+
+            <article class="interactive-card">
+              <div>
+                <h3>Interactive Simplex Trajectory</h3>
+                <p>Full graph-of-thought reasoning trajectory with 3D PCA display coordinates, radius and reasoning-level sliders, token hover/click panels, one-dimensional simplex edges, optional filled 2-simplices, and analogy gates.</p>
+                <span>radius slider · reasoning-level slider · token hover/click · 3D PCA · simplex maps</span>
+              </div>
+              <a class="button" href="page_interactive/branching_reasoning/branching_reasoning_trajectory.html">Open interactive report</a>
+            </article>
+
+            <article class="interactive-card">
+              <div>
+                <h3>GUDHI Persistent Homology</h3>
+                <p>Exact simplex-tree persistent homology, persistence landscapes/images/entropy, vectorized PH features, and Macaulay2 F2[x_level,y_radius] artifacts.</p>
+                <span>PH records · landscapes/images · entropy · Macaulay2 links</span>
+              </div>
+              <a class="button" href="page_interactive/gudhi_persistence/index.html">Open interactive report</a>
+            </article>
+
+            <article class="interactive-card">
+              <div>
+                <h3>Toric Embedding and Staircases</h3>
+                <p>Tropical ring-attention embeddings into toric charts, one-dimensional cones, Miller-Sturmfels staircase modules, vector-bundle/sheaf panels, and fan diagnostics.</p>
+                <span>toric charts · staircases · vector bundles · one-dimensional cones</span>
+              </div>
+              <a class="button" href="page_interactive/toric_embedding/index.html">Open interactive report</a>
+            </article>
+
+            <article class="interactive-card">
+              <div>
+                <h3>CAS Algebra Sidecar</h3>
+                <p>Sage/Macaulay2-backed module, resolution, syzygy, and derived-signature evidence generated for the embedding audits.</p>
+                <span>resolutions · syzygies · CAS records · derived signatures</span>
+              </div>
+              <a class="button" href="page_interactive/cas_sidecar/index.html">Open interactive report</a>
+            </article>
+
+            <article class="interactive-card">
+              <div>
+                <h3>Toric BGG Category O</h3>
+                <p>Finite category-O certificates, standard-filtration checks, sparse differentials, Gale-dual signals, and homological consistency metrics.</p>
+                <span>standard filtrations · differentials · Gale duality · category O</span>
+              </div>
+              <a class="button" href="page_interactive/bgg_category_o/index.html">Open interactive report</a>
+            </article>
+
+            <article class="interactive-card">
+              <div>
+                <h3>Toric Vector-Bundle Sheaf Audit</h3>
+                <p>Klyachko-style vector-bundle and sheaf compatibility evidence over one-dimensional cones and adjacent fan neighborhoods.</p>
+                <span>1D-cone filtrations · sheaf CE · fan-neighborhood compatibility</span>
+              </div>
+              <a class="button" href="page_interactive/toric_vector_bundle/index.html">Open interactive report</a>
+            </article>
+
+      </div>
+    </section>
+
+
+                <article class="panel interactive-embed">
+                  <h3>Interactive Simplex Trajectory Live Preview</h3>
+                  <p>Embedded directly from the generated HTML report; open it separately for full-screen slider and hover/click use.</p>
+                  <iframe src="page_interactive/branching_reasoning/branching_reasoning_trajectory.html" title="Interactive Simplex Trajectory"></iframe>
+                </article>
+
 
     <section class="wrap grid panels">
       <article class="panel">

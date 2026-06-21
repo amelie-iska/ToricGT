@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8"><title>ToricGT Tropical-To-Toric Embedding Visualizations</title><style>
+:root{color-scheme:dark;--bg:#030712;--panel:#07111f;--panel2:#0b1728;--text:#e8fbff;--muted:#9fb1c9;--cyan:#37e8ff;--mag:#ff4fd8;--green:#8cff6a;--amber:#ffd166;--bad:#ff7b9c;--border:rgba(55,232,255,.28)}
+body{margin:0;background:radial-gradient(circle at top left,#092238 0,#030712 44rem);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1320px;margin:0 auto;padding:32px 24px 72px}
+a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+.hero,.panel,.card{background:linear-gradient(180deg,rgba(11,23,40,.96),rgba(5,13,25,.98));border:1px solid var(--border);border-radius:8px;box-shadow:0 18px 50px rgba(0,0,0,.28)}
+.hero{padding:24px;margin-bottom:18px}.panel,.card{padding:16px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+h1{margin:0 0 8px;font-size:29px;letter-spacing:0}h2{margin:0 0 10px;font-size:18px;letter-spacing:0}h3{margin:14px 0 8px;font-size:14px;color:#dff9ff}
+p{color:var(--muted);line-height:1.55}
+.metric{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(145,168,183,.14);padding:7px 0}
+.metric span:first-child{color:var(--muted)}.metric span:last-child{text-align:right;color:white;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:6px 10px;margin:3px;background:rgba(55,232,255,.07);color:#dff9ff}
+.ok{color:var(--green)}.bad{color:var(--bad)}.warn{color:var(--amber)}
+pre{white-space:pre-wrap;overflow:auto;max-height:520px;background:#020713;border:1px solid rgba(145,168,183,.18);border-radius:8px;padding:14px;color:#dff8ff}
+.plot{border:1px solid rgba(55,232,255,.14);border-radius:8px;overflow:hidden;background:#020713;margin:10px 0}
+.unavailable{border:1px dashed rgba(255,209,102,.45);border-radius:8px;padding:12px;background:rgba(255,209,102,.06);color:#ffe8a8}
+.diagram{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 0}
+.box{border:1px solid rgba(55,232,255,.32);background:rgba(55,232,255,.07);border-radius:8px;padding:10px 12px;min-width:110px;text-align:center}
+.arrow{color:var(--cyan);font-size:24px}
+.small{font-size:12px;color:var(--muted)}
+details{border:1px solid rgba(145,168,183,.18);border-radius:8px;margin:10px 0;background:#020713}
+summary{cursor:pointer;color:var(--cyan);padding:10px 12px}
+details pre{border:0;border-top:1px solid rgba(145,168,183,.18);border-radius:0;margin:0;max-height:520px}
+.statusgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:12px 0}
+.statuscard,.diffcard{border:1px solid rgba(55,232,255,.20);border-radius:8px;background:rgba(55,232,255,.045);padding:10px 12px}
+.statuscard strong,.diffcard strong{display:block;color:#dff9ff;margin-bottom:4px}
+.diffgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin:12px 0}
+.modulechain{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;margin:12px 0}
+.modulebox{border:1px solid rgba(255,79,216,.28);background:rgba(255,79,216,.06);border-radius:8px;padding:10px 12px;min-width:116px;text-align:center}
+</style></head>
+<body><main>
+<section class="hero"><h1>ToricGT Tropical-To-Toric Embedding Visualizations</h1>
+<p>Visual audit pages for exact finite sidecars embedding tropical ring attention into toric geometry.  Panels show initial degenerations, Newton polytopes, normal fans, toric orbit strata, monomial staircases, toric ideals, free resolutions, and optional Klyachko vector-bundle/sheaf certificates.</p>
+<p><a class="pill" href="manifest.json">manifest JSON</a><a class="pill" href="vector_bundle/klyachko_vector_bundle.html">Klyachko vector-bundle page</a></p></section>
+<section class="grid"><section class="card"><h2>record_000</h2>
+<div class="metric"><span>exponents</span><span>8</span></div>
+<div class="metric"><span>dimension</span><span>2</span></div>
+<div class="metric"><span>Sage exact</span><span>True</span></div>
+<div class="metric"><span>Macaulay2 exact</span><span>True</span></div>
+<p><a class="pill" href="records/record_000_toric_embedding.html">open report</a><a class="pill" href="records/record_000_toric_embedding_summary.json">summary JSON</a></p></section><section class="card"><h2>rich_miller_sturmfels_staircase_demo</h2>
+<div class="metric"><span>exponents</span><span>9</span></div>
+<div class="metric"><span>dimension</span><span>2</span></div>
+<div class="metric"><span>Sage exact</span><span>False</span></div>
+<div class="metric"><span>Macaulay2 exact</span><span>False</span></div>
+<p><a class="pill" href="records/rich_miller_sturmfels_staircase_demo_toric_embedding.html">open report</a><a class="pill" href="records/rich_miller_sturmfels_staircase_demo_toric_embedding_summary.json">summary JSON</a></p></section></section>
+</main></body></html>

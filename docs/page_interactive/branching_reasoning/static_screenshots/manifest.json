@@ -1,0 +1,35 @@
+{
+  "contact_sheet": "contact_sheet.png",
+  "dag_edges": 95,
+  "decode_order": 10,
+  "index_html": "index.html",
+  "nodes": 96,
+  "payload_json": "ToricGT/outputs/smoke_oai_full_iteration_analysis_2/branching_reasoning_report/branching_reasoning_payload.json",
+  "radius_index": 3,
+  "reasoning_level": 95,
+  "schema": "toricgt.branching_payload_static_screenshots.v1",
+  "screenshots": [
+    {
+      "label": "summary",
+      "path": "summary.png"
+    },
+    {
+      "label": "full trajectory filtered complex",
+      "path": "full_trajectory_filtered_complex.png"
+    },
+    {
+      "label": "selected step simplex tree and token metadata",
+      "path": "selected_step_simplex_tree_tokens.png"
+    },
+    {
+      "label": "analogical memory simplex-tree map",
+      "path": "analogical_memory_simplex_tree_map.png"
+    },
+    {
+      "label": "vectorized persistent-homology features",
+      "path": "vectorized_ph_features.png"
+    }
+  ],
+  "selected_step_id": 48,
+  "step_radius_index": 6
+}

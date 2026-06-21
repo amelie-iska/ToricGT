@@ -1,0 +1,101 @@
+{
+  "backend": "gudhi",
+  "config": {
+    "macaulay2_resolutions": true,
+    "max_dimension": 2,
+    "max_points": 10,
+    "num_levels": 5,
+    "num_radii": 5,
+    "ph_feature_visualizations": true,
+    "radius_quantile": 0.62
+  },
+  "mean_be_rank_residual_c1": 0.0,
+  "mean_betti0": 2.0,
+  "mean_betti1": 0.0,
+  "mean_finite_field_d_squared_zero": 1.0,
+  "mean_finite_field_exact_at_c1": 1.0,
+  "mean_h0_entropy_vector_norm": 0.12597275619706344,
+  "mean_h0_interval_count": 8.0,
+  "mean_h0_landscape_norm": 201.0671401191265,
+  "mean_h0_max_persistence": 28.6704512744413,
+  "mean_h0_mean_persistence": 23.535594295932455,
+  "mean_h0_persistence_entropy": 0.9400588649387569,
+  "mean_h0_persistence_image_norm": 91.05452765354467,
+  "mean_h0_silhouette_norm": 74.43979793516534,
+  "mean_h0_total_persistence": 188.28475436745964,
+  "mean_h1_entropy_vector_norm": 0.0,
+  "mean_h1_interval_count": 0.0,
+  "mean_h1_landscape_norm": 0.0,
+  "mean_h1_max_persistence": 0.0,
+  "mean_h1_mean_persistence": 0.0,
+  "mean_h1_persistence_entropy": 0.0,
+  "mean_h1_persistence_image_norm": 0.0,
+  "mean_h1_silhouette_norm": 0.0,
+  "mean_h1_total_persistence": 0.0,
+  "mean_h2_entropy_vector_norm": 0.0,
+  "mean_h2_interval_count": 0.0,
+  "mean_h2_landscape_norm": 0.0,
+  "mean_h2_max_persistence": 0.0,
+  "mean_h2_mean_persistence": 0.0,
+  "mean_h2_persistence_entropy": 0.0,
+  "mean_h2_persistence_image_norm": 0.0,
+  "mean_h2_silhouette_norm": 0.0,
+  "mean_h2_total_persistence": 0.0,
+  "mean_macaulay2_d_squared_zero": 1.0,
+  "mean_macaulay2_homogeneous_d1": 1.0,
+  "mean_macaulay2_homogeneous_d2": 1.0,
+  "mean_macaulay2_identity_cone_acyclic": 1.0,
+  "mean_num_simplices": 82.0,
+  "mean_points": 10.0,
+  "mean_simplicial_map_valid_fraction": 1.0,
+  "mean_two_parameter_commutative_square_residual": 0.0,
+  "ph_feature_artifacts": [
+    {
+      "json": "ph_features/tok_emb_weight_ph_features.json",
+      "npz": "ph_features/tok_emb_weight_ph_features.npz",
+      "record_id": "tok_emb_weight"
+    }
+  ],
+  "records": 1,
+  "records_detail": [
+    {
+      "betti": {
+        "0": 2,
+        "1": 0,
+        "2": 24
+      },
+      "finite_field_chain_audit": {
+        "buchsbaum_eisenbud_rank_condition_c1": true,
+        "buchsbaum_eisenbud_rank_residual_c1": 0,
+        "chain_dimensions": {
+          "C0": 10,
+          "C1": 28,
+          "C2": 44
+        },
+        "d1d2_residual": 0,
+        "d_squared_zero": true,
+        "exact_at_c1": true,
+        "field": "F2",
+        "h1_dim": 0,
+        "image_d2_dim": 20,
+        "kernel_d1_dim": 20,
+        "rank_d1": 8,
+        "rank_d2": 20
+      },
+      "macaulay2_identity_cone_acyclic": 1.0,
+      "max_radius": 35.19865058474126,
+      "num_simplices": 82,
+      "points": 10,
+      "record_id": "tok_emb_weight",
+      "structure_map_summary": {
+        "all_simplicial_maps_valid": true,
+        "map_count": 40,
+        "mean_simplicial_map_valid_fraction": 1.0,
+        "min_simplicial_map_valid_fraction": 1.0,
+        "x_level_map_count": 20,
+        "y_radius_map_count": 20
+      }
+    }
+  ],
+  "schema": "toricgt.gudhi_persistence.summary.v1"
+}

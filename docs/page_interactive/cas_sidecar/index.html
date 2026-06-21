@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ToricGT Embedding CAS Sidecar</title><style>
+:root { color-scheme: dark; --bg:#030712; --panel:#07111f; --text:#e8fbff; --muted:#91a8b7; --cyan:#37e8ff; --border:rgba(55,232,255,.28); }
+body { margin:0; font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:radial-gradient(circle at top left,#092238 0,var(--bg) 42rem); color:var(--text); }
+main { max-width:1240px; margin:0 auto; padding:32px 24px 64px; }
+a { color:var(--cyan); text-decoration:none; } a:hover { text-decoration:underline; }
+.hero,.card,.panel { background:linear-gradient(180deg,rgba(11,23,40,.94),rgba(5,13,25,.96)); border:1px solid var(--border); border-radius:8px; box-shadow:0 18px 50px rgba(0,0,0,.28); }
+.hero { padding:24px; margin-bottom:20px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
+.card,.panel { padding:16px; margin-bottom:16px; }
+h1 { margin:0 0 8px; font-size:28px; letter-spacing:0; } h2 { margin:0 0 12px; font-size:18px; letter-spacing:0; }
+p { color:var(--muted); line-height:1.55; }
+.metric { display:flex; justify-content:space-between; gap:14px; border-bottom:1px solid rgba(145,168,183,.14); padding:7px 0; }
+.metric span:first-child { color:var(--muted); } .metric span:last-child { color:white; text-align:right; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.links { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.pill { border:1px solid var(--border); border-radius:999px; padding:6px 10px; background:rgba(55,232,255,.07); }
+.tablewrap { overflow-x:auto; margin-top:12px; }
+table { border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums; }
+th,td { border:1px solid rgba(145,168,183,.17); padding:6px 8px; text-align:right; }
+th:first-child,td:first-child { text-align:left; color:var(--muted); }
+pre { white-space:pre-wrap; overflow-x:auto; background:#020713; border:1px solid rgba(145,168,183,.18); border-radius:8px; padding:14px; color:#dff8ff; }
+summary { cursor:pointer; color:var(--cyan); }
+</style></head>
+<body><main>
+<section class="hero">
+  <h1>ToricGT Embedding CAS Sidecar</h1>
+  <p>Exact SageMath and Macaulay2 toric computations from saved TokenGT embedding payloads.</p>
+  <div class="links"><a class="pill" href="manifest.json">manifest JSON</a></div>
+</section>
+<section class="grid"><div class="card">
+  <h2>record_000</h2>
+  <div class="metric"><span>record</span><span>record_000</span></div><div class="metric"><span>embedding NPZ</span><span>ToricGT/outputs/smoke_oai_full_iteration_analysis_2/geometry/embeddings/oai_ckpt_toricgt-oai-sidecar-bpb112-campaign-20260616T222606Z-run001-large_batch_lower_lr_sidecar_light-20260616T222607Z_step_005000_batch000_row00.npz</span></div><div class="metric"><span>exponent method</span><span>actual_hidden_pca_rank_quantized_nonnegative_exponents</span></div><div class="metric"><span>unique exponents</span><span>8</span></div><div class="metric"><span>Sage fan dimension</span><span>2</span></div><div class="metric"><span>Sage fan one-dimensional cones</span><span>4</span></div><div class="metric"><span>Macaulay2 toric generators</span><span>45</span></div><div class="metric"><span>Macaulay2 resolution length</span><span>7</span></div><div class="metric"><span>Macaulay2 projective dimension</span><span>-1</span></div><div class="metric"><span>Macaulay2 regularity</span><span>9</span></div><div class="metric"><span>Tropical facets</span><span>28</span></div><div class="metric"><span>Tropical balanced</span><span>True</span></div><div class="metric"><span>Chow/Minkowski certified</span><span>True</span></div><div class="metric"><span>identity cone H0</span><span>R^0</span></div><div class="metric"><span>identity cone H1</span><span>R^0</span></div><div class="metric"><span>identity cone H2</span><span>R^0</span></div>
+  <div class="links"><a class="pill" href="records/record_000_cas_sidecar.html">open page</a><a class="pill" href="ToricGT/outputs/smoke_oai_full_iteration_analysis_2/embedding_cas_sidecar/records/record_000_cas_sidecar.json">JSON</a></div>
+</div></section>
+</main></body></html>

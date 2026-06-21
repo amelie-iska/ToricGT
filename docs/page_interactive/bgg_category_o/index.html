@@ -1,0 +1,684 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Toric BGG Category O Report</title><style>
+:root { color-scheme: dark; --bg:#030712; --panel:#07111f; --text:#e8fbff; --muted:#91a8b7; --cyan:#37e8ff; --magenta:#ff4fd8; --green:#8cff6a; --border:rgba(55,232,255,.28); }
+body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:radial-gradient(circle at top left,#092238 0,var(--bg) 42rem); color:var(--text); }
+main { max-width:1180px; margin:0 auto; padding:32px 24px 64px; }
+.hero,.card,.panel { background:linear-gradient(180deg,rgba(11,23,40,.94),rgba(5,13,25,.96)); border:1px solid var(--border); border-radius:8px; box-shadow:0 18px 50px rgba(0,0,0,.28); }
+.hero,.card,.panel { padding:18px; margin-bottom:16px; }
+.grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
+h1 { margin:0 0 8px; font-size:28px; letter-spacing:0; } h2 { margin:0 0 10px; font-size:18px; letter-spacing:0; }
+p { color:var(--muted); line-height:1.55; }
+a { color:var(--cyan); text-decoration:none; } a:hover { text-decoration:underline; }
+.metric { display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid rgba(145,168,183,.14); padding:7px 0; }
+.metric span:first-child { color:var(--muted); }
+.metric span:last-child { color:white; overflow-wrap:anywhere; text-align:right; font-variant-numeric:tabular-nums; }
+.badge { display:inline-block; border:1px solid rgba(140,255,106,.35); border-radius:999px; color:#d9ffd2; background:rgba(140,255,106,.11); padding:4px 8px; font-size:12px; margin:2px 4px 2px 0; }
+.badge.off { border-color:rgba(255,79,216,.45); color:#ffd8f7; background:rgba(255,79,216,.12); }
+pre { white-space:pre-wrap; overflow-x:auto; background:#020713; border:1px solid rgba(145,168,183,.18); border-radius:8px; padding:14px; color:#dff8ff; }
+.links { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.pill { border:1px solid var(--border); border-radius:999px; padding:6px 10px; background:rgba(55,232,255,.07); }
+</style></head>
+<body><main>
+<section class="hero">
+  <h1>Toric BGG Category O Report</h1>
+  <p>Finite Category O/BGG diagnostics with explicit certificate provenance.  Missing metrics are marked unavailable rather than replaced by proxy values.</p>
+  <div><span class="badge off">exact_certificate_available: 0.0</span><span class="badge off">exact_finite_chain_provenance: 0.0</span><span class="badge">late_gate_required: 1.0</span></div>
+  <div class="links"><a class="pill" href="bgg_category_o_report.json">report JSON</a></div>
+</section>
+<section class="grid">
+  <div class="card"><h2>Resolution And Standard Filtration</h2><div class="metric"><span>toric_bgg_d2_residual</span><span>unavailable <span class="badge off">unavailable</span><br><small>exact_finite_chain_complex_boundary_square</small></span></div><div class="metric"><span>toric_bgg_standard_leakage</span><span>unavailable <span class="badge off">unavailable</span><br><small>exact_finite_chain_poset_standard_mask</small></span></div></div>
+  <div class="card"><h2>Koszul, Gale, And Signature</h2><div class="metric"><span>toric_bgg_koszul_linearity_residual</span><span>unavailable <span class="badge off">unavailable</span><br><small>exact_finite_koszul_degree_profile</small></span></div><div class="metric"><span>toric_bgg_gale_dual_consistency</span><span>unavailable <span class="badge off">unavailable</span><br><small>finite_gale_dual_signature_pair</small></span></div><div class="metric"><span>toric_bgg_signature_smoothness</span><span>unavailable <span class="badge off">unavailable</span><br><small>finite_bgg_signature_path</small></span></div><div class="metric"><span>toric_bgg_standard_entropy</span><span>unavailable <span class="badge off">unavailable</span><br><small>finite_standard_label_distribution</small></span></div></div>
+</section>
+<section class="panel"><h2>Raw Metrics</h2><pre>{
+  &quot;artifact_bytes&quot;: 14959389,
+  &quot;checkpoint&quot;: &quot;ToricGT/checkpoints/toricgt-oai-sidecar-bpb112-campaign-20260616T222606Z-run001-large_batch_lower_lr_sidecar_light-20260616T222607Z/toricgt-oai-sidecar-bpb112-campaign-20260616T222606Z-run001-large_batch_lower_lr_sidecar_light-20260616T222607Z_step_005000.pt&quot;,
+  &quot;checkpoint_paths&quot;: [
+    {
+      &quot;path&quot;: &quot;ToricGT/checkpoints/toricgt-oai-sidecar-bpb112-campaign-20260616T222606Z-run001-large_batch_lower_lr_sidecar_light-20260616T222607Z/toricgt-oai-sidecar-bpb112-campaign-20260616T222606Z-run001-large_batch_lower_lr_sidecar_light-20260616T222607Z_step_000000.pt&quot;,
+      &quot;step&quot;: 0,
+      &quot;val_bpb&quot;: 4.108633868914793
+    },
+    {
+      &quot;path&quot;: &quot;ToricGT/checkpoints/toricgt-oai-sidecar-bpb112-campaign-20260616T222606Z-run001-large_batch_lower_lr_sidecar_light-20260616T222607Z/toricgt-oai-sidecar-bpb112-campaign-20260616T222606Z-run001-large_batch_lower_lr_sidecar_light-20260616T222607Z_step_005000.pt&quot;,
+      &quot;step&quot;: 5000,
+      &quot;val_bpb&quot;: 1.261774987848364
+    }
+  ],
+  &quot;final_int8_bpb&quot;: 1.2637899,
+  &quot;final_int8_loss&quot;: 2.1338563,
+  &quot;latest_train&quot;: {
+    &quot;analogy&quot;: 0.050845,
+    &quot;graphcg&quot;: 0.014045,
+    &quot;loss&quot;: 2.1748,
+    &quot;memory&quot;: 1.386073,
+    &quot;sidecar&quot;: 5e-05,
+    &quot;step&quot;: 5000.0,
+    &quot;tokengt&quot;: 0.939152,
+    &quot;total&quot;: 5000.0
+  },
+  &quot;latest_val&quot;: {
+    &quot;bpb&quot;: 1.2618,
+    &quot;loss&quot;: 2.1305,
+    &quot;step&quot;: 5000.0,
+    &quot;total&quot;: 5000.0
+  },
+  &quot;selected_bpb&quot;: 1.2637899,
+  &quot;train_log&quot;: &quot;ToricGT/runs/oai_sidecar/toricgt-oai-sidecar-bpb112-campaign-20260616T222606Z-run001-large_batch_lower_lr_sidecar_light-20260616T222607Z/train.log&quot;,
+  &quot;train_rows&quot;: [
+    {
+      &quot;analogy&quot;: 0.069275,
+      &quot;graphcg&quot;: 0.012009,
+      &quot;loss&quot;: 6.9373,
+      &quot;memory&quot;: 2.011764,
+      &quot;sidecar&quot;: 6.4e-05,
+      &quot;step&quot;: 1.0,
+      &quot;tokengt&quot;: 1.078049,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.065324,
+      &quot;graphcg&quot;: 0.014042,
+      &quot;loss&quot;: 13.5953,
+      &quot;memory&quot;: 2.534684,
+      &quot;sidecar&quot;: 7.7e-05,
+      &quot;step&quot;: 2.0,
+      &quot;tokengt&quot;: 1.251791,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.065839,
+      &quot;graphcg&quot;: 0.015692,
+      &quot;loss&quot;: 7.8407,
+      &quot;memory&quot;: 2.971503,
+      &quot;sidecar&quot;: 0.0001,
+      &quot;step&quot;: 3.0,
+      &quot;tokengt&quot;: 1.820239,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.065193,
+      &quot;graphcg&quot;: 0.020125,
+      &quot;loss&quot;: 6.5371,
+      &quot;memory&quot;: 2.411993,
+      &quot;sidecar&quot;: 9.9e-05,
+      &quot;step&quot;: 4.0,
+      &quot;tokengt&quot;: 2.038294,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.065589,
+      &quot;graphcg&quot;: 0.02289,
+      &quot;loss&quot;: 6.9869,
+      &quot;memory&quot;: 2.309362,
+      &quot;sidecar&quot;: 0.000106,
+      &quot;step&quot;: 5.0,
+      &quot;tokengt&quot;: 2.322949,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.06467,
+      &quot;graphcg&quot;: 0.02543,
+      &quot;loss&quot;: 7.2599,
+      &quot;memory&quot;: 2.263537,
+      &quot;sidecar&quot;: 0.000112,
+      &quot;step&quot;: 6.0,
+      &quot;tokengt&quot;: 2.545363,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.065869,
+      &quot;graphcg&quot;: 0.02104,
+      &quot;loss&quot;: 6.8312,
+      &quot;memory&quot;: 2.626217,
+      &quot;sidecar&quot;: 0.000132,
+      &quot;step&quot;: 7.0,
+      &quot;tokengt&quot;: 3.026888,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.065693,
+      &quot;graphcg&quot;: 0.022083,
+      &quot;loss&quot;: 6.5019,
+      &quot;memory&quot;: 2.195629,
+      &quot;sidecar&quot;: 0.000124,
+      &quot;step&quot;: 8.0,
+      &quot;tokengt&quot;: 2.987738,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.063862,
+      &quot;graphcg&quot;: 0.025834,
+      &quot;loss&quot;: 6.278,
+      &quot;memory&quot;: 2.732787,
+      &quot;sidecar&quot;: 0.00012,
+      &quot;step&quot;: 9.0,
+      &quot;tokengt&quot;: 2.582065,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.064919,
+      &quot;graphcg&quot;: 0.025637,
+      &quot;loss&quot;: 6.2015,
+      &quot;memory&quot;: 2.283967,
+      &quot;sidecar&quot;: 0.000124,
+      &quot;step&quot;: 10.0,
+      &quot;tokengt&quot;: 2.95378,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.061809,
+      &quot;graphcg&quot;: 0.012284,
+      &quot;loss&quot;: 3.4205,
+      &quot;memory&quot;: 1.048968,
+      &quot;sidecar&quot;: 5.3e-05,
+      &quot;step&quot;: 100.0,
+      &quot;tokengt&quot;: 1.190245,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.061568,
+      &quot;graphcg&quot;: 0.011544,
+      &quot;loss&quot;: 2.818,
+      &quot;memory&quot;: 2.002901,
+      &quot;sidecar&quot;: 6.3e-05,
+      &quot;step&quot;: 200.0,
+      &quot;tokengt&quot;: 1.049445,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.05865,
+      &quot;graphcg&quot;: 0.012309,
+      &quot;loss&quot;: 2.647,
+      &quot;memory&quot;: 2.151888,
+      &quot;sidecar&quot;: 6.5e-05,
+      &quot;step&quot;: 300.0,
+      &quot;tokengt&quot;: 1.055247,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.057539,
+      &quot;graphcg&quot;: 0.013466,
+      &quot;loss&quot;: 2.4455,
+      &quot;memory&quot;: 0.93048,
+      &quot;sidecar&quot;: 5e-05,
+      &quot;step&quot;: 400.0,
+      &quot;tokengt&quot;: 1.151146,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.056687,
+      &quot;graphcg&quot;: 0.01297,
+      &quot;loss&quot;: 2.5377,
+      &quot;memory&quot;: 0.86406,
+      &quot;sidecar&quot;: 4.7e-05,
+      &quot;step&quot;: 500.0,
+      &quot;tokengt&quot;: 1.08729,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.059175,
+      &quot;graphcg&quot;: 0.011821,
+      &quot;loss&quot;: 2.5522,
+      &quot;memory&quot;: 0.283094,
+      &quot;sidecar&quot;: 3.6e-05,
+      &quot;step&quot;: 600.0,
+      &quot;tokengt&quot;: 1.025294,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.06005,
+      &quot;graphcg&quot;: 0.012136,
+      &quot;loss&quot;: 2.5086,
+      &quot;memory&quot;: 1.608239,
+      &quot;sidecar&quot;: 5.7e-05,
+      &quot;step&quot;: 700.0,
+      &quot;tokengt&quot;: 1.056007,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.056418,
+      &quot;graphcg&quot;: 0.012559,
+      &quot;loss&quot;: 2.3928,
+      &quot;memory&quot;: 1.5552,
+      &quot;sidecar&quot;: 5.7e-05,
+      &quot;step&quot;: 800.0,
+      &quot;tokengt&quot;: 1.084584,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.059107,
+      &quot;graphcg&quot;: 0.011996,
+      &quot;loss&quot;: 2.4122,
+      &quot;memory&quot;: 0.695812,
+      &quot;sidecar&quot;: 4.2e-05,
+      &quot;step&quot;: 900.0,
+      &quot;tokengt&quot;: 1.024466,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.059322,
+      &quot;graphcg&quot;: 0.01302,
+      &quot;loss&quot;: 2.3965,
+      &quot;memory&quot;: 0.435483,
+      &quot;sidecar&quot;: 4e-05,
+      &quot;step&quot;: 1000.0,
+      &quot;tokengt&quot;: 1.094735,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.058245,
+      &quot;graphcg&quot;: 0.01213,
+      &quot;loss&quot;: 2.3126,
+      &quot;memory&quot;: 0.666252,
+      &quot;sidecar&quot;: 4.1e-05,
+      &quot;step&quot;: 1100.0,
+      &quot;tokengt&quot;: 0.991489,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.056462,
+      &quot;graphcg&quot;: 0.012174,
+      &quot;loss&quot;: 2.3214,
+      &quot;memory&quot;: 1.992539,
+      &quot;sidecar&quot;: 6.2e-05,
+      &quot;step&quot;: 1200.0,
+      &quot;tokengt&quot;: 1.037291,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.054211,
+      &quot;graphcg&quot;: 0.012754,
+      &quot;loss&quot;: 2.3434,
+      &quot;memory&quot;: 1.2659,
+      &quot;sidecar&quot;: 5.1e-05,
+      &quot;step&quot;: 1300.0,
+      &quot;tokengt&quot;: 1.020047,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.055899,
+      &quot;graphcg&quot;: 0.012942,
+      &quot;loss&quot;: 2.3576,
+      &quot;memory&quot;: 0.641736,
+      &quot;sidecar&quot;: 4.1e-05,
+      &quot;step&quot;: 1400.0,
+      &quot;tokengt&quot;: 1.017678,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.054081,
+      &quot;graphcg&quot;: 0.012676,
+      &quot;loss&quot;: 2.3147,
+      &quot;memory&quot;: 1.183852,
+      &quot;sidecar&quot;: 5e-05,
+      &quot;step&quot;: 1500.0,
+      &quot;tokengt&quot;: 1.033712,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.059048,
+      &quot;graphcg&quot;: 0.016724,
+      &quot;loss&quot;: 2.247,
+      &quot;memory&quot;: 2.385678,
+      &quot;sidecar&quot;: 7e-05,
+      &quot;step&quot;: 1600.0,
+      &quot;tokengt&quot;: 1.109368,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.05787,
+      &quot;graphcg&quot;: 0.01449,
+      &quot;loss&quot;: 2.2917,
+      &quot;memory&quot;: 2.123466,
+      &quot;sidecar&quot;: 6.5e-05,
+      &quot;step&quot;: 1700.0,
+      &quot;tokengt&quot;: 1.063921,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.058021,
+      &quot;graphcg&quot;: 0.023316,
+      &quot;loss&quot;: 2.2847,
+      &quot;memory&quot;: 2.225974,
+      &quot;sidecar&quot;: 7.1e-05,
+      &quot;step&quot;: 1800.0,
+      &quot;tokengt&quot;: 1.224626,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.057338,
+      &quot;graphcg&quot;: 0.019149,
+      &quot;loss&quot;: 2.2344,
+      &quot;memory&quot;: 0.909497,
+      &quot;sidecar&quot;: 4.4e-05,
+      &quot;step&quot;: 1900.0,
+      &quot;tokengt&quot;: 0.981221,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.053978,
+      &quot;graphcg&quot;: 0.015593,
+      &quot;loss&quot;: 2.3027,
+      &quot;memory&quot;: 1.231984,
+      &quot;sidecar&quot;: 4.9e-05,
+      &quot;step&quot;: 2000.0,
+      &quot;tokengt&quot;: 0.982788,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.055583,
+      &quot;graphcg&quot;: 0.023537,
+      &quot;loss&quot;: 2.2811,
+      &quot;memory&quot;: 1.437801,
+      &quot;sidecar&quot;: 5.3e-05,
+      &quot;step&quot;: 2100.0,
+      &quot;tokengt&quot;: 1.008488,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.054244,
+      &quot;graphcg&quot;: 0.016751,
+      &quot;loss&quot;: 2.3089,
+      &quot;memory&quot;: 2.652962,
+      &quot;sidecar&quot;: 7.1e-05,
+      &quot;step&quot;: 2200.0,
+      &quot;tokengt&quot;: 1.000793,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.055119,
+      &quot;graphcg&quot;: 0.017161,
+      &quot;loss&quot;: 2.1725,
+      &quot;memory&quot;: 0.53965,
+      &quot;sidecar&quot;: 4.1e-05,
+      &quot;step&quot;: 2300.0,
+      &quot;tokengt&quot;: 1.059081,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.056089,
+      &quot;graphcg&quot;: 0.021987,
+      &quot;loss&quot;: 2.2974,
+      &quot;memory&quot;: 0.808427,
+      &quot;sidecar&quot;: 4.4e-05,
+      &quot;step&quot;: 2400.0,
+      &quot;tokengt&quot;: 1.024187,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.057297,
+      &quot;graphcg&quot;: 0.016425,
+      &quot;loss&quot;: 2.2627,
+      &quot;memory&quot;: 1.542774,
+      &quot;sidecar&quot;: 5.5e-05,
+      &quot;step&quot;: 2500.0,
+      &quot;tokengt&quot;: 1.010784,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.05399,
+      &quot;graphcg&quot;: 0.015322,
+      &quot;loss&quot;: 2.2451,
+      &quot;memory&quot;: 1.378984,
+      &quot;sidecar&quot;: 5.2e-05,
+      &quot;step&quot;: 2600.0,
+      &quot;tokengt&quot;: 0.994992,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.053996,
+      &quot;graphcg&quot;: 0.017777,
+      &quot;loss&quot;: 2.2206,
+      &quot;memory&quot;: 0.213735,
+      &quot;sidecar&quot;: 3.4e-05,
+      &quot;step&quot;: 2700.0,
+      &quot;tokengt&quot;: 0.985447,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.053746,
+      &quot;graphcg&quot;: 0.018342,
+      &quot;loss&quot;: 2.1977,
+      &quot;memory&quot;: 2.12526,
+      &quot;sidecar&quot;: 6.2e-05,
+      &quot;step&quot;: 2800.0,
+      &quot;tokengt&quot;: 0.968452,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.060104,
+      &quot;graphcg&quot;: 0.013902,
+      &quot;loss&quot;: 2.2142,
+      &quot;memory&quot;: 0.619013,
+      &quot;sidecar&quot;: 4e-05,
+      &quot;step&quot;: 2900.0,
+      &quot;tokengt&quot;: 0.983764,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.051859,
+      &quot;graphcg&quot;: 0.01685,
+      &quot;loss&quot;: 2.3959,
+      &quot;memory&quot;: 0.53909,
+      &quot;sidecar&quot;: 3.8e-05,
+      &quot;step&quot;: 3000.0,
+      &quot;tokengt&quot;: 0.962279,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.053296,
+      &quot;graphcg&quot;: 0.017767,
+      &quot;loss&quot;: 2.212,
+      &quot;memory&quot;: 1.795871,
+      &quot;sidecar&quot;: 5.7e-05,
+      &quot;step&quot;: 3100.0,
+      &quot;tokengt&quot;: 0.9776,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.053487,
+      &quot;graphcg&quot;: 0.01512,
+      &quot;loss&quot;: 2.2593,
+      &quot;memory&quot;: 0.305547,
+      &quot;sidecar&quot;: 3.4e-05,
+      &quot;step&quot;: 3200.0,
+      &quot;tokengt&quot;: 0.958006,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.053806,
+      &quot;graphcg&quot;: 0.021742,
+      &quot;loss&quot;: 2.3183,
+      &quot;memory&quot;: 2.280042,
+      &quot;sidecar&quot;: 6.4e-05,
+      &quot;step&quot;: 3300.0,
+      &quot;tokengt&quot;: 0.969923,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.057412,
+      &quot;graphcg&quot;: 0.014496,
+      &quot;loss&quot;: 2.1641,
+      &quot;memory&quot;: 1.224386,
+      &quot;sidecar&quot;: 4.9e-05,
+      &quot;step&quot;: 3400.0,
+      &quot;tokengt&quot;: 0.990262,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.054761,
+      &quot;graphcg&quot;: 0.020255,
+      &quot;loss&quot;: 2.1807,
+      &quot;memory&quot;: 0.33833,
+      &quot;sidecar&quot;: 3.5e-05,
+      &quot;step&quot;: 3500.0,
+      &quot;tokengt&quot;: 0.948206,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.053634,
+      &quot;graphcg&quot;: 0.015911,
+      &quot;loss&quot;: 2.2234,
+      &quot;memory&quot;: 1.811415,
+      &quot;sidecar&quot;: 5.7e-05,
+      &quot;step&quot;: 3600.0,
+      &quot;tokengt&quot;: 0.960243,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.055962,
+      &quot;graphcg&quot;: 0.015239,
+      &quot;loss&quot;: 2.3416,
+      &quot;memory&quot;: 0.308743,
+      &quot;sidecar&quot;: 3.4e-05,
+      &quot;step&quot;: 3700.0,
+      &quot;tokengt&quot;: 0.951583,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.052522,
+      &quot;graphcg&quot;: 0.018716,
+      &quot;loss&quot;: 2.1343,
+      &quot;memory&quot;: 0.88551,
+      &quot;sidecar&quot;: 4.4e-05,
+      &quot;step&quot;: 3800.0,
+      &quot;tokengt&quot;: 0.985776,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.053388,
+      &quot;graphcg&quot;: 0.017147,
+      &quot;loss&quot;: 2.1237,
+      &quot;memory&quot;: 0.883946,
+      &quot;sidecar&quot;: 4.4e-05,
+      &quot;step&quot;: 3900.0,
+      &quot;tokengt&quot;: 0.977429,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.058864,
+      &quot;graphcg&quot;: 0.014922,
+      &quot;loss&quot;: 2.1847,
+      &quot;memory&quot;: 0.876848,
+      &quot;sidecar&quot;: 4.4e-05,
+      &quot;step&quot;: 4000.0,
+      &quot;tokengt&quot;: 0.982469,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.052311,
+      &quot;graphcg&quot;: 0.016461,
+      &quot;loss&quot;: 2.1556,
+      &quot;memory&quot;: 3.027361,
+      &quot;sidecar&quot;: 7.5e-05,
+      &quot;step&quot;: 4100.0,
+      &quot;tokengt&quot;: 0.965038,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.055184,
+      &quot;graphcg&quot;: 0.013547,
+      &quot;loss&quot;: 2.1951,
+      &quot;memory&quot;: 1.178715,
+      &quot;sidecar&quot;: 4.7e-05,
+      &quot;step&quot;: 4200.0,
+      &quot;tokengt&quot;: 0.9586,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.054757,
+      &quot;graphcg&quot;: 0.015247,
+      &quot;loss&quot;: 2.0342,
+      &quot;memory&quot;: 1.155694,
+      &quot;sidecar&quot;: 4.7e-05,
+      &quot;step&quot;: 4300.0,
+      &quot;tokengt&quot;: 0.969107,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.053428,
+      &quot;graphcg&quot;: 0.015607,
+      &quot;loss&quot;: 2.119,
+      &quot;memory&quot;: 0.422669,
+      &quot;sidecar&quot;: 3.7e-05,
+      &quot;step&quot;: 4400.0,
+      &quot;tokengt&quot;: 0.976824,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.050698,
+      &quot;graphcg&quot;: 0.0148,
+      &quot;loss&quot;: 2.0703,
+      &quot;memory&quot;: 0.289394,
+      &quot;sidecar&quot;: 3.4e-05,
+      &quot;step&quot;: 4500.0,
+      &quot;tokengt&quot;: 0.944766,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.057014,
+      &quot;graphcg&quot;: 0.016647,
+      &quot;loss&quot;: 2.2108,
+      &quot;memory&quot;: 0.428204,
+      &quot;sidecar&quot;: 3.6e-05,
+      &quot;step&quot;: 4600.0,
+      &quot;tokengt&quot;: 0.94004,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.052038,
+      &quot;graphcg&quot;: 0.016382,
+      &quot;loss&quot;: 2.1286,
+      &quot;memory&quot;: 2.30591,
+      &quot;sidecar&quot;: 6.4e-05,
+      &quot;step&quot;: 4700.0,
+      &quot;tokengt&quot;: 0.944055,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.051491,
+      &quot;graphcg&quot;: 0.017248,
+      &quot;loss&quot;: 2.1622,
+      &quot;memory&quot;: 1.401399,
+      &quot;sidecar&quot;: 5.1e-05,
+      &quot;step&quot;: 4800.0,
+      &quot;tokengt&quot;: 0.953942,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.059614,
+      &quot;graphcg&quot;: 0.014033,
+      &quot;loss&quot;: 2.1585,
+      &quot;memory&quot;: 0.761653,
+      &quot;sidecar&quot;: 4.1e-05,
+      &quot;step&quot;: 4900.0,
+      &quot;tokengt&quot;: 0.946217,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;analogy&quot;: 0.050845,
+      &quot;graphcg&quot;: 0.014045,
+      &quot;loss&quot;: 2.1748,
+      &quot;memory&quot;: 1.386073,
+      &quot;sidecar&quot;: 5e-05,
+      &quot;step&quot;: 5000.0,
+      &quot;tokengt&quot;: 0.939152,
+      &quot;total&quot;: 5000.0
+    }
+  ],
+  &quot;val_rows&quot;: [
+    {
+      &quot;bpb&quot;: 4.1086,
+      &quot;loss&quot;: 6.9373,
+      &quot;step&quot;: 0.0,
+      &quot;total&quot;: 5000.0
+    },
+    {
+      &quot;bpb&quot;: 1.2618,
+      &quot;loss&quot;: 2.1305,
+      &quot;step&quot;: 5000.0,
+      &quot;total&quot;: 5000.0
+    }
+  ]
+}</pre></section>
+</main></body></html>

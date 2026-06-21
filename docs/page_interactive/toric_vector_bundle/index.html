@@ -1,0 +1,343 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Toric Vector Bundle / Sheaf Report</title><style>
+:root { color-scheme: dark; --bg:#030712; --panel:#07111f; --text:#e8fbff; --muted:#91a8b7; --cyan:#37e8ff; --magenta:#ff4fd8; --green:#8cff6a; --border:rgba(55,232,255,.28); }
+body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:radial-gradient(circle at top left,#092238 0,var(--bg) 42rem); color:var(--text); }
+main { max-width:1180px; margin:0 auto; padding:32px 24px 64px; }
+.hero,.card,.panel { background:linear-gradient(180deg,rgba(11,23,40,.94),rgba(5,13,25,.96)); border:1px solid var(--border); border-radius:8px; box-shadow:0 18px 50px rgba(0,0,0,.28); padding:18px; margin-bottom:16px; }
+.grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
+h1 { margin:0 0 8px; font-size:28px; letter-spacing:0; } h2 { margin:0 0 10px; font-size:18px; letter-spacing:0; }
+p { color:var(--muted); line-height:1.55; }
+a { color:var(--cyan); text-decoration:none; }
+.metric { display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid rgba(145,168,183,.14); padding:7px 0; }
+.metric span:first-child { color:var(--muted); }
+.metric span:last-child { color:white; overflow-wrap:anywhere; text-align:right; font-variant-numeric:tabular-nums; }
+pre { white-space:pre-wrap; overflow-x:auto; background:#020713; border:1px solid rgba(145,168,183,.18); border-radius:8px; padding:14px; color:#dff8ff; }
+.links { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.pill { border:1px solid var(--border); border-radius:999px; padding:6px 10px; background:rgba(55,232,255,.07); }
+.badge { display:inline-block; border:1px solid rgba(140,255,106,.35); border-radius:999px; color:#d9ffd2; background:rgba(140,255,106,.11); padding:4px 8px; font-size:12px; margin:2px 4px 2px 0; }
+</style></head>
+<body><main>
+<section class="hero">
+  <h1>Toric Vector Bundle / Sheaf Report</h1>
+  <p>Exact Macaulay2 ToricVectorBundles certificate with structured Klyachko filtrations, chart transitions, Cech cocycle checks, and cohomology summary.</p>
+  <div class="links"><a class="pill" href="toric_vector_bundle_certificate.json">certificate JSON</a></div>
+</section>
+<section class="grid">
+  <div class="card"><h2>Bundle</h2>
+    <div class="metric"><span>provenance</span><span>exact_cas/macaulay2</span></div>
+    <div class="metric"><span>ambient</span><span>P2</span></div>
+    <div class="metric"><span>rank</span><span>2</span></div>
+    <div class="metric"><span>charts</span><span>3</span></div>
+    <div class="metric"><span>is vector bundle</span><span>True</span></div>
+    <div class="metric"><span>Euler characteristic</span><span>2</span></div>
+  </div>
+  <div class="card"><h2>Cech And Overlap Checks</h2>
+    <p>Cocycle checks:</p><span class="badge">sigma0_sigma1_sigma2: True</span><span class="badge">sigma1_sigma2_sigma0: True</span><span class="badge">sigma2_sigma0_sigma1: True</span>
+    <p>Chart-overlap checks:</p><span class="badge">sigma0_sigma1: True</span><span class="badge">sigma1_sigma2: True</span><span class="badge">sigma2_sigma0: True</span>
+  </div>
+</section>
+<section class="panel"><h2>One-Dimensional Cones And Maximal Cones</h2><pre>{
+  &quot;maximal_cones&quot;: [
+    [
+      0,
+      1
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      2,
+      0
+    ]
+  ],
+  &quot;one_dimensional_cones&quot;: [
+    [
+      1,
+      0
+    ],
+    [
+      0,
+      1
+    ],
+    [
+      -1,
+      -1
+    ]
+  ]
+}</pre></section>
+<section class="panel"><h2>Klyachko Filtrations And Chart Weights</h2><pre>{
+  &quot;chart_weights&quot;: {
+    &quot;sigma0&quot;: [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    &quot;sigma1&quot;: [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    &quot;sigma2&quot;: [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ]
+    ]
+  },
+  &quot;one_dimensional_cone_filtrations&quot;: {
+    &quot;rho0&quot;: [
+      [
+        0,
+        2
+      ]
+    ],
+    &quot;rho1&quot;: [
+      [
+        0,
+        2
+      ]
+    ],
+    &quot;rho2&quot;: [
+      [
+        0,
+        2
+      ]
+    ]
+  }
+}</pre></section>
+<section class="panel"><h2>Transition Matrices And Cech Cocycle</h2><pre>{
+  &quot;cech_cocycle_checks&quot;: {
+    &quot;sigma0_sigma1_sigma2&quot;: true,
+    &quot;sigma1_sigma2_sigma0&quot;: true,
+    &quot;sigma2_sigma0_sigma1&quot;: true
+  },
+  &quot;chart_overlap_checks&quot;: {
+    &quot;sigma0_sigma1&quot;: true,
+    &quot;sigma1_sigma2&quot;: true,
+    &quot;sigma2_sigma0&quot;: true
+  },
+  &quot;transition_matrices&quot;: {
+    &quot;sigma0_sigma1&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma0_sigma2&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma1_sigma0&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma1_sigma2&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma2_sigma0&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma2_sigma1&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ]
+  }
+}</pre></section>
+<section class="panel"><h2>Cohomology Summary</h2><pre>{
+  &quot;H0_dimension&quot;: 2,
+  &quot;H1_dimension&quot;: 0,
+  &quot;H2_dimension&quot;: 0,
+  &quot;euler_chi&quot;: 2
+}</pre></section>
+<section class="panel"><h2>Raw Macaulay2 Fields</h2><pre>{
+  &quot;cech_cocycle_checks&quot;: {
+    &quot;sigma0_sigma1_sigma2&quot;: true,
+    &quot;sigma1_sigma2_sigma0&quot;: true,
+    &quot;sigma2_sigma0_sigma1&quot;: true
+  },
+  &quot;chart_overlap_checks&quot;: {
+    &quot;sigma0_sigma1&quot;: true,
+    &quot;sigma1_sigma2&quot;: true,
+    &quot;sigma2_sigma0&quot;: true
+  },
+  &quot;chart_weights&quot;: {
+    &quot;sigma0&quot;: [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    &quot;sigma1&quot;: [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    &quot;sigma2&quot;: [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ]
+    ]
+  },
+  &quot;class&quot;: &quot;ToricVectorBundleKlyachko&quot;,
+  &quot;cohomology_summary&quot;: {
+    &quot;H0_dimension&quot;: 2,
+    &quot;H1_dimension&quot;: 0,
+    &quot;H2_dimension&quot;: 0,
+    &quot;euler_chi&quot;: 2
+  },
+  &quot;euler_chi&quot;: 2,
+  &quot;is_general&quot;: true,
+  &quot;is_vector_bundle&quot;: true,
+  &quot;klyachko_base_raw&quot;: &quot;new HashTable from {matrix {{-1}, {-1}} =&gt; matrix {{1, 0}, {0, 1}}, matrix {{0}, {1}} =&gt; matrix {{1, 0}, {0, 1}}, matrix {{1}, {0}} =&gt; matrix {{1, 0}, {0, 1}}}&quot;,
+  &quot;klyachko_details_raw&quot;: &quot;new HashTable from {matrix {{-1}, {-1}} =&gt; (matrix {{1, 0}, {0, 1}},matrix {{0, 0}}), matrix {{1}, {0}} =&gt; (matrix {{1, 0}, {0, 1}},matrix {{0, 0}}), matrix {{0}, {1}} =&gt; (matrix {{1, 0}, {0, 1}},matrix {{0, 0}})}&quot;,
+  &quot;klyachko_filtration_raw&quot;: &quot;new HashTable from {matrix {{-1}, {-1}} =&gt; matrix {{0, 0}}, matrix {{0}, {1}} =&gt; matrix {{0, 0}}, matrix {{1}, {0}} =&gt; matrix {{0, 0}}}&quot;,
+  &quot;one_dimensional_cone_filtrations&quot;: {
+    &quot;rho0&quot;: [
+      [
+        0,
+        2
+      ]
+    ],
+    &quot;rho1&quot;: [
+      [
+        0,
+        2
+      ]
+    ],
+    &quot;rho2&quot;: [
+      [
+        0,
+        2
+      ]
+    ]
+  },
+  &quot;structured_certificate_provenance&quot;: &quot;macaulay2_toricvectorbundles_validated_P2_rank2_bundle&quot;,
+  &quot;transition_matrices&quot;: {
+    &quot;sigma0_sigma1&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma0_sigma2&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma1_sigma0&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma1_sigma2&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma2_sigma0&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    &quot;sigma2_sigma1&quot;: [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ]
+  }
+}</pre></section>
+</main></body></html>

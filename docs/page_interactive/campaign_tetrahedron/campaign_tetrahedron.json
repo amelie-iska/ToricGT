@@ -1,0 +1,201 @@
+{
+  "labels": [
+    "low BPB",
+    "compact artifact",
+    "graph/FoT pressure",
+    "toric algebraic pressure"
+  ],
+  "points": [
+    {
+      "artifact": 15180494,
+      "bpb": 0.56512505,
+      "profile": "convextok2048_det_tropical_toric_bpb",
+      "raw": {
+        "algebraic": -3.642155,
+        "compact": -15180494.0,
+        "graph_reasoning": -5.955681,
+        "low_bpb": -0.56512505
+      },
+      "run": "xtok2048_det_tropical_toric_bpb-20260621T040718Z",
+      "train_bpb": 1.0058,
+      "weights": [
+        0.38383465619241297,
+        0.05785646677159549,
+        0.0,
+        0.5583088770359915
+      ],
+      "xyz": [
+        0.884287066456809,
+        -0.23233068761517406,
+        -0.11661775407198306
+      ]
+    },
+    {
+      "artifact": 15287974,
+      "bpb": 0.66925466,
+      "profile": "gate1500_fast_main_lr_light_graphcg",
+      "raw": {
+        "algebraic": -4.29927,
+        "compact": -15287974.0,
+        "graph_reasoning": -4.96138,
+        "low_bpb": -0.66925466
+      },
+      "run": "1500_fast_main_lr_light_graphcg-20260621T101734Z",
+      "train_bpb": 0.9026,
+      "weights": [
+        0.11373704526602083,
+        0.03665811715331077,
+        0.43334952863394033,
+        0.416255308946728
+      ],
+      "xyz": [
+        0.059984708425497746,
+        0.09417314779992236,
+        -0.6992096751613368
+      ]
+    },
+    {
+      "artifact": 15525100,
+      "bpb": 0.7186649,
+      "profile": "gate1500_fast_main_lr_aux_conflict_recovery",
+      "raw": {
+        "algebraic": -4.148112,
+        "compact": -15525100.0,
+        "graph_reasoning": -4.863176,
+        "low_bpb": -0.7186649
+      },
+      "run": "t_main_lr_aux_conflict_recovery-20260621T120339Z",
+      "train_bpb": 0.8295,
+      "weights": [
+        0.0,
+        0.0,
+        0.5204338980485238,
+        0.4795661019514762
+      ],
+      "xyz": [
+        -0.040867796097047604,
+        0.040867796097047604,
+        -1.0
+      ]
+    },
+    {
+      "artifact": 14400139,
+      "bpb": 0.65850488,
+      "profile": "gate1500_structural_toric_heavy",
+      "raw": {
+        "algebraic": -4.215662,
+        "compact": -14400139.0,
+        "graph_reasoning": -4.845788,
+        "low_bpb": -0.65850488
+      },
+      "run": "gate1500_structural_toric_heavy-20260621T135410Z",
+      "train_bpb": 0.8738,
+      "weights": [
+        0.11306261135991315,
+        0.14198893697306322,
+        0.39493682128524976,
+        0.3500116303817738
+      ],
+      "xyz": [
+        -0.07385151651662604,
+        0.01599886529032589,
+        -0.4898969033340472
+      ]
+    },
+    {
+      "artifact": 14589172,
+      "bpb": 0.68937811,
+      "profile": "gate1500_bgg_memory_probe",
+      "raw": {
+        "algebraic": -4.334161,
+        "compact": -14589172.0,
+        "graph_reasoning": -4.776132,
+        "low_bpb": -0.68937811
+      },
+      "run": "-r007-gate1500_bgg_memory_probe-20260621T144834Z",
+      "train_bpb": 0.8316,
+      "weights": [
+        0.059278947367418816,
+        0.1272263744532618,
+        0.4520434395844234,
+        0.3614512385948961
+      ],
+      "xyz": [
+        -0.15853962807537028,
+        0.02264477390368433,
+        -0.6269893563586388
+      ]
+    },
+    {
+      "artifact": 12202796,
+      "bpb": 0.49533264,
+      "profile": "gate2500_experimental_family_selective",
+      "raw": {
+        "algebraic": -5.884988,
+        "compact": -12202796.0,
+        "graph_reasoning": -5.027384,
+        "low_bpb": -0.49533264
+      },
+      "run": "0_experimental_family_selective-20260621T154110Z",
+      "train_bpb": 0.5036,
+      "weights": [
+        0.3188235887087437,
+        0.3185256094767849,
+        0.2509119849430254,
+        0.11173881687144598
+      ],
+      "xyz": [
+        -0.13887518883962058,
+        0.13947114730353827,
+        0.2746983963710572
+      ]
+    },
+    {
+      "artifact": 12199688,
+      "bpb": 0.49795596,
+      "profile": "gate2500_fast_bpb_low_aux",
+      "raw": {
+        "algebraic": -7.095176,
+        "compact": -12199688.0,
+        "graph_reasoning": -4.881859,
+        "low_bpb": -0.49795596
+      },
+      "run": "-r009-gate2500_fast_bpb_low_aux-20260621T161926Z",
+      "train_bpb": 0.5056,
+      "weights": [
+        0.34093935189057406,
+        0.34499171615185675,
+        0.31406893195756924,
+        0.0
+      ],
+      "xyz": [
+        -0.31812129621885193,
+        0.31001656769628655,
+        0.37186213608486157
+      ]
+    }
+  ],
+  "title": "Campaign Metric Tetrahedron",
+  "vertices": [
+    [
+      1.0,
+      1.0,
+      1.0
+    ],
+    [
+      -1.0,
+      -1.0,
+      1.0
+    ],
+    [
+      -1.0,
+      1.0,
+      -1.0
+    ],
+    [
+      1.0,
+      -1.0,
+      -1.0
+    ]
+  ]
+}

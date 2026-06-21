@@ -1,0 +1,35 @@
+{
+  "bias_source": "record",
+  "exactness": {
+    "macaulay2_toric_ideal_exact": true,
+    "sage_normal_fan_exact": true
+  },
+  "exponent_count": 8,
+  "exponent_dim": 2,
+  "html": "records/record_000_toric_embedding.html",
+  "json": "records/record_000_toric_embedding_summary.json",
+  "miller_sturmfels_staircase": {
+    "adjacent_lcm_layer": [],
+    "minimal_generators": [
+      [
+        0,
+        0
+      ]
+    ],
+    "quotient_basis": [],
+    "staircase_threshold_by_x": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "window": {
+      "x_max": 4,
+      "y_max": 4
+    }
+  },
+  "record_id": "record_000",
+  "schema": "toricgt.toric_embedding_visual_record.v1",
+  "visualization_demo_only": false
+}

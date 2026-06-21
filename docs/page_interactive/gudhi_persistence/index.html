@@ -1,0 +1,119 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ToricGT GUDHI Persistence Audit</title><style>
+:root {
+  color-scheme: dark;
+  --bg: #030712;
+  --panel: #07111f;
+  --panel2: #0b1728;
+  --text: #e8fbff;
+  --muted: #91a8b7;
+  --cyan: #37e8ff;
+  --magenta: #ff4fd8;
+  --green: #8cff6a;
+  --border: rgba(55, 232, 255, 0.28);
+}
+body {
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top left, #092238 0, var(--bg) 42rem);
+  color: var(--text);
+}
+main { max-width: 1320px; margin: 0 auto; padding: 32px 24px 64px; }
+a { color: var(--cyan); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.hero, .card, .panel {
+  background: linear-gradient(180deg, rgba(11, 23, 40, 0.94), rgba(5, 13, 25, 0.96));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+}
+.hero { padding: 24px; margin-bottom: 20px; }
+h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: 0; }
+h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }
+p { color: var(--muted); line-height: 1.55; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.card { padding: 16px; }
+.metric { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid rgba(145,168,183,0.14); padding: 7px 0; }
+.metric span:first-child { color: var(--muted); }
+.metric span:last-child { color: white; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.pill { border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; background: rgba(55,232,255,0.07); }
+.badge { display: inline-block; border: 1px solid rgba(140,255,106,0.35); border-radius: 999px; color: #d9ffd2; background: rgba(140,255,106,0.11); padding: 4px 8px; font-size: 12px; margin: 2px 4px 2px 0; }
+.badge.fail { border-color: rgba(255,79,216,0.45); color: #ffd8f7; background: rgba(255,79,216,0.12); }
+.tablewrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { border: 1px solid rgba(145,168,183,0.17); padding: 6px 8px; text-align: right; }
+th:first-child, td:first-child { text-align: left; color: var(--muted); }
+.xygrid { width: 100%; max-width: 820px; height: auto; display: block; background: #020713; border: 1px solid rgba(145,168,183,0.18); border-radius: 8px; }
+.legend { color: var(--muted); font-size: 13px; line-height: 1.5; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--cyan); }
+pre {
+  white-space: pre-wrap;
+  overflow-x: auto;
+  background: #020713;
+  border: 1px solid rgba(145,168,183,0.18);
+  border-radius: 8px;
+  padding: 14px;
+  color: #dff8ff;
+}
+.plot { margin: 18px 0; }
+</style></head>
+<body><main>
+<section class="hero">
+  <h1>ToricGT GUDHI Persistence Audit</h1>
+  <p>Exact simplex-tree persistent homology, vectorized PH metrics, simplicial maps by radius, and Macaulay2 F2[x_level,y_radius] resolutions for reasoning trajectories.</p>
+  <div class="links"><a class="pill" href="summary.json">summary JSON</a><a class="pill" href="records.json">records JSON</a></div>
+</section>
+<section class="grid"><div class="card"><h2>Summary</h2><div class="metric"><span>schema</span><span>toricgt.gudhi_persistence.summary.v1</span></div>
+<div class="metric"><span>backend</span><span>gudhi</span></div>
+<div class="metric"><span>records</span><span>1</span></div>
+<div class="metric"><span>mean_points</span><span>10</span></div>
+<div class="metric"><span>mean_num_simplices</span><span>82</span></div>
+<div class="metric"><span>mean_betti0</span><span>2</span></div>
+<div class="metric"><span>mean_betti1</span><span>0</span></div>
+<div class="metric"><span>mean_h0_landscape_norm</span><span>201.067</span></div>
+<div class="metric"><span>mean_h1_landscape_norm</span><span>0</span></div>
+<div class="metric"><span>mean_h1_persistence_image_norm</span><span>0</span></div>
+<div class="metric"><span>mean_two_parameter_commutative_square_residual</span><span>0</span></div>
+<div class="metric"><span>mean_macaulay2_homogeneous_d1</span><span>1</span></div>
+<div class="metric"><span>mean_macaulay2_homogeneous_d2</span><span>1</span></div>
+<div class="metric"><span>mean_macaulay2_d_squared_zero</span><span>1</span></div>
+<div class="metric"><span>mean_macaulay2_identity_cone_acyclic</span><span>1</span></div>
+<div class="metric"><span>mean_finite_field_d_squared_zero</span><span>1</span></div>
+<div class="metric"><span>mean_finite_field_exact_at_c1</span><span>1</span></div>
+<div class="metric"><span>mean_be_rank_residual_c1</span><span>0</span></div>
+<div class="metric"><span>mean_simplicial_map_valid_fraction</span><span>1</span></div>
+<div class="metric"><span>mean_h0_interval_count</span><span>8</span></div>
+<div class="metric"><span>mean_h0_total_persistence</span><span>188.285</span></div>
+<div class="metric"><span>mean_h0_max_persistence</span><span>28.6705</span></div>
+<div class="metric"><span>mean_h0_mean_persistence</span><span>23.5356</span></div>
+<div class="metric"><span>mean_h0_persistence_entropy</span><span>0.940059</span></div>
+<div class="metric"><span>mean_h0_persistence_image_norm</span><span>91.0545</span></div>
+<div class="metric"><span>mean_h0_silhouette_norm</span><span>74.4398</span></div>
+<div class="metric"><span>mean_h0_entropy_vector_norm</span><span>0.125973</span></div>
+<div class="metric"><span>mean_h1_interval_count</span><span>0</span></div>
+<div class="metric"><span>mean_h1_total_persistence</span><span>0</span></div>
+<div class="metric"><span>mean_h1_max_persistence</span><span>0</span></div>
+<div class="metric"><span>mean_h1_mean_persistence</span><span>0</span></div>
+<div class="metric"><span>mean_h1_persistence_entropy</span><span>0</span></div>
+<div class="metric"><span>mean_h1_silhouette_norm</span><span>0</span></div>
+<div class="metric"><span>mean_h1_entropy_vector_norm</span><span>0</span></div>
+<div class="metric"><span>mean_h2_interval_count</span><span>0</span></div>
+<div class="metric"><span>mean_h2_total_persistence</span><span>0</span></div>
+<div class="metric"><span>mean_h2_max_persistence</span><span>0</span></div>
+<div class="metric"><span>mean_h2_mean_persistence</span><span>0</span></div>
+<div class="metric"><span>mean_h2_persistence_entropy</span><span>0</span></div>
+<div class="metric"><span>mean_h2_landscape_norm</span><span>0</span></div>
+<div class="metric"><span>mean_h2_persistence_image_norm</span><span>0</span></div>
+<div class="metric"><span>mean_h2_silhouette_norm</span><span>0</span></div>
+<div class="metric"><span>mean_h2_entropy_vector_norm</span><span>0</span></div>
+<div class="metric"><span>config</span><span>{&#x27;max_points&#x27;: 10, &#x27;max_dimension&#x27;: 2, &#x27;radius_quantile&#x27;: 0.62, &#x27;num_radii&#x27;: 5, &#x27;num_levels&#x27;: 5, &#x27;macaulay2_resolutions&#x27;: True, &#x27;ph_feature_visualizations&#x27;: True}</span></div>
+<div class="metric"><span>ph_feature_artifacts</span><span>({&#x27;record_id&#x27;: &#x27;tok_emb_weight&#x27;, &#x27;json&#x27;: &#x27;ph_features/tok_emb_weight_ph_features.json&#x27;, &#x27;npz&#x27;: &#x27;ph_features/tok_emb_weight_ph_features.npz&#x27;})</span></div></div><div class="card">
+  <h2>tok_emb_weight</h2>
+  <p>Exact GUDHI/Macaulay2 reasoning-radius persistence audit.</p>
+  <div><span class="badge">M2 d1*d2=0: PASS</span><span class="badge">homogeneous: PASS</span><span class="badge">square residual: PASS</span></div>
+  <div class="metric"><span>simplices</span><span>82</span></div><div class="metric"><span>Betti</span><span>{&#x27;0&#x27;: 2, &#x27;1&#x27;: 0, &#x27;2&#x27;: 24}</span></div><div class="metric"><span>H1 landscape norm</span><span>0</span></div><div class="metric"><span>H1 image norm</span><span>0</span></div><div class="metric"><span>H1 silhouette norm</span><span>0</span></div><div class="metric"><span>H1 entropy-vector norm</span><span>0</span></div><div class="metric"><span>GF(2) exact at C1</span><span>True</span></div><div class="metric"><span>simplicial-map validity</span><span>1</span></div>
+  <div class="links"><a class="pill" href="records/tok_emb_weight.html">open page</a><a class="pill" href="records/tok_emb_weight.json">JSON</a><a class="pill" href="macaulay2/tok_emb_weight.m2">M2 script</a><a class="pill" href="ph_features/tok_emb_weight_ph_features.json">PH JSON</a><a class="pill" href="ph_features/tok_emb_weight_ph_features.npz">PH NPZ</a></div>
+</div></section>
+</main></body></html>

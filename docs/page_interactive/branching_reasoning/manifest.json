@@ -1,0 +1,10 @@
+{
+  "analogy_emitted": true,
+  "edges": 95,
+  "index_html": "index.html",
+  "nodes": 96,
+  "payload_json": "branching_reasoning_payload.json",
+  "schema": "toricgt.branching_reasoning_visual_report.v1",
+  "source_mode": "checkpoint_embedding_payload",
+  "trajectory_html": "branching_reasoning_trajectory.html"
+}
