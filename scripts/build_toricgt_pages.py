@@ -57,7 +57,7 @@ INTERACTIVE_REPORTS = {
             "simplex edges, optional filled 2-simplices, and analogy gates."
         ),
         "features": "radius slider · reasoning-level slider · token hover/click · 3D PCA · simplex maps",
-        "embed": True,
+        "embed": False,
     },
     "gudhi_persistence": {
         "source": "outputs/smoke_oai_full_iteration_analysis_2/gudhi_persistence",
@@ -298,8 +298,15 @@ def scrub_public_report_paths(root: Path, repo: Path) -> None:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
+        text = re.sub(
+            r"\n?<!-- toricgt-html-screenshot-link:start -->.*?<!-- toricgt-html-screenshot-link:end -->\n?",
+            "\n",
+            text,
+            flags=re.DOTALL,
+        )
         text = text.replace(repo_text + "/", "ToricGT/")
         text = text.replace(repo_text, "ToricGT")
+        text = re.sub(r"/tmp/toricgt_[^\"'<>\s]+", "local-screenshot-artifact", text)
         text = re.sub(r"/home/iska/miniconda3/envs/[^\"'<>\s]+", "local-cas-executable", text)
         text = re.sub(r"/home/iska/Documents/amelie/bio/[^\"'<>\s]+", "local-experiment-artifact", text)
         path.write_text(text, encoding="utf-8")
@@ -681,37 +688,32 @@ def write_campaign_tetrahedron_report(docs: Path, rows: list[dict[str, Any]]) ->
 body{{margin:0;background:radial-gradient(circle at 10% 10%,rgba(70,231,255,.16),transparent 30rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
 main{{max-width:1280px;margin:0 auto;padding:24px}}.panel{{border:1px solid var(--line);border-radius:10px;background:rgba(7,20,33,.86);padding:16px;margin:14px 0}}
 h1{{margin:0 0 8px}}p{{color:var(--muted);line-height:1.5}}.plot{{height:620px;border:1px solid rgba(70,231,255,.16);border-radius:10px;background:#020713;margin-top:12px}}
-.plot.triangle{{height:500px}}.gallery{{display:grid;grid-template-columns:1fr;gap:18px}}.metric-note{{font-size:.92rem;color:var(--muted);margin-top:8px}}code{{color:#7df5ff}}
+.plot.triangle{{height:500px}}.view-controls{{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin:8px 0 12px}}select{{width:100%;background:#020713;color:var(--text);border:1px solid rgba(70,231,255,.28);border-radius:8px;padding:10px}}label{{display:block;color:var(--muted);font-size:.9rem;margin-bottom:4px}}.metric-note{{font-size:.92rem;color:var(--muted);margin-top:8px}}code{{color:#7df5ff}}
 table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}th,td{{border-bottom:1px solid rgba(157,184,207,.16);padding:8px;text-align:left}}td.num{{text-align:right;color:var(--gold)}}
 </style></head><body><main>
 <section class="panel"><h1>Campaign Metric Tetrahedra and Shaded Triangles</h1>
-<p>This page now renders a gallery of interactive tetrahedra and shaded metric triangles over completed campaign runs. Each tetrahedron uses four normalized axes. Each triangle uses three normalized axes; the blue background shading marks regions where the three metrics are jointly balanced, while run markers are colored by BPB and labeled by run index. Lower BPB is always better.</p>
+<p>This page renders interactive tetrahedra and shaded metric triangles over completed campaign runs without mounting every Plotly view at once. Each tetrahedron uses four normalized axes. Each triangle uses three normalized axes; the blue background shading marks regions where the three metrics are jointly balanced, while run markers are colored by BPB and labeled by run index. Lower BPB is always better.</p>
 <p><a href="campaign_tetrahedron.json">payload JSON</a></p></section>
-<section class="panel"><h2>Tetrahedron Views</h2><div id="tetra_gallery" class="gallery"></div></section>
-<section class="panel"><h2>Shaded Triangle Views</h2><p>Blue shading indicates the balanced-support region for the metric triple. Markers remain actual run observations; hover text reports profile, BPB, raw axis values, and barycentric weights.</p><div id="triangle_gallery" class="gallery"></div></section>
+<section class="panel"><h2>Tetrahedron Views</h2><div class="view-controls"><div><label for="tetra_select">metric tetrahedron</label><select id="tetra_select"><option>loading...</option></select></div><span id="tetra_count" class="metric-note"></span></div><div id="tetra_plot" class="plot"></div><p id="tetra_caption" class="metric-note"></p></section>
+<section class="panel"><h2>Shaded Triangle Views</h2><p>Blue shading indicates the balanced-support region for the metric triple. Markers remain actual run observations; hover text reports profile, BPB, raw axis values, and barycentric weights.</p><div class="view-controls"><div><label for="triangle_select">metric triangle</label><select id="triangle_select"><option>loading...</option></select></div><span id="triangle_count" class="metric-note"></span></div><div id="triangle_plot" class="plot triangle"></div><p id="triangle_caption" class="metric-note"></p></section>
 <section class="panel"><h2>Run Table</h2><table><thead><tr><th>profile</th><th>run</th><th>BPB</th><th>artifact bytes</th><th>train BPB</th></tr></thead><tbody>
 {''.join(f"<tr><td>{html.escape(p['profile'])}</td><td>{html.escape(p['run'])}</td><td class='num'>{p['bpb']:.6f}</td><td class='num'>{fmt(p.get('artifact'),0)}</td><td class='num'>{fmt(p.get('train_bpb'))}</td></tr>" for p in records)}
 </tbody></table></section>
 <script>
-const payload = {json.dumps(payload)};
+let payload = null;
 function axisRawText(point, axes) {{
   return axes.map(axis => payload.axis_library[axis].label+': '+(point.raw_values[axis] ?? 'missing')).join('<br>');
 }}
-function mountPlot(container, id, title, className) {{
-  const wrapper = document.createElement('section');
-  wrapper.className = 'panel';
-  const h = document.createElement('h3');
-  h.textContent = title;
-  const div = document.createElement('div');
-  div.id = id;
-  div.className = 'plot '+(className || '');
-  wrapper.appendChild(h);
-  wrapper.appendChild(div);
-  container.appendChild(wrapper);
-  return div;
+function populateSelect(select, views) {{
+  select.innerHTML = '';
+  views.forEach((view, idx) => {{
+    const option = document.createElement('option');
+    option.value = String(idx);
+    option.textContent = view.title;
+    select.appendChild(option);
+  }});
 }}
 function renderTetra(view) {{
-  const div = mountPlot(document.getElementById('tetra_gallery'), 'tetra_'+view.id, view.title, '');
   const vertices = view.vertices;
   const edges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
   const traces = [];
@@ -721,10 +723,10 @@ function renderTetra(view) {{
   traces.push({{type:'mesh3d', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]), i:[0,0,0,1], j:[1,1,2,2], k:[2,3,3,3], opacity:0.09, color:'#46e7ff', hoverinfo:'skip', name:'tetrahedron faces'}});
   traces.push({{type:'scatter3d', mode:'markers+text', name:'campaign runs', showlegend:false, x:view.points.map(p=>p.xyz[0]), y:view.points.map(p=>p.xyz[1]), z:view.points.map(p=>p.xyz[2]), text:view.points.map(p=>String(p.index)), customdata:view.points.map(p=>[p.profile,p.run,p.bpb,p.artifact,p.train_bpb,p.weights.map(w=>w.toFixed(3)).join(' / '),axisRawText(p, view.axes)]), marker:{{size:8,color:view.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,colorbar:{{title:'BPB'}},line:{{color:'white',width:1}}}}, hovertemplate:'%{{customdata[0]}}<br>run %{{customdata[1]}}<br>BPB %{{customdata[2]:.6f}}<br>artifact %{{customdata[3]}}<br>train BPB %{{customdata[4]}}<br>weights %{{customdata[5]}}<br>%{{customdata[6]}}<extra></extra>'}});
   traces.push({{type:'scatter3d', mode:'text', x:vertices.map(v=>v[0]), y:vertices.map(v=>v[1]), z:vertices.map(v=>v[2]+0.08), text:view.labels, textfont:{{color:'#ecfbff',size:14}}, hoverinfo:'skip', showlegend:false}});
-  Plotly.newPlot(div.id, traces, {{template:'plotly_dark', title:{{text:view.title,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', scene:{{aspectmode:'data', camera:{{eye:{{x:1.55,y:1.35,z:1.15}}}}, xaxis:{{visible:false}}, yaxis:{{visible:false}}, zaxis:{{visible:false}}, bgcolor:'#020713'}}, margin:{{l:0,r:0,t:42,b:0}}}}, {{responsive:true}});
+  Plotly.react('tetra_plot', traces, {{template:'plotly_dark', title:{{text:view.title,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', scene:{{aspectmode:'data', camera:{{eye:{{x:1.55,y:1.35,z:1.15}}}}, xaxis:{{visible:false}}, yaxis:{{visible:false}}, zaxis:{{visible:false}}, bgcolor:'#020713'}}, margin:{{l:0,r:0,t:42,b:0}}}}, {{responsive:true}});
+  document.getElementById('tetra_caption').innerHTML = 'Axes: '+view.axes.map(axis => payload.axis_library[axis].label).join(' · ');
 }}
 function renderTriangle(view) {{
-  const div = mountPlot(document.getElementById('triangle_gallery'), 'tri_'+view.id, view.title, 'triangle');
   const boundary = [...view.vertices, view.vertices[0]];
   const traces = [
     {{type:'scatter', mode:'markers', x:view.grid.map(g=>g.x), y:view.grid.map(g=>g.y), marker:{{size:9,color:view.grid.map(g=>g.shade),colorscale:'Blues',opacity:0.68,colorbar:{{title:'blue balance'}}}}, hoverinfo:'skip', showlegend:false}},
@@ -732,10 +734,29 @@ function renderTriangle(view) {{
     {{type:'scatter', mode:'markers+text', name:'campaign runs', showlegend:false, x:view.points.map(p=>p.xy[0]), y:view.points.map(p=>p.xy[1]), text:view.points.map(p=>String(p.index)), textposition:'top center', customdata:view.points.map(p=>[p.profile,p.run,p.bpb,p.weights.map(w=>w.toFixed(3)).join(' / '),p.balance.toFixed(3),axisRawText(p, view.axes)]), marker:{{size:13,color:view.points.map(p=>p.bpb),colorscale:'Magma',reversescale:true,line:{{color:'#ecfbff',width:1}},colorbar:{{title:'BPB'}}}}, hovertemplate:'%{{customdata[0]}}<br>run %{{customdata[1]}}<br>BPB %{{customdata[2]:.6f}}<br>weights %{{customdata[3]}}<br>balance %{{customdata[4]}}<br>%{{customdata[5]}}<extra></extra>'}},
     {{type:'scatter', mode:'text', x:view.vertices.map(v=>v[0]), y:view.vertices.map(v=>v[1]), text:view.labels, textfont:{{color:'#ecfbff',size:13}}, hoverinfo:'skip', showlegend:false}},
   ];
-  Plotly.newPlot(div.id, traces, {{template:'plotly_dark', title:{{text:view.title+' · '+view.shade,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', xaxis:{{visible:false,range:[0,1]}}, yaxis:{{visible:false,range:[0,1]}}, margin:{{l:12,r:12,t:42,b:12}}}}, {{responsive:true}});
+  Plotly.react('triangle_plot', traces, {{template:'plotly_dark', title:{{text:view.title+' · '+view.shade,font:{{color:'#ecfbff'}}}}, paper_bgcolor:'#020713', plot_bgcolor:'#020713', xaxis:{{visible:false,range:[0,1]}}, yaxis:{{visible:false,range:[0,1]}}, margin:{{l:12,r:12,t:42,b:12}}}}, {{responsive:true}});
+  document.getElementById('triangle_caption').innerHTML = 'Axes: '+view.axes.map(axis => payload.axis_library[axis].label).join(' · ')+' · shade: '+view.shade;
 }}
-payload.tetrahedra.forEach(renderTetra);
-payload.triangles.forEach(renderTriangle);
+function initCampaignViews(data) {{
+  payload = data;
+  const tetraSelect = document.getElementById('tetra_select');
+  const triangleSelect = document.getElementById('triangle_select');
+  populateSelect(tetraSelect, payload.tetrahedra);
+  populateSelect(triangleSelect, payload.triangles);
+  document.getElementById('tetra_count').textContent = payload.tetrahedra.length+' views; one rendered at a time';
+  document.getElementById('triangle_count').textContent = payload.triangles.length+' views; one rendered at a time';
+  tetraSelect.addEventListener('change', () => renderTetra(payload.tetrahedra[Number(tetraSelect.value)]));
+  triangleSelect.addEventListener('change', () => renderTriangle(payload.triangles[Number(triangleSelect.value)]));
+  renderTetra(payload.tetrahedra[0]);
+  renderTriangle(payload.triangles[0]);
+}}
+fetch('campaign_tetrahedron.json')
+  .then(response => response.json())
+  .then(initCampaignViews)
+  .catch(error => {{
+    document.getElementById('tetra_caption').textContent = 'Could not load campaign_tetrahedron.json: '+error;
+    document.getElementById('triangle_caption').textContent = 'Could not load campaign_tetrahedron.json: '+error;
+  }});
 </script></main></body></html>
 """
     page = "\n".join(line.rstrip() for line in page.splitlines()) + "\n"

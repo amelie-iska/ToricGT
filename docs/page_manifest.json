@@ -19,7 +19,7 @@
     "tropical": "page_assets/tropical.png",
     "vectorized_ph": "page_assets/vectorized_ph.png"
   },
-  "generated_utc": "2026-06-21 20:32:28 UTC",
+  "generated_utc": "2026-06-21 20:55:55 UTC",
   "interactive_reports": {
     "bgg_category_o": {
       "embed": "0",
@@ -36,7 +36,7 @@
       "title": "Toric BGG Category O Method"
     },
     "branching_reasoning": {
-      "embed": "1",
+      "embed": "0",
       "features": "radius slider \u00b7 reasoning-level slider \u00b7 token hover/click \u00b7 3D PCA \u00b7 simplex maps",
       "href": "page_interactive/branching_reasoning/branching_reasoning_trajectory.html",
       "summary": "Full graph-of-thought reasoning trajectory with 3D PCA display coordinates, radius and reasoning-level sliders, token hover/click panels, one-dimensional simplex edges, optional filled 2-simplices, and analogy gates.",
