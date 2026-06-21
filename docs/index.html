@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ToricGT</title>
+  <meta name="description" content="ToricGT: graph-token transformers with tropical attention embedded into toric geometry, topological audits, Toric BGG supervision, and Parameter Golf BPB training.">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #030811;
+      --panel: #071421;
+      --panel2: #0b1b2b;
+      --line: rgba(79, 223, 255, .28);
+      --text: #ecfbff;
+      --muted: #9db8cf;
+      --cyan: #46e7ff;
+      --gold: #ffd166;
+      --pink: #ff5fa2;
+      --green: #88ff86;
+      --violet: #a78bfa;
+      --shadow: 0 24px 80px rgba(0,0,0,.42);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 14% 10%, rgba(70,231,255,.20), transparent 28rem),
+        radial-gradient(circle at 82% 4%, rgba(255,95,162,.15), transparent 24rem),
+        linear-gradient(135deg, #030811 0%, #06111c 52%, #03101b 100%);
+      color: var(--text);
+    }
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { width: min(1180px, calc(100vw - 40px)); margin: 0 auto; }
+    header {
+      position: sticky; top: 0; z-index: 20;
+      backdrop-filter: blur(18px);
+      background: rgba(3,8,17,.78);
+      border-bottom: 1px solid var(--line);
+    }
+    nav { display:flex; align-items:center; justify-content:space-between; min-height:72px; gap:24px; }
+    nav .brand { font-weight: 800; letter-spacing: .02em; font-size: 1.05rem; }
+    nav .links { display:flex; flex-wrap:wrap; gap: 14px; font-size:.92rem; }
+    .hero { padding: 74px 0 48px; display:grid; grid-template-columns: 1.05fr .95fr; gap: 38px; align-items:center; }
+    .eyebrow { color: var(--gold); text-transform: uppercase; letter-spacing:.16em; font-size:.77rem; font-weight:700; }
+    h1 { margin: 14px 0 18px; font-size: clamp(2.9rem, 7vw, 6.8rem); line-height:.88; letter-spacing:0; }
+    .lead { color: #c8e0f0; font-size: clamp(1.05rem, 2vw, 1.35rem); line-height:1.65; max-width: 62ch; }
+    .hero-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:28px; }
+    .button { border:1px solid var(--line); background:rgba(70,231,255,.08); color:var(--text); border-radius:999px; padding:11px 15px; font-weight:700; }
+    .button.primary { background:linear-gradient(135deg, rgba(70,231,255,.95), rgba(136,255,134,.85)); color:#041017; border:0; }
+    .hero-visual { position:relative; min-height: 440px; border:1px solid var(--line); background:rgba(7,20,33,.72); border-radius:28px; overflow:hidden; box-shadow:var(--shadow); }
+    .hero-visual img { width:100%; height:100%; object-fit:cover; opacity:.72; position:absolute; inset:0; }
+    .fan {
+      position:absolute; inset:0; display:grid; place-items:center;
+      background: radial-gradient(circle, rgba(70,231,255,.15), transparent 42%);
+    }
+    .fan svg { width:min(88%,560px); filter:drop-shadow(0 0 28px rgba(70,231,255,.35)); }
+    .ray { stroke-dasharray: 7 10; animation: dash 5s linear infinite; }
+    .poly { animation: pulse 3.6s ease-in-out infinite; transform-origin:center; }
+    @keyframes dash { to { stroke-dashoffset:-90; } }
+    @keyframes pulse { 50% { transform:scale(1.035); opacity:.82; } }
+    section { padding: 38px 0; }
+    .section-head { display:flex; justify-content:space-between; gap:24px; align-items:flex-end; margin-bottom:18px; }
+    h2 { font-size: clamp(1.7rem, 3vw, 2.6rem); margin:0; letter-spacing:0; }
+    .section-head p { margin:0; color:var(--muted); max-width:62ch; line-height:1.55; }
+    .grid { display:grid; gap:16px; }
+    .metrics { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .metric-card, .panel, .gallery-card {
+      border:1px solid var(--line); background:linear-gradient(180deg, rgba(11,27,43,.92), rgba(7,20,33,.86));
+      border-radius:20px; box-shadow:var(--shadow);
+    }
+    .metric-card { padding:18px; min-height:142px; }
+    .metric-card span { color:var(--muted); font-size:.84rem; text-transform:uppercase; letter-spacing:.08em; }
+    .metric-card strong { display:block; font-size:clamp(1.6rem, 4vw, 2.7rem); margin:10px 0 8px; }
+    .metric-card p { color:#b4ccdd; margin:0; line-height:1.45; }
+    .panels { grid-template-columns: 1.2fr .8fr; }
+    .panel { padding:22px; overflow:hidden; }
+    .panel h3 { margin:0 0 14px; font-size:1.22rem; }
+    .metric-table { width:100%; border-collapse:collapse; }
+    .metric-table th,.metric-table td { border-bottom:1px solid rgba(157,184,207,.16); padding:10px 8px; text-align:left; }
+    .metric-table th { color:#b8d4e8; font-weight:700; }
+    .loss-list { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+    .loss-list li { border:1px solid rgba(70,231,255,.18); border-radius:14px; padding:12px; background:rgba(3,8,17,.34); }
+    .loss-list span { color:var(--cyan); font-weight:800; }
+    .loss-list strong { float:right; color:var(--gold); }
+    .loss-list p { clear:both; margin:7px 0 0; color:#b7cce0; line-height:1.45; }
+    .chart { height:260px; display:flex; align-items:flex-end; gap:10px; padding:18px 6px 6px; border-bottom:1px solid rgba(157,184,207,.25); }
+    .bar { flex:1; min-width:24px; border-radius:10px 10px 0 0; background:linear-gradient(180deg, var(--cyan), var(--violet)); position:relative; }
+    .bar.best { background:linear-gradient(180deg, var(--green), var(--gold)); }
+    .bar span { position:absolute; inset:auto 0 calc(100% + 8px); text-align:center; font-size:.75rem; color:#dff9ff; }
+    .gallery { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .gallery-card { margin:0; overflow:hidden; }
+    .gallery-card img { display:block; width:100%; aspect-ratio: 16 / 9; object-fit:cover; background:#020711; }
+    .gallery-card figcaption { padding:14px 16px 16px; display:grid; gap:5px; }
+    .gallery-card figcaption span { color:var(--muted); line-height:1.45; }
+    .concepts { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .concept { padding:18px; border:1px solid rgba(70,231,255,.22); background:rgba(7,20,33,.72); border-radius:18px; min-height:220px; position:relative; overflow:hidden; }
+    .concept h3 { margin:0 0 10px; }
+    .concept p { color:#b8d1e2; line-height:1.5; }
+    .mini-svg { height:82px; margin-top:12px; }
+    .moving-dot { animation: glide 3.2s ease-in-out infinite alternate; }
+    @keyframes glide { from { transform:translateX(0); } to { transform:translateX(64px); } }
+    footer { padding: 44px 0 56px; color:var(--muted); border-top:1px solid var(--line); margin-top:42px; }
+    @media (max-width: 860px) {
+      .hero, .panels { grid-template-columns:1fr; }
+      .metrics, .concepts, .gallery { grid-template-columns:1fr; }
+      nav { align-items:flex-start; flex-direction:column; padding:18px 0; }
+      .hero-visual { min-height: 320px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="wrap">
+      <a class="brand" href="#">ToricGT</a>
+      <div class="links">
+        <a href="https://github.com/amelie-iska/ToricGT">Code</a>
+        <a href="https://huggingface.co/AmelieSchreiber/toricgt-checkpoints">Hugging Face</a>
+        <a href="https://github.com/openai/parameter-golf">Parameter Golf</a>
+        <a href="https://github.com/openai/parameter-golf">Submission PR</a>
+        <a href="https://github.com/amelie-iska/ToricGT/blob/oai-toricgt/assets/toricgt_toric_bgg_rewrite_amelie_schreiber.tex">Long Paper</a>
+        <a href="https://github.com/amelie-iska/ToricGT/blob/oai-toricgt/assets/toricgt_neurips_condensed.tex">Condensed Paper</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <div>
+        <div class="eyebrow">Graph-token reasoning under a BPB artifact budget</div>
+        <h1>ToricGT</h1>
+        <p class="lead">ToricGT embeds tropical ring attention into toric geometry, then uses graph tokens, Forest-of-Thought search, persistent homology, Toric BGG certificates, vector-bundle one-dimensional-cone sheaf audits, and BPB-first training to pressure compact language models toward structured reasoning.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="https://github.com/amelie-iska/ToricGT">Explore the codebase</a>
+          <a class="button" href="https://huggingface.co/AmelieSchreiber/toricgt-checkpoints">Best checkpoints</a>
+          <a class="button" href="https://github.com/openai/parameter-golf">Parameter Golf PR: pending after best-of-10 + 900-step candidate</a>
+        </div>
+      </div>
+      <div class="hero-visual" aria-label="Animated toric fan visualization">
+        <img src="page_assets/logo.png" alt="ToricGT visual backdrop">
+        <div class="fan">
+          <svg viewBox="0 0 520 380" role="img" aria-label="Tropical active faces embedded in a toric fan">
+            <defs>
+              <linearGradient id="g" x1="0" x2="1"><stop offset="0%" stop-color="#46e7ff"/><stop offset="100%" stop-color="#ffd166"/></linearGradient>
+            </defs>
+            <g transform="translate(260 190)">
+              <circle r="128" fill="rgba(70,231,255,.05)" stroke="rgba(70,231,255,.25)"/>
+              <g stroke="rgba(236,251,255,.55)" stroke-width="2">
+                <line class="ray" x1="0" y1="0" x2="178" y2="-84"/>
+                <line class="ray" x1="0" y1="0" x2="124" y2="134"/>
+                <line class="ray" x1="0" y1="0" x2="-168" y2="92"/>
+                <line class="ray" x1="0" y1="0" x2="-120" y2="-142"/>
+                <line class="ray" x1="0" y1="0" x2="18" y2="-188"/>
+              </g>
+              <polygon class="poly" points="-88,-64 8,-128 112,-36 92,92 -34,126 -126,24" fill="rgba(70,231,255,.16)" stroke="url(#g)" stroke-width="4"/>
+              <path d="M -110 70 C -48 -20, 60 118, 132 -50" fill="none" stroke="#ff5fa2" stroke-width="5" stroke-linecap="round"/>
+              <circle class="moving-dot" cx="-108" cy="70" r="8" fill="#88ff86"/>
+            </g>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap">
+      <div class="section-head">
+        <h2>Best Completed Run</h2>
+        <p>Generated 2026-06-21 16:50:50 UTC from <code>training_notes/tg-bpb-bestof10-convextok2048-det-20260621T040717Z/campaign_state.json</code>. The page should be regenerated after the 10-run sweep, 900-step candidate, HF upload, and PR creation finish.</p>
+      </div>
+      <div class="grid metrics">
+        
+    <article class="metric-card">
+      <span>Best int8 BPB</span>
+      <strong>0.4953</strong>
+      <p>final int8+zlib round-trip BPB</p>
+    </article>
+    
+        
+    <article class="metric-card">
+      <span>Validation BPB</span>
+      <strong>0.4924</strong>
+      <p>score on the OAI FineWeb validation stream</p>
+    </article>
+    
+        
+    <article class="metric-card">
+      <span>Train BPB</span>
+      <strong>0.5036</strong>
+      <p>latest train-side BPB in the selected run</p>
+    </article>
+    
+        
+    <article class="metric-card">
+      <span>Compressed bytes</span>
+      <strong>12,202,796</strong>
+      <p>model artifact before code/dependency accounting</p>
+    </article>
+    
+      </div>
+    </section>
+
+    <section class="wrap grid panels">
+      <article class="panel">
+        <h3>Campaign Trace</h3>
+        <div id="chart" class="chart" data-history='[{&quot;artifact&quot;: 14959389, &quot;bpb&quot;: 1.2637899, &quot;profile&quot;: &quot;prior_external&quot;, &quot;run&quot;: &quot;ge_batch_lower_lr_sidecar_light-20260616T222607Z&quot;, &quot;train_bpb&quot;: null}, {&quot;artifact&quot;: 15180494, &quot;bpb&quot;: 0.56512505, &quot;profile&quot;: &quot;convextok2048_det_tropical_toric_bpb&quot;, &quot;run&quot;: &quot;xtok2048_det_tropical_toric_bpb-20260621T040718Z&quot;, &quot;train_bpb&quot;: 1.0058}, {&quot;artifact&quot;: 15287974, &quot;bpb&quot;: 0.66925466, &quot;profile&quot;: &quot;gate1500_fast_main_lr_light_graphcg&quot;, &quot;run&quot;: &quot;1500_fast_main_lr_light_graphcg-20260621T101734Z&quot;, &quot;train_bpb&quot;: 0.9026}, {&quot;artifact&quot;: 15525100, &quot;bpb&quot;: 0.7186649, &quot;profile&quot;: &quot;gate1500_fast_main_lr_aux_conflict_recovery&quot;, &quot;run&quot;: &quot;t_main_lr_aux_conflict_recovery-20260621T120339Z&quot;, &quot;train_bpb&quot;: 0.8295}, {&quot;artifact&quot;: 14400139, &quot;bpb&quot;: 0.65850488, &quot;profile&quot;: &quot;gate1500_structural_toric_heavy&quot;, &quot;run&quot;: &quot;gate1500_structural_toric_heavy-20260621T135410Z&quot;, &quot;train_bpb&quot;: 0.8738}, {&quot;artifact&quot;: 14589172, &quot;bpb&quot;: 0.68937811, &quot;profile&quot;: &quot;gate1500_bgg_memory_probe&quot;, &quot;run&quot;: &quot;-r007-gate1500_bgg_memory_probe-20260621T144834Z&quot;, &quot;train_bpb&quot;: 0.8316}, {&quot;artifact&quot;: 12202796, &quot;bpb&quot;: 0.49533264, &quot;profile&quot;: &quot;gate2500_experimental_family_selective&quot;, &quot;run&quot;: &quot;0_experimental_family_selective-20260621T154110Z&quot;, &quot;train_bpb&quot;: 0.5036}, {&quot;artifact&quot;: 12199688, &quot;bpb&quot;: 0.49795596, &quot;profile&quot;: &quot;gate2500_fast_bpb_low_aux&quot;, &quot;run&quot;: &quot;-r009-gate2500_fast_bpb_low_aux-20260621T161926Z&quot;, &quot;train_bpb&quot;: 0.5056}]'></div>
+        <p class="lead">Campaign <code>tg-bpb-bestof10-convextok2048-det-20260621T040717Z</code> restarts from step 0 each attempt. Current best profile: <code>gate2500_experimental_family_selective</code>. Best run id: <code>tg-bpb-bestof10-convextok2048-det-20260621T040717Z-r008-gate2500_experimental_family_selective-20260621T154110Z</code>.</p>
+      </article>
+      <article class="panel">
+        <h3>Core Metrics</h3>
+        <table class="metric-table">
+          <tbody>
+          <tr><th>final_int8_loss</th><td>0.842962</td></tr>
+<tr><th>final_int8_bpb</th><td>0.4953</td></tr>
+<tr><th>val_loss</th><td>0.838000</td></tr>
+<tr><th>val_bpb</th><td>0.4924</td></tr>
+<tr><th>train_loss</th><td>0.855800</td></tr>
+<tr><th>train_bpb</th><td>0.5036</td></tr>
+<tr><th>graph_lm_bpb</th><td>0.2962</td></tr>
+<tr><th>checkpoint_step</th><td>1000.0000</td></tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="wrap">
+      <div class="section-head">
+        <h2>What Is Being Optimized</h2>
+        <p>BPB stays primary. The advanced losses are small, evidence-weighted pressures that shape hidden graph structure, retrieval, toric/tropical geometry, and algebraic consistency without letting those objectives dominate byte likelihood.</p>
+      </div>
+      <article class="panel">
+        <ul class="loss-list">
+          <li><span>graphcg_loss</span><strong>0.011413</strong><p>Full-rank GraphCG pressure: disentangles latent concept axes so graph and byte objectives can expose stable directions rather than collapsing into one entangled basis.</p></li><li><span>analogy_loss</span><strong>0.064827</strong><p>Analogical-retrieval lattice loss: encourages maps between reasoning memories through simplex-tree and vectorized persistent-homology similarity gates.</p></li><li><span>tokengt_graph_loss</span><strong>1.162810</strong><p>First-class TokenGT graph objective: trains causal node, edge, endpoint, distance, torus, and tokenization-DAG features used by the OAI FineWeb adapter.</p></li><li><span>memory_loss</span><strong>1.140689</strong><p>Trajectory-memory retrieval loss: selects reusable reasoning traces and stabilizes retrieval-conditioned auxiliary routing.</p></li><li><span>toric_geometry_loss</span><strong>5.884988</strong><p>Toric embedding and fan audit loss: keeps tropical ring attention active faces embedded into toric charts with interpretable cone/fan structure.</p></li><li><span>toric_vector_bundle_1d_cone_ce_loss</span><strong>0.704291</strong><p>Toric vector-bundle one-dimensional-cone/sheaf CE: regularizes per-cone filtrations and sheaf-style compatibility across fan neighborhoods.</p></li><li><span>toric_bgg_loss</span><strong>0.164997</strong><p>Toric BGG category-O supervision: keeps finite category-O certificates, standard filtrations, Gale-dual labels, and differential consistency visible.</p></li><li><span>koszul_persistence_loss</span><strong>0.045398</strong><p>Koszul/persistence loss: checks filtered complexes, multigraded modules, and chain-complex consistency for topological reasoning traces.</p></li><li><span>toric_cca_topology_loss</span><strong>1.045991</strong><p>Combinatorial toric commutative algebra/topology loss: tracks monomial staircases, syzygies, and CAS-backed toric module diagnostics.</p></li><li><span>derived_signature_loss</span><strong>3.243159</strong><p>Derived-signature distillation: compresses resolution, chain-map, and derived-category evidence into low-rank signatures for training-time audits.</p></li><li><span>oai_gflownet_loss</span><strong>1.715701</strong><p>Embedding-space GFlowNet loss: samples graph-of-thought continuations with reward tied to byte-likelihood, retrieval utility, and structural diversity.</p></li><li><span>oai_fot_loss</span><strong>5.027384</strong><p>Embedding-space Forest-of-Thought loss: searches branching reasoning forests and uses BPB-delta reward to prioritize branches that improve compression.</p></li><li><span>oai_mtp_loss</span><strong>11.487040</strong><p>Multi-token prediction loss: adds short-horizon targets that improve early byte likelihood while staying compatible with graph output flattening.</p></li><li><span>graph_lm_loss</span><strong>0.368675</strong><p>Graph-LM primary loss: trains graph-structured records directly while FineWeb output flattening remains optional and BPB-focused.</p></li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="wrap">
+      <div class="section-head">
+        <h2>Conceptual Helpers</h2>
+        <p>These small animated sketches summarize the operational math: tropical dynamic programming, toric embedding, reasoning forests, and persistence-vector retrieval.</p>
+      </div>
+      <div class="grid concepts">
+        <div class="concept">
+          <h3>Tropical Path</h3>
+          <p>ConvexTok and tropical attention both expose min-plus or max-plus active paths with margins.</p>
+          <svg class="mini-svg" viewBox="0 0 180 80"><path d="M10 62 L55 22 L100 52 L158 16" fill="none" stroke="#46e7ff" stroke-width="4"/><circle class="moving-dot" cx="20" cy="56" r="6" fill="#ffd166"/></svg>
+        </div>
+        <div class="concept">
+          <h3>Toric Fan</h3>
+          <p>Active tropical faces are embedded into toric charts so cone, divisor, and one-dimensional-cone audits become meaningful.</p>
+          <svg class="mini-svg" viewBox="0 0 180 80"><g transform="translate(90 42)" stroke="#88ff86" stroke-width="2"><line class="ray" x1="0" y1="0" x2="70" y2="-22"/><line class="ray" x1="0" y1="0" x2="-60" y2="-35"/><line class="ray" x1="0" y1="0" x2="-52" y2="34"/><line class="ray" x1="0" y1="0" x2="50" y2="32"/></g></svg>
+        </div>
+        <div class="concept">
+          <h3>Forest Search</h3>
+          <p>Embedding-space FoT/GFlowNet branches are rewarded by BPB-delta and structural diversity.</p>
+          <svg class="mini-svg" viewBox="0 0 180 80"><g stroke="#ff5fa2" stroke-width="3" fill="none"><path d="M20 65 C50 55 55 28 88 18"/><path d="M20 65 C56 60 80 62 126 46"/><path d="M88 18 C118 20 136 16 160 8"/><path d="M88 18 C114 34 132 36 160 30"/></g></svg>
+        </div>
+        <div class="concept">
+          <h3>PH Retrieval</h3>
+          <p>Analogies require simplex-map evidence and vectorized persistent-homology agreement.</p>
+          <svg class="mini-svg" viewBox="0 0 180 80"><rect x="18" y="18" width="44" height="44" fill="rgba(70,231,255,.22)" stroke="#46e7ff"/><rect x="118" y="18" width="44" height="44" fill="rgba(255,209,102,.22)" stroke="#ffd166"/><path d="M66 40 L112 40" stroke="#88ff86" stroke-width="4" stroke-dasharray="6 7"/></svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap">
+      <div class="section-head">
+        <h2>Visual Evidence</h2>
+        <p>These are copied from the project’s generated diagrams and audit screenshots so the public page reflects real outputs from the codebase.</p>
+      </div>
+      <div class="grid gallery">
+        
+                <figure class="gallery-card">
+                  <img src="page_assets/architecture.png" alt="Architecture">
+                  <figcaption><strong>Architecture</strong><span>Graph-token, tropical, toric, FoT, and BPB paths in one training system.</span></figcaption>
+                </figure>
+                
+                <figure class="gallery-card">
+                  <img src="page_assets/tropical.png" alt="Tropical Active Faces">
+                  <figcaption><strong>Tropical Active Faces</strong><span>Max-plus attention exposes active predecessors, margins, and normal-fan cells.</span></figcaption>
+                </figure>
+                
+                <figure class="gallery-card">
+                  <img src="page_assets/graphcg.png" alt="GraphCG + Topology">
+                  <figcaption><strong>GraphCG + Topology</strong><span>Disentangled concept axes meet vectorized persistent homology and retrieval.</span></figcaption>
+                </figure>
+                
+                <figure class="gallery-card">
+                  <img src="page_assets/branching.png" alt="Branching Reasoning">
+                  <figcaption><strong>Branching Reasoning</strong><span>Forest/graph-of-thought branches merge through retrieval and BPB-delta rewards.</span></figcaption>
+                </figure>
+                
+                <figure class="gallery-card">
+                  <img src="page_assets/trajectory.png" alt="Trajectory Complex">
+                  <figcaption><strong>Trajectory Complex</strong><span>Filtered simplicial complexes reveal token-level reasoning structure.</span></figcaption>
+                </figure>
+                
+                <figure class="gallery-card">
+                  <img src="page_assets/analogy.png" alt="Analogy Maps">
+                  <figcaption><strong>Analogy Maps</strong><span>Memory retrieval is gated by simplex-tree maps and PH feature similarity.</span></figcaption>
+                </figure>
+                
+                <figure class="gallery-card">
+                  <img src="page_assets/vectorized_ph.png" alt="Vectorized PH">
+                  <figcaption><strong>Vectorized PH</strong><span>Landscapes, images, entropy, and persistence vectors become auditable features.</span></figcaption>
+                </figure>
+                
+                <figure class="gallery-card">
+                  <img src="page_assets/cas.png" alt="CAS Sidecar">
+                  <figcaption><strong>CAS Sidecar</strong><span>Sage/Macaulay2-backed algebraic certificates validate toric and module data.</span></figcaption>
+                </figure>
+                
+                <figure class="gallery-card">
+                  <img src="page_assets/toric_embedding.png" alt="Toric Embedding">
+                  <figcaption><strong>Toric Embedding</strong><span>Tropical ring attention is embedded into toric charts for fan/cone audits.</span></figcaption>
+                </figure>
+                
+                <figure class="gallery-card">
+                  <img src="page_assets/bgg.png" alt="BGG Category O">
+                  <figcaption><strong>BGG Category O</strong><span>Finite Toric BGG certificates track standards, differentials, and homological consistency.</span></figcaption>
+                </figure>
+                
+      </div>
+    </section>
+
+    <section class="wrap grid panels">
+      <article class="panel">
+        <h3>Central Construction</h3>
+        <p class="lead">ToricGT treats graph-structured data as graph-in/graph-out by default, but gives OAI FineWeb an optional BPB-only flattening path. Tokenization DAGs are graphified, edge tokens are first-class, and tropical dynamic-programming paths are embedded into toric varieties so the model can audit active faces using fans, cones, one-dimensional cones, divisors, sheaf/vector-bundle signals, and commutative-algebra certificates.</p>
+      </article>
+      <article class="panel">
+        <h3>Links</h3>
+        <table class="metric-table">
+          <tbody>
+            <tr><th>Code</th><td><a href="https://github.com/amelie-iska/ToricGT">https://github.com/amelie-iska/ToricGT</a></td></tr>
+            <tr><th>Hugging Face</th><td><a href="https://huggingface.co/AmelieSchreiber/toricgt-checkpoints">https://huggingface.co/AmelieSchreiber/toricgt-checkpoints</a></td></tr>
+            <tr><th>OpenAI Parameter Golf</th><td><a href="https://github.com/openai/parameter-golf">https://github.com/openai/parameter-golf</a></td></tr>
+            <tr><th>Submission PR</th><td><a href="https://github.com/openai/parameter-golf">pending after best-of-10 + 900-step candidate</a></td></tr>
+            <tr><th>Long Paper</th><td><a href="https://github.com/amelie-iska/ToricGT/blob/oai-toricgt/assets/toricgt_toric_bgg_rewrite_amelie_schreiber.tex">assets/toricgt_toric_bgg_rewrite_amelie_schreiber.tex</a></td></tr>
+            <tr><th>Condensed Paper</th><td><a href="https://github.com/amelie-iska/ToricGT/blob/oai-toricgt/assets/toricgt_neurips_condensed.tex">assets/toricgt_neurips_condensed.tex</a></td></tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>ToricGT page generated from local experiment artifacts. Competition scores should be interpreted with the record/non-record status and tokenizer/BPB validation caveats documented in the associated Parameter Golf submission.</p>
+    </div>
+  </footer>
+  <script>
+    const chart = document.getElementById('chart');
+    const history = JSON.parse(chart.dataset.history || '[]').filter(d => Number.isFinite(d.bpb));
+    if (history.length) {
+      const best = Math.min(...history.map(d => d.bpb));
+      const worst = Math.max(...history.map(d => d.bpb));
+      for (const [idx, d] of history.entries()) {
+        const bar = document.createElement('div');
+        const t = worst === best ? 1 : (worst - d.bpb) / (worst - best);
+        bar.className = 'bar' + (d.bpb === best ? ' best' : '');
+        bar.style.height = `${Math.max(24, 54 + t * 180)}px`;
+        bar.title = `${idx + 1} · ${d.profile || 'profile'} · BPB ${d.bpb.toFixed(4)}`;
+        const label = document.createElement('span');
+        label.textContent = d.bpb.toFixed(3);
+        bar.appendChild(label);
+        chart.appendChild(bar);
+      }
+    } else {
+      chart.textContent = 'No completed run metrics found yet.';
+    }
+  </script>
+</body>
+</html>

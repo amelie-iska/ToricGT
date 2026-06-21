@@ -17,8 +17,15 @@ ToricGT is a research prototype for TokenGT-style graph-to-graph modeling with t
 <p align="center">
   <a href="./assets/toricgt_paper_pg_softmoe_final.tex"><img src="https://img.shields.io/badge/arXiv-94133F?style=for-the-badge&logo=arxiv" alt="arXiv"/></a>
   <a href="https://github.com/amelie-iska/ToricGT/"><img src="https://img.shields.io/badge/📝%20GitHub-007A87?style=for-the-badge&logoColor=grey" alt="GitHub"/></a>
+  <a href="https://amelie-iska.github.io/ToricGT/"><img src="https://img.shields.io/badge/Project%20Page-46E7FF?style=for-the-badge" alt="Project page"/></a>
   <a href="https://huggingface.co/blog/AmelieSchreiber/toricgt"><img src="https://img.shields.io/badge/HuggingFace-DE9B35.svg?style=for-the-badge&logo=HuggingFace" alt="HF"/></a>
 </p>
+
+The public project page is generated from the current best campaign artifacts
+with `python scripts/build_toricgt_pages.py` and lives in `docs/index.html`.
+It summarizes the best BPB run, active losses, toric/tropical/topological
+visualizations, papers, Hugging Face checkpoints, and the Parameter Golf
+submission link once the PR is created.
 
 *Note: consider PH disambiguation along decision boundaries or of words with multiple meanings*
 
