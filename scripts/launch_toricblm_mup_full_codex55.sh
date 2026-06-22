@@ -37,5 +37,5 @@ echo "data_path: ${DATA_PATH:-unset}"
 echo "late_graph_train_glob: ${LATE_GRAPH_TRAIN_GLOB:-unset}"
 echo "mup_base_shapes: ${MUP_BASE_SHAPES:-unset}"
 
-exec conda run -n tokengt env PYTHONPATH="$PYTHONPATH" \
+exec conda run --no-capture-output -n tokengt env PYTHONPATH="$PYTHONPATH" \
   python "$ROOT/amelie-iska/parameter-golf/train_gpt.py" 2>&1 | tee "$RUN_DIR/train.log"
