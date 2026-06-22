@@ -93,6 +93,23 @@ priced tokens respect the toric vocabulary-face geometry induced by LP score,
 rank, and byte length.  BPB is still computed on the final flattened token
 sequence, with exact byte counts for ConvexTok byte-string tokens.
 
+The active ToricBLM scale-up restart uses a fresh ConvexTok-8192 tokenizer, not
+BPE and not a reused ConvexTok-2048 vocabulary.  The tokenizer keeps the
+standard ConvexTok byte fallback and allocates a fixed biomedical/control
+reserve for universal-modality de novo design work: UniProt-style protein
+annotations and sequences, PDB/AFDB/ESMFold structure fields, molecular graph
+syntax, atomistic trajectory and UMA MLIP energy/force tags, dynamics-generator
+trajectory tags, cell perturbation/expression/phenotype tags, graph-control
+tokens, tropical-toric diagnostics, persistence features, category-theoretic
+certificates, and Forest-of-Thought control tokens.  The current reserve target
+is 512 exact seed tokens; the remaining priced-token budget is selected from
+the curated training corpus.  The first 8192-token comparison showed about
+20.5% fewer tokens on a 1024-row curated text sample and about 77.8% fewer
+tokens on the biomedical/control seed sample relative to the previous
+ConvexTok-2048 tokenizer.  The matching muP target model is 9 layers, width
+1536, 12 attention heads, 6 KV heads, and about 169.7M parameters, staying
+under the requested roughly 170M limit without increasing layer count.
+
 The current OAI route also uses BPB-safe TokenGT-style identifiers without
 inserting extra scored tokens into the SentencePiece stream.  Deterministic
 low-rank node identifiers, endpoint-pair features, and virtual local edge-token
@@ -158,7 +175,19 @@ pressure, and effective loss weight from observed reward/diversity/entropy.
 The implementation plan and test ledger are in
 [`planning/BPB-IDEAS-1-4-IMPLEMENTATION-20260619.md`](planning/BPB-IDEAS-1-4-IMPLEMENTATION-20260619.md).
 
-ConvexTok build and run commands:
+ConvexTok-8192 biomedical scale-up build and run commands:
+
+```bash
+# Build and export fresh ConvexTok-8192 shards from the existing ToricGT data root.
+# This is ConvexTok byte-DAG tokenization, not BPE.
+./scripts/export_convextok8192_biomed_full.sh
+
+# Launch the muP 169.7M ToricBLM run after the export is ready.
+CONFIG_PATH=configs/toricblm_mup_170m_convextok8192_biomed_codex55.env \
+  ./scripts/launch_toricblm_mup_full_convextok8192_biomed.sh
+```
+
+Legacy ConvexTok-2048 build and run commands:
 
 ```bash
 MATCHED_FINEWEB_CONVEXTOK_ENCODE_WORKERS=8 \

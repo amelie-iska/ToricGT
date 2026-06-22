@@ -1,6 +1,6 @@
 # Current OAI ToricGT State
 
-Updated: 2026-06-21
+Updated: 2026-06-22
 
 ## Goal
 
@@ -18,7 +18,7 @@ policy: run all 10 attempts, review full analyses/visualizations, pick the
 The current hardware target is roughly 20GB VRAM by using large token batches
 with `TRAIN_SEQ_LEN=1024`.
 
-## Active Full Continuation
+## Previous Best Short Run
 
 The best completed short-run configuration came from:
 
@@ -32,15 +32,42 @@ int8+zlib round-trip val BPB: 0.49533264
 artifact estimate: 12,202,796 bytes
 ```
 
-The current tmux session is a full-data continuation from that best
-configuration:
+That run remains the best small Parameter-Golf-style checkpoint snapshot, but
+the active ToricBLM scale-up path has moved to a larger fresh ConvexTok
+vocabulary for biomedical/universal-modality pretraining.
+
+## Active ToricBLM ConvexTok-8192 Restart
 
 ```text
-tmux:           toricgt_convextok_bpb_loop_10_bestfull
-log:            logs/convextok2048_bpb_bestof10_full_20260621T040717Z.log
-tokenizer:      /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/tokenizers/fineweb_convextok_2048_det.convextok.json
-FineWeb shards: /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok2048_det_full/datasets/fineweb10B_convextok2048_det
-vocab size:     2048
+export tmux:    toricblm_convextok8192_export
+wait tmux:      toricblm8192_wait_launch
+train tmux:     toricblm_mup_full_8192 once export manifest exists
+export log:     runs/convextok8192_biomed_export.log
+wait log:       runs/toricblm8192_wait_and_launch.log
+tokenizer:      /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok8192_biomed_det_full/tokenizers/fineweb_convextok_8192_biomed_det.convextok.json
+FineWeb shards: /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok8192_biomed_det_full/datasets/fineweb10B_convextok8192_biomed_det
+config:         configs/toricblm_mup_170m_convextok8192_biomed_codex55.env
+vocab size:     8192
+target params:  169,698,927
+layers:         9
+width:          1536
+heads / KV:     12 / 6
+batch tokens:   196,608 initial setting
+```
+
+The previous 2048 `.bin` token shards were removed to make room for the fresh
+8192 export.  The 2048 tokenizer metadata remains for provenance and tokenizer
+comparison.  The new tokenizer is fresh ConvexTok, not BPE and not a reused
+2048 vocabulary.  It uses the standard byte fallback plus a 512-token target
+reserve for biomedical/control syntax covering UniProt/PDB/AFDB/ESMFold,
+molecular graph, UMA MLIP energy/force, dynamics trajectory, cell phenotype,
+tropical-toric, persistence, category-theoretic, and Forest-of-Thought tags.
+
+Tokenizer comparison against ConvexTok-2048:
+
+```text
+curated train sample:       993,945 -> 790,185 tokens (-20.50%)
+biomed/control seed sample:   3,010 ->     669 tokens (-77.77%)
 ```
 
 The public page in `docs/index.html` was regenerated from the best checkpoint

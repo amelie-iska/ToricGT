@@ -34,9 +34,19 @@ def load_train_module():
     return module
 
 
-def build_model(module, *, dim: int, layers: int, heads: int, kv_heads: int, mup: bool, width_mult: float):
+def build_model(
+    module,
+    *,
+    vocab_size: int,
+    dim: int,
+    layers: int,
+    heads: int,
+    kv_heads: int,
+    mup: bool,
+    width_mult: float,
+):
     return module.GPT(
-        vocab_size=2048,
+        vocab_size=vocab_size,
         num_layers=layers,
         model_dim=dim,
         num_heads=heads,
@@ -95,6 +105,18 @@ def main() -> None:
     parser.add_argument("--base-kv-heads", type=int, default=4)
     parser.add_argument("--delta-kv-heads", type=int, default=6)
     parser.add_argument("--target-kv-heads", type=int, default=6)
+    parser.add_argument("--vocab-size", type=int, default=2048)
+    parser.add_argument(
+        "--fineweb-root",
+        default=(
+            "/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/"
+            "parameter_golf_convextok2048_det_full"
+        ),
+    )
+    parser.add_argument("--tokenizer-filename", default="fineweb_convextok_2048_det.convextok.json")
+    parser.add_argument("--dataset-name", default="fineweb10B_convextok2048_det")
+    parser.add_argument("--train-batch-tokens", type=int, default=262144)
+    parser.add_argument("--tokenizer-label", default="convextok2048_det")
     parser.add_argument("--output-dir", default=str(ROOT / "configs" / "mup"))
     parser.add_argument("--env-path", default=str(ROOT / "configs" / "toricblm_mup_170m_codex55.env"))
     parser.add_argument("--late-start-step", type=int, default=17500)
@@ -106,10 +128,11 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     bsh_path = output_dir / (
-        f"toricblm_base{args.base_dim}_delta{args.delta_dim}_layers{args.layers}.bsh"
+        f"toricblm_{args.tokenizer_label}_base{args.base_dim}_delta{args.delta_dim}_layers{args.layers}.bsh"
     )
     base = build_model(
         module,
+        vocab_size=args.vocab_size,
         dim=args.base_dim,
         layers=args.layers,
         heads=args.base_heads,
@@ -119,6 +142,7 @@ def main() -> None:
     )
     delta = build_model(
         module,
+        vocab_size=args.vocab_size,
         dim=args.delta_dim,
         layers=args.layers,
         heads=args.delta_heads,
@@ -129,6 +153,7 @@ def main() -> None:
     target_width_mult = args.target_dim / args.base_dim
     target = build_model(
         module,
+        vocab_size=args.vocab_size,
         dim=args.target_dim,
         layers=args.layers,
         heads=args.target_heads,
@@ -147,13 +172,14 @@ def main() -> None:
         "layers": args.layers,
         "target_width_mult": target_width_mult,
         "base_shapes": str(bsh_path),
+        "vocab_size": int(args.vocab_size),
+        "tokenizer_label": str(args.tokenizer_label),
     }
     env_path = Path(args.env_path)
     env_path.parent.mkdir(parents=True, exist_ok=True)
-    fineweb_root = (
-        "/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/"
-        "parameter_golf_convextok2048_det_full"
-    )
+    fineweb_root = str(Path(args.fineweb_root).expanduser().resolve())
+    tokenizer_path = str(Path(fineweb_root) / "tokenizers" / str(args.tokenizer_filename))
+    dataset_path = str(Path(fineweb_root) / "datasets" / str(args.dataset_name))
     late_root = (
         "/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/"
         "codex55_tot_late_stage"
@@ -177,13 +203,12 @@ def main() -> None:
         f"export NUM_HEADS={args.target_heads}",
         f"export NUM_KV_HEADS={args.target_kv_heads}",
         "export MLP_MULT=2",
-        "export VOCAB_SIZE=2048",
+        f"export VOCAB_SIZE={int(args.vocab_size)}",
         "export TIE_EMBEDDINGS=1",
-        "export TOKENIZER_PATH="
-        f"{fineweb_root}/tokenizers/fineweb_convextok_2048_det.convextok.json",
-        f"export DATA_PATH={fineweb_root}/datasets/fineweb10B_convextok2048_det",
+        f"export TOKENIZER_PATH={tokenizer_path}",
+        f"export DATA_PATH={dataset_path}",
         "export TRAIN_SEQ_LEN=1024",
-        "export TRAIN_BATCH_TOKENS=262144",
+        f"export TRAIN_BATCH_TOKENS={int(args.train_batch_tokens)}",
         "export ITERATIONS=25000",
         "export MAX_WALLCLOCK_SECONDS=0",
         "export WARMUP_STEPS=20",
@@ -191,9 +216,9 @@ def main() -> None:
         "export VAL_LOSS_EVERY=1000",
         "export CHECKPOINT_EVERY=1000",
         "export VAL_MAX_TOKENS=8388608",
-        "export MATRIX_LR=0.030",
-        "export SCALAR_LR=0.030",
-        "export TIED_EMBED_LR=0.036",
+        "export MATRIX_LR=0.028",
+        "export SCALAR_LR=0.028",
+        "export TIED_EMBED_LR=0.030",
         "export TOKENGT_FIRST_CLASS_LR=0.00018",
         "export GRAPH_OUTPUT_FLATTENING_LR=0.00018",
         "export FINEWEB_GRAPHIFY=1",
@@ -202,7 +227,7 @@ def main() -> None:
         "export TOKENGT_TOKEN_CLASS_BUCKETS=128",
         "export TOKENGT_POSITION_BUCKETS=512",
         "export CONVEXTOK_DAG_FEATURES=1",
-        "export CONVEXTOK_DAG_FEATURE_WEIGHT=0.020",
+        "export CONVEXTOK_DAG_FEATURE_WEIGHT=0.024",
         "export GRAPH_OUTPUT_FLATTENING=1",
         "export GRAPH_OUTPUT_EDGE_RADIUS=4",
         "export GRAPH_OUTPUT_CALIBRATION_LOSS_WEIGHT=0.010",
@@ -255,6 +280,8 @@ def main() -> None:
         f"export LATE_GRAPH_START_STEP={args.late_start_step}",
         "export LATE_GRAPH_MIX_RATIO=0.85",
         "export LATE_GRAPH_UPSAMPLE_PASSES=3",
+        "export TORICBLM_TOKENIZER_FAMILY=convextok",
+        f"export TORICBLM_TOKENIZER_LABEL={args.tokenizer_label}",
     ]
     env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
     print(json.dumps({"base_shapes": str(bsh_path), "env_path": str(env_path), **params}, indent=2))
