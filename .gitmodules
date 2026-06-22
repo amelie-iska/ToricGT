@@ -8,3 +8,6 @@
 	path = amelie-iska/parameter-golf
 	url = https://github.com/amelie-iska/parameter-golf.git
 	branch = oai-advanced
+[submodule "external/mup"]
+	path = external/mup
+	url = https://github.com/amelie-iska/mup.git

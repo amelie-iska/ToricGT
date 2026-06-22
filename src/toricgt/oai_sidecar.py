@@ -328,7 +328,7 @@ class GraphParquetTokenStream:
         sep = self._encode("\n\n")
         self.token_buffer.extend(ids + sep)
 
-    def next_batch(self, device: torch.device) -> tuple[Tensor, Tensor]:
+    def next_batch(self, device: torch.device, step: int | None = None) -> tuple[Tensor, Tensor]:
         needed = self.batch_size * self.seq_len + 1
         while len(self.token_buffer) < needed:
             self._append_next_row()
@@ -338,6 +338,63 @@ class GraphParquetTokenStream:
         x = tokens[:-1].reshape(self.batch_size, self.seq_len)
         y = tokens[1:].reshape(self.batch_size, self.seq_len)
         return x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+
+
+class ScheduledGraphParquetTokenStream:
+    """Switch graph LM/sidecar rows to a late-stage train-only stream.
+
+    The base stream remains the default curated graph corpus.  Once
+    ``late_start_step`` is reached, a deterministic ratio gate draws rows from
+    the late stream.  This is used for train-only Tree/Forest-of-Thought data:
+    the validation BPB stream is not affected.
+    """
+
+    def __init__(
+        self,
+        base_pattern: str,
+        late_pattern: str,
+        tokenizer: Any,
+        seq_len: int,
+        batch_size: int,
+        *,
+        late_start_step: int,
+        late_mix_ratio: float = 1.0,
+    ) -> None:
+        self.base = GraphParquetTokenStream(base_pattern, tokenizer, seq_len, batch_size)
+        self.late = GraphParquetTokenStream(late_pattern, tokenizer, seq_len, batch_size) if late_pattern else None
+        self.late_start_step = max(0, int(late_start_step))
+        self.late_mix_ratio = max(0.0, min(1.0, float(late_mix_ratio)))
+        self.counter = 0
+        self.last_stream = "base"
+
+    def _use_late(self, step: int | None) -> bool:
+        if self.late is None:
+            return False
+        if step is None or int(step) < self.late_start_step:
+            return False
+        if self.late_mix_ratio >= 1.0:
+            return True
+        if self.late_mix_ratio <= 0.0:
+            return False
+        bucket = self.counter % 100
+        return bucket < int(round(100.0 * self.late_mix_ratio))
+
+    def describe(self) -> str:
+        late_desc = self.late.describe() if self.late is not None else "disabled"
+        return (
+            f"scheduled base=({self.base.describe()}) "
+            f"late=({late_desc}) late_start_step:{self.late_start_step} "
+            f"late_mix_ratio:{self.late_mix_ratio:.3f} last_stream:{self.last_stream}"
+        )
+
+    def next_batch(self, device: torch.device, step: int | None = None) -> tuple[Tensor, Tensor]:
+        self.counter += 1
+        if self._use_late(step):
+            self.last_stream = "late"
+            assert self.late is not None
+            return self.late.next_batch(device, step=step)
+        self.last_stream = "base"
+        return self.base.next_batch(device, step=step)
 
 
 class ToricGTSidecar(nn.Module):
