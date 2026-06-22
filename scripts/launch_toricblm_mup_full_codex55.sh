@@ -22,6 +22,7 @@ mkdir -p "$RUN_DIR" "$CHECKPOINT_DIR"
 
 export RUN_ID
 export CHECKPOINT_DIR
+export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 export WANDB_RUN_ID="${WANDB_RUN_ID:-$RUN_ID}"
 export WANDB_NAME="${WANDB_NAME:-$RUN_ID}"
 export PYTHONPATH="$ROOT/src:$ROOT/external/mup:$ROOT/amelie-iska/parameter-golf:${PYTHONPATH:-}"

@@ -169,6 +169,7 @@ The eventual full command should:
 - [x] Add a launch script that sources the config without hardcoding secrets.
 - [x] Run compile and stream smoke tests.
 - [x] Verify that the target model accepts the generated base-shape file after the trainer dtype path.
+- [x] Run two full-shape warmup launch attempts and adjust batch tokens after OOM.
 - [x] Record final paths and readiness state.
 - [ ] Start full training only when the ready state is confirmed.
 
@@ -181,3 +182,20 @@ The eventual full command should:
 - Late-stage 3-pass graph glob: `/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/*.parquet`
 
 The generated target model has `160,261,743` parameters.  It is therefore slightly under the verbal 170M target but close to the requested 10x scale and preserves a width-first muP transfer path.
+
+## Warmup Memory Adjustment
+
+Two launch attempts verified that the full dataset and late-stage codex5.5 streams initialize correctly, but the 160M target model OOMed during the compiled warmup forward at larger global batch sizes:
+
+- `TRAIN_BATCH_TOKENS=524288`: OOM at about 23.46GB in use.
+- `TRAIN_BATCH_TOKENS=393216`: OOM at about 23.32GB in use.
+
+The config was therefore reduced to:
+
+- `TRAIN_BATCH_TOKENS=262144`
+- `TRAIN_SEQ_LEN=1024`
+- `grad_accum_steps=8`
+- effective microbatch: `32768` tokens, or 32 length-1024 sequences
+- effective optimizer-step batch: `262144` tokens, or 256 length-1024 sequences
+
+This does not reduce the dataset.  It only reduces the number of tokens processed per optimizer step so the 160M muP model can fit on the 24GB RTX 4090 while preserving the full FineWeb shard path and the train-only codex5.5 late-stage graph stream.
