@@ -53,13 +53,14 @@ CSS = """
   --green: #8cff6a;
   --border: rgba(55, 232, 255, 0.28);
 }
+* { box-sizing: border-box; }
 body {
   margin: 0;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: radial-gradient(circle at top left, #092238 0, var(--bg) 42rem);
   color: var(--text);
 }
-main { max-width: 1320px; margin: 0 auto; padding: 32px 24px 64px; }
+main { width: min(1420px, calc(100vw - 24px)); max-width: 1420px; margin: 0 auto; padding: 32px 12px 64px; }
 a { color: var(--cyan); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .hero, .card, .panel {
@@ -67,21 +68,37 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
 }
 .hero { padding: 24px; margin-bottom: 20px; }
-h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: 0; }
+h1, h2, h3, .record-title {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+  line-height: 1.16;
+}
+h1 { margin: 0 0 8px; font-size: clamp(22px, 3vw, 28px); letter-spacing: 0; }
 h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }
 p { color: var(--muted); line-height: 1.55; }
-.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-.card { padding: 16px; }
-.metric { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid rgba(145,168,183,0.14); padding: 7px 0; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.card { padding: 16px; min-width: 0; }
+.metric {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.35fr);
+  align-items: start;
+  gap: 12px;
+  border-bottom: 1px solid rgba(145,168,183,0.14);
+  padding: 7px 0;
+  min-width: 0;
+}
+.metric span { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .metric span:first-child { color: var(--muted); }
-.metric span:last-child { color: white; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.metric span:last-child { color: white; font-variant-numeric: tabular-nums; text-align: right; max-width: 100%; }
 .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .pill { border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; background: rgba(55,232,255,0.07); }
 .badge { display: inline-block; border: 1px solid rgba(140,255,106,0.35); border-radius: 999px; color: #d9ffd2; background: rgba(140,255,106,0.11); padding: 4px 8px; font-size: 12px; margin: 2px 4px 2px 0; }
 .badge.fail { border-color: rgba(255,79,216,0.45); color: #ffd8f7; background: rgba(255,79,216,0.12); }
-.tablewrap { overflow-x: auto; margin: 12px 0; }
+.tablewrap { max-width: 100%; overflow: auto; margin: 12px 0; }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { border: 1px solid rgba(145,168,183,0.17); padding: 6px 8px; text-align: right; }
 th:first-child, td:first-child { text-align: left; color: var(--muted); }
@@ -89,16 +106,56 @@ th:first-child, td:first-child { text-align: left; color: var(--muted); }
 .legend { color: var(--muted); font-size: 13px; line-height: 1.5; }
 details { margin-top: 12px; }
 summary { cursor: pointer; color: var(--cyan); }
+code { overflow-wrap: anywhere; word-break: break-word; }
 pre {
   white-space: pre-wrap;
   overflow-x: auto;
+  max-height: min(72vh, 720px);
   background: #020713;
   border: 1px solid rgba(145,168,183,0.18);
   border-radius: 8px;
   padding: 14px;
   color: #dff8ff;
+  font-size: 12px;
+  line-height: 1.4;
 }
-.plot { margin: 18px 0; }
+.plot {
+  margin: 18px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid rgba(55,232,255,.18);
+  border-radius: 10px;
+  background: #020713;
+  padding: 6px;
+}
+.plot > div { min-width: 980px; max-width: none; }
+.diff-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid rgba(55,232,255,.18);
+  border-radius: 10px;
+  background: #020713;
+  padding: 8px;
+  margin-top: 12px;
+}
+.differential-heatmap {
+  display: block;
+  min-width: 1040px;
+  max-width: none;
+  width: 100%;
+  height: auto;
+}
+details[open] pre { box-shadow: inset 0 0 0 1px rgba(55,232,255,.10); }
+svg.xygrid { max-height: 82vh; object-fit: contain; }
+@media (max-width: 760px) {
+  main { width: 100%; padding: 10px; }
+  .grid { grid-template-columns: 1fr; }
+  .metric { grid-template-columns: 1fr; gap: 3px; }
+  .metric span:last-child { text-align: left; }
+  .plot > div { min-width: 760px; }
+  .differential-heatmap { min-width: 920px; }
+}
 """
 
 
@@ -142,6 +199,18 @@ def parse_args() -> argparse.Namespace:
 def safe_slug(value: str) -> str:
     out = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in value)
     return out[:96] or "record"
+
+
+def breakable_identifier(value: Any) -> str:
+    """Escape an identifier while allowing HTML line breaks at separators."""
+
+    escaped = html.escape(str(value))
+    return (
+        escaped.replace("_", "_<wbr>")
+        .replace("/", "/<wbr>")
+        .replace("-", "-<wbr>")
+        .replace(".", ".<wbr>")
+    )
 
 
 def finite_matrix(payload: Any) -> np.ndarray:
@@ -830,7 +899,7 @@ def differential_heatmap_svg(record: dict[str, Any]) -> str:
 
     presentation = record.get("bigraded_chain_presentation", {})
     matrices = presentation.get("boundary_matrices", {}) if isinstance(presentation, dict) else {}
-    width, panel_h = 980, 260
+    width, panel_h = 1120, 330
     parts = [
         f'<svg class="differential-heatmap" viewBox="0 0 {width} {panel_h * 2}" role="img" aria-label="GF(2) differential matrix heatmaps">',
         '<rect x="0" y="0" width="100%" height="100%" fill="#020713"/>',
@@ -841,17 +910,42 @@ def differential_heatmap_svg(record: dict[str, Any]) -> str:
         rows = raw if isinstance(raw, list) else []
         row_count = max(1, len(rows))
         col_count = max(1, max((len(row) for row in rows if isinstance(row, list)), default=0))
-        pad_l, pad_t, pad_r, pad_b = 74, top + 48, 24, 34
-        cell = min(34.0, (width - pad_l - pad_r) / max(1, col_count), (panel_h - 88) / max(1, row_count))
-        parts.append(f'<text x="28" y="{top+26}" fill="#e8fbff" font-size="15">{html.escape(title)}</text>')
+        pad_l, pad_t, pad_r, pad_b = 82, top + 82, 36, 38
+        grid_w = width - pad_l - pad_r
+        grid_h = panel_h - 122
+        cell_w = grid_w / max(1, col_count)
+        cell_h = grid_h / max(1, row_count)
+        tick_cell = min(cell_w, cell_h)
+        row_tick_step = max(1, math.ceil(row_count / 10))
+        col_tick_step = max(1, math.ceil(col_count / 14))
+        parts.append(f'<text x="28" y="{top+28}" fill="#e8fbff" font-size="15" font-weight="700">{html.escape(title)}</text>')
         parts.append(
-            f'<text x="28" y="{top+44}" fill="#91a8b7" font-size="11">Nonzero entries are the actual emitted monomial terms, reduced to GF(2) support and bidegree weight.</text>'
+            f'<text x="28" y="{top+50}" fill="#91a8b7" font-size="11">Exact emitted monomial terms over GF(2); opacity encodes bidegree weight. Hover nonzero cells for terms.</text>'
+        )
+        parts.append(
+            f'<text x="28" y="{top+67}" fill="#91a8b7" font-size="11">Matrix shape: {row_count} rows x {col_count} columns. Axis ticks are sampled to keep dense supports readable.</text>'
+        )
+        nz = sum(1 for row in rows if isinstance(row, list) for value in row if _matrix_nonzero_weight(str(value)) > 0)
+        badge_w = 178
+        parts.append(
+            f'<rect x="{width-badge_w-28}" y="{top+12}" width="{badge_w}" height="28" rx="14" fill="{color}" opacity="0.14" stroke="{color}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{width-42}" y="{top+31}" text-anchor="end" fill="{color}" font-size="13" font-weight="700">{nz} nonzero terms</text>'
+        )
+        parts.append(
+            f'<rect x="{pad_l}" y="{pad_t}" width="{grid_w}" height="{grid_h}" fill="rgba(145,168,183,0.035)" stroke="rgba(145,168,183,0.20)" stroke-width="1"/>'
         )
         for r in range(row_count):
-            parts.append(f'<text x="{pad_l-10}" y="{pad_t+r*cell+cell*.65:.1f}" text-anchor="end" fill="#91a8b7" font-size="10">r{r}</text>')
+            if r % row_tick_step == 0 or r == row_count - 1:
+                parts.append(
+                    f'<text x="{pad_l-10}" y="{pad_t+r*cell_h+cell_h*.65:.1f}" text-anchor="end" fill="#91a8b7" font-size="10">r{r}</text>'
+                )
         for c in range(col_count):
-            if c % max(1, math.ceil(col_count / 12)) == 0:
-                parts.append(f'<text x="{pad_l+c*cell+cell/2:.1f}" y="{pad_t-8}" text-anchor="middle" fill="#91a8b7" font-size="10">c{c}</text>')
+            if c % col_tick_step == 0 or c == col_count - 1:
+                parts.append(
+                    f'<text x="{pad_l+c*cell_w+cell_w/2:.1f}" y="{pad_t-10}" text-anchor="middle" fill="#91a8b7" font-size="10">c{c}</text>'
+                )
         for r, row in enumerate(rows):
             if not isinstance(row, list):
                 continue
@@ -861,18 +955,19 @@ def differential_heatmap_svg(record: dict[str, Any]) -> str:
                 alpha = 0.08 if weight == 0 else min(0.90, 0.18 + 0.12 * weight)
                 fill = f"rgba(145,168,183,{alpha:.3f})" if weight == 0 else color
                 parts.append(
-                    f'<rect x="{pad_l+c*cell:.1f}" y="{pad_t+r*cell:.1f}" width="{cell-1:.1f}" height="{cell-1:.1f}" '
-                    f'fill="{fill}" opacity="{alpha:.3f}" stroke="rgba(145,168,183,0.14)"/>'
+                    f'<rect x="{pad_l+c*cell_w:.1f}" y="{pad_t+r*cell_h:.1f}" '
+                    f'width="{max(0.8, cell_w-0.7):.1f}" height="{max(0.8, cell_h-0.7):.1f}" '
+                    f'fill="{fill}" opacity="{alpha:.3f}" stroke="rgba(145,168,183,0.12)">'
+                    f'<title>{html.escape(title)} row r{r}, column c{c}: {html.escape(value)}</title></rect>'
                 )
-                if weight > 0 and cell >= 20:
+                if weight > 0 and tick_cell >= 16:
                     label = "1" if value == "1_R" else value.replace("x_level", "x").replace("y_radius", "y")
                     parts.append(
-                        f'<text x="{pad_l+c*cell+cell/2:.1f}" y="{pad_t+r*cell+cell*.62:.1f}" '
-                        f'text-anchor="middle" fill="#020713" font-size="{max(7, min(10, cell*.28)):.1f}" font-weight="700">{html.escape(label[:8])}</text>'
+                        f'<text x="{pad_l+c*cell_w+cell_w/2:.1f}" y="{pad_t+r*cell_h+cell_h*.62:.1f}" '
+                        f'text-anchor="middle" fill="#020713" font-size="{max(7, min(10, tick_cell*.30)):.1f}" font-weight="700">{html.escape(label[:8])}</text>'
                     )
-        nz = sum(1 for row in rows if isinstance(row, list) for value in row if _matrix_nonzero_weight(str(value)) > 0)
         parts.append(
-            f'<text x="{width-28}" y="{top+26}" text-anchor="end" fill="{color}" font-size="13">{nz} nonzero terms</text>'
+            f'<text x="{pad_l + grid_w / 2:.1f}" y="{top + panel_h - 10}" text-anchor="middle" fill="#91a8b7" font-size="10">columns are domain basis elements; rows are codomain basis elements</text>'
         )
 
     render_panel("1", "d1: C1 -> C0 differential support", 0, "#37e8ff")
@@ -1255,10 +1350,10 @@ def write_record_html(
 """
     )
     body = f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>{html.escape(record['record_id'])} GUDHI persistence audit</title><style>{CSS}</style></head>
+<html><head><meta charset="utf-8"><title>{html.escape(str(record['record_id']))} GUDHI persistence audit</title><style>{CSS}</style></head>
 <body><main>
 <section class="hero">
-  <h1>{html.escape(record['record_id'])}</h1>
+  <h1 class="record-title">{breakable_identifier(record['record_id'])}</h1>
   <p>Exact GUDHI simplex-tree persistence, vectorized PH, F2[x_level,y_radius] module maps, and Macaulay2 free-resolution output for a reasoning/radius trajectory filtration.</p>
   <div class="links">
     <a class="pill" href="../index.html">index</a>
@@ -1286,7 +1381,7 @@ def write_record_html(
 <section class="panel card">
   <h2>Readable Resolution And Differential Summary</h2>
   {resolution_strip_svg(record)}
-  {differential_heatmap_svg(record)}
+  <div class="diff-scroll">{differential_heatmap_svg(record)}</div>
 </section>
 {derived_map_visual_html(record)}
 {ph_section}
@@ -1347,7 +1442,7 @@ def write_index(output_dir: Path, summary: dict[str, Any], record_pages: list[di
             feature_links += f'<a class="pill" href="{html.escape(str(page["ph_feature_npz"]))}">PH NPZ</a>'
         cards.append(
             f"""<div class="card">
-  <h2>{html.escape(page['record_id'])}</h2>
+  <h2 class="record-title">{breakable_identifier(page['record_id'])}</h2>
   <p>Exact GUDHI/Macaulay2 reasoning-radius persistence audit.</p>
   <div>{badges}</div>
   {metrics}

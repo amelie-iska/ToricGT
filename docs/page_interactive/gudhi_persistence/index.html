@@ -1,6 +1,5 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>ToricGT GUDHI Persistence Audit</title><style>
-:root {
+<html><head><meta charset="utf-8"><title>ToricGT GUDHI Persistence Audit</title><style>:root {
   color-scheme: dark;
   --bg: #030712;
   --panel: #07111f;
@@ -12,13 +11,14 @@
   --green: #8cff6a;
   --border: rgba(55, 232, 255, 0.28);
 }
+* { box-sizing: border-box; }
 body {
   margin: 0;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: radial-gradient(circle at top left, #092238 0, var(--bg) 42rem);
   color: var(--text);
 }
-main { max-width: 1320px; margin: 0 auto; padding: 32px 24px 64px; }
+main { width: min(1420px, calc(100vw - 24px)); max-width: 1420px; margin: 0 auto; padding: 32px 12px 64px; }
 a { color: var(--cyan); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .hero, .card, .panel {
@@ -26,21 +26,37 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
 }
 .hero { padding: 24px; margin-bottom: 20px; }
-h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: 0; }
+h1, h2, h3, .record-title {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+  line-height: 1.16;
+}
+h1 { margin: 0 0 8px; font-size: clamp(22px, 3vw, 28px); letter-spacing: 0; }
 h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }
 p { color: var(--muted); line-height: 1.55; }
-.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-.card { padding: 16px; }
-.metric { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid rgba(145,168,183,0.14); padding: 7px 0; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.card { padding: 16px; min-width: 0; }
+.metric {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.35fr);
+  align-items: start;
+  gap: 12px;
+  border-bottom: 1px solid rgba(145,168,183,0.14);
+  padding: 7px 0;
+  min-width: 0;
+}
+.metric span { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .metric span:first-child { color: var(--muted); }
-.metric span:last-child { color: white; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.metric span:last-child { color: white; font-variant-numeric: tabular-nums; text-align: right; max-width: 100%; }
 .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .pill { border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; background: rgba(55,232,255,0.07); }
 .badge { display: inline-block; border: 1px solid rgba(140,255,106,0.35); border-radius: 999px; color: #d9ffd2; background: rgba(140,255,106,0.11); padding: 4px 8px; font-size: 12px; margin: 2px 4px 2px 0; }
 .badge.fail { border-color: rgba(255,79,216,0.45); color: #ffd8f7; background: rgba(255,79,216,0.12); }
-.tablewrap { overflow-x: auto; margin: 12px 0; }
+.tablewrap { max-width: 100%; overflow: auto; margin: 12px 0; }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { border: 1px solid rgba(145,168,183,0.17); padding: 6px 8px; text-align: right; }
 th:first-child, td:first-child { text-align: left; color: var(--muted); }
@@ -48,17 +64,56 @@ th:first-child, td:first-child { text-align: left; color: var(--muted); }
 .legend { color: var(--muted); font-size: 13px; line-height: 1.5; }
 details { margin-top: 12px; }
 summary { cursor: pointer; color: var(--cyan); }
+code { overflow-wrap: anywhere; word-break: break-word; }
 pre {
   white-space: pre-wrap;
   overflow-x: auto;
+  max-height: min(72vh, 720px);
   background: #020713;
   border: 1px solid rgba(145,168,183,0.18);
   border-radius: 8px;
   padding: 14px;
   color: #dff8ff;
+  font-size: 12px;
+  line-height: 1.4;
 }
-.plot { margin: 18px 0; }
-</style></head>
+.plot {
+  margin: 18px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid rgba(55,232,255,.18);
+  border-radius: 10px;
+  background: #020713;
+  padding: 6px;
+}
+.plot > div { min-width: 980px; max-width: none; }
+.diff-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid rgba(55,232,255,.18);
+  border-radius: 10px;
+  background: #020713;
+  padding: 8px;
+  margin-top: 12px;
+}
+.differential-heatmap {
+  display: block;
+  min-width: 1040px;
+  max-width: none;
+  width: 100%;
+  height: auto;
+}
+details[open] pre { box-shadow: inset 0 0 0 1px rgba(55,232,255,.10); }
+svg.xygrid { max-height: 82vh; object-fit: contain; }
+@media (max-width: 760px) {
+  main { width: 100%; padding: 10px; }
+  .grid { grid-template-columns: 1fr; }
+  .metric { grid-template-columns: 1fr; gap: 3px; }
+  .metric span:last-child { text-align: left; }
+  .plot > div { min-width: 760px; }
+  .differential-heatmap { min-width: 920px; }
+}</style></head>
 <body><main>
 <section class="hero">
   <h1>ToricGT GUDHI Persistence Audit</h1>
@@ -110,19 +165,19 @@ pre {
 <div class="metric"><span>mean_h2_entropy_vector_norm</span><span>0</span></div>
 <div class="metric"><span>config</span><span>{&#x27;max_points&#x27;: 12, &#x27;max_dimension&#x27;: 2, &#x27;radius_quantile&#x27;: 0.62, &#x27;num_radii&#x27;: 5, &#x27;num_levels&#x27;: 5, &#x27;macaulay2_resolutions&#x27;: True, &#x27;ph_feature_visualizations&#x27;: True}</span></div>
 <div class="metric"><span>ph_feature_artifacts</span><span>({&#x27;record_id&#x27;: &#x27;fineweb_tokengt_position_bucket_emb_weight&#x27;, &#x27;json&#x27;: &#x27;ph_features/fineweb_tokengt_position_bucket_emb_weight_ph_features.json&#x27;, &#x27;npz&#x27;: &#x27;ph_features/fineweb_tokengt_position_bucket_emb_weight_ph_features.npz&#x27;}, {&#x27;record_id&#x27;: &#x27;tok_emb_weight&#x27;, &#x27;json&#x27;: &#x27;ph_features/tok_emb_weight_ph_features.json&#x27;, &#x27;npz&#x27;: &#x27;ph_features/tok_emb_weight_ph_features.npz&#x27;}, {&#x27;record_id&#x27;: &#x27;fineweb_tokengt_edge_source_class_emb_weight&#x27;, &#x27;json&#x27;: &#x27;ph_features/fineweb_tokengt_edge_source_class_emb_weight_ph_features.json&#x27;, &#x27;npz&#x27;: &#x27;ph_features/fineweb_tokengt_edge_source_class_emb_weight_ph_features.npz&#x27;})</span></div></div><div class="card">
-  <h2>fineweb_tokengt_position_bucket_emb_weight</h2>
+  <h2 class="record-title">fineweb_<wbr>tokengt_<wbr>position_<wbr>bucket_<wbr>emb_<wbr>weight</h2>
   <p>Exact GUDHI/Macaulay2 reasoning-radius persistence audit.</p>
   <div><span class="badge">M2 d1*d2=0: PASS</span><span class="badge">homogeneous: PASS</span><span class="badge">square residual: PASS</span></div>
   <div class="metric"><span>simplices</span><span>108</span></div><div class="metric"><span>Betti</span><span>{&#x27;0&#x27;: 1, &#x27;1&#x27;: 0, &#x27;2&#x27;: 25}</span></div><div class="metric"><span>H1 landscape norm</span><span>11.9349</span></div><div class="metric"><span>H1 image norm</span><span>27.2356</span></div><div class="metric"><span>H1 silhouette norm</span><span>3.57744</span></div><div class="metric"><span>H1 entropy-vector norm</span><span>0.131548</span></div><div class="metric"><span>GF(2) exact at C1</span><span>True</span></div><div class="metric"><span>simplicial-map validity</span><span>1</span></div>
   <div class="links"><a class="pill" href="records/fineweb_tokengt_position_bucket_emb_weight.html">open page</a><a class="pill" href="records/fineweb_tokengt_position_bucket_emb_weight.json">JSON</a><a class="pill" href="macaulay2/fineweb_tokengt_position_bucket_emb_weight.m2">M2 script</a><a class="pill" href="ph_features/fineweb_tokengt_position_bucket_emb_weight_ph_features.json">PH JSON</a><a class="pill" href="ph_features/fineweb_tokengt_position_bucket_emb_weight_ph_features.npz">PH NPZ</a></div>
 </div><div class="card">
-  <h2>tok_emb_weight</h2>
+  <h2 class="record-title">tok_<wbr>emb_<wbr>weight</h2>
   <p>Exact GUDHI/Macaulay2 reasoning-radius persistence audit.</p>
   <div><span class="badge">M2 d1*d2=0: PASS</span><span class="badge">homogeneous: PASS</span><span class="badge">square residual: PASS</span></div>
   <div class="metric"><span>simplices</span><span>122</span></div><div class="metric"><span>Betti</span><span>{&#x27;0&#x27;: 1, &#x27;1&#x27;: 0, &#x27;2&#x27;: 39}</span></div><div class="metric"><span>H1 landscape norm</span><span>0</span></div><div class="metric"><span>H1 image norm</span><span>0</span></div><div class="metric"><span>H1 silhouette norm</span><span>0</span></div><div class="metric"><span>H1 entropy-vector norm</span><span>0</span></div><div class="metric"><span>GF(2) exact at C1</span><span>True</span></div><div class="metric"><span>simplicial-map validity</span><span>1</span></div>
   <div class="links"><a class="pill" href="records/tok_emb_weight.html">open page</a><a class="pill" href="records/tok_emb_weight.json">JSON</a><a class="pill" href="macaulay2/tok_emb_weight.m2">M2 script</a><a class="pill" href="ph_features/tok_emb_weight_ph_features.json">PH JSON</a><a class="pill" href="ph_features/tok_emb_weight_ph_features.npz">PH NPZ</a></div>
 </div><div class="card">
-  <h2>fineweb_tokengt_edge_source_class_emb_weight</h2>
+  <h2 class="record-title">fineweb_<wbr>tokengt_<wbr>edge_<wbr>source_<wbr>class_<wbr>emb_<wbr>weight</h2>
   <p>Exact GUDHI/Macaulay2 reasoning-radius persistence audit.</p>
   <div><span class="badge">M2 d1*d2=0: PASS</span><span class="badge">homogeneous: PASS</span><span class="badge">square residual: PASS</span></div>
   <div class="metric"><span>simplices</span><span>113</span></div><div class="metric"><span>Betti</span><span>{&#x27;0&#x27;: 1, &#x27;1&#x27;: 0, &#x27;2&#x27;: 30}</span></div><div class="metric"><span>H1 landscape norm</span><span>10.008</span></div><div class="metric"><span>H1 image norm</span><span>72.4099</span></div><div class="metric"><span>H1 silhouette norm</span><span>6.85289</span></div><div class="metric"><span>H1 entropy-vector norm</span><span>0.128437</span></div><div class="metric"><span>GF(2) exact at C1</span><span>True</span></div><div class="metric"><span>simplicial-map validity</span><span>1</span></div>
