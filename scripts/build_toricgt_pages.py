@@ -276,7 +276,7 @@ def copy_interactive_reports(repo: Path, docs: Path, analysis_dir: Path | None =
             shutil.rmtree(dst)
         shutil.copytree(src, dst)
         if key == "branching_reasoning":
-            write_branching_reasoning_lite_report(dst)
+            write_branching_reasoning_lite_report(dst, analysis_dir=analysis_dir)
         if key == "gudhi_persistence":
             enhance_gudhi_persistence_report(dst)
         if key == "toric_embedding":
@@ -314,13 +314,121 @@ svg.xygrid{max-height:82vh;object-fit:contain}
         path.write_text(text, encoding="utf-8")
 
 
-def write_branching_reasoning_lite_report(dst: Path) -> None:
+def write_branching_reasoning_lite_report(dst: Path, analysis_dir: Path | None = None) -> None:
     original_index = dst / "index.html"
     payload_path = dst / "branching_reasoning_payload.json"
     compact_payload_written = False
     if payload_path.exists():
         try:
             payload = load_json(payload_path)
+            fot_trace_path = None
+            if analysis_dir and analysis_dir.exists():
+                candidate = analysis_dir / "embedding_fot_report" / "embedding_fot_trace.json"
+                if candidate.exists():
+                    fot_trace_path = candidate
+            elif (dst.parent / "embedding_fot_report" / "embedding_fot_trace.json").exists():
+                fot_trace_path = dst.parent / "embedding_fot_report" / "embedding_fot_trace.json"
+            fot_trace = load_json(fot_trace_path) if fot_trace_path and fot_trace_path.exists() else {}
+
+            def compact_forest(trace: dict[str, Any]) -> dict[str, Any] | None:
+                forest = trace.get("forest") if isinstance(trace.get("forest"), dict) else None
+                if not forest:
+                    return None
+
+                def as_int(value: Any, default: int = 0) -> int:
+                    if value is None:
+                        return int(default)
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError):
+                        return int(default)
+
+                def as_float(value: Any, default: float = 0.0) -> float:
+                    if value is None:
+                        return float(default)
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        return float(default)
+
+                nodes_out: list[dict[str, Any]] = []
+                for node in forest.get("nodes", []):
+                    if not isinstance(node, dict):
+                        continue
+                    layout = node.get("layout", [0, 0, 0])
+                    nodes_out.append(
+                        {
+                            "id": as_int(node.get("id"), len(nodes_out)),
+                            "kind": str(node.get("kind", "thought")),
+                            "tree_id": as_int(node.get("tree_id"), -1),
+                            "depth": as_int(node.get("depth"), 0),
+                            "budget_level": as_int(node.get("budget_level", node.get("depth", 0)), 0),
+                            "parent": None if node.get("parent") is None else as_int(node.get("parent")),
+                            "branch_slot": as_int(node.get("branch_slot"), 0),
+                            "action_id": as_int(node.get("action_id"), -1),
+                            "position": as_int(node.get("position", node.get("step_index", 0)), 0),
+                            "step_index": as_int(node.get("step_index", node.get("position", 0)), 0),
+                            "target_id": as_int(node.get("target_id"), -1),
+                            "nll": round(as_float(node.get("nll"), 0.0), 4),
+                            "activation": round(as_float(node.get("activation"), 0.0), 5),
+                            "value": round(as_float(node.get("value"), 0.0), 5),
+                            "flow": round(as_float(node.get("flow"), 0.0), 5),
+                            "correction_norm": round(as_float(node.get("correction_norm"), 0.0), 5),
+                            "consensus_bucket": as_int(node.get("consensus_bucket"), -1),
+                            "x": round(as_float(layout[0] if len(layout) > 0 else 0.0), 5),
+                            "y": round(as_float(layout[1] if len(layout) > 1 else 0.0), 5),
+                            "z": round(as_float(layout[2] if len(layout) > 2 else 0.0), 5),
+                        }
+                    )
+                edges_out: list[dict[str, Any]] = []
+                for edge in forest.get("edges", []):
+                    if not isinstance(edge, dict):
+                        continue
+                    edges_out.append(
+                        {
+                            "source": as_int(edge.get("source"), 0),
+                            "target": as_int(edge.get("target"), 0),
+                            "tree_id": as_int(edge.get("tree_id"), -1),
+                            "kind": str(edge.get("kind", "expansion")),
+                            "action_id": as_int(edge.get("action_id"), -1),
+                            "branch_slot": as_int(edge.get("branch_slot"), 0),
+                            "policy_probability": round(as_float(edge.get("policy_probability"), 0.0), 5),
+                            "source_depth": as_int(edge.get("source_depth"), 0),
+                            "target_depth": as_int(edge.get("target_depth"), 0),
+                            "nll_delta_improvement": round(as_float(edge.get("nll_delta_improvement"), 0.0), 5),
+                            "value_delta": round(as_float(edge.get("value_delta"), 0.0), 5),
+                            "correction_score": round(as_float(edge.get("correction_score"), 0.0), 5),
+                            "correction_cosine": round(as_float(edge.get("correction_cosine"), 0.0), 5),
+                        }
+                    )
+                radius_edges_out: list[list[float]] = []
+                for row in forest.get("radius_edges", []):
+                    if isinstance(row, (list, tuple)) and len(row) >= 4:
+                        radius_edges_out.append([as_int(row[0]), as_int(row[1]), as_int(row[2]), round(as_float(row[3]), 4)])
+                return {
+                    "schema": "toricgt.embedding_fot_public_compact.v1",
+                    "provenance": forest.get("provenance", trace.get("schema", "unknown")),
+                    "display_space": forest.get("display_space", "forest_process_layout_3d"),
+                    "comparison_space": forest.get("comparison_space", "original_selected_hidden_states"),
+                    "num_trees": as_int(forest.get("num_trees", trace.get("num_trees")), 0),
+                    "branching": as_int(forest.get("branching"), 0),
+                    "max_depth_config": as_int(forest.get("max_depth_config"), 0),
+                    "consensus_node_id": as_int(forest.get("consensus_node_id"), -1),
+                    "nodes": nodes_out,
+                    "edges": edges_out,
+                    "radius_values": [round(float(v), 4) for v in forest.get("radius_values", [])],
+                    "radius_edges": radius_edges_out,
+                    "tree_summaries": forest.get("tree_summaries", []),
+                    "trace_metrics": {
+                        str(key): round(float(value), 6)
+                        for key, value in (trace.get("trace_metrics", {}) if isinstance(trace.get("trace_metrics"), dict) else {}).items()
+                        if isinstance(value, (int, float))
+                    },
+                }
+
+            forest_payload = compact_forest(fot_trace)
+            if fot_trace_path and fot_trace_path.exists():
+                shutil.copy2(fot_trace_path, dst / "embedding_fot_trace.json")
             compact_nodes = []
             for node in payload.get("nodes", []):
                 pca = node.get("pca", [0, 0, 0])
@@ -419,6 +527,13 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
                     "emitted": payload.get("analogy", {}).get("analogy_emitted"),
                     "decision_summary": payload.get("analogy", {}).get("decision_summary"),
                 },
+                "forest": forest_payload
+                if forest_payload is not None
+                else {
+                    "schema": "toricgt.embedding_fot_public_absent.v1",
+                    "available": False,
+                    "reason": "No embedding_fot_report/embedding_fot_trace.json with an explicit forest block was available for this analysis bundle.",
+                },
             }
             (dst / "branching_reasoning_interactive.json").write_text(
                 json.dumps(compact_payload, separators=(",", ":"), sort_keys=True),
@@ -443,6 +558,24 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
             "<tr><th>report mode</th><td>static low-resource summary</td></tr>",
             "<tr><th>source</th><td>generated branching reasoning analysis bundle</td></tr>",
         ]
+    interactive_payload = load_json(dst / "branching_reasoning_interactive.json")
+    forest_summary = interactive_payload.get("forest") if isinstance(interactive_payload.get("forest"), dict) else None
+    if forest_summary and forest_summary.get("available") is not False and forest_summary.get("nodes"):
+        forest_edge_counts: dict[str, int] = {}
+        for edge in forest_summary.get("edges", []):
+            if not isinstance(edge, dict):
+                continue
+            kind = str(edge.get("kind", "edge"))
+            forest_edge_counts[kind] = forest_edge_counts.get(kind, 0) + 1
+        metric_rows.extend(
+            [
+                f"<tr><th>FoT parallel trees</th><td>{html.escape(str(forest_summary.get('num_trees', 'unknown')))}</td></tr>",
+                f"<tr><th>FoT forest nodes</th><td>{len(forest_summary.get('nodes', []))}</td></tr>",
+                f"<tr><th>FoT forest edges</th><td>{len(forest_summary.get('edges', []))}</td></tr>",
+                f"<tr><th>FoT edge kinds</th><td>{html.escape(json.dumps(forest_edge_counts, sort_keys=True))}</td></tr>",
+                f"<tr><th>FoT reconstruction source</th><td>{html.escape(str(forest_summary.get('provenance', 'unknown')))}</td></tr>",
+            ]
+        )
     screenshot_specs = [
         ("summary.png", "Summary Dashboard", "Summary screenshot generated from the exact branching-reasoning payload."),
         (
@@ -538,6 +671,23 @@ def write_branching_reasoning_lite_report(dst: Path) -> None:
     <h2>Exact Summary Metrics</h2>
     <table><tbody>{''.join(metric_rows)}</tbody></table>
   </section>
+  <section class="panel" id="fotForestSection">
+    <h2>Embedding-Space Forest-of-Thought Reasoning</h2>
+    <p>This panel renders the FoT process explicitly as parallel thought trees grown under a reasoning budget. Expansion edges are policy-ranked branch choices from the checkpoint FoT head, correction edges are value/NLL/correction-vector improvements, and consensus edges gather tree leaves. Click a node to inspect it and jump the local reasoning-step simplex viewer to the corresponding hidden-state position.</p>
+    <div class="controls">
+      <label>FoT budget level <input id="forestBudgetRange" type="range" min="0" max="1" value="1"></label>
+      <label>FoT radius <input id="forestRadiusRange" type="range" min="0" max="1" value="0"></label>
+      <label>yaw <input id="forestYawRange" type="range" min="-180" max="180" value="-24"></label>
+      <label>pitch <input id="forestPitchRange" type="range" min="-70" max="70" value="-18"></label>
+      <label>zoom <input id="forestZoomRange" type="range" min="55" max="180" value="105"></label>
+      <label><input id="forestExpansionToggle" type="checkbox" checked> expansion edges</label>
+      <label><input id="forestCorrectionToggle" type="checkbox" checked> correction edges</label>
+      <label><input id="forestConsensusToggle" type="checkbox" checked> consensus edges</label>
+      <label><input id="forestRadiusToggle" type="checkbox"> radius simplex edges</label>
+    </div>
+    <canvas id="forestCanvas" width="1120" height="600"></canvas>
+    <div id="forestDetail" class="detail">FoT forest payload has not loaded yet.</div>
+  </section>
   <section class="panel">
     <h2>Interactive Native 3D PCA Trajectory</h2>
     <p>This viewer restores rotation, pitch, zoom, reasoning-level filtering, radius filtering, one-dimensional simplex edges, and sampled 2-simplices without shipping hidden embeddings or the heavyweight plotting runtime.</p>
@@ -597,12 +747,26 @@ const stepDecodeToggle = document.getElementById('stepDecodeToggle');
 const stepEdgeToggle = document.getElementById('stepEdgeToggle');
 const stepTriToggle = document.getElementById('stepTriToggle');
 const stepDetail = document.getElementById('stepDetail');
+const forestCanvas = document.getElementById('forestCanvas');
+const forestCtx = forestCanvas.getContext('2d');
+const forestBudgetRange = document.getElementById('forestBudgetRange');
+const forestRadiusRange = document.getElementById('forestRadiusRange');
+const forestYawRange = document.getElementById('forestYawRange');
+const forestPitchRange = document.getElementById('forestPitchRange');
+const forestZoomRange = document.getElementById('forestZoomRange');
+const forestExpansionToggle = document.getElementById('forestExpansionToggle');
+const forestCorrectionToggle = document.getElementById('forestCorrectionToggle');
+const forestConsensusToggle = document.getElementById('forestConsensusToggle');
+const forestRadiusToggle = document.getElementById('forestRadiusToggle');
+const forestDetail = document.getElementById('forestDetail');
 let compact = null;
 let projected = [];
 let projectedById = new Map();
 let stepProjected = [];
 let stepProjectedById = new Map();
 let stepVisibleIds = new Set();
+let forestProjected = [];
+let forestProjectedById = new Map();
 function esc(value) {{ return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch])); }}
 function colorForNll(nll, minNll, maxNll) {{
   const t = Math.max(0, Math.min(1, (nll - minNll) / Math.max(1e-6, maxNll - minNll)));
@@ -663,6 +827,116 @@ function bindDrag(targetCanvas, yawInput, pitchInput, render) {{
   }});
   targetCanvas.addEventListener('pointerup', () => {{ down = false; }});
   targetCanvas.addEventListener('pointercancel', () => {{ down = false; }});
+}}
+function forestEdgeStyle(kind) {{
+  if (kind === 'self_correction') return {{color:'rgba(255,79,216,.78)', width:1.6, dashed:true}};
+  if (kind === 'consensus') return {{color:'rgba(255,209,102,.82)', width:2.1, dashed:true}};
+  if (kind === 'budget_continuation') return {{color:'rgba(140,255,106,.56)', width:1.4, dashed:true}};
+  return {{color:'rgba(55,232,255,.72)', width:1.8, dashed:false}};
+}}
+function drawLineMaybeDashed(context, a, b, style) {{
+  if (!a || !b) return;
+  context.save();
+  context.strokeStyle = style.color;
+  context.lineWidth = style.width;
+  context.setLineDash(style.dashed ? [7, 6] : []);
+  context.beginPath(); context.moveTo(a.px, a.py); context.lineTo(b.px, b.py); context.stroke();
+  context.restore();
+}}
+function selectStepByIndex(stepIndex) {{
+  if (!compact?.steps?.length) return;
+  const bounded = Math.max(0, Math.min(compact.steps.length - 1, Number(stepIndex) || 0));
+  stepSelect.value = String(bounded);
+  const step = currentStep();
+  if (step) {{
+    const maxDecode = Math.max(...step.tokens.map(t => t.decode_order));
+    decodeRange.max = maxDecode; decodeRange.value = maxDecode;
+    stepRadiusRange.max = Math.max(0, step.radius_values.length - 1);
+    stepRadiusRange.value = Math.max(0, Math.floor((step.radius_values.length - 1) / 2));
+    drawStep();
+  }}
+}}
+function drawForest() {{
+  const forest = compact?.forest;
+  if (!forest || forest.available === false || !forest.nodes?.length) {{
+    forestCtx.clearRect(0,0,forestCanvas.width,forestCanvas.height);
+    forestCtx.fillStyle = '#020713'; forestCtx.fillRect(0,0,forestCanvas.width,forestCanvas.height);
+    forestCtx.fillStyle = '#ffd166'; forestCtx.font='18px system-ui';
+    forestCtx.fillText('No explicit FoT forest payload is available for this analysis bundle.', 24, 42);
+    forestDetail.textContent = forest?.reason || 'FoT forest unavailable.';
+    return;
+  }}
+  const maxBudget = Number(forestBudgetRange.value);
+  const radiusIndex = Number(forestRadiusRange.value);
+  const radius = forest.radius_values?.[Math.min(radiusIndex, Math.max(0, forest.radius_values.length - 1))] ?? 0;
+  const visible = forest.nodes.filter(n => Number(n.budget_level || 0) <= maxBudget);
+  const visibleIds = new Set(visible.map(n => Number(n.id)));
+  forestProjected = projectCollection(forest.nodes, forestCanvas, Number(forestYawRange.value), Number(forestPitchRange.value), Number(forestZoomRange.value));
+  forestProjectedById = new Map(forestProjected.map(p => [Number(p.node.id), p]));
+  forestCtx.clearRect(0,0,forestCanvas.width,forestCanvas.height);
+  forestCtx.fillStyle = '#020713'; forestCtx.fillRect(0,0,forestCanvas.width,forestCanvas.height);
+  forestCtx.strokeStyle = 'rgba(157,184,207,.16)'; forestCtx.lineWidth = 1;
+  for (let i=0;i<7;i++) {{ const y=58+i*(forestCanvas.height-116)/6; forestCtx.beginPath(); forestCtx.moveTo(64,y); forestCtx.lineTo(forestCanvas.width-64,y); forestCtx.stroke(); }}
+  if (forestRadiusToggle.checked) {{
+    for (const [a,b,l,birth] of (forest.radius_edges || [])) {{
+      if (birth > radius || !visibleIds.has(Number(a)) || !visibleIds.has(Number(b))) continue;
+      drawLineMaybeDashed(forestCtx, forestProjectedById.get(Number(a)), forestProjectedById.get(Number(b)), {{color:'rgba(136,255,134,.13)', width:.7, dashed:false}});
+    }}
+  }}
+  for (const edge of (forest.edges || [])) {{
+    const kind = String(edge.kind || 'expansion');
+    if (kind === 'expansion' && !forestExpansionToggle.checked) continue;
+    if (kind === 'budget_continuation' && !forestExpansionToggle.checked) continue;
+    if (kind === 'self_correction' && !forestCorrectionToggle.checked) continue;
+    if (kind === 'consensus' && !forestConsensusToggle.checked) continue;
+    const a = Number(edge.source), b = Number(edge.target);
+    if (!visibleIds.has(a) || !visibleIds.has(b)) continue;
+    drawLineMaybeDashed(forestCtx, forestProjectedById.get(a), forestProjectedById.get(b), forestEdgeStyle(kind));
+  }}
+  const nlls = visible.map(n => Number(n.nll || 0));
+  const minNll = nlls.length ? Math.min(...nlls) : 0;
+  const maxNll = nlls.length ? Math.max(...nlls) : 1;
+  const treePalette = ['#37e8ff','#ff4fd8','#8cff6a','#ffd166','#a78bfa','#ff8c42','#6fffe9','#ff6b91'];
+  for (const p of forestProjected.filter(p => visibleIds.has(Number(p.node.id))).sort((a,b)=>a.depth-b.depth)) {{
+    const node = p.node;
+    const isConsensus = String(node.kind) === 'consensus';
+    forestCtx.fillStyle = colorForNll(Number(node.nll || 0), minNll, maxNll);
+    forestCtx.strokeStyle = isConsensus ? '#ffd166' : treePalette[Math.max(0, Number(node.tree_id || 0)) % treePalette.length];
+    forestCtx.lineWidth = isConsensus ? 3 : 2;
+    forestCtx.beginPath(); forestCtx.arc(p.px, p.py, isConsensus ? 8 : 5.8, 0, Math.PI*2); forestCtx.fill(); forestCtx.stroke();
+    if (isConsensus || Number(node.depth || 0) === 0) {{
+      forestCtx.fillStyle = '#e8fbff'; forestCtx.font = '12px system-ui';
+      forestCtx.fillText(isConsensus ? 'consensus' : `T${{node.tree_id}}`, p.px + 9, p.py - 7);
+    }}
+  }}
+  forestCtx.fillStyle='#ecfbff'; forestCtx.font='16px system-ui';
+  forestCtx.fillText(`FoT budget ≤ ${{maxBudget}} · radius ${{Number(radius).toFixed(3)}} · visible nodes ${{visible.length}} · trees ${{forest.num_trees || 'n/a'}} · provenance: ${{forest.display_space || 'forest'}}`, 22, 32);
+  if (!forestDetail.dataset.locked) {{
+    const counts = (forest.edges || []).reduce((acc, e) => {{ const k = String(e.kind || 'edge'); acc[k] = (acc[k] || 0) + 1; return acc; }}, {{}});
+    forestDetail.innerHTML = `<strong>FoT forest loaded</strong><br>${{visible.length}} visible nodes across ${{forest.num_trees}} parallel trees · edge kinds ${{esc(JSON.stringify(counts))}}<br>Click a thought node to inspect it and reveal its associated reasoning-step filtered simplicial complex below.`;
+  }}
+}}
+function nearestForest(event) {{
+  const forest = compact?.forest;
+  if (!forest?.nodes?.length || !forestProjected.length) return;
+  const rect = forestCanvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * forestCanvas.width / rect.width;
+  const y = (event.clientY - rect.top) * forestCanvas.height / rect.height;
+  let best=null, bd=Infinity;
+  for (const p of forestProjected) {{
+    const d=(p.px-x)**2+(p.py-y)**2;
+    if (d<bd) {{bd=d; best=p;}}
+  }}
+  if (best && bd < 700) {{
+    const n = best.node;
+    const edgeKinds = (forest.edges || []).filter(e => Number(e.source) === Number(n.id) || Number(e.target) === Number(n.id)).reduce((acc, e) => {{ acc[String(e.kind || 'edge')] = (acc[String(e.kind || 'edge')] || 0) + 1; return acc; }}, {{}});
+    forestDetail.dataset.locked = '1';
+    forestDetail.innerHTML = `<strong>FoT ${{esc(n.kind)}} node ${{n.id}}</strong><br>tree ${{n.tree_id}} · depth ${{n.depth}} · branch slot ${{n.branch_slot}} · action ${{n.action_id}} · target token ${{n.target_id}}<br>NLL ${{Number(n.nll).toFixed(4)}} · activation ${{Number(n.activation).toFixed(4)}} · value ${{Number(n.value).toFixed(4)}} · correction norm ${{Number(n.correction_norm).toFixed(4)}}<br>source hidden position / reasoning step ${{n.step_index}} · incident edge kinds ${{esc(JSON.stringify(edgeKinds))}}`;
+    if (event.type === 'click') {{
+      selectStepByIndex(Number(n.step_index || 0));
+      stepCanvas.scrollIntoView({{block:'center', behavior:'smooth'}});
+    }}
+  }}
 }}
 function draw() {{
   if (!compact) return;
@@ -772,6 +1046,16 @@ fetch('branching_reasoning_interactive.json').then(r => r.json()).then(data => {
   const maxLevel = Math.max(...compact.nodes.map(n => n.level));
   levelRange.max = maxLevel; levelRange.value = maxLevel;
   radiusRange.max = Math.max(0, compact.radius_values.length - 1); radiusRange.value = Math.max(0, Math.floor((compact.radius_values.length - 1) / 3));
+  if (compact.forest?.nodes?.length && compact.forest.available !== false) {{
+    const maxForestBudget = Math.max(...compact.forest.nodes.map(n => Number(n.budget_level || 0)));
+    forestBudgetRange.max = maxForestBudget; forestBudgetRange.value = maxForestBudget;
+    forestRadiusRange.max = Math.max(0, (compact.forest.radius_values || []).length - 1);
+    forestRadiusRange.value = Math.max(0, Math.floor(((compact.forest.radius_values || []).length - 1) / 3));
+    [forestBudgetRange, forestRadiusRange, forestYawRange, forestPitchRange, forestZoomRange, forestExpansionToggle, forestCorrectionToggle, forestConsensusToggle, forestRadiusToggle].forEach(el => el.addEventListener('input', drawForest));
+    forestCanvas.addEventListener('mousemove', nearestForest);
+    forestCanvas.addEventListener('click', nearestForest);
+    bindDrag(forestCanvas, forestYawRange, forestPitchRange, drawForest);
+  }}
   [levelRange, radiusRange, rotRange, pitchRange, zoomRange, edgeToggle, triToggle].forEach(el => el.addEventListener('input', draw));
   canvas.addEventListener('mousemove', nearest); canvas.addEventListener('click', nearest);
   bindDrag(canvas, rotRange, pitchRange, draw);
@@ -795,6 +1079,7 @@ fetch('branching_reasoning_interactive.json').then(r => r.json()).then(data => {
   }} else {{
     stepDetail.textContent = 'Per-step compact simplex payload is unavailable for this report.';
   }}
+  drawForest();
   draw();
 }}).catch(error => {{ detail.textContent = 'Compact interactive payload unavailable: '+error; }});
   </script>
