@@ -23,7 +23,24 @@
   </section>
   <section class="panel">
     <h2>Exact Summary Metrics</h2>
-    <table><tbody><tr><th>source mode</th><td>checkpoint_embedding_payload</td></tr><tr><th>reasoning steps</th><td>512</td></tr><tr><th>DAG edges</th><td>511</td></tr><tr><th>radius levels</th><td>7</td></tr><tr><th>analogy emitted</th><td>True</td></tr><tr><th>analogy status</th><td>strong_analogy</td></tr><tr><th>analogy confidence</th><td>0.975</td></tr><tr><th>full simplex-map valid fraction</th><td>0.9829</td></tr><tr><th>vectorized PH cosine mean</th><td>0.9495</td></tr><tr><th>vectorized PH gate score</th><td>0.9975</td></tr><tr><th>step simplex-map mean</th><td>0.7083</td></tr></tbody></table>
+    <table><tbody><tr><th>source mode</th><td>checkpoint_embedding_payload</td></tr><tr><th>reasoning steps</th><td>512</td></tr><tr><th>DAG edges</th><td>511</td></tr><tr><th>radius levels</th><td>7</td></tr><tr><th>analogy emitted</th><td>True</td></tr><tr><th>analogy status</th><td>strong_analogy</td></tr><tr><th>analogy confidence</th><td>0.975</td></tr><tr><th>full simplex-map valid fraction</th><td>0.9829</td></tr><tr><th>vectorized PH cosine mean</th><td>0.9495</td></tr><tr><th>vectorized PH gate score</th><td>0.9975</td></tr><tr><th>step simplex-map mean</th><td>0.7083</td></tr><tr><th>FoT parallel trees</th><td>4</td></tr><tr><th>FoT forest nodes</th><td>61</td></tr><tr><th>FoT forest edges</th><td>112</td></tr><tr><th>FoT edge kinds</th><td>{&quot;consensus&quot;: 40, &quot;expansion&quot;: 56, &quot;self_correction&quot;: 16}</td></tr><tr><th>FoT reconstruction source</th><td>real_checkpoint_fot_head_reconstructed_from_selected_hidden_states_policy_logits_value_correction_and_consensus</td></tr></tbody></table>
+  </section>
+  <section class="panel" id="fotForestSection">
+    <h2>Embedding-Space Forest-of-Thought Reasoning</h2>
+    <p>This panel renders the FoT process explicitly as parallel thought trees grown under a reasoning budget. Expansion edges are policy-ranked branch choices from the checkpoint FoT head, correction edges are value/NLL/correction-vector improvements, and consensus edges gather tree leaves. Click a node to inspect it and jump the local reasoning-step simplex viewer to the corresponding hidden-state position.</p>
+    <div class="controls">
+      <label>FoT budget level <input id="forestBudgetRange" type="range" min="0" max="1" value="1"></label>
+      <label>FoT radius <input id="forestRadiusRange" type="range" min="0" max="1" value="0"></label>
+      <label>yaw <input id="forestYawRange" type="range" min="-180" max="180" value="-24"></label>
+      <label>pitch <input id="forestPitchRange" type="range" min="-70" max="70" value="-18"></label>
+      <label>zoom <input id="forestZoomRange" type="range" min="55" max="180" value="105"></label>
+      <label><input id="forestExpansionToggle" type="checkbox" checked> expansion edges</label>
+      <label><input id="forestCorrectionToggle" type="checkbox" checked> correction edges</label>
+      <label><input id="forestConsensusToggle" type="checkbox" checked> consensus edges</label>
+      <label><input id="forestRadiusToggle" type="checkbox"> radius simplex edges</label>
+    </div>
+    <canvas id="forestCanvas" width="1120" height="600"></canvas>
+    <div id="forestDetail" class="detail">FoT forest payload has not loaded yet.</div>
   </section>
   <section class="panel">
     <h2>Interactive Native 3D PCA Trajectory</h2>
@@ -109,12 +126,26 @@ const stepDecodeToggle = document.getElementById('stepDecodeToggle');
 const stepEdgeToggle = document.getElementById('stepEdgeToggle');
 const stepTriToggle = document.getElementById('stepTriToggle');
 const stepDetail = document.getElementById('stepDetail');
+const forestCanvas = document.getElementById('forestCanvas');
+const forestCtx = forestCanvas.getContext('2d');
+const forestBudgetRange = document.getElementById('forestBudgetRange');
+const forestRadiusRange = document.getElementById('forestRadiusRange');
+const forestYawRange = document.getElementById('forestYawRange');
+const forestPitchRange = document.getElementById('forestPitchRange');
+const forestZoomRange = document.getElementById('forestZoomRange');
+const forestExpansionToggle = document.getElementById('forestExpansionToggle');
+const forestCorrectionToggle = document.getElementById('forestCorrectionToggle');
+const forestConsensusToggle = document.getElementById('forestConsensusToggle');
+const forestRadiusToggle = document.getElementById('forestRadiusToggle');
+const forestDetail = document.getElementById('forestDetail');
 let compact = null;
 let projected = [];
 let projectedById = new Map();
 let stepProjected = [];
 let stepProjectedById = new Map();
 let stepVisibleIds = new Set();
+let forestProjected = [];
+let forestProjectedById = new Map();
 function esc(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 function colorForNll(nll, minNll, maxNll) {
   const t = Math.max(0, Math.min(1, (nll - minNll) / Math.max(1e-6, maxNll - minNll)));
@@ -175,6 +206,116 @@ function bindDrag(targetCanvas, yawInput, pitchInput, render) {
   });
   targetCanvas.addEventListener('pointerup', () => { down = false; });
   targetCanvas.addEventListener('pointercancel', () => { down = false; });
+}
+function forestEdgeStyle(kind) {
+  if (kind === 'self_correction') return {color:'rgba(255,79,216,.78)', width:1.6, dashed:true};
+  if (kind === 'consensus') return {color:'rgba(255,209,102,.82)', width:2.1, dashed:true};
+  if (kind === 'budget_continuation') return {color:'rgba(140,255,106,.56)', width:1.4, dashed:true};
+  return {color:'rgba(55,232,255,.72)', width:1.8, dashed:false};
+}
+function drawLineMaybeDashed(context, a, b, style) {
+  if (!a || !b) return;
+  context.save();
+  context.strokeStyle = style.color;
+  context.lineWidth = style.width;
+  context.setLineDash(style.dashed ? [7, 6] : []);
+  context.beginPath(); context.moveTo(a.px, a.py); context.lineTo(b.px, b.py); context.stroke();
+  context.restore();
+}
+function selectStepByIndex(stepIndex) {
+  if (!compact?.steps?.length) return;
+  const bounded = Math.max(0, Math.min(compact.steps.length - 1, Number(stepIndex) || 0));
+  stepSelect.value = String(bounded);
+  const step = currentStep();
+  if (step) {
+    const maxDecode = Math.max(...step.tokens.map(t => t.decode_order));
+    decodeRange.max = maxDecode; decodeRange.value = maxDecode;
+    stepRadiusRange.max = Math.max(0, step.radius_values.length - 1);
+    stepRadiusRange.value = Math.max(0, Math.floor((step.radius_values.length - 1) / 2));
+    drawStep();
+  }
+}
+function drawForest() {
+  const forest = compact?.forest;
+  if (!forest || forest.available === false || !forest.nodes?.length) {
+    forestCtx.clearRect(0,0,forestCanvas.width,forestCanvas.height);
+    forestCtx.fillStyle = '#020713'; forestCtx.fillRect(0,0,forestCanvas.width,forestCanvas.height);
+    forestCtx.fillStyle = '#ffd166'; forestCtx.font='18px system-ui';
+    forestCtx.fillText('No explicit FoT forest payload is available for this analysis bundle.', 24, 42);
+    forestDetail.textContent = forest?.reason || 'FoT forest unavailable.';
+    return;
+  }
+  const maxBudget = Number(forestBudgetRange.value);
+  const radiusIndex = Number(forestRadiusRange.value);
+  const radius = forest.radius_values?.[Math.min(radiusIndex, Math.max(0, forest.radius_values.length - 1))] ?? 0;
+  const visible = forest.nodes.filter(n => Number(n.budget_level || 0) <= maxBudget);
+  const visibleIds = new Set(visible.map(n => Number(n.id)));
+  forestProjected = projectCollection(forest.nodes, forestCanvas, Number(forestYawRange.value), Number(forestPitchRange.value), Number(forestZoomRange.value));
+  forestProjectedById = new Map(forestProjected.map(p => [Number(p.node.id), p]));
+  forestCtx.clearRect(0,0,forestCanvas.width,forestCanvas.height);
+  forestCtx.fillStyle = '#020713'; forestCtx.fillRect(0,0,forestCanvas.width,forestCanvas.height);
+  forestCtx.strokeStyle = 'rgba(157,184,207,.16)'; forestCtx.lineWidth = 1;
+  for (let i=0;i<7;i++) { const y=58+i*(forestCanvas.height-116)/6; forestCtx.beginPath(); forestCtx.moveTo(64,y); forestCtx.lineTo(forestCanvas.width-64,y); forestCtx.stroke(); }
+  if (forestRadiusToggle.checked) {
+    for (const [a,b,l,birth] of (forest.radius_edges || [])) {
+      if (birth > radius || !visibleIds.has(Number(a)) || !visibleIds.has(Number(b))) continue;
+      drawLineMaybeDashed(forestCtx, forestProjectedById.get(Number(a)), forestProjectedById.get(Number(b)), {color:'rgba(136,255,134,.13)', width:.7, dashed:false});
+    }
+  }
+  for (const edge of (forest.edges || [])) {
+    const kind = String(edge.kind || 'expansion');
+    if (kind === 'expansion' && !forestExpansionToggle.checked) continue;
+    if (kind === 'budget_continuation' && !forestExpansionToggle.checked) continue;
+    if (kind === 'self_correction' && !forestCorrectionToggle.checked) continue;
+    if (kind === 'consensus' && !forestConsensusToggle.checked) continue;
+    const a = Number(edge.source), b = Number(edge.target);
+    if (!visibleIds.has(a) || !visibleIds.has(b)) continue;
+    drawLineMaybeDashed(forestCtx, forestProjectedById.get(a), forestProjectedById.get(b), forestEdgeStyle(kind));
+  }
+  const nlls = visible.map(n => Number(n.nll || 0));
+  const minNll = nlls.length ? Math.min(...nlls) : 0;
+  const maxNll = nlls.length ? Math.max(...nlls) : 1;
+  const treePalette = ['#37e8ff','#ff4fd8','#8cff6a','#ffd166','#a78bfa','#ff8c42','#6fffe9','#ff6b91'];
+  for (const p of forestProjected.filter(p => visibleIds.has(Number(p.node.id))).sort((a,b)=>a.depth-b.depth)) {
+    const node = p.node;
+    const isConsensus = String(node.kind) === 'consensus';
+    forestCtx.fillStyle = colorForNll(Number(node.nll || 0), minNll, maxNll);
+    forestCtx.strokeStyle = isConsensus ? '#ffd166' : treePalette[Math.max(0, Number(node.tree_id || 0)) % treePalette.length];
+    forestCtx.lineWidth = isConsensus ? 3 : 2;
+    forestCtx.beginPath(); forestCtx.arc(p.px, p.py, isConsensus ? 8 : 5.8, 0, Math.PI*2); forestCtx.fill(); forestCtx.stroke();
+    if (isConsensus || Number(node.depth || 0) === 0) {
+      forestCtx.fillStyle = '#e8fbff'; forestCtx.font = '12px system-ui';
+      forestCtx.fillText(isConsensus ? 'consensus' : `T${node.tree_id}`, p.px + 9, p.py - 7);
+    }
+  }
+  forestCtx.fillStyle='#ecfbff'; forestCtx.font='16px system-ui';
+  forestCtx.fillText(`FoT budget ≤ ${maxBudget} · radius ${Number(radius).toFixed(3)} · visible nodes ${visible.length} · trees ${forest.num_trees || 'n/a'} · provenance: ${forest.display_space || 'forest'}`, 22, 32);
+  if (!forestDetail.dataset.locked) {
+    const counts = (forest.edges || []).reduce((acc, e) => { const k = String(e.kind || 'edge'); acc[k] = (acc[k] || 0) + 1; return acc; }, {});
+    forestDetail.innerHTML = `<strong>FoT forest loaded</strong><br>${visible.length} visible nodes across ${forest.num_trees} parallel trees · edge kinds ${esc(JSON.stringify(counts))}<br>Click a thought node to inspect it and reveal its associated reasoning-step filtered simplicial complex below.`;
+  }
+}
+function nearestForest(event) {
+  const forest = compact?.forest;
+  if (!forest?.nodes?.length || !forestProjected.length) return;
+  const rect = forestCanvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * forestCanvas.width / rect.width;
+  const y = (event.clientY - rect.top) * forestCanvas.height / rect.height;
+  let best=null, bd=Infinity;
+  for (const p of forestProjected) {
+    const d=(p.px-x)**2+(p.py-y)**2;
+    if (d<bd) {bd=d; best=p;}
+  }
+  if (best && bd < 700) {
+    const n = best.node;
+    const edgeKinds = (forest.edges || []).filter(e => Number(e.source) === Number(n.id) || Number(e.target) === Number(n.id)).reduce((acc, e) => { acc[String(e.kind || 'edge')] = (acc[String(e.kind || 'edge')] || 0) + 1; return acc; }, {});
+    forestDetail.dataset.locked = '1';
+    forestDetail.innerHTML = `<strong>FoT ${esc(n.kind)} node ${n.id}</strong><br>tree ${n.tree_id} · depth ${n.depth} · branch slot ${n.branch_slot} · action ${n.action_id} · target token ${n.target_id}<br>NLL ${Number(n.nll).toFixed(4)} · activation ${Number(n.activation).toFixed(4)} · value ${Number(n.value).toFixed(4)} · correction norm ${Number(n.correction_norm).toFixed(4)}<br>source hidden position / reasoning step ${n.step_index} · incident edge kinds ${esc(JSON.stringify(edgeKinds))}`;
+    if (event.type === 'click') {
+      selectStepByIndex(Number(n.step_index || 0));
+      stepCanvas.scrollIntoView({block:'center', behavior:'smooth'});
+    }
+  }
 }
 function draw() {
   if (!compact) return;
@@ -284,6 +425,16 @@ fetch('branching_reasoning_interactive.json').then(r => r.json()).then(data => {
   const maxLevel = Math.max(...compact.nodes.map(n => n.level));
   levelRange.max = maxLevel; levelRange.value = maxLevel;
   radiusRange.max = Math.max(0, compact.radius_values.length - 1); radiusRange.value = Math.max(0, Math.floor((compact.radius_values.length - 1) / 3));
+  if (compact.forest?.nodes?.length && compact.forest.available !== false) {
+    const maxForestBudget = Math.max(...compact.forest.nodes.map(n => Number(n.budget_level || 0)));
+    forestBudgetRange.max = maxForestBudget; forestBudgetRange.value = maxForestBudget;
+    forestRadiusRange.max = Math.max(0, (compact.forest.radius_values || []).length - 1);
+    forestRadiusRange.value = Math.max(0, Math.floor(((compact.forest.radius_values || []).length - 1) / 3));
+    [forestBudgetRange, forestRadiusRange, forestYawRange, forestPitchRange, forestZoomRange, forestExpansionToggle, forestCorrectionToggle, forestConsensusToggle, forestRadiusToggle].forEach(el => el.addEventListener('input', drawForest));
+    forestCanvas.addEventListener('mousemove', nearestForest);
+    forestCanvas.addEventListener('click', nearestForest);
+    bindDrag(forestCanvas, forestYawRange, forestPitchRange, drawForest);
+  }
   [levelRange, radiusRange, rotRange, pitchRange, zoomRange, edgeToggle, triToggle].forEach(el => el.addEventListener('input', draw));
   canvas.addEventListener('mousemove', nearest); canvas.addEventListener('click', nearest);
   bindDrag(canvas, rotRange, pitchRange, draw);
@@ -307,6 +458,7 @@ fetch('branching_reasoning_interactive.json').then(r => r.json()).then(data => {
   } else {
     stepDetail.textContent = 'Per-step compact simplex payload is unavailable for this report.';
   }
+  drawForest();
   draw();
 }).catch(error => { detail.textContent = 'Compact interactive payload unavailable: '+error; });
   </script>
