@@ -41,6 +41,7 @@ def write_card(data_dir: Path, destination: Path, repo_id: str) -> None:
         "- `derived/*.parquet` graphified source-data slices",
         "- `authored/accepted/accepted_records.parquet` when authored records are present",
         "- `authored/accepted/validation_report.json`",
+        "- `authored/records/*.json` inspectable handwritten source records",
         "- `manifests/uniprot_fot_build_manifest.json`",
         "- `schema/uniprot_fot_record.schema.json`",
         "- `LOCAL_README.md`",
@@ -85,6 +86,8 @@ def upload_plan(data_dir: Path, include_jsonl: bool) -> list[tuple[Path, str]]:
         (data_dir / "authored" / "accepted" / "validation_report.json", "authored/accepted/validation_report.json"),
         ]
     )
+    for record_path in sorted((data_dir / "authored" / "records").glob("*.json")):
+        files.append((record_path, f"authored/records/{record_path.name}"))
     if include_jsonl:
         for jsonl_path in sorted((data_dir / "derived").glob("uniprot_fot_graphified*.jsonl")):
             files.append((jsonl_path, f"derived/{jsonl_path.name}"))

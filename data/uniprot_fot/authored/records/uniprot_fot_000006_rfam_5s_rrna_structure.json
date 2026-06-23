@@ -1,0 +1,59 @@
+{
+  "id": "uniprot_fot_000006_rfam_5s_rrna_structure",
+  "source": {
+    "reasoning_tree_author": "Codex",
+    "content_creation_mode": "handwritten",
+    "contains_imported_reasoning_trace": false,
+    "grounding_sources": [
+      {
+        "dataset": "rfam_sequence_train",
+        "id": "AAAA02036851.1/1-118",
+        "family": "5S_rRNA",
+        "clan": "CL00113",
+        "source_file": "raw_hf_bio_scale/rfam_sequence_train/default/train/0000.parquet"
+      }
+    ]
+  },
+  "task_family": "rna_family_structure_reasoning",
+  "nodes": [
+    {"id": "n0_problem", "type": "problem", "content": "A short RFAM record is labeled 5S_rRNA with a 118 nt sequence. Build a forest target that teaches a model to reason from RNA family and length toward structural-function constraints instead of treating it as arbitrary nucleotide text.", "latent_coordinates": [0.06, 0.27, -0.14, 0.33, 0.18, -0.25, 0.41, 0.12], "symbolic_payload": {"rfam_family": "5S_rRNA", "clan": "CL00113", "sequence_length": 118}},
+    {"id": "n1_source", "type": "evidence", "content": "The source row provides a 5S_rRNA family label, clan CL00113, plant genome-shotgun description, and compact RNA sequence length. The label is more informative than raw base composition alone.", "latent_coordinates": [0.12, 0.33, -0.08, 0.38, 0.24, -0.19, 0.45, 0.18], "symbolic_payload": {"family": "5S_rRNA", "organism_context": "Oryza sativa Indica Group", "length": 118}},
+    {"id": "n2_tree_ribosomal_role", "type": "reasoning_tree", "content": "The ribosomal-role tree treats 5S rRNA as a structured noncoding RNA participating in ribosome architecture. The training signal should connect family identity to ribonucleoprotein context, not to protein-coding translation.", "latent_coordinates": [0.17, 0.39, -0.02, 0.44, 0.29, -0.13, 0.5, 0.23], "symbolic_payload": {"tree": "ribosomal_context", "not_protein_coding": true}},
+    {"id": "n3_tree_secondary_structure", "type": "reasoning_tree", "content": "The structure tree should preserve the idea that short rRNA function depends on base-paired stems, loops, and conserved positions. Exact folding is not present in the row, so the safe target is family-conditioned structural expectation.", "latent_coordinates": [0.22, 0.44, 0.04, 0.49, 0.34, -0.08, 0.55, 0.29], "symbolic_payload": {"tree": "secondary_structure_expectation", "features": ["stems", "loops", "conserved motifs"]}},
+    {"id": "n4_rejected_mrna",
+      "type": "rejected_branch",
+      "content": "An mRNA or protein-coding branch is rejected. The family label is rRNA, and the compact length plus RFAM annotation makes coding interpretation less useful for the model.",
+      "latent_coordinates": [-0.19, 0.04, -0.31, 0.1, -0.05, 0.18, -0.12, 0.02],
+      "symbolic_payload": {"rejected_label": "mRNA/protein-coding sequence", "rejection_basis": "RFAM rRNA family label"}
+    },
+    {"id": "n5_merge", "type": "merge", "content": "The target merges ribosomal context with secondary-structure expectation. For de novo RNA medicine design, the transferable lesson is to preserve functional RNA class and structural constraints separately from raw nucleotide identity.", "latent_coordinates": [0.28, 0.51, 0.09, 0.56, 0.39, -0.02, 0.61, 0.35], "symbolic_payload": {"merge_inputs": ["n2_tree_ribosomal_role", "n3_tree_secondary_structure", "n4_rejected_mrna"], "design_transfer": "class-conditioned RNA constraints"}},
+    {"id": "n6_answer", "type": "answer", "content": "Represent the sample as a 5S rRNA family graph: a short structured noncoding RNA with ribosomal context and family-conditioned secondary-structure constraints, not a protein-coding transcript.", "latent_coordinates": [0.33, 0.56, 0.14, 0.61, 0.44, 0.03, 0.66, 0.4], "symbolic_payload": {"answer": "5S rRNA structured noncoding RNA family record"}}
+  ],
+  "edges": [
+    {"id": "e0", "source": "n0_problem", "target": "n1_source", "type": "requires_evidence", "directed": true, "causal_semantics": "The RFAM row supplies the family label and length."},
+    {"id": "e1", "source": "n1_source", "target": "n2_tree_ribosomal_role", "type": "activates_tree", "directed": true, "causal_semantics": "The 5S_rRNA label activates ribosomal function reasoning."},
+    {"id": "e2", "source": "n1_source", "target": "n3_tree_secondary_structure", "type": "activates_tree", "directed": true, "causal_semantics": "The RNA family label activates structural expectation."},
+    {"id": "e3", "source": "n1_source", "target": "n4_rejected_mrna", "type": "rejects_branch", "directed": true, "causal_semantics": "The rRNA annotation rejects protein-coding interpretation."},
+    {"id": "e4", "source": "n2_tree_ribosomal_role", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "Ribosomal role enters the final target."},
+    {"id": "e5", "source": "n3_tree_secondary_structure", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "Structural expectation enters the final target."},
+    {"id": "e6", "source": "n4_rejected_mrna", "target": "n5_merge", "type": "contrastive_input", "directed": true, "causal_semantics": "The rejected coding branch prevents class confusion."},
+    {"id": "e7", "source": "n5_merge", "target": "n6_answer", "type": "finalizes_answer", "directed": true, "causal_semantics": "Merged class and structure constraints determine the answer."}
+  ],
+  "targets": {
+    "answer": "Use a 5S rRNA structured-noncoding-RNA graph with ribosomal context and secondary-structure expectations; reject mRNA/protein-coding interpretation.",
+    "verifier_metadata": {"verifier_type": "rna_family_check", "must_include": ["5S_rRNA", "structured", "ribosomal", "noncoding"], "must_not_claim": ["protein-coding", "patient-specific therapy", "exact structure solved from row alone"]},
+    "gflownet_reward_metadata": {"reward_type": "rna_family_forest_reward", "terminal_reward": 0.89, "reward_components": {"family_fidelity": 0.96, "structure_constraint": 0.86, "branch_contrast": 0.85, "design_transfer": 0.81}},
+    "active_support_nodes": ["n1_source", "n2_tree_ribosomal_role", "n3_tree_secondary_structure", "n5_merge"]
+  },
+  "metadata": {
+    "domain": "molecular_biology",
+    "topic": "rna_family_structure_reasoning",
+    "merge_status": "ribosomal_context_secondary_structure_merge",
+    "multiple_viable_solution_status": "single_family_label_with_structure_and_context_views",
+    "continuous_embedding_fields": {"forest_count": 3, "trajectory_type": "rna_class_structure_forest", "graphcg_axes": ["rna_class", "length", "secondary_structure", "ribosomal_context"]},
+    "tokengt_tropical_toric_fields": {"node_token_order": ["n0_problem", "n1_source", "n2_tree_ribosomal_role", "n3_tree_secondary_structure", "n4_rejected_mrna", "n5_merge", "n6_answer"], "edge_token_order": ["e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7"], "tropical_active_support_nodes": ["n1_source", "n2_tree_ribosomal_role", "n3_tree_secondary_structure", "n5_merge"], "tropical_margin": 0.33, "toric_phase_basis": "rna_class_structure_basis"},
+    "quality_flags": {"accepted": true, "hand_inspected": true, "biomedical_safety": "non_patient_specific_rna_design_abstraction", "contains_rejected_branch": true, "contains_merge": true},
+    "topic_flags": {"rna_medicine_design": true, "cell_biology": true, "molecular_pathways": false}
+  },
+  "split_cluster": {"cluster_id": "rfam_5S_rRNA_CL00113", "split": "train", "leakage_resistant_basis": "RFAM family and clan"}
+}

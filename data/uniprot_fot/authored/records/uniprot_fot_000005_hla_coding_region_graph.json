@@ -1,0 +1,53 @@
+{
+  "id": "uniprot_fot_000005_hla_coding_region_graph",
+  "source": {
+    "reasoning_tree_author": "Codex",
+    "content_creation_mode": "handwritten",
+    "contains_imported_reasoning_trace": false,
+    "grounding_sources": [
+      {
+        "dataset": "dna_coding_regions_train",
+        "accession": "PV930210.1",
+        "organism": "Homo sapiens",
+        "source_file": "raw_hf_bio_scale/dna_coding_regions_train/default/train/0000.parquet"
+      }
+    ]
+  },
+  "task_family": "coding_region_feature_to_protein_reasoning",
+  "nodes": [
+    {"id": "n0_problem", "type": "problem", "content": "A coding-region row contains a Homo sapiens HLA-B genomic sequence, exon features, and one translated protein. Build a graph reasoning target that connects genomic coordinates to protein-level immunological function without overclaiming allele-specific clinical advice.", "latent_coordinates": [0.1, -0.22, 0.18, 0.49, 0.25, -0.05, 0.32, 0.04], "symbolic_payload": {"accession": "PV930210.1", "gene": "HLA-B", "organism": "Homo sapiens"}},
+    {"id": "n1_feature_evidence", "type": "evidence", "content": "The row gives repeated HLA-B exon features and a translated protein of length 362 amino acids. The useful graph should preserve exon-to-protein causality rather than treating the DNA string as unstructured text.", "latent_coordinates": [0.15, -0.16, 0.24, 0.55, 0.29, 0.01, 0.37, 0.09], "symbolic_payload": {"feature_types": ["exons", "protein"], "protein_length": 362}},
+    {"id": "n2_tree_genomic_splicing", "type": "reasoning_tree", "content": "The genomic tree tracks exon boundaries, local splice context, and coding sequence assembly. It explains how separated genomic intervals become a single translated receptor-like protein product.", "latent_coordinates": [0.2, -0.09, 0.31, 0.61, 0.34, 0.08, 0.42, 0.14], "symbolic_payload": {"tree": "genomic_feature_tree", "tokens": ["exon", "splice context", "coding assembly"]}},
+    {"id": "n3_tree_immunological_function", "type": "reasoning_tree", "content": "The protein-function tree should recognize HLA-B as an MHC class I heavy-chain context: sequence variation can shape peptide presentation, but the row alone does not justify patient-specific transplant or disease predictions.", "latent_coordinates": [0.25, -0.03, 0.37, 0.67, 0.39, 0.13, 0.47, 0.19], "symbolic_payload": {"tree": "immunological_function_tree", "safe_scope": "mechanism-level antigen-presentation reasoning"}},
+    {"id": "n4_rejected_clinical_call", "type": "rejected_branch", "content": "A clinical compatibility or disease-risk claim is rejected. The data row has sequence and feature evidence, not the patient context, allele resolution, phenotype, or population priors needed for medical advice.", "latent_coordinates": [-0.2, -0.28, 0.05, 0.22, 0.11, -0.19, 0.16, -0.12], "symbolic_payload": {"rejected_claim": "patient-specific HLA interpretation", "reason": "missing clinical context"}},
+    {"id": "n5_merge", "type": "merge", "content": "The correct training target merges genomic feature causality with protein-level mechanism: exon organization produces an HLA-B protein whose biological interpretation is antigen-presentation context, while clinical inference remains out of scope.", "latent_coordinates": [0.3, 0.04, 0.45, 0.74, 0.43, 0.18, 0.53, 0.24], "symbolic_payload": {"merge_inputs": ["n2_tree_genomic_splicing", "n3_tree_immunological_function", "n4_rejected_clinical_call"]}},
+    {"id": "n6_answer", "type": "answer", "content": "Represent the sample as a directed DNA-feature-protein graph for HLA-B: exons assemble the coding product, the protein belongs in antigen-presentation reasoning, and patient-specific conclusions are excluded.", "latent_coordinates": [0.35, 0.08, 0.5, 0.78, 0.48, 0.23, 0.58, 0.29], "symbolic_payload": {"answer": "HLA-B coding-region graph with safe mechanism-level immunology"}}
+  ],
+  "edges": [
+    {"id": "e0", "source": "n0_problem", "target": "n1_feature_evidence", "type": "requires_evidence", "directed": true, "causal_semantics": "The coding-region row supplies exon and protein fields."},
+    {"id": "e1", "source": "n1_feature_evidence", "target": "n2_tree_genomic_splicing", "type": "activates_tree", "directed": true, "causal_semantics": "Exon features activate the genomic assembly tree."},
+    {"id": "e2", "source": "n1_feature_evidence", "target": "n3_tree_immunological_function", "type": "activates_tree", "directed": true, "causal_semantics": "The HLA-B protein product activates mechanism-level immunology."},
+    {"id": "e3", "source": "n1_feature_evidence", "target": "n4_rejected_clinical_call", "type": "rejects_branch", "directed": true, "causal_semantics": "The row lacks clinical context."},
+    {"id": "e4", "source": "n2_tree_genomic_splicing", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "Feature causality enters the final graph."},
+    {"id": "e5", "source": "n3_tree_immunological_function", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "Protein mechanism enters the final graph."},
+    {"id": "e6", "source": "n4_rejected_clinical_call", "target": "n5_merge", "type": "safety_contrast", "directed": true, "causal_semantics": "Rejected clinical overreach bounds the target."},
+    {"id": "e7", "source": "n5_merge", "target": "n6_answer", "type": "finalizes_answer", "directed": true, "causal_semantics": "The merged graph determines the safe answer."}
+  ],
+  "targets": {
+    "answer": "Use a directed HLA-B DNA-feature-protein graph: exons and splice context support coding-product assembly, protein identity supports antigen-presentation mechanism, and patient-specific clinical interpretation is rejected.",
+    "verifier_metadata": {"verifier_type": "genomic_feature_safety_check", "must_include": ["HLA-B", "exon", "protein", "antigen-presentation", "not patient-specific"], "must_not_claim": ["transplant advice", "diagnosis", "disease-risk prediction"]},
+    "gflownet_reward_metadata": {"reward_type": "safe_genomic_graph_reward", "terminal_reward": 0.91, "reward_components": {"feature_causality": 0.94, "mechanism_context": 0.88, "safety": 0.99, "merge_quality": 0.84}},
+    "active_support_nodes": ["n1_feature_evidence", "n2_tree_genomic_splicing", "n3_tree_immunological_function", "n4_rejected_clinical_call", "n5_merge"]
+  },
+  "metadata": {
+    "domain": "biomedicine",
+    "topic": "hla_coding_region_to_protein_graph",
+    "merge_status": "genuine_merge_with_safety_rejection",
+    "multiple_viable_solution_status": "mechanism_annotation_only_clinical_branch_rejected",
+    "continuous_embedding_fields": {"forest_count": 3, "trajectory_type": "genomic_feature_to_protein_forest", "graphcg_axes": ["genomic_interval", "splice_context", "protein_product", "immune_mechanism", "clinical_boundary"]},
+    "tokengt_tropical_toric_fields": {"node_token_order": ["n0_problem", "n1_feature_evidence", "n2_tree_genomic_splicing", "n3_tree_immunological_function", "n4_rejected_clinical_call", "n5_merge", "n6_answer"], "edge_token_order": ["e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7"], "tropical_active_support_nodes": ["n1_feature_evidence", "n2_tree_genomic_splicing", "n3_tree_immunological_function", "n5_merge"], "tropical_margin": 0.36, "toric_phase_basis": "dna_feature_protein_safety_basis"},
+    "quality_flags": {"accepted": true, "hand_inspected": true, "biomedical_safety": "no_patient_specific_advice", "contains_rejected_branch": true, "contains_merge": true},
+    "topic_flags": {"biomedicine": true, "cell_biology": true, "gene_regulatory_context": true, "coding_problem": false}
+  },
+  "split_cluster": {"cluster_id": "dna_PV930210_HLA_B", "split": "train", "leakage_resistant_basis": "accession plus HLA-B gene family"}
+}

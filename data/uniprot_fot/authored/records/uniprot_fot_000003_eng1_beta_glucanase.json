@@ -1,0 +1,86 @@
+{
+  "id": "uniprot_fot_000003_eng1_beta_glucanase",
+  "source": {
+    "reasoning_tree_author": "Codex",
+    "content_creation_mode": "handwritten",
+    "contains_imported_reasoning_trace": false,
+    "grounding_sources": [
+      {
+        "dataset": "uniprot_function_text_train",
+        "entry": "A0A023I7E1",
+        "entry_name": "ENG1_RHIMI",
+        "source_file": "raw_hf_bio_scale/uniprot_function_text_train/default/train/0000.parquet"
+      }
+    ]
+  },
+  "task_family": "uniprot_enzyme_specificity_reasoning",
+  "nodes": [
+    {
+      "id": "n0_problem",
+      "type": "problem",
+      "content": "Classify the functional signal in a UniProt row for glucan endo-1,3-beta-D-glucosidase 1 and decide what a model should learn about substrate specificity, cleavage mode, and design relevance.",
+      "latent_coordinates": [0.07, -0.11, 0.44, 0.18, -0.24, 0.33, 0.05, 0.28],
+      "symbolic_payload": {"entry": "A0A023I7E1", "enzyme_name": "Glucan endo-1,3-beta-D-glucosidase 1", "ec": "3.2.1.39"}
+    },
+    {
+      "id": "n1_source",
+      "type": "evidence",
+      "content": "The source annotation says the enzyme cleaves internal linkages in 1,3-beta-glucan. The word internal is the key mechanistic cue: it points to endo cleavage rather than terminal trimming.",
+      "latent_coordinates": [0.12, -0.05, 0.51, 0.22, -0.18, 0.38, 0.09, 0.34],
+      "symbolic_payload": {"substrate": "1,3-beta-glucan", "cleavage_mode": "endo", "bond_class": "glycosidic"}
+    },
+    {
+      "id": "n2_branch_endo",
+      "type": "reasoning_branch",
+      "content": "The endo-glucanase branch is strongest because internal cleavage explains rapid viscosity reduction, creation of new chain ends, and broad remodeling of a beta-glucan network.",
+      "latent_coordinates": [0.18, 0.01, 0.56, 0.27, -0.12, 0.41, 0.13, 0.39],
+      "symbolic_payload": {"candidate": "endo-1,3-beta-glucanase", "support": "internal linkage cleavage"}
+    },
+    {
+      "id": "n3_branch_exo_rejected",
+      "type": "rejected_branch",
+      "content": "An exoglucanase interpretation is weaker for this row. Exo enzymes remove units from chain ends, but the annotation explicitly says internal linkages.",
+      "latent_coordinates": [-0.16, -0.18, 0.11, 0.06, 0.23, -0.08, 0.04, -0.12],
+      "symbolic_payload": {"rejected_candidate": "exo-glucanase", "rejection_basis": "contradicts internal-cleavage cue"}
+    },
+    {
+      "id": "n4_merge_design",
+      "type": "merge",
+      "content": "The training target should merge EC identity, substrate polymer, and cleavage geometry. For industrial enzyme design, thermostability or secretion can be optimized only after preserving the endo-active geometry on beta-1,3 glucan.",
+      "latent_coordinates": [0.22, 0.05, 0.62, 0.34, -0.08, 0.47, 0.17, 0.45],
+      "symbolic_payload": {"merge_inputs": ["n2_branch_endo", "n3_branch_exo_rejected"], "design_axes": ["specificity", "endo cleavage", "stability", "secretion"]}
+    },
+    {
+      "id": "n5_answer",
+      "type": "answer",
+      "content": "Represent ENG1 as an endo-1,3-beta-glucanase: the decisive feature is internal cleavage of 1,3-beta-glucan, with exo trimming rejected and design objectives conditioned on preserving endo specificity.",
+      "latent_coordinates": [0.26, 0.09, 0.67, 0.38, -0.04, 0.51, 0.22, 0.49],
+      "symbolic_payload": {"answer_label": "endo-1,3-beta-glucanase", "negative_label": "exo terminal glucanase"}
+    }
+  ],
+  "edges": [
+    {"id": "e0", "source": "n0_problem", "target": "n1_source", "type": "requires_evidence", "directed": true, "causal_semantics": "The problem is grounded in the UniProt function line."},
+    {"id": "e1", "source": "n1_source", "target": "n2_branch_endo", "type": "supports_branch", "directed": true, "causal_semantics": "Internal linkage cleavage supports endo classification."},
+    {"id": "e2", "source": "n1_source", "target": "n3_branch_exo_rejected", "type": "rejects_branch", "directed": true, "causal_semantics": "The same wording rejects exo-only trimming."},
+    {"id": "e3", "source": "n2_branch_endo", "target": "n4_merge_design", "type": "merge_input", "directed": true, "causal_semantics": "The accepted branch supplies the mechanism."},
+    {"id": "e4", "source": "n3_branch_exo_rejected", "target": "n4_merge_design", "type": "contrastive_input", "directed": true, "causal_semantics": "The rejected branch improves boundary clarity."},
+    {"id": "e5", "source": "n4_merge_design", "target": "n5_answer", "type": "finalizes_answer", "directed": true, "causal_semantics": "The merged mechanism and design constraints determine the final label."}
+  ],
+  "targets": {
+    "answer": "ENG1 should be labeled as an endo-1,3-beta-glucanase, with internal beta-glucan cleavage as the active support and exo terminal trimming rejected.",
+    "verifier_metadata": {"verifier_type": "enzyme_specificity_check", "must_include": ["internal", "1,3-beta-glucan", "endo"], "must_not_claim": ["exo-only", "cellulose-specific only", "patient advice"]},
+    "gflownet_reward_metadata": {"reward_type": "enzyme_branch_reward", "terminal_reward": 0.9, "reward_components": {"source_fidelity": 0.97, "branch_contrast": 0.88, "design_usefulness": 0.84, "safety": 0.93}},
+    "active_support_nodes": ["n1_source", "n2_branch_endo", "n3_branch_exo_rejected", "n4_merge_design"]
+  },
+  "metadata": {
+    "domain": "biochemistry",
+    "topic": "glycoside_hydrolase_specificity",
+    "merge_status": "accepted_branch_plus_rejected_branch",
+    "multiple_viable_solution_status": "single_best_label_with_close_exo_confounder",
+    "continuous_embedding_fields": {"forest_count": 2, "trajectory_type": "enzyme_specificity_branch_merge", "graphcg_axes": ["substrate_polymer", "cleavage_position", "industrial_design_axis"]},
+    "tokengt_tropical_toric_fields": {"node_token_order": ["n0_problem", "n1_source", "n2_branch_endo", "n3_branch_exo_rejected", "n4_merge_design", "n5_answer"], "edge_token_order": ["e0", "e1", "e2", "e3", "e4", "e5"], "tropical_active_support_nodes": ["n1_source", "n2_branch_endo", "n4_merge_design"], "tropical_margin": 0.34, "toric_phase_basis": "substrate_cleavage_specificity_basis"},
+    "quality_flags": {"accepted": true, "hand_inspected": true, "biomedical_safety": "industrial_enzyme_context", "contains_rejected_branch": true, "contains_merge": true},
+    "topic_flags": {"biochemistry": true, "protein_design": true, "uniprot_annotation": true}
+  },
+  "split_cluster": {"cluster_id": "uniprot_A0A023I7E1_eng1_glucanase", "split": "train", "leakage_resistant_basis": "UniProt accession plus glycoside hydrolase mechanism"}
+}

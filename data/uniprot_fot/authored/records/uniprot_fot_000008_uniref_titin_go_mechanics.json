@@ -1,0 +1,70 @@
+{
+  "id": "uniprot_fot_000008_uniref_titin_go_mechanics",
+  "source": {
+    "reasoning_tree_author": "Codex",
+    "content_creation_mode": "handwritten",
+    "contains_imported_reasoning_trace": false,
+    "grounding_sources": [
+      {
+        "dataset": "uniprot_uniref50_sequence_train",
+        "id": "UniRef50_A0A4U5TZD8",
+        "name": "Cluster: Titin",
+        "source_file": "raw_hf_bio_scale/uniprot_uniref50_sequence_train/default/train/*.parquet"
+      }
+    ]
+  },
+  "task_family": "uniref_go_annotation_reasoning",
+  "nodes": [
+    {"id": "n0_problem", "type": "problem", "content": "A UniRef50 row describes a Titin cluster with a very long representative sequence, GO molecular function structural molecule activity, a biological-process annotation related to muscle regulation, and a cellular-component striated-muscle context. Build a reasoning target for associating giant sequence scale with mechanical function.", "latent_coordinates": [0.11, 0.07, -0.22, 0.46, -0.18, 0.53, 0.28, -0.04], "symbolic_payload": {"cluster": "UniRef50_A0A4U5TZD8", "name": "Titin", "sequence_length": 38162}},
+    {"id": "n1_go_evidence", "type": "evidence", "content": "The source row gives GO:0005198 as molecular-function evidence, GO:0045989 as a process signal, and GO:0030018 as a cellular-component signal. Together they suggest structural/mechanical muscle context rather than catalytic small-enzyme behavior.", "latent_coordinates": [0.16, 0.12, -0.16, 0.52, -0.12, 0.58, 0.33, 0.01], "symbolic_payload": {"go_mf": ["GO:0005198"], "go_bp": ["GO:0045989"], "go_cc": ["GO:0030018"]}},
+    {"id": "n2_tree_sequence_scale", "type": "reasoning_tree", "content": "The sequence-scale tree treats the 38k-residue length as functional evidence: giant modular proteins often encode repeated mechanical, scaffold, or elastic domains rather than compact catalytic sites.",
+      "latent_coordinates": [0.21, 0.18, -0.1, 0.57, -0.07, 0.63, 0.38, 0.06],
+      "symbolic_payload": {"tree": "sequence_scale", "reasoning_signal": "giant modular protein"}
+    },
+    {"id": "n3_tree_go_mechanics", "type": "reasoning_tree", "content": "The GO tree maps structural molecule activity and striated-muscle component context to mechanical scaffolding. A small model should learn that GO labels supply orthogonal evidence to sequence length.",
+      "latent_coordinates": [0.26, 0.24, -0.04, 0.63, -0.02, 0.68, 0.43, 0.11],
+      "symbolic_payload": {"tree": "go_mechanics", "concepts": ["structural molecule activity", "striated muscle component", "mechanical regulation"]}
+    },
+    {"id": "n4_rejected_enzyme",
+      "type": "rejected_branch",
+      "content": "A small soluble enzyme interpretation is rejected. The row lacks EC catalytic labels and instead combines giant length with structural molecule GO evidence.",
+      "latent_coordinates": [-0.24, -0.08, -0.31, 0.12, 0.18, -0.19, 0.07, -0.14],
+      "symbolic_payload": {"rejected_label": "compact catalytic enzyme", "rejection_basis": "GO and sequence-scale mismatch"}
+    },
+    {"id": "n5_merge", "type": "merge", "content": "The best target merges sequence-scale evidence with GO evidence: titin-like clusters teach the model that abundance of domains, mechanical localization, and structural activity can dominate over active-site-centric annotation.",
+      "latent_coordinates": [0.32, 0.3, 0.02, 0.69, 0.04, 0.74, 0.49, 0.17],
+      "symbolic_payload": {"merge_inputs": ["n2_tree_sequence_scale", "n3_tree_go_mechanics", "n4_rejected_enzyme"], "training_signal": "mechanical scaffold annotation"}
+    },
+    {"id": "n6_answer", "type": "answer", "content": "Represent the UniRef50 Titin cluster as a giant mechanical/structural protein annotation: very long modular sequence plus GO structural and striated-muscle context support scaffold/elastic reasoning, while compact-enzyme reasoning is rejected.",
+      "latent_coordinates": [0.37, 0.35, 0.07, 0.74, 0.09, 0.79, 0.54, 0.22],
+      "symbolic_payload": {"answer": "giant structural/mechanical protein cluster"}
+    }
+  ],
+  "edges": [
+    {"id": "e0", "source": "n0_problem", "target": "n1_go_evidence", "type": "requires_evidence", "directed": true, "causal_semantics": "The UniRef row supplies GO and sequence-length evidence."},
+    {"id": "e1", "source": "n1_go_evidence", "target": "n2_tree_sequence_scale", "type": "activates_tree", "directed": true, "causal_semantics": "The very long sequence activates modular-scale reasoning."},
+    {"id": "e2", "source": "n1_go_evidence", "target": "n3_tree_go_mechanics", "type": "activates_tree", "directed": true, "causal_semantics": "GO labels activate structural/mechanical reasoning."},
+    {"id": "e3", "source": "n1_go_evidence", "target": "n4_rejected_enzyme", "type": "rejects_branch", "directed": true, "causal_semantics": "GO evidence and no EC label reject compact enzyme framing."},
+    {"id": "e4", "source": "n2_tree_sequence_scale", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "Sequence scale contributes to final annotation."},
+    {"id": "e5", "source": "n3_tree_go_mechanics", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "GO mechanics contributes to final annotation."},
+    {"id": "e6", "source": "n4_rejected_enzyme", "target": "n5_merge", "type": "contrastive_input", "directed": true, "causal_semantics": "Rejected enzyme framing sharpens the target."},
+    {"id": "e7", "source": "n5_merge", "target": "n6_answer", "type": "finalizes_answer", "directed": true, "causal_semantics": "Merged scale and GO evidence determine the answer."}
+  ],
+  "targets": {
+    "answer": "Treat the Titin UniRef50 row as a giant structural/mechanical protein cluster: sequence length and GO labels jointly support scaffold/elastic muscle-context reasoning, not compact enzyme reasoning.",
+    "verifier_metadata": {"verifier_type": "go_sequence_scale_check", "must_include": ["Titin", "GO", "structural", "muscle", "giant"], "must_not_claim": ["EC enzyme", "small molecule catalyst", "patient advice"]},
+    "gflownet_reward_metadata": {"reward_type": "go_annotation_merge_reward", "terminal_reward": 0.9, "reward_components": {"go_fidelity": 0.92, "sequence_scale_reasoning": 0.91, "branch_contrast": 0.86, "merge_quality": 0.89}},
+    "active_support_nodes": ["n1_go_evidence", "n2_tree_sequence_scale", "n3_tree_go_mechanics", "n5_merge"]
+  },
+  "metadata": {
+    "domain": "biophysics",
+    "topic": "giant_structural_protein_go_reasoning",
+    "merge_status": "sequence_scale_go_label_merge",
+    "multiple_viable_solution_status": "structural_mechanics_preferred_over_enzyme_frame",
+    "continuous_embedding_fields": {"forest_count": 3, "trajectory_type": "go_sequence_scale_forest", "graphcg_axes": ["sequence_length", "go_mf", "go_cc", "mechanical_context", "enzyme_rejection"]},
+    "tokengt_tropical_toric_fields": {"node_token_order": ["n0_problem", "n1_go_evidence", "n2_tree_sequence_scale", "n3_tree_go_mechanics", "n4_rejected_enzyme", "n5_merge", "n6_answer"], "edge_token_order": ["e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7"], "tropical_active_support_nodes": ["n1_go_evidence", "n2_tree_sequence_scale", "n3_tree_go_mechanics", "n5_merge"], "tropical_margin": 0.35, "toric_phase_basis": "go_sequence_mechanics_basis"},
+    "quality_flags": {"accepted": true, "hand_inspected": true, "biomedical_safety": "mechanism_annotation_only", "contains_rejected_branch": true, "contains_merge": true},
+    "topic_flags": {"biophysics": true, "uniprot_annotation": true, "expression_and_abundance": false, "cell_morphology": true}
+  },
+  "split_cluster": {"cluster_id": "uniref50_titin_go_mechanics", "split": "train", "leakage_resistant_basis": "UniRef cluster and GO mechanical protein family"}
+}

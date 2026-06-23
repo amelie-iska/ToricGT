@@ -2,13 +2,16 @@
   "records_dir": "data/uniprot_fot/authored/records",
   "accepted_jsonl": "data/uniprot_fot/authored/accepted/accepted_records.jsonl",
   "accepted_parquet": "data/uniprot_fot/authored/accepted/accepted_records.parquet",
-  "accepted_count": 2,
+  "accepted_count": 8,
   "split_counts": {
-    "train": 2
+    "train": 8
   },
   "domain_counts": {
-    "biochemistry": 1,
-    "biomedicine": 1
+    "biochemistry": 3,
+    "biomedicine": 2,
+    "molecular_biology": 1,
+    "medicinal_chemistry": 1,
+    "biophysics": 1
   },
   "errors": [],
   "ok": true

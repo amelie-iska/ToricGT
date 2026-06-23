@@ -1,0 +1,53 @@
+{
+  "id": "uniprot_fot_000004_cellobiohydrolase_synergy",
+  "source": {
+    "reasoning_tree_author": "Codex",
+    "content_creation_mode": "handwritten",
+    "contains_imported_reasoning_trace": false,
+    "grounding_sources": [
+      {
+        "dataset": "uniprot_function_text_train",
+        "entry": "A0A024SH76",
+        "entry_name": "GUX2_HYPJR",
+        "source_file": "raw_hf_bio_scale/uniprot_function_text_train/default/train/0000.parquet"
+      }
+    ]
+  },
+  "task_family": "biomass_deconstruction_pathway_reasoning",
+  "nodes": [
+    {"id": "n0_problem", "type": "problem", "content": "Use the UniProt row for exoglucanase 2 to build a forest target that connects enzyme label, cellulose bond chemistry, product identity, and multi-enzyme synergy.", "latent_coordinates": [0.04, 0.14, 0.31, 0.42, -0.21, 0.16, 0.27, -0.06], "symbolic_payload": {"entry": "A0A024SH76", "ec": "3.2.1.91", "protein": "Exoglucanase 2"}},
+    {"id": "n1_source", "type": "evidence", "content": "The annotation describes a cellobiohydrolase that hydrolyzes 1,4-beta-D-glucosidic bonds in cellulose to release cellobiose, and notes interplay among cellulolytic enzymes.", "latent_coordinates": [0.09, 0.2, 0.39, 0.48, -0.17, 0.21, 0.31, -0.01], "symbolic_payload": {"substrate": "cellulose", "bond": "1,4-beta-D-glucosidic", "product": "cellobiose"}},
+    {"id": "n2_tree_processive_exo", "type": "reasoning_tree", "content": "The exo/processive tree explains why cellobiose is the named product: a chain-end-active cellulose enzyme can repeatedly release disaccharide units.", "latent_coordinates": [0.13, 0.25, 0.45, 0.53, -0.11, 0.26, 0.36, 0.04], "symbolic_payload": {"tree": "processive_exoglucanase", "output_unit": "cellobiose"}},
+    {"id": "n3_tree_synergy", "type": "reasoning_tree", "content": "The pathway tree says the enzyme should not be trained as a lone cellulose solver. Endoglucanases create accessible chain ends, exoglucanases release cellobiose, and beta-glucosidases can further convert soluble products.", "latent_coordinates": [0.17, 0.31, 0.5, 0.6, -0.06, 0.33, 0.41, 0.08], "symbolic_payload": {"tree": "cellulolytic_synergy", "roles": ["endo opening", "exo cellobiose release", "downstream soluble sugar processing"]}},
+    {"id": "n4_rejected_generic_hydrolase", "type": "rejected_branch", "content": "A generic hydrolase label is true but too weak. It loses the cellulose substrate, beta-1,4 bond, cellobiose product, and pathway role that matter for design.", "latent_coordinates": [-0.22, 0.03, 0.12, -0.18, 0.29, -0.14, 0.09, -0.21], "symbolic_payload": {"rejected_label": "generic hydrolase", "reason": "under-specified for training"}},
+    {"id": "n5_merge", "type": "merge", "content": "The strongest target merges processive exo chemistry with ensemble cellulase context. This supports de novo protein design objectives that optimize activity, binding, stability, and compatibility with partner enzymes.", "latent_coordinates": [0.22, 0.35, 0.58, 0.66, -0.02, 0.38, 0.46, 0.13], "symbolic_payload": {"merge_inputs": ["n2_tree_processive_exo", "n3_tree_synergy", "n4_rejected_generic_hydrolase"], "design_axes": ["activity", "binding", "stability", "enzyme-cocktail compatibility"]}},
+    {"id": "n6_answer", "type": "answer", "content": "Represent GUX2 as a cellulose-active exocellobiohydrolase that releases cellobiose from beta-1,4 glucosidic cellulose chains and functions within a cooperative cellulolytic system.", "latent_coordinates": [0.27, 0.39, 0.63, 0.7, 0.02, 0.43, 0.5, 0.18], "symbolic_payload": {"answer_label": "exocellobiohydrolase/cellobiohydrolase", "product": "cellobiose", "context": "cellulase synergy"}}
+  ],
+  "edges": [
+    {"id": "e0", "source": "n0_problem", "target": "n1_source", "type": "requires_evidence", "directed": true, "causal_semantics": "The source annotation supplies the mechanism."},
+    {"id": "e1", "source": "n1_source", "target": "n2_tree_processive_exo", "type": "activates_tree", "directed": true, "causal_semantics": "Cellobiose product activates the exo/processive branch."},
+    {"id": "e2", "source": "n1_source", "target": "n3_tree_synergy", "type": "activates_tree", "directed": true, "causal_semantics": "The interplay wording activates the pathway-synergy tree."},
+    {"id": "e3", "source": "n1_source", "target": "n4_rejected_generic_hydrolase", "type": "rejects_branch", "directed": true, "causal_semantics": "Specific substrate/product evidence rejects a flat generic label."},
+    {"id": "e4", "source": "n2_tree_processive_exo", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "Product chemistry enters the final target."},
+    {"id": "e5", "source": "n3_tree_synergy", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "Pathway context enters the final target."},
+    {"id": "e6", "source": "n4_rejected_generic_hydrolase", "target": "n5_merge", "type": "contrastive_input", "directed": true, "causal_semantics": "The weak label clarifies why specificity is rewarded."},
+    {"id": "e7", "source": "n5_merge", "target": "n6_answer", "type": "finalizes_answer", "directed": true, "causal_semantics": "Merged mechanism and pathway context produce the answer."}
+  ],
+  "targets": {
+    "answer": "GUX2 should be trained as a cellulose-active exocellobiohydrolase/cellobiohydrolase that releases cellobiose and participates in cooperative cellulose deconstruction.",
+    "verifier_metadata": {"verifier_type": "pathway_specificity_check", "must_include": ["cellulose", "1,4-beta-D-glucosidic", "cellobiose", "synergy"], "must_not_claim": ["1,3-beta-glucan only", "generic hydrolase only", "patient advice"]},
+    "gflownet_reward_metadata": {"reward_type": "multi_tree_pathway_reward", "terminal_reward": 0.92, "reward_components": {"source_fidelity": 0.97, "pathway_context": 0.91, "merge_quality": 0.9, "design_relevance": 0.88}},
+    "active_support_nodes": ["n1_source", "n2_tree_processive_exo", "n3_tree_synergy", "n5_merge"]
+  },
+  "metadata": {
+    "domain": "biochemistry",
+    "topic": "cellulose_deconstruction_enzyme_synergy",
+    "merge_status": "genuine_merge_of_mechanism_and_pathway_context",
+    "multiple_viable_solution_status": "specific_label_preferred_over_generic_hydrolase",
+    "continuous_embedding_fields": {"forest_count": 3, "trajectory_type": "pathway_forest_merge", "graphcg_axes": ["substrate", "product", "enzyme_role", "partner_enzyme_context"]},
+    "tokengt_tropical_toric_fields": {"node_token_order": ["n0_problem", "n1_source", "n2_tree_processive_exo", "n3_tree_synergy", "n4_rejected_generic_hydrolase", "n5_merge", "n6_answer"], "edge_token_order": ["e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7"], "tropical_active_support_nodes": ["n1_source", "n2_tree_processive_exo", "n3_tree_synergy", "n5_merge"], "tropical_margin": 0.39, "toric_phase_basis": "cellulose_product_synergy_basis"},
+    "quality_flags": {"accepted": true, "hand_inspected": true, "biomedical_safety": "industrial_biochemistry_context", "contains_rejected_branch": true, "contains_merge": true},
+    "topic_flags": {"biochemistry": true, "protein_design": true, "industrial_biotechnology": true, "uniprot_annotation": true}
+  },
+  "split_cluster": {"cluster_id": "uniprot_A0A024SH76_gux2_cellobiohydrolase", "split": "train", "leakage_resistant_basis": "UniProt accession plus cellulase function family"}
+}

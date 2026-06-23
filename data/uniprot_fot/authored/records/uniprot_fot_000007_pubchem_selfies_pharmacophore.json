@@ -1,0 +1,55 @@
+{
+  "id": "uniprot_fot_000007_pubchem_selfies_pharmacophore",
+  "source": {
+    "reasoning_tree_author": "Codex",
+    "content_creation_mode": "handwritten",
+    "contains_imported_reasoning_trace": false,
+    "grounding_sources": [
+      {
+        "dataset": "pubchem10m_selfies_train",
+        "source_file": "raw_hf_bio_scale/pubchem10m_selfies_train/default/train/0000.parquet",
+        "row_index": 0
+      }
+    ]
+  },
+  "task_family": "medicinal_chemistry_string_to_graph_reasoning",
+  "nodes": [
+    {"id": "n0_problem", "type": "problem", "content": "Given a SELFIES molecular string containing aromatic carbon tokens, branches, heteroatoms, carbonyl-like motifs, and rings, build a reasoning target for graphifying medicinal-chemistry strings without hallucinating a named drug.", "latent_coordinates": [0.02, -0.31, 0.27, 0.16, 0.42, -0.07, 0.19, 0.35], "symbolic_payload": {"source_format": "SELFIES", "row_index": 0}},
+    {"id": "n1_source_tokens", "type": "evidence", "content": "The source string contains token-level evidence for aromatic fragments, branching, nitrogen and oxygen heteroatoms, ring closures, and a carbonyl-like branch. It does not provide assay, target, dose, or identity metadata.", "latent_coordinates": [0.08, -0.24, 0.33, 0.22, 0.47, -0.01, 0.25, 0.4], "symbolic_payload": {"observed_token_classes": ["aromatic carbon", "branch", "nitrogen", "oxygen", "ring", "carbonyl-like branch"]}},
+    {"id": "n2_tree_graph_parse", "type": "reasoning_tree", "content": "The graph-parse tree turns SELFIES tokens into atoms, bonds, branches, and ring closures. This is the structural substrate for property learning and should be kept separate from biological activity claims.", "latent_coordinates": [0.14, -0.18, 0.4, 0.29, 0.53, 0.05, 0.31, 0.46], "symbolic_payload": {"tree": "molecular_graph_parse", "safe_output": "atom/bond graph features"}},
+    {"id": "n3_tree_pharmacophore_hints", "type": "reasoning_tree", "content": "The pharmacophore-hint tree may infer generic possibilities such as hydrogen-bond acceptors/donors, aromatic stacking surfaces, and polarity islands from heteroatoms and rings, but it must mark them as hypotheses until assay context exists.", "latent_coordinates": [0.19, -0.12, 0.46, 0.35, 0.58, 0.11, 0.36, 0.51], "symbolic_payload": {"tree": "hypothesis_features", "feature_hints": ["H-bonding", "aromatic surface", "polarity"]}},
+    {"id": "n4_rejected_named_drug", "type": "rejected_branch", "content": "A named-drug, target-binding, or safety claim is rejected. SELFIES gives graph syntax, not a verified chemical identity, biological target, pharmacokinetics, or toxicology.",
+      "latent_coordinates": [-0.27, -0.36, 0.05, -0.08, 0.18, -0.22, 0.03, 0.09],
+      "symbolic_payload": {"rejected_claim": "named drug or target activity", "reason": "missing assay and identity metadata"}
+    },
+    {"id": "n5_merge", "type": "merge", "content": "The final training target merges graph parsing with cautious pharmacophore hypotheses. For de novo design, the model should learn controllable molecular features first, then condition activity only when target/assay evidence is present.", "latent_coordinates": [0.25, -0.05, 0.52, 0.42, 0.64, 0.17, 0.42, 0.57], "symbolic_payload": {"merge_inputs": ["n2_tree_graph_parse", "n3_tree_pharmacophore_hints", "n4_rejected_named_drug"], "design_policy": "structure first, activity only when evidenced"}},
+    {"id": "n6_answer", "type": "answer", "content": "Represent the row as a medicinal-chemistry graphification task: parse SELFIES into molecular graph tokens, attach cautious feature hypotheses, and reject unevidenced drug identity or target-activity claims.", "latent_coordinates": [0.31, 0.01, 0.58, 0.48, 0.69, 0.23, 0.48, 0.62], "symbolic_payload": {"answer": "SELFIES-to-graph with cautious pharmacophore hints"}}
+  ],
+  "edges": [
+    {"id": "e0", "source": "n0_problem", "target": "n1_source_tokens", "type": "requires_evidence", "directed": true, "causal_semantics": "The source SELFIES tokens are the only evidence."},
+    {"id": "e1", "source": "n1_source_tokens", "target": "n2_tree_graph_parse", "type": "activates_tree", "directed": true, "causal_semantics": "SELFIES syntax activates molecular graph parsing."},
+    {"id": "e2", "source": "n1_source_tokens", "target": "n3_tree_pharmacophore_hints", "type": "activates_tree", "directed": true, "causal_semantics": "Heteroatoms and aromatic tokens support cautious feature hypotheses."},
+    {"id": "e3", "source": "n1_source_tokens", "target": "n4_rejected_named_drug", "type": "rejects_branch", "directed": true, "causal_semantics": "Token syntax lacks identity and assay proof."},
+    {"id": "e4", "source": "n2_tree_graph_parse", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "Graph structure enters the final target."},
+    {"id": "e5", "source": "n3_tree_pharmacophore_hints", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "Feature hypotheses enter with uncertainty."},
+    {"id": "e6", "source": "n4_rejected_named_drug", "target": "n5_merge", "type": "safety_contrast", "directed": true, "causal_semantics": "Rejected activity claims bound the answer."},
+    {"id": "e7", "source": "n5_merge", "target": "n6_answer", "type": "finalizes_answer", "directed": true, "causal_semantics": "The merged structure-first policy determines the answer."}
+  ],
+  "targets": {
+    "answer": "Graphify the SELFIES row into molecular graph tokens and cautious feature hypotheses; do not infer a named drug, target activity, dose, or safety profile from the string alone.",
+    "verifier_metadata": {"verifier_type": "chemistry_string_scope_check", "must_include": ["SELFIES", "graph", "heteroatom", "ring", "hypothesis"], "must_not_claim": ["named drug", "confirmed target", "clinical safety"]},
+    "gflownet_reward_metadata": {"reward_type": "molecular_graph_scope_reward", "terminal_reward": 0.88, "reward_components": {"graph_parse": 0.93, "hypothesis_calibration": 0.86, "safety": 0.96, "design_relevance": 0.78}},
+    "active_support_nodes": ["n1_source_tokens", "n2_tree_graph_parse", "n3_tree_pharmacophore_hints", "n4_rejected_named_drug", "n5_merge"]
+  },
+  "metadata": {
+    "domain": "medicinal_chemistry",
+    "topic": "selfies_to_graph_scope_control",
+    "merge_status": "graph_parse_and_hypothesis_merge_with_rejected_activity_claim",
+    "multiple_viable_solution_status": "graph_features_viable_activity_claims_not_viable_without_assay",
+    "continuous_embedding_fields": {"forest_count": 3, "trajectory_type": "chemistry_string_graph_forest", "graphcg_axes": ["atom_token", "bond_topology", "heteroatom_feature", "activity_uncertainty"]},
+    "tokengt_tropical_toric_fields": {"node_token_order": ["n0_problem", "n1_source_tokens", "n2_tree_graph_parse", "n3_tree_pharmacophore_hints", "n4_rejected_named_drug", "n5_merge", "n6_answer"], "edge_token_order": ["e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7"], "tropical_active_support_nodes": ["n1_source_tokens", "n2_tree_graph_parse", "n3_tree_pharmacophore_hints", "n5_merge"], "tropical_margin": 0.31, "toric_phase_basis": "molecular_graph_uncertainty_basis"},
+    "quality_flags": {"accepted": true, "hand_inspected": true, "biomedical_safety": "no_clinical_or_activity_claim", "contains_rejected_branch": true, "contains_merge": true},
+    "topic_flags": {"medicinal_chemistry": true, "hypothesis_generation": true, "molecular_design": true}
+  },
+  "split_cluster": {"cluster_id": "pubchem_selfies_row0_graph_scope", "split": "train", "leakage_resistant_basis": "source row index plus SELFIES token sketch"}
+}
