@@ -1,6 +1,6 @@
 # Current OAI ToricGT State
 
-Updated: 2026-06-22
+Updated: 2026-06-23
 
 ## Goal
 
@@ -46,13 +46,16 @@ export log:     runs/convextok8192_biomed_export.log
 wait log:       runs/toricblm8192_wait_and_launch.log
 tokenizer:      /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok8192_biomed_det_full/tokenizers/fineweb_convextok_8192_biomed_det.convextok.json
 FineWeb shards: /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok8192_biomed_det_full/datasets/fineweb10B_convextok8192_biomed_det
-config:         configs/toricblm_mup_170m_convextok8192_biomed_codex55.env
+config:         configs/toricblm_mup_170m_convextok8192_biomed_fot_structure.env
 vocab size:     8192
 target params:  169,698,927
 layers:         9
 width:          1536
 heads / KV:     12 / 6
 batch tokens:   196,608 initial setting
+late graph:     data/toricblm_late_mixed_fot_structure/train/*.parquet
+late start:     step 12,000
+late mix:       0.80
 ```
 
 The previous 2048 `.bin` token shards were removed to make room for the fresh
@@ -69,6 +72,38 @@ Tokenizer comparison against ConvexTok-2048:
 curated train sample:       993,945 -> 790,185 tokens (-20.50%)
 biomed/control seed sample:   3,010 ->     669 tokens (-77.77%)
 ```
+
+The new ToricBLM bio/FoT curation slice is published at
+`AmelieSchreiber/toricblm_fot` and stored locally under `data/uniprot_fot`.
+It contains graph/FoT records from UniProt function text, UniRef50, DNA coding
+regions, Rfam, RNAcentral, and PubChem SELFIES.  The leakage-aware split uses
+sequence sketches, function shingles, structure lookup hooks, source graph
+histograms, and FoT graph topology:
+
+```text
+train:      2,788
+validation:   156
+test:         128
+clusters:   2,640
+```
+
+The current tokenizer audit on the bio/FoT fields keeps ConvexTok-8192 for the
+immediate full run: it reduces audited graph/FoT token count by 7.21% relative
+to ConvexTok-2048, but raw biological sequence strings still use byte fallback
+often enough that a later motif-aware vocabulary extension is recommended.
+
+Structure readiness for the train shard:
+
+```text
+structure-association records: 917
+coordinate-bearing records:    0
+```
+
+This means the active full run trains sequence/function/chemistry/structure-hook
+association through graph LM, FoT, GFlowNet, and ToricGT sidecar losses.
+Coordinate-native structure flow matching, contact, distogram, and frame/RMSD
+losses are implemented and logged under `toricblm_structure/*`, but remain
+dormant until records with actual coordinate tensors are curated.
 
 The public page in `docs/index.html` was regenerated from the best checkpoint
 with a 512-token hidden-state extraction and includes fresh interactive

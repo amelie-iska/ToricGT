@@ -28,3 +28,10 @@ Validation:
 The validator enforces authorship fields, directed edge integrity, active
 support node references, GFlowNet reward metadata, continuous embedding fields,
 and TokenGT/TropicalGT/ToricGT metadata.
+
+## Source Anchors
+
+Use `scripts/extract_uniprot_fot_anchors.py` to prepare compact source-row
+summaries for the next handwritten batch. These anchors are not reasoning
+records; they only expose provenance, labels, snippets, sequence lengths, GO/EC
+fields, and suggested modality axes for author inspection.

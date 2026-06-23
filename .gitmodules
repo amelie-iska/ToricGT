@@ -11,3 +11,6 @@
 [submodule "external/mup"]
 	path = external/mup
 	url = https://github.com/amelie-iska/mup.git
+[submodule "external/ProTrek"]
+	path = external/ProTrek
+	url = https://github.com/amelie-iska/ProTrek.git

@@ -1,0 +1,16 @@
+{
+  "cluster_count": 2640,
+  "input": "data/uniprot_fot/derived/toricblm_fot_graphified_512_per_dataset_leakage_v1.parquet",
+  "max_cluster_size": 403,
+  "outputs": {
+    "test": "data/uniprot_fot/splits/leakage_v1/toricblm_fot_leakage_v1_test.parquet",
+    "train": "data/uniprot_fot/splits/leakage_v1/toricblm_fot_leakage_v1_train.parquet",
+    "validation": "data/uniprot_fot/splits/leakage_v1/toricblm_fot_leakage_v1_validation.parquet"
+  },
+  "schema": "toricblm.fot_split_shard_report.v1",
+  "split_counts": {
+    "test": 128,
+    "train": 2788,
+    "validation": 156
+  }
+}

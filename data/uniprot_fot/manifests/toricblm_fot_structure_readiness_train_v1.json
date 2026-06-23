@@ -1,0 +1,31 @@
+{
+  "avg_fot_edges": 44.74928263988522,
+  "avg_fot_nodes": 26.465208034433285,
+  "avg_graph_edges": 20.61441893830703,
+  "avg_graph_nodes": 15.362984218077475,
+  "chemistry_records": 505,
+  "coordinate_bearing_records": 0,
+  "coordinate_examples": [],
+  "counts_by_dataset": {
+    "dna_coding_regions_train": 461,
+    "pubchem10m_selfies_train": 505,
+    "rfam_sequence_train": 454,
+    "rnacentral_8192_sequence_train": 452,
+    "uniprot_function_text_train": 456,
+    "uniprot_uniref50_sequence_train": 460
+  },
+  "input": "data/uniprot_fot/splits/leakage_v1/toricblm_fot_leakage_v1_train.parquet",
+  "recommended_training_mode": "train graph/FoT structure association now; keep coordinate losses dormant",
+  "records": 2788,
+  "schema": "toricblm.structure_readiness_report.v1",
+  "structure_association_records": 917,
+  "structure_flow_status": "association_only_until_coordinate_records_are_added",
+  "structure_hook_examples": [
+    "uniprot_fot_pubchem10m_selfies_train_e93ee6dafdb2a24d349a",
+    "uniprot_fot_uniprot_function_text_train_b7f9b667e8a8f762c8e6",
+    "uniprot_fot_uniprot_function_text_train_7826c5c3f0f1e54c7f96",
+    "uniprot_fot_uniprot_function_text_train_16152476f06f46d687bc",
+    "uniprot_fot_uniprot_function_text_train_68c34f169db1d0c9e821"
+  ],
+  "uniprot_records": 916
+}

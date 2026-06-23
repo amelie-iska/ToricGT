@@ -1,0 +1,14 @@
+{
+  "jsonl": "/home/iska/Documents/amelie/bio/ToricGT/data/uniprot_fot/authored/source_anchors/source_anchors_seed_000144.jsonl",
+  "parquet": "/home/iska/Documents/amelie/bio/ToricGT/data/uniprot_fot/authored/source_anchors/source_anchors_seed_000144.parquet",
+  "records": 144,
+  "counts_by_dataset": {
+    "uniprot_function_text_train": 24,
+    "uniprot_uniref50_sequence_train": 24,
+    "rfam_sequence_train": 24,
+    "rnacentral_8192_sequence_train": 24,
+    "dna_coding_regions_train": 24,
+    "pubchem10m_selfies_train": 24
+  },
+  "note": "Source anchors only; no authored reasoning text is generated here."
+}

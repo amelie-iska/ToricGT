@@ -43,10 +43,37 @@ Each derived row has flat Parquet fields for training loaders plus a full
 - Leakage-resistant split clusters based on dataset, entry/accession, sequence
   hashes, or sequence prefixes.
 
-The companion `forest_json` organizes each source row into four deterministic
-source-field trees: sequence, annotation, structure lookup, and future design
-conditions. This is not the authored reasoning dataset yet; it is the graphified
-raw-data substrate that later authored FoT/ToT trajectories can cite.
+The companion `thought_forest_json` is the stronger training view. It
+materializes source-grounded Forest-of-Thought nodes and edges with sparse tree
+activation, expansion, self-correction, and consensus. The trees are:
+
+- `sequence_tree`: source sequence, deterministic sequence analytics, and local
+  sequence chunks.
+- `annotation_tree`: function text, protein names, taxonomy, GO, EC, family,
+  clan, and other source annotations.
+- `structure_tree`: PDB/AFDB lookup hooks when accession-like identifiers permit
+  them; otherwise an explicit self-correction edge to enrichment status.
+- `design_condition_tree`: future conditional design constraints grounded in
+  available source evidence.
+- `chemistry_tree`: SELFIES token evidence for molecule rows.
+
+This is source-grounded deterministic FoT scaffolding, not imported LLM
+rationales and not hallucinated biological knowledge. If full UniProtKB fields,
+PDB mappings, AFDB coordinates, sites, binding sites, catalytic activity, or
+kinetic constants are absent from the local row, `enrichment_status_json` records
+that absence and the forest routes through a self-correction edge instead of
+inventing the missing evidence.
+
+The `convextok_dag_json` field stores a compact ConvexTok-8192 biomedical
+tokenization graph over a bounded text prefix: byte-boundary vertices, free byte
+fallback edges, matched priced vocabulary edges, and an exact min-plus
+shortest-path dynamic program. This is the tokenizer-side graph that aligns the
+bio records with ToricGT's tropical-attention/TokenGT training path.
+
+The `training_views_json` field exposes named views for graph-in/graph-out,
+embedding-space FoT/GFlowNet training, ConvexTok flattening, GraphCG axes, and
+tropical-toric active support metadata. The older `forest_json` field is kept as
+a backward-compatible compact source-field tree summary.
 
 ## Build And Validate
 
@@ -63,12 +90,69 @@ Run from the ToricGT repository root on branch `toricblm-data`:
   --jsonl data/uniprot_fot/derived/uniprot_fot_graphified_sample.jsonl
 ```
 
+For larger local builds, prefer Parquet-only output:
+
+```bash
+/home/iska/miniconda3/envs/iska-net-2/bin/python scripts/build_uniprot_fot_dataset.py build \
+  --raw-root /home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale \
+  --output-dir data/uniprot_fot \
+  --records-per-dataset 512 \
+  --output-prefix toricblm_fot_graphified_512_per_dataset \
+  --raw-link-mode symlink \
+  --no-jsonl
+```
+
 Outputs:
 
 - `raw_sources/`: symlink organization layer for the original raw datasets.
 - `manifests/uniprot_fot_build_manifest.json`: raw and derived data manifest.
 - `derived/uniprot_fot_graphified_sample.jsonl`: inspectable JSONL rows.
 - `derived/uniprot_fot_graphified_sample.parquet`: Parquet training sample.
+
+## Leakage Split, Tokenizer Audit, And Structure Readiness
+
+The current balanced build is:
+
+```text
+derived/toricblm_fot_graphified_512_per_dataset_v1.parquet
+```
+
+It has 3,072 records, with 512 from each local raw source family.  The
+leakage-aware splitter writes:
+
+```text
+derived/toricblm_fot_graphified_512_per_dataset_leakage_v1.parquet
+splits/leakage_v1/toricblm_fot_leakage_v1_train.parquet
+splits/leakage_v1/toricblm_fot_leakage_v1_validation.parquet
+splits/leakage_v1/toricblm_fot_leakage_v1_test.parquet
+```
+
+Split counts are 2,788 train, 156 validation, and 128 test.  Clusters combine
+sequence sketches, function/annotation shingles, structure lookup hooks, source
+graph histograms, and FoT graph topology.  This is a leakage guard for the data
+available now; coordinate-level Foldseek or ProTrek trimodal clustering should
+be applied after coordinate-bearing PDB/AFDB/dynamics records are added.
+
+The ConvexTok audit is recorded in
+`../../planning/TORICBLM-FOT-TOKENIZER-AUDIT.md`.  The current decision is to
+keep the fresh ConvexTok-8192 biomedical tokenizer for the immediate full run
+and revisit vocabulary extension when residue, atom, coordinate, trajectory,
+and richer UniProt/PDB fields are included.
+
+`manifests/toricblm_fot_structure_readiness_train_v1.json` reports 917
+structure-association records and zero coordinate-bearing records in the train
+split.  Structure association is therefore trainable now through graph/FoT
+annotations and lookup hooks, while coordinate-native flow/contact/distogram
+losses remain dormant until actual coordinate tensors are curated.
+
+The late-stage training glob used by the full ToricBLM run is symlink-only:
+
+```text
+../toricblm_late_mixed_fot_structure/train/*.parquet
+```
+
+It combines the existing Codex 5.5 ToT/FoT three-pass train files with
+`splits/leakage_v1/toricblm_fot_leakage_v1_train.parquet`.
 
 ## Next Dataset Layer
 

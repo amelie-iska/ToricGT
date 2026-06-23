@@ -1,0 +1,164 @@
+{
+  "cluster_count": 2640,
+  "input_files": [
+    "data/uniprot_fot/derived/toricblm_fot_graphified_512_per_dataset_v1.parquet"
+  ],
+  "largest_modality_clusters": {
+    "fot_graph_cluster": [
+      [
+        "2778d022492a89d43ef0",
+        512
+      ],
+      [
+        "60a7dba66d20df147aed",
+        512
+      ],
+      [
+        "7addaceda9a499b8c4a2",
+        268
+      ],
+      [
+        "4828f626737c71a3b466",
+        198
+      ],
+      [
+        "c8e6972e03829101ef89",
+        191
+      ],
+      [
+        "0dbd747f90918093716f",
+        130
+      ],
+      [
+        "a4edf7becb0058ba5a0a",
+        127
+      ],
+      [
+        "8aae7452eaf4e383ed73",
+        120
+      ]
+    ],
+    "function_cluster": [
+      [
+        "c8b344030375dd3c3af6",
+        512
+      ],
+      [
+        "253d4a9cbca4058aca4b",
+        512
+      ],
+      [
+        "1ef8fcb57a2dd6475909",
+        37
+      ],
+      [
+        "51cb1b71b3bd34a79ca2",
+        23
+      ],
+      [
+        "eb88d971cd6d65760a02",
+        16
+      ],
+      [
+        "3981dad930b9b629f439",
+        16
+      ],
+      [
+        "6ab8696a135e8d569296",
+        13
+      ],
+      [
+        "241e1d2a78eaa83fa3c7",
+        10
+      ]
+    ],
+    "sequence_cluster": [
+      [
+        "04bff73be499fd6a7b0a",
+        512
+      ],
+      [
+        "6bf22f56fa8996d1a86d",
+        98
+      ],
+      [
+        "660556ef2861dc829ed9",
+        87
+      ],
+      [
+        "9c2e70e2cbb0c144809d",
+        57
+      ],
+      [
+        "0ea54b4c90e9cf170882",
+        27
+      ],
+      [
+        "b1f73026ebd2218bb789",
+        11
+      ],
+      [
+        "252270d9f6eace5219ea",
+        5
+      ],
+      [
+        "b6b9ca8fbc3b75d09a1a",
+        5
+      ]
+    ],
+    "structure_cluster": [
+      [
+        "743f158306d5b3817489",
+        403
+      ],
+      [
+        "0a562d9697edd2ff5bc4",
+        248
+      ],
+      [
+        "c6182e82b5e2b9c7e61e",
+        191
+      ],
+      [
+        "197c3daaa777bf0c5389",
+        173
+      ],
+      [
+        "4f89a52399721aa1ee67",
+        23
+      ],
+      [
+        "7819e0e088e701504ec7",
+        21
+      ],
+      [
+        "6699518c1c9324fa388c",
+        14
+      ],
+      [
+        "a6310c619773aa779885",
+        7
+      ]
+    ]
+  },
+  "max_cluster_size": 403,
+  "modality_cluster_counts": {
+    "fot_graph_cluster": 96,
+    "function_cluster": 1811,
+    "sequence_cluster": 2190,
+    "structure_cluster": 1875
+  },
+  "notes": [
+    "All rows in the same combined sequence/function/structure/FoT cluster are assigned to the same split.",
+    "Structure similarity currently uses source-grounded PDB/AFDB hooks because coordinate-bearing structure files are not present in the local raw dataset.",
+    "ProTrek trimodal embedding clusters and FoldSeek clusters can be added later as additional modality_keys without changing the downstream schema."
+  ],
+  "output_path": "data/uniprot_fot/derived/toricblm_fot_graphified_512_per_dataset_leakage_v1.parquet",
+  "records": 3072,
+  "schema": "toricblm.leakage_aware_split_report.v1",
+  "split_counts": {
+    "test": 128,
+    "train": 2788,
+    "validation": 156
+  }
+}

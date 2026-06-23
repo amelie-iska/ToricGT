@@ -3070,12 +3070,18 @@ A safe starting microarchitecture for the implemented dense track is
 with tied embeddings, recurrent block tying, hybrid softmax/tropical-ring attention, a tiny $A=8$ action GFlowNet policy, and no stored expert bank.  In the current artifact audit this gives about $13.0$M stored scalars and an int8 compressed artifact around $12.94$MB, leaving margin below $16{,}000{,}000$ bytes for code and metadata.  If $P_{\mathrm{fp}}$ is the uncompressed scalar count, then int8 export roughly permits $P_{\mathrm{fp}}<16$M minus code overhead; int6 export roughly permits $P_{\mathrm{fp}}<21$M before entropy compression; int4 export permits more parameters but is less stable unless quantization-aware training is strong.  These are engineering estimates; the actual gate is the serialized artifact size.
 
 The active OAI-baseline adaptation uses the same principle with either the
-SP1024 baseline tokenizer or the ConvexTok-2048 Det tokenizer.  The current
-ConvexTok restart uses $V=2048$, $d=512$, $H=8$, $L=9$, tied embeddings, RoPE
-with \texttt{ROPE\_BASE}=10000, sequence length $1024$, and a training-token
-batch near $10^6$ tokens to use roughly the 20GB VRAM budget.  With first-class
-FineWeb TokenGT identifiers and graph-output flattening enabled, the current
-configuration has about $18.09$M trainable parameters before sidecar heads.
+SP1024 baseline tokenizer, the ConvexTok-2048 Det tokenizer, or the current
+fresh ConvexTok-8192 biomedical tokenizer.  The ConvexTok-8192 restart is not
+BPE and does not reuse the ConvexTok-2048 vocabulary.  It keeps byte fallback
+and a biomedical/control reserve for UniProt-style annotations, sequence
+motifs, PDB/AFDB/ESMFold structure tags, molecule strings, atomistic trajectory
+metadata, toric/tropical diagnostics, persistence signatures, BGG certificates,
+and Forest-of-Thought control tokens.  The current mu-transfer scale-up uses
+$V=8192$, $d=1536$, $H=12$, six KV heads, $L=9$, tied embeddings, RoPE with
+\texttt{ROPE\_BASE}=10000, sequence length $1024$, and about $1.7\times10^8$
+parameters.  First-class FineWeb TokenGT identifiers and graph-output
+flattening remain enabled; the official BPB score is still computed on the
+flattened active-tokenizer sequence.
 The relevant exposed knobs are
 \texttt{TOKENGT\_IDENTIFIER\_WEIGHT},
 \texttt{TOKENGT\_ENDPOINT\_WEIGHT},
@@ -3264,6 +3270,52 @@ Opus reasoning 24k & default & Apache-2.0 & high-quality reasoning style transfe
 The important loader details are pragmatic.  The UniMorph Hub repository may contain an old dataset script, so the Hebrew file should be downloaded directly from the UniMorph GitHub source when the current \texttt{datasets} package rejects the script.  The GoT and ToT sources are raw JSON/JSONL rather than conventional multi-shard builders, so the curation script downloads and streams them directly.  The Hebrew/Jewish-text slice intentionally uses Sefaria and UniMorph Hebrew sources rather than Christian-branded biblical-language datasets when the experimental goal is Jewish Hebrew/rabbinic coverage.
 
 Hebrew rows are niqqud-aware.  The curation policy is to preserve pointed Hebrew when the upstream source provides it, prefer same-consonant pointed variants when an equivalent field is present, and explicitly flag unpointed Hebrew rather than synthesize vowels into attested source text.  The current audit finds $3{,}564{,}756$ rows containing Hebrew, of which $2{,}868$ are pointed upstream rows and $3{,}561{,}888$ are unpointed upstream rows.  Strict pointed-Hebrew runs should filter out records with \texttt{has\_hebrew\_without\_niqqud=true}; broader Jewish-text pretraining can retain them while making the missing-vowel status visible to the model and to evaluation reports.
+
+\subsection{ToricBLM biological Forest-of-Thought records}
+
+The ToricBLM preparation path adds a biological graph/FoT slice derived from
+local mirrors of UniProt function text, UniRef50 sequence clusters, DNA coding
+regions, Rfam sequence records, RNAcentral records, and PubChem SELFIES strings.
+The raw mirrors remain symlinked into the ToricGT repository rather than copied,
+so the training code can use them without duplicating tens of gigabytes of
+source data.  Each curated row contains the ordinary text view plus
+\texttt{graph\_json}, \texttt{thought\_forest\_json},
+\texttt{convextok\_dag\_json}, \texttt{training\_views\_json}, and
+\texttt{enrichment\_status\_json}.  The forest view is source-grounded: sequence,
+annotation, structure-lookup, design-condition, and chemistry trees expand from
+fields actually present in the row, while absent UniProtKB, PDB, AFDB, site,
+kinetic, pathway, or coordinate information is routed through explicit
+self-correction edges instead of being synthesized.
+
+The current balanced slice has $3072$ records, $512$ from each of the six local
+source families.  A leakage-aware split assigns entire clusters to one split,
+yielding $2788$ train, $156$ validation, and $128$ test records.  The cluster
+signature combines sequence sketches, function labels and text shingles,
+structure lookup hooks, source-graph histograms, and FoT graph topology.  This
+is a finite leakage guard for the data actually present.  It is not yet a claim
+of full structural decontamination: when coordinate-bearing PDB, AFDB, UMA
+MLIP, BioEmu, BioKinema, ConfRover, or other trajectory records are added, the
+splitter should be upgraded with Foldseek-style structural clustering or
+ProTrek-style trimodal sequence/structure/function contrastive embeddings.
+
+The ConvexTok audit on this slice compares the fresh ConvexTok-8192
+biomedical tokenizer with the older ConvexTok-2048 tokenizer.  ConvexTok-8192
+reduces audited graph/FoT token count by $7.21\%$ and increases priced-token
+coverage, but raw sequence fields still use byte fallback heavily.  The
+pragmatic decision is therefore to train the immediate full run with
+ConvexTok-8192 and schedule a later vocabulary-extension pass over amino-acid
+motifs, nucleotide motifs, GO/EC syntax, residue-pair fields, atom and chain
+labels, coordinate metadata, and dynamics tags.
+
+The same audit distinguishes structure association from coordinate-native
+structure training.  The present train split contains $917$ structure-association
+records and no coordinate-bearing records.  Thus the run can train associations
+between sequence, function, chemistry, and structure lookup hooks through the
+graph LM and FoT/sidecar losses, but coordinate-flow matching, contact-map
+binary cross-entropy, distogram cross-entropy, and frame/RMSD losses are
+dormant until actual coordinate tensors are curated.  The implementation keeps
+these losses coordinate-native: they operate on real batched coordinates and
+masks, and they are not replaced by textual proxies.
 
 \subsection{Normalized record schema}
 

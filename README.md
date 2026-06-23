@@ -110,6 +110,47 @@ ConvexTok-2048 tokenizer.  The matching muP target model is 9 layers, width
 1536, 12 attention heads, 6 KV heads, and about 169.7M parameters, staying
 under the requested roughly 170M limit without increasing layer count.
 
+The ToricBLM bio/FoT curation path is now wired into the full run.  Local raw
+biological-scale Hugging Face mirrors are symlinked under `data/uniprot_fot`
+rather than copied; curated graph/FoT rows live in
+`data/uniprot_fot/derived` and split shards live in
+`data/uniprot_fot/splits/leakage_v1`.  The published dataset is
+[`AmelieSchreiber/toricblm_fot`](https://huggingface.co/datasets/AmelieSchreiber/toricblm_fot).
+The current split is leakage-aware: sequence sketches, function labels/text,
+structure lookup hooks, source graph histograms, and FoT graph topology are
+clustered before assigning train/validation/test.  Counts are 2,788 train, 156
+validation, and 128 test records.  This is ProTrek/Foldseek-ready, but the
+present local slice contains structure hooks rather than coordinate-bearing
+PDB/AFDB structures, so true trimodal structure clustering is deferred until
+coordinate records are added.
+`external/ProTrek` is cloned as a lightweight reference checkout for that next
+split upgrade: once sequence, structure, and function embedding assets are
+available, the splitter should cluster by ProTrek sequence/structure/function
+similarity, with Foldseek-style structural clustering as a direct coordinate
+check.
+
+The immediate full-run config is
+`configs/toricblm_mup_170m_convextok8192_biomed_fot_structure.env`.  It keeps
+the full ConvexTok-8192 FineWeb BPB stream as the primary objective and adds a
+late graph stream at step 12,000 from
+`data/toricblm_late_mixed_fot_structure/train/*.parquet`, combining the Codex
+5.5 ToT/FoT three-pass train files with the leakage-aware ToricBLM bio/FoT
+train shard.  The tokenizer audit in
+[`planning/TORICBLM-FOT-TOKENIZER-AUDIT.md`](planning/TORICBLM-FOT-TOKENIZER-AUDIT.md)
+keeps ConvexTok-8192 for this run: it reduced audited graph/FoT token count by
+7.21% relative to ConvexTok-2048, but raw sequences still fall back to bytes
+often enough that the next large structure/dynamics phase should audit a larger
+motif-aware vocabulary.
+
+Coordinate-native structure losses are implemented in
+`src/toricgt/structure_flow_matching.py`: rectified-flow velocity MSE, contact
+map BCE, distogram CE, and centered RMSD/frame diagnostics.  They are not
+proxies.  The current UniProt/FoT slice reports 917 structure-association
+records and zero coordinate-bearing records, so the full run trains structure
+association through graph/FoT text and lookup hooks while logging
+`toricblm_structure/*`; coordinate-flow losses remain dormant until records
+carry actual coordinate tensors.
+
 The current OAI route also uses BPB-safe TokenGT-style identifiers without
 inserting extra scored tokens into the SentencePiece stream.  Deterministic
 low-rank node identifiers, endpoint-pair features, and virtual local edge-token

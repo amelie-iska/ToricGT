@@ -29,9 +29,9 @@ def write_card(data_dir: Path, destination: Path, repo_id: str) -> None:
         "pretty_name: UniProt Forest-of-Thought Graphification for ToricGT",
         "---",
         "",
-        "# UniProt Forest-of-Thought Graphification for ToricGT",
+        "# ToricBLM Bio Forest-of-Thought Graphification for ToricGT",
         "",
-        "This repository stores Parquet-first biological graph/FoT curation artifacts for ToricGT.",
+        "This repository stores Parquet-first biological graph/FoT curation artifacts for ToricGT/ToricBLM.",
         "The current upload is an initial deterministic graphification sample, not the final authored reasoning corpus.",
         "",
         "Raw upstream Parquet data is not uploaded in this initial push. Local raw sources remain organized by symlink under the ToricGT data tree and require separate license review before redistribution.",
@@ -42,6 +42,7 @@ def write_card(data_dir: Path, destination: Path, repo_id: str) -> None:
         "- `authored/accepted/accepted_records.parquet` when authored records are present",
         "- `authored/accepted/validation_report.json`",
         "- `authored/records/*.json` inspectable handwritten source records",
+        "- `authored/source_anchors/*.parquet` source-row anchors for future handwritten batches",
         "- `manifests/uniprot_fot_build_manifest.json`",
         "- `schema/uniprot_fot_record.schema.json`",
         "- `LOCAL_README.md`",
@@ -60,7 +61,9 @@ def write_card(data_dir: Path, destination: Path, repo_id: str) -> None:
         "",
         "## Format",
         "",
-        "Each row contains flat loader columns plus `graph_json`, `forest_json`, `metadata_json`, hashes, split cluster metadata, and quality flags. Graph JSON records include directed nodes/edges, GFlowNet reward metadata, continuous embedding proxies, TokenGT/TropicalGT/ToricGT fields, active support nodes, and leakage-resistant split metadata.",
+        "Each row contains flat loader columns plus `graph_json`, `forest_json`, `thought_forest_json`, `convextok_dag_json`, `training_views_json`, `enrichment_status_json`, `metadata_json`, hashes, split cluster metadata, and quality flags.",
+        "",
+        "`thought_forest_json` materializes source-grounded Forest-of-Thought trees with expansion, self-correction, and consensus edges. `convextok_dag_json` stores a compact ConvexTok byte-boundary DAG with free byte fallback edges, matched priced-token edges, and a min-plus shortest path. Graph JSON records include directed nodes/edges, GFlowNet reward metadata, continuous embedding proxies, TokenGT/TropicalGT/ToricGT fields, active support nodes, and leakage-resistant split metadata.",
         "",
         "## Safety And License Notes",
         "",
@@ -72,8 +75,9 @@ def write_card(data_dir: Path, destination: Path, repo_id: str) -> None:
 
 def upload_plan(data_dir: Path, include_jsonl: bool) -> list[tuple[Path, str]]:
     files: list[tuple[Path, str]] = []
-    for parquet_path in sorted((data_dir / "derived").glob("uniprot_fot_graphified*.parquet")):
-        files.append((parquet_path, f"derived/{parquet_path.name}"))
+    for pattern in ("uniprot_fot_graphified*.parquet", "toricblm_fot_graphified*.parquet"):
+        for parquet_path in sorted((data_dir / "derived").glob(pattern)):
+            files.append((parquet_path, f"derived/{parquet_path.name}"))
     files.extend(
         [
         (data_dir / "manifests" / "uniprot_fot_build_manifest.json", "manifests/uniprot_fot_build_manifest.json"),
@@ -88,9 +92,14 @@ def upload_plan(data_dir: Path, include_jsonl: bool) -> list[tuple[Path, str]]:
     )
     for record_path in sorted((data_dir / "authored" / "records").glob("*.json")):
         files.append((record_path, f"authored/records/{record_path.name}"))
+    for anchor_path in sorted((data_dir / "authored" / "source_anchors").glob("*.parquet")):
+        files.append((anchor_path, f"authored/source_anchors/{anchor_path.name}"))
+    for anchor_manifest in sorted((data_dir / "authored" / "source_anchors").glob("*_manifest.json")):
+        files.append((anchor_manifest, f"authored/source_anchors/{anchor_manifest.name}"))
     if include_jsonl:
-        for jsonl_path in sorted((data_dir / "derived").glob("uniprot_fot_graphified*.jsonl")):
-            files.append((jsonl_path, f"derived/{jsonl_path.name}"))
+        for pattern in ("uniprot_fot_graphified*.jsonl", "toricblm_fot_graphified*.jsonl"):
+            for jsonl_path in sorted((data_dir / "derived").glob(pattern)):
+                files.append((jsonl_path, f"derived/{jsonl_path.name}"))
         files.append((data_dir / "authored" / "accepted" / "accepted_records.jsonl", "authored/accepted/accepted_records.jsonl"))
     return [(path, repo_path) for path, repo_path in files if path.exists()]
 
@@ -98,7 +107,7 @@ def upload_plan(data_dir: Path, include_jsonl: bool) -> list[tuple[Path, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", default="data/uniprot_fot")
-    parser.add_argument("--repo-id", default="AmelieSchreiber/uniprot_fot")
+    parser.add_argument("--repo-id", default="AmelieSchreiber/toricblm_fot")
     parser.add_argument("--include-jsonl", action="store_true", help="Also upload inspectable JSONL.")
     parser.add_argument("--private", action="store_true", help="Create/update as a private dataset.")
     parser.add_argument("--dry-run", action="store_true")

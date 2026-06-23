@@ -325,6 +325,34 @@ edge flags as compact structural embeddings; a tiny toric regularizer aligns
 token embeddings with these vocabulary-face coordinates.  BPB remains the
 byte-denominated prequential score on the final flattened token sequence.
 
+The ToricBLM scale-up path keeps this tokenizer-as-graph contract but moves to
+a fresh ConvexTok-8192 biomedical vocabulary rather than reusing the
+ConvexTok-2048 vocabulary or returning to BPE.  The 8192 vocabulary retains
+byte fallback and reserves biomedical/control seed strings for UniProt-style
+annotations, protein and nucleotide motifs, PDB/AFDB/ESMFold structure tags,
+chemical graph strings, atomistic trajectory metadata, toric/tropical
+diagnostics, and Forest-of-Thought control tokens.  A post-curation audit on
+the new biological graph/FoT records found a 7.21\% token-count reduction
+relative to ConvexTok-2048 on audited fields, but also a high fallback rate on
+raw sequence strings; therefore the immediate full run keeps ConvexTok-8192
+and defers larger motif-aware vocabularies until coordinate, residue-pair,
+atom-type, chain-id, and dynamics fields are present.  The matching
+mu-transfer model uses width $1536$, nine layers, twelve attention heads, six
+KV heads, tied embeddings, and about $1.7\times10^8$ parameters.
+
+For biomedicine preparation, the graph stream now includes a source-grounded
+ToricBLM Forest-of-Thought dataset derived from local UniProt, UniRef50, DNA,
+Rfam, RNAcentral, and PubChem SELFIES mirrors.  Each row stores
+\texttt{graph\_json}, \texttt{thought\_forest\_json}, \texttt{convextok\_dag\_json},
+\texttt{training\_views\_json}, and \texttt{enrichment\_status\_json}.  The
+split is leakage-aware across sequence sketches, function labels and text
+shingles, structure lookup hooks, graph histograms, and FoT topology.  The
+current slice has $2788$ train, $156$ validation, and $128$ test records.  It
+contains structure-association records but no coordinate-bearing records; hence
+graph/FoT structure association is active, while coordinate-native flow,
+contact, distogram, and frame losses are implemented but dormant until true
+PDB/AFDB or dynamics coordinates are curated.
+
 The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.  The local mirror of \texttt{AmelieSchreiber/toricgt-curated-splits} is used in the competition-safe split: train shards feed supervised BPB optimization, validation shards feed score-first validation, and test shards are reserved for held-out GFlowNet test-time scaling.  The byte loader packs multiple source rows into one chunk; after warmup the training iterator switches to larger technical records, and a 2048-byte packed-context config can resume from a 1024-byte checkpoint by resizing only the learned position table.  This exploits the tropical-ring upper layers for longer composite reasoning trajectories while preserving the strict prequential scoring contract.
 
 The next inference-scaling layer is anticipative trajectory memory.  Completed graph-of-thought DAGs are stored as compact keys

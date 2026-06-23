@@ -300,18 +300,19 @@
     ]
   },
   "derived": {
-    "jsonl": "data/uniprot_fot/derived/uniprot_fot_graphified_200_per_dataset.jsonl",
-    "parquet": "data/uniprot_fot/derived/uniprot_fot_graphified_200_per_dataset.parquet",
-    "records": 1200,
-    "records_per_dataset": 200,
+    "jsonl": "data/uniprot_fot/derived/toricblm_fot_graphified_512_per_dataset_v1.jsonl",
+    "jsonl_written": false,
+    "parquet": "data/uniprot_fot/derived/toricblm_fot_graphified_512_per_dataset_v1.parquet",
+    "records": 3072,
+    "records_per_dataset": 512,
     "max_total_records": null,
     "counts_by_dataset": {
-      "dna_coding_regions_train": 200,
-      "pubchem10m_selfies_train": 200,
-      "rfam_sequence_train": 200,
-      "rnacentral_8192_sequence_train": 200,
-      "uniprot_function_text_train": 200,
-      "uniprot_uniref50_sequence_train": 200
+      "dna_coding_regions_train": 512,
+      "pubchem10m_selfies_train": 512,
+      "rfam_sequence_train": 512,
+      "rnacentral_8192_sequence_train": 512,
+      "uniprot_function_text_train": 512,
+      "uniprot_uniref50_sequence_train": 512
     },
     "schema": [
       {
@@ -359,6 +360,22 @@
         "type": "large_string"
       },
       {
+        "name": "thought_forest_json",
+        "type": "large_string"
+      },
+      {
+        "name": "convextok_dag_json",
+        "type": "large_string"
+      },
+      {
+        "name": "training_views_json",
+        "type": "large_string"
+      },
+      {
+        "name": "enrichment_status_json",
+        "type": "large_string"
+      },
+      {
         "name": "metadata_json",
         "type": "large_string"
       },
@@ -384,9 +401,17 @@
       }
     ]
   },
+  "convextok": {
+    "tokenizer_path": "/home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/parameter_golf_convextok8192_biomed_det_full/tokenizers/fineweb_convextok_8192_biomed_det.convextok.json",
+    "priced_tokens_loaded": 7932,
+    "indexed_first_byte_buckets": 70,
+    "dag_max_bytes": 384,
+    "max_token_bytes": 96
+  },
   "notes": [
     "This is a deterministic graphification sample, not the final authored reasoning corpus.",
     "Raw sources are symlinked by default to avoid duplicating 26GB on a nearly full filesystem.",
-    "Use --raw-link-mode move only after confirming no other workflow depends on the old raw path."
+    "Use --raw-link-mode move only after confirming no other workflow depends on the old raw path.",
+    "Full raw-derived builds should use --no-jsonl and compressed Parquet to avoid disk pressure."
   ]
 }
