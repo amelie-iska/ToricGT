@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ToricGT UniProt FoT Graphified Record",
+  "type": "object",
+  "required": [
+    "record_id",
+    "dataset",
+    "source_file",
+    "source_row_index",
+    "entry_id",
+    "task_family",
+    "text",
+    "graph_json",
+    "forest_json",
+    "metadata_json",
+    "content_hash",
+    "group_hash",
+    "split",
+    "split_cluster",
+    "quality_flags_json"
+  ],
+  "properties": {
+    "record_id": {"type": "string"},
+    "dataset": {"type": "string"},
+    "source_file": {"type": "string"},
+    "source_row_index": {"type": "integer", "minimum": 0},
+    "entry_id": {"type": "string"},
+    "task_family": {"type": "string"},
+    "sequence": {"type": "string"},
+    "annotation_text": {"type": "string"},
+    "text": {"type": "string"},
+    "graph_json": {"type": "string"},
+    "forest_json": {"type": "string"},
+    "metadata_json": {"type": "string"},
+    "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "group_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "split": {"enum": ["train", "validation", "test"]},
+    "split_cluster": {"type": "string"},
+    "quality_flags_json": {"type": "string"}
+  },
+  "additionalProperties": false
+}

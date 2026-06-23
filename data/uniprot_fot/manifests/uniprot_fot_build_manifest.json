@@ -1,0 +1,397 @@
+{
+  "format_version": "uniprot_fot_graphified_v0",
+  "raw_manifest": {
+    "raw_root": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale",
+    "datasets": [
+      {
+        "name": "dna_coding_regions_train",
+        "path": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/dna_coding_regions_train",
+        "parquet_files": 24,
+        "readable_parquet_files": 24,
+        "unreadable_files": [],
+        "bytes": 5448417115,
+        "rows": 1677609,
+        "schema": [
+          {
+            "name": "accession",
+            "type": "string"
+          },
+          {
+            "name": "organism",
+            "type": "string"
+          },
+          {
+            "name": "sequence",
+            "type": "string"
+          },
+          {
+            "name": "introns",
+            "type": "list<element: struct<after: string, before: string, end: int64, gene: string, sequence: string, start: int64>>"
+          },
+          {
+            "name": "exons",
+            "type": "list<element: struct<after: string, before: string, end: int64, gene: string, sequence: string, start: int64>>"
+          },
+          {
+            "name": "proteins",
+            "type": "list<element: struct<end: int64, gene: string, sequence: string, start: int64>>"
+          }
+        ]
+      },
+      {
+        "name": "pubchem10m_selfies_train",
+        "path": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/pubchem10m_selfies_train",
+        "parquet_files": 5,
+        "readable_parquet_files": 5,
+        "unreadable_files": [],
+        "bytes": 555511826,
+        "rows": 9999999,
+        "schema": [
+          {
+            "name": "SELFIES",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "name": "rfam_sequence_train",
+        "path": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/rfam_sequence_train",
+        "parquet_files": 1,
+        "readable_parquet_files": 1,
+        "unreadable_files": [],
+        "bytes": 726072383,
+        "rows": 20051822,
+        "schema": [
+          {
+            "name": "id",
+            "type": "string"
+          },
+          {
+            "name": "sequence",
+            "type": "string"
+          },
+          {
+            "name": "family",
+            "type": "string"
+          },
+          {
+            "name": "clan",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "name": "rnacentral_8192_sequence_train",
+        "path": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/rnacentral_8192_sequence_train",
+        "parquet_files": 7,
+        "readable_parquet_files": 7,
+        "unreadable_files": [],
+        "bytes": 2432802851,
+        "rows": 7340032,
+        "schema": [
+          {
+            "name": "upi",
+            "type": "string"
+          },
+          {
+            "name": "sequence",
+            "type": "string"
+          },
+          {
+            "name": "type",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "name": "uniprot_function_text_train",
+        "path": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/uniprot_function_text_train",
+        "parquet_files": 1,
+        "readable_parquet_files": 1,
+        "unreadable_files": [],
+        "bytes": 237633233,
+        "rows": 464395,
+        "schema": [
+          {
+            "name": "entry",
+            "type": "string"
+          },
+          {
+            "name": "entry_name",
+            "type": "string"
+          },
+          {
+            "name": "protein_name",
+            "type": "string"
+          },
+          {
+            "name": "sequence",
+            "type": "string"
+          },
+          {
+            "name": "function",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "name": "uniprot_uniref50_sequence_train",
+        "path": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/uniprot_uniref50_sequence_train",
+        "parquet_files": 130,
+        "readable_parquet_files": 129,
+        "unreadable_files": [
+          {
+            "path": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/uniprot_uniref50_sequence_train/default/train/0109.parquet",
+            "error": "ArrowInvalid: Parquet magic bytes not found in footer. Either the file is corrupted or this is not a parquet file."
+          }
+        ],
+        "bytes": 18112483652,
+        "rows": 59604946,
+        "schema": [
+          {
+            "name": "id",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "updated",
+            "type": "string"
+          },
+          {
+            "name": "member_count",
+            "type": "int32"
+          },
+          {
+            "name": "common_taxon",
+            "type": "string"
+          },
+          {
+            "name": "common_taxon_id",
+            "type": "int32"
+          },
+          {
+            "name": "seed_id",
+            "type": "string"
+          },
+          {
+            "name": "go_mf",
+            "type": "list<element: string>"
+          },
+          {
+            "name": "go_bp",
+            "type": "list<element: string>"
+          },
+          {
+            "name": "go_cc",
+            "type": "list<element: string>"
+          },
+          {
+            "name": "member_ids",
+            "type": "list<element: string>"
+          },
+          {
+            "name": "rep_member_id",
+            "type": "string"
+          },
+          {
+            "name": "rep_member_id_type",
+            "type": "string"
+          },
+          {
+            "name": "rep_organism",
+            "type": "string"
+          },
+          {
+            "name": "rep_organism_tax_id",
+            "type": "int32"
+          },
+          {
+            "name": "rep_protein_name",
+            "type": "string"
+          },
+          {
+            "name": "rep_accessions",
+            "type": "list<element: string>"
+          },
+          {
+            "name": "rep_uniparc_id",
+            "type": "string"
+          },
+          {
+            "name": "rep_uniref90_id",
+            "type": "string"
+          },
+          {
+            "name": "rep_uniref100_id",
+            "type": "string"
+          },
+          {
+            "name": "rep_is_seed",
+            "type": "bool"
+          },
+          {
+            "name": "sequence",
+            "type": "large_string"
+          },
+          {
+            "name": "sequence_length",
+            "type": "int32"
+          },
+          {
+            "name": "sequence_crc64",
+            "type": "string"
+          },
+          {
+            "name": "sequence_xxh128",
+            "type": "string"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "datasets": 6,
+      "parquet_files": 168,
+      "readable_parquet_files": 167,
+      "bytes": 27512921060,
+      "rows": 99138803
+    },
+    "raw_links": [
+      {
+        "dataset": "dna_coding_regions_train",
+        "path": "data/uniprot_fot/raw_sources/dna_coding_regions_train",
+        "mode": "symlink",
+        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/dna_coding_regions_train"
+      },
+      {
+        "dataset": "pubchem10m_selfies_train",
+        "path": "data/uniprot_fot/raw_sources/pubchem10m_selfies_train",
+        "mode": "symlink",
+        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/pubchem10m_selfies_train"
+      },
+      {
+        "dataset": "rfam_sequence_train",
+        "path": "data/uniprot_fot/raw_sources/rfam_sequence_train",
+        "mode": "symlink",
+        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/rfam_sequence_train"
+      },
+      {
+        "dataset": "rnacentral_8192_sequence_train",
+        "path": "data/uniprot_fot/raw_sources/rnacentral_8192_sequence_train",
+        "mode": "symlink",
+        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/rnacentral_8192_sequence_train"
+      },
+      {
+        "dataset": "uniprot_function_text_train",
+        "path": "data/uniprot_fot/raw_sources/uniprot_function_text_train",
+        "mode": "symlink",
+        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/uniprot_function_text_train"
+      },
+      {
+        "dataset": "uniprot_uniref50_sequence_train",
+        "path": "data/uniprot_fot/raw_sources/uniprot_uniref50_sequence_train",
+        "mode": "symlink",
+        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/uniprot_uniref50_sequence_train"
+      }
+    ]
+  },
+  "derived": {
+    "jsonl": "data/uniprot_fot/derived/uniprot_fot_graphified_sample.jsonl",
+    "parquet": "data/uniprot_fot/derived/uniprot_fot_graphified_sample.parquet",
+    "records": 48,
+    "sample_per_dataset": 8,
+    "counts_by_dataset": {
+      "dna_coding_regions_train": 8,
+      "pubchem10m_selfies_train": 8,
+      "rfam_sequence_train": 8,
+      "rnacentral_8192_sequence_train": 8,
+      "uniprot_function_text_train": 8,
+      "uniprot_uniref50_sequence_train": 8
+    },
+    "schema": [
+      {
+        "name": "record_id",
+        "type": "string"
+      },
+      {
+        "name": "dataset",
+        "type": "string"
+      },
+      {
+        "name": "source_file",
+        "type": "string"
+      },
+      {
+        "name": "source_row_index",
+        "type": "int64"
+      },
+      {
+        "name": "entry_id",
+        "type": "string"
+      },
+      {
+        "name": "task_family",
+        "type": "string"
+      },
+      {
+        "name": "sequence",
+        "type": "large_string"
+      },
+      {
+        "name": "annotation_text",
+        "type": "large_string"
+      },
+      {
+        "name": "text",
+        "type": "large_string"
+      },
+      {
+        "name": "graph_json",
+        "type": "large_string"
+      },
+      {
+        "name": "forest_json",
+        "type": "large_string"
+      },
+      {
+        "name": "metadata_json",
+        "type": "large_string"
+      },
+      {
+        "name": "content_hash",
+        "type": "string"
+      },
+      {
+        "name": "group_hash",
+        "type": "string"
+      },
+      {
+        "name": "split",
+        "type": "string"
+      },
+      {
+        "name": "split_cluster",
+        "type": "string"
+      },
+      {
+        "name": "quality_flags_json",
+        "type": "string"
+      }
+    ]
+  },
+  "notes": [
+    "This is a deterministic graphification sample, not the final authored reasoning corpus.",
+    "Raw sources are symlinked by default to avoid duplicating 26GB on a nearly full filesystem.",
+    "Use --raw-link-mode move only after confirming no other workflow depends on the old raw path."
+  ]
+}

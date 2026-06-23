@@ -20,6 +20,9 @@ data/curated/*.parquet
 data/curated/*.jsonl
 data/curated/by_dataset/
 data/curated_smoke/
+data/uniprot_fot/raw_sources/
+data/uniprot_fot/full/
+data/uniprot_fot/hf_shards/
 data/synthetic/*.jsonl
 data/splits/*.jsonl
 *.aux
