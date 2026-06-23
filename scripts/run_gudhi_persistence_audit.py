@@ -899,7 +899,7 @@ def differential_heatmap_svg(record: dict[str, Any]) -> str:
 
     presentation = record.get("bigraded_chain_presentation", {})
     matrices = presentation.get("boundary_matrices", {}) if isinstance(presentation, dict) else {}
-    width, panel_h = 1120, 330
+    width, panel_h = 1120, 350
     parts = [
         f'<svg class="differential-heatmap" viewBox="0 0 {width} {panel_h * 2}" role="img" aria-label="GF(2) differential matrix heatmaps">',
         '<rect x="0" y="0" width="100%" height="100%" fill="#020713"/>',
@@ -910,9 +910,9 @@ def differential_heatmap_svg(record: dict[str, Any]) -> str:
         rows = raw if isinstance(raw, list) else []
         row_count = max(1, len(rows))
         col_count = max(1, max((len(row) for row in rows if isinstance(row, list)), default=0))
-        pad_l, pad_t, pad_r, pad_b = 82, top + 82, 36, 38
+        pad_l, pad_t, pad_r, pad_b = 82, top + 100, 36, 38
         grid_w = width - pad_l - pad_r
-        grid_h = panel_h - 122
+        grid_h = panel_h - 148
         cell_w = grid_w / max(1, col_count)
         cell_h = grid_h / max(1, row_count)
         tick_cell = min(cell_w, cell_h)
@@ -923,7 +923,7 @@ def differential_heatmap_svg(record: dict[str, Any]) -> str:
             f'<text x="28" y="{top+50}" fill="#91a8b7" font-size="11">Exact emitted monomial terms over GF(2); opacity encodes bidegree weight. Hover nonzero cells for terms.</text>'
         )
         parts.append(
-            f'<text x="28" y="{top+67}" fill="#91a8b7" font-size="11">Matrix shape: {row_count} rows x {col_count} columns. Axis ticks are sampled to keep dense supports readable.</text>'
+            f'<text x="28" y="{top+70}" fill="#91a8b7" font-size="11">Matrix shape: {row_count} rows x {col_count} columns. Axis ticks are sampled to keep dense supports readable.</text>'
         )
         nz = sum(1 for row in rows if isinstance(row, list) for value in row if _matrix_nonzero_weight(str(value)) > 0)
         badge_w = 178
@@ -960,7 +960,7 @@ def differential_heatmap_svg(record: dict[str, Any]) -> str:
                     f'fill="{fill}" opacity="{alpha:.3f}" stroke="rgba(145,168,183,0.12)">'
                     f'<title>{html.escape(title)} row r{r}, column c{c}: {html.escape(value)}</title></rect>'
                 )
-                if weight > 0 and tick_cell >= 16:
+                if weight > 0 and tick_cell >= 24 and row_count <= 14 and col_count <= 24:
                     label = "1" if value == "1_R" else value.replace("x_level", "x").replace("y_radius", "y")
                     parts.append(
                         f'<text x="{pad_l+c*cell_w+cell_w/2:.1f}" y="{pad_t+r*cell_h+cell_h*.62:.1f}" '
