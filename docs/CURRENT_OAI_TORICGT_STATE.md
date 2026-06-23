@@ -92,18 +92,30 @@ immediate full run: it reduces audited graph/FoT token count by 7.21% relative
 to ConvexTok-2048, but raw biological sequence strings still use byte fallback
 often enough that a later motif-aware vocabulary extension is recommended.
 
-Structure readiness for the train shard:
+Structure readiness for the balanced graph/FoT train shard:
 
 ```text
 structure-association records: 917
 coordinate-bearing records:    0
 ```
 
-This means the active full run trains sequence/function/chemistry/structure-hook
-association through graph LM, FoT, GFlowNet, and ToricGT sidecar losses.
-Coordinate-native structure flow matching, contact, distogram, and frame/RMSD
-losses are implemented and logged under `toricblm_structure/*`, but remain
-dormant until records with actual coordinate tensors are curated.
+That larger shard trains sequence/function/chemistry/structure-hook association
+through graph LM, FoT, GFlowNet, and ToricGT sidecar losses.  Coordinate-native
+training is now supplied by the AFDB v6 coordinate shard:
+
+```text
+data/uniprot_fot/structures/afdb_v6/toricblm_afdb_structure_fot_train.parquet
+coordinate-bearing train records: 239
+validation records: 7
+test records: 10
+readiness status: ready_for_coordinate_losses
+```
+
+The active run
+`toricblm-mup-fot-afdb-structure-20260623T220856Z` uses this shard through
+`TORICBLM_STRUCTURE_TRAIN_GLOB`; the adapted OAI baseline logs real
+`toricblm_structure/*` metrics including flow-matching loss, contact BCE,
+distogram CE, centered RMSD, coordinate count, and batch pLDDT.
 
 The public page in `docs/index.html` was regenerated from the best checkpoint
 with a 512-token hidden-state extraction and includes fresh interactive

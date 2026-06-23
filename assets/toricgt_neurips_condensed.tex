@@ -348,10 +348,15 @@ Rfam, RNAcentral, and PubChem SELFIES mirrors.  Each row stores
 split is leakage-aware across sequence sketches, function labels and text
 shingles, structure lookup hooks, graph histograms, and FoT topology.  The
 current slice has $2788$ train, $156$ validation, and $128$ test records.  It
-contains structure-association records but no coordinate-bearing records; hence
-graph/FoT structure association is active, while coordinate-native flow,
-contact, distogram, and frame losses are implemented but dormant until true
-PDB/AFDB or dynamics coordinates are curated.
+trains sequence/function/chemistry/structure-hook association.  A separate
+AFDB v6 coordinate shard supplies true AlphaFold mmCIF-derived structure
+targets: $256$ coordinate-bearing records split into $239$ train, $7$
+validation, and $10$ test examples.  These records carry real CA/backbone
+coordinates, coordinate masks, pLDDT, and graph/FoT structure context.  The
+adapted OAI baseline therefore trains coordinate-native rectified-flow,
+contact-map, distogram, and centered-RMSD structure losses on real coordinate
+batches; rows without usable coordinates are skipped rather than replaced by
+proxy structure targets.
 
 The current competition branch adds several high-impact modifications inspired by OpenAI's public Parameter-Golf retrospective while excluding JEPA.  BigramHash gives a tiny strict-prefix n-gram memory; CaseOps adds byte-class operator features; SmearGate learns input-dependent confidence; stripped multi-token heads improve hidden states but are omitted from the artifact; contrastive hidden-state regularization replaces JEPA-style prediction; coprime row striding changes data order without changing data; score-first output-bias adaptation updates only after a token has been scored; and bit-packed 6-bit row quantization with LZMA reduces serialized weight cost.  Domain tags emphasize math, code, graph, Hebrew, biomedical, biochemical, biophysical, and toric records without adding evaluator dependencies.  The local mirror of \texttt{AmelieSchreiber/toricgt-curated-splits} is used in the competition-safe split: train shards feed supervised BPB optimization, validation shards feed score-first validation, and test shards are reserved for held-out GFlowNet test-time scaling.  The byte loader packs multiple source rows into one chunk; after warmup the training iterator switches to larger technical records, and a 2048-byte packed-context config can resume from a 1024-byte checkpoint by resizing only the learned position table.  This exploits the tropical-ring upper layers for longer composite reasoning trajectories while preserving the strict prequential scoring contract.
 

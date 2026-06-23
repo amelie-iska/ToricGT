@@ -397,6 +397,198 @@ class ScheduledGraphParquetTokenStream:
         return self.base.next_batch(device, step=step)
 
 
+class StructureCoordinateParquetStream:
+    """Stream coordinate-bearing graph rows for structure-flow training.
+
+    Unlike :class:`GraphParquetTokenStream`, this keeps row boundaries intact so
+    each text/graph context remains aligned with its coordinate target.  Rows
+    without explicit coordinate columns are skipped instead of replaced by
+    synthetic coordinates.
+    """
+
+    TEXT_COLUMNS = GraphParquetTokenStream.TEXT_COLUMNS + ("forest_json",)
+    COORD_COLUMNS = ("structure_coordinates", "ca_coordinates")
+
+    def __init__(
+        self,
+        pattern: str,
+        tokenizer: Any,
+        seq_len: int,
+        batch_size: int,
+        *,
+        max_atoms: int = 128,
+    ) -> None:
+        self.files = [Path(p) for p in sorted(glob.glob(pattern))]
+        if not self.files:
+            raise FileNotFoundError(f"No structure Parquet files found for pattern: {pattern}")
+        self.tokenizer = tokenizer
+        self.seq_len = int(seq_len)
+        self.batch_size = int(batch_size)
+        self.max_atoms = max(8, int(max_atoms))
+        self.file_idx = 0
+        self.row_idx = 0
+        self.rows: list[tuple[str, list[list[float]], list[float] | None]] = []
+        self.rows_loaded = 0
+        self.rows_coordinate_bearing = 0
+        self.rows_skipped = 0
+        self._load_file()
+
+    def _encode(self, text: str) -> list[int]:
+        try:
+            ids = self.tokenizer.encode(text, out_type=int)
+        except TypeError:
+            ids = self.tokenizer.encode(text)
+        return [int(token_id) for token_id in ids]
+
+    @staticmethod
+    def _normalize_coords(value: Any, max_atoms: int) -> list[list[float]] | None:
+        if value in (None, ""):
+            return None
+        coords: list[list[float]] = []
+        try:
+            iterable = value.tolist() if hasattr(value, "tolist") else value
+        except Exception:
+            iterable = value
+        if not isinstance(iterable, list):
+            return None
+        for item in iterable[:max_atoms]:
+            if item is None:
+                continue
+            try:
+                xyz = item.tolist() if hasattr(item, "tolist") else item
+            except Exception:
+                xyz = item
+            if not isinstance(xyz, (list, tuple)) or len(xyz) < 3:
+                continue
+            try:
+                coords.append([float(xyz[0]), float(xyz[1]), float(xyz[2])])
+            except Exception:
+                continue
+        return coords if len(coords) >= 8 else None
+
+    @staticmethod
+    def _normalize_plddt(value: Any, n: int) -> list[float] | None:
+        if value in (None, ""):
+            return None
+        try:
+            vals = value.tolist() if hasattr(value, "tolist") else value
+        except Exception:
+            vals = value
+        if not isinstance(vals, list):
+            return None
+        out: list[float] = []
+        for raw in vals[:n]:
+            try:
+                out.append(float(raw))
+            except Exception:
+                out.append(0.0)
+        return out if out else None
+
+    @staticmethod
+    def _row_text(row: dict[str, Any], record_id: str) -> str:
+        text, policy = GraphParquetTokenStream._graphify_row(row, record_id)
+        forest = row.get("forest_json")
+        if forest not in (None, ""):
+            text = text + "\n<forest_of_thought>" + GraphParquetTokenStream._payload_text(forest, max_chars=1600) + "</forest_of_thought>"
+        metadata = row.get("metadata_json")
+        if metadata not in (None, ""):
+            text = text + "\n<structure_metadata>" + GraphParquetTokenStream._payload_text(metadata, max_chars=1200) + "</structure_metadata>"
+        return text
+
+    def describe(self) -> str:
+        return (
+            f"files:{len(self.files)} current_rows:{len(self.rows)} "
+            f"coordinate_rows:{self.rows_coordinate_bearing} skipped:{self.rows_skipped} "
+            f"max_atoms:{self.max_atoms}"
+        )
+
+    def _load_file(self) -> None:
+        import pyarrow.parquet as pq
+
+        path = self.files[self.file_idx]
+        schema_names = set(pq.read_schema(path).names)
+        coord_col = next((name for name in self.COORD_COLUMNS if name in schema_names), None)
+        if coord_col is None:
+            self.rows = []
+            self.rows_skipped += 1
+            return
+        columns = [name for name in self.TEXT_COLUMNS if name in schema_names]
+        for name in (coord_col, "plddt", "record_id"):
+            if name in schema_names and name not in columns:
+                columns.append(name)
+        table = pq.read_table(path, columns=columns)
+        rows: list[tuple[str, list[list[float]], list[float] | None]] = []
+        for idx in range(table.num_rows):
+            row = {name: table[name][idx].as_py() for name in columns}
+            coords = self._normalize_coords(row.get(coord_col), self.max_atoms)
+            if coords is None:
+                self.rows_skipped += 1
+                continue
+            record_id = str(row.get("record_id") or f"{path.name}:{idx}")
+            rows.append((self._row_text(row, record_id), coords, self._normalize_plddt(row.get("plddt"), len(coords))))
+            self.rows_coordinate_bearing += 1
+        if not rows:
+            raise ValueError(f"Structure Parquet shard has no coordinate-bearing rows: {path}")
+        self.rows = rows
+        self.rows_loaded += len(rows)
+        self.row_idx = 0
+
+    def _advance_file(self) -> None:
+        attempts = 0
+        while attempts < len(self.files):
+            self.file_idx = (self.file_idx + 1) % len(self.files)
+            attempts += 1
+            self._load_file()
+            if self.rows:
+                return
+        raise ValueError("No coordinate-bearing structure rows available in configured files")
+
+    def _next_row(self) -> tuple[str, list[list[float]], list[float] | None]:
+        if self.row_idx >= len(self.rows):
+            self._advance_file()
+        row = self.rows[self.row_idx]
+        self.row_idx += 1
+        return row
+
+    def next_batch(self, device: torch.device, step: int | None = None) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        x_rows: list[Tensor] = []
+        y_rows: list[Tensor] = []
+        coord_rows: list[Tensor] = []
+        mask_rows: list[Tensor] = []
+        plddt_rows: list[Tensor] = []
+        sep = self._encode("\n\n") or [0]
+        for _ in range(self.batch_size):
+            text, coords, plddt = self._next_row()
+            ids = self._encode(text)
+            if len(ids) < 2:
+                ids = ids + sep
+            ids = (ids + sep * (self.seq_len + 1))[: self.seq_len + 1]
+            if len(ids) < self.seq_len + 1:
+                ids = ids + [0] * (self.seq_len + 1 - len(ids))
+            token_tensor = torch.tensor(ids, dtype=torch.int64)
+            x_rows.append(token_tensor[:-1])
+            y_rows.append(token_tensor[1:])
+            n = min(len(coords), self.max_atoms)
+            coord_tensor = torch.zeros(self.max_atoms, 3, dtype=torch.float32)
+            mask_tensor = torch.zeros(self.max_atoms, dtype=torch.bool)
+            plddt_tensor = torch.zeros(self.max_atoms, dtype=torch.float32)
+            if n:
+                coord_tensor[:n] = torch.tensor(coords[:n], dtype=torch.float32)
+                mask_tensor[:n] = True
+                if plddt:
+                    plddt_tensor[: min(n, len(plddt))] = torch.tensor(plddt[:n], dtype=torch.float32)
+            coord_rows.append(coord_tensor)
+            mask_rows.append(mask_tensor)
+            plddt_rows.append(plddt_tensor)
+        return (
+            torch.stack(x_rows).to(device, non_blocking=True),
+            torch.stack(y_rows).to(device, non_blocking=True),
+            torch.stack(coord_rows).to(device, non_blocking=True),
+            torch.stack(mask_rows).to(device, non_blocking=True),
+            torch.stack(plddt_rows).to(device, non_blocking=True),
+        )
+
+
 class ToricGTSidecar(nn.Module):
     """Train graph, geometry, topology, category, and memory-retrieval heads."""
 

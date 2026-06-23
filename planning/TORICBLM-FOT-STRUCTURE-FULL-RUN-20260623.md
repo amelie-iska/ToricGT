@@ -22,6 +22,8 @@ biomedicine preparation.
   `data/uniprot_fot/splits/leakage_v1/toricblm_fot_leakage_v1_train.parquet`
 - Structure readiness manifest:
   `data/uniprot_fot/manifests/toricblm_fot_structure_readiness_train_v1.json`
+- AFDB v6 coordinate train shard:
+  `data/uniprot_fot/structures/afdb_v6/toricblm_afdb_structure_fot_train.parquet`
 - Config:
   `configs/toricblm_mup_170m_convextok8192_biomed_fot_structure.env`
 
@@ -41,22 +43,30 @@ signatures combine sequence sketches, function labels/text shingles, structure
 lookup hooks, source graph histograms, and FoT graph topology.  This prevents
 direct leakage of near-duplicate sequence/function/FoT structures across splits
 for the current data.  True ProTrek trimodal or Foldseek structural clustering
-is deferred until coordinate-bearing structure records are present.
+should be applied as the coordinate corpus expands.  The first AFDB v6
+coordinate shard is already curated and split separately, with 239 train,
+7 validation, and 10 test coordinate-bearing records.
 
 ## Structure Loss Status
 
-The current curated train split contains 917 structure-association records but
-zero coordinate-bearing records.  Therefore:
+The balanced graph/FoT train split contains 917 structure-association records
+but zero coordinate-bearing records.  Therefore:
 
 - graph/FoT structure association is active through the graph LM and ToricGT
   sidecar;
 - coordinate-native flow matching, contact-map BCE, distogram CE, and frame/RMSD
   losses are implemented in `src/toricgt/structure_flow_matching.py`;
-- those coordinate losses are logged as configured but dormant until real
-  coordinate tensors are added to training records.
+- coordinate-native losses are fed by the AFDB v6 coordinate stream, not by the
+  hook-only graph/FoT split.
 
-This avoids proxy coordinate targets and keeps the implementation ready for
-future PDB/AFDB/UMA/BioEmu/BioKinema/ConfRover trajectory phases.
+The AFDB v6 coordinate stream uses real AlphaFold DB mmCIF-derived CA/backbone
+coordinates, coordinate masks, and pLDDT.  Rows without usable coordinates are
+skipped rather than filled with proxy targets.  The active run
+`toricblm-mup-fot-afdb-structure-20260623T220856Z` starts structure flow from
+step 0 and logs nonzero `structure_loss`, `structure_rmsd`, and
+`structure_coords` values from real coordinate batches.  This keeps the
+implementation ready for future PDB/UMA/BioEmu/BioKinema/ConfRover trajectory
+phases while already training on actual AFDB structures.
 
 ## Training Configuration
 
@@ -71,8 +81,8 @@ Key settings in
 - Graph LM and ToricGT sidecar active every 4 steps.
 - OAI GFlowNet, embedding-space FoT, and MTP active every 4 steps.
 - Late graph stream starts at step 12,000 with mix ratio 0.80.
-- Structure readiness and coordinate-loss configuration are reported to W&B
-  under `toricblm_structure/*`.
+- Structure coordinate losses are active from AFDB train batches and reported
+  to W&B under `toricblm_structure/*`.
 
 ## Launch Command
 
@@ -93,7 +103,7 @@ Monitor:
 - `oai_fot/*`, `oai_gflownet/*`, and `oai_mtp/*` for reasoning-search stability;
 - `toricgt_sidecar/*` for GraphCG, analogy, memory, toric, BGG, Koszul, derived,
   and vector-bundle 1D-cone signals;
-- `toricblm_structure/*` to confirm coordinate losses remain dormant until
-  coordinate-bearing records are added;
+- `toricblm_structure/*` for flow-matching loss, contact BCE, distogram CE,
+  RMSD, coordinate count, and pLDDT on AFDB coordinate batches;
 - tokenizer toric/tropical metrics for any evidence that the 8192 vocab is
   under-serving biological strings.

@@ -1,0 +1,24 @@
+{
+  "all_path": "data/uniprot_fot/structures/afdb_v6/toricblm_afdb_structure_fot_all.parquet",
+  "coordinate_bearing_records": 256,
+  "coordinate_source": "AlphaFold DB current API mmCIF",
+  "max_residues": 512,
+  "records": 256,
+  "skipped": {
+    "length_or_accession": 196,
+    "no_afdb_prediction": 2
+  },
+  "split_report": {
+    "counts": {
+      "test": 10,
+      "train": 239,
+      "validation": 7
+    },
+    "paths": {
+      "test": "data/uniprot_fot/structures/afdb_v6/toricblm_afdb_structure_fot_test.parquet",
+      "train": "data/uniprot_fot/structures/afdb_v6/toricblm_afdb_structure_fot_train.parquet",
+      "validation": "data/uniprot_fot/structures/afdb_v6/toricblm_afdb_structure_fot_validation.parquet"
+    }
+  },
+  "uniprot_function_parquet": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/uniprot_function_text_train/default/train/0000.parquet"
+}

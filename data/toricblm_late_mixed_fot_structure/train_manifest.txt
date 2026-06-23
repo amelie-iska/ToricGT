@@ -1,13 +1,14 @@
-codex55_pass00_codex55_tot_train_00000.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass00_codex55_tot_train_00000.parquet
-codex55_pass00_codex55_tot_train_00001.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass00_codex55_tot_train_00001.parquet
-codex55_pass00_codex55_tot_train_00002.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass00_codex55_tot_train_00002.parquet
-codex55_pass00_codex55_tot_train_00003.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass00_codex55_tot_train_00003.parquet
-codex55_pass01_codex55_tot_train_00000.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass01_codex55_tot_train_00000.parquet
-codex55_pass01_codex55_tot_train_00001.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass01_codex55_tot_train_00001.parquet
-codex55_pass01_codex55_tot_train_00002.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass01_codex55_tot_train_00002.parquet
-codex55_pass01_codex55_tot_train_00003.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass01_codex55_tot_train_00003.parquet
-codex55_pass02_codex55_tot_train_00000.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass02_codex55_tot_train_00000.parquet
-codex55_pass02_codex55_tot_train_00001.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass02_codex55_tot_train_00001.parquet
-codex55_pass02_codex55_tot_train_00002.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass02_codex55_tot_train_00002.parquet
-codex55_pass02_codex55_tot_train_00003.parquet -> /home/iska/Documents/amelie/bio/TropicalGT/TropicalGT-I/data/toricgt/codex55_tot_late_stage/train_3pass/pass02_codex55_tot_train_00003.parquet
-toricblm_fot_leakage_v1_train.parquet -> /home/iska/Documents/amelie/bio/ToricGT/data/uniprot_fot/splits/leakage_v1/toricblm_fot_leakage_v1_train.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass00_codex55_tot_train_00000.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass00_codex55_tot_train_00001.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass00_codex55_tot_train_00002.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass00_codex55_tot_train_00003.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass01_codex55_tot_train_00000.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass01_codex55_tot_train_00001.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass01_codex55_tot_train_00002.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass01_codex55_tot_train_00003.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass02_codex55_tot_train_00000.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass02_codex55_tot_train_00001.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass02_codex55_tot_train_00002.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass02_codex55_tot_train_00003.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/toricblm_afdb_structure_fot_train.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/toricblm_fot_leakage_v1_train.parquet

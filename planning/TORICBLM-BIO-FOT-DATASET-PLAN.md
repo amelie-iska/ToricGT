@@ -249,7 +249,8 @@ before large structure/dynamics training.
 
 ## Structure Training Status
 
-`scripts/analyze_toricblm_structure_readiness.py` audited the train split:
+`scripts/analyze_toricblm_structure_readiness.py` audited the balanced graph/FoT
+train split:
 
 - Records: 2,788.
 - UniProt records: 916.
@@ -259,13 +260,16 @@ before large structure/dynamics training.
 - Average graph size: 15.36 nodes, 20.61 edges.
 - Average FoT size: 26.47 nodes, 44.75 edges.
 
-The current run can train structure association through graph/FoT text, UniProt
+That split trains structure association through graph/FoT text, UniProt
 function fields, GO/EC labels, sites/domains when present, SELFIES chemistry,
-and AFDB/PDB lookup hooks.  It cannot honestly train coordinate-flow,
-contact-map, or distogram losses yet because the local raw slice does not carry
-coordinate tensors.  The new `src/toricgt/structure_flow_matching.py` module is
-coordinate-native and ready for future coordinate-bearing records; those losses
-remain dormant until such records are present.
+and AFDB/PDB lookup hooks.  After this plan was written, a separate AFDB v6
+coordinate shard was curated under `data/uniprot_fot/structures/afdb_v6`, with
+256 coordinate-bearing records split into 239 train, 7 validation, and 10 test
+examples.  Those rows carry real AlphaFold mmCIF-derived coordinate tensors,
+coordinate masks, and pLDDT.  The active training run uses that shard for
+coordinate-native flow matching, contact-map BCE, distogram CE, and centered
+RMSD/frame diagnostics; rows without usable coordinates are skipped rather than
+filled with proxy targets.
 
 ## Full-Run Wiring
 

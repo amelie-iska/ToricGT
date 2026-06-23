@@ -119,10 +119,13 @@ rather than copied; curated graph/FoT rows live in
 The current split is leakage-aware: sequence sketches, function labels/text,
 structure lookup hooks, source graph histograms, and FoT graph topology are
 clustered before assigning train/validation/test.  Counts are 2,788 train, 156
-validation, and 128 test records.  This is ProTrek/Foldseek-ready, but the
-present local slice contains structure hooks rather than coordinate-bearing
-PDB/AFDB structures, so true trimodal structure clustering is deferred until
-coordinate records are added.
+validation, and 128 test records.  This is ProTrek/Foldseek-ready.  A first
+coordinate-bearing AFDB v6 shard is now also curated under
+`data/uniprot_fot/structures/afdb_v6`, with 256 AlphaFold mmCIF-derived
+records split into 239 train, 7 validation, and 10 test examples.  These rows
+carry real CA/backbone coordinate tensors, pLDDT, graph/FoT structure nodes,
+and split metadata; missing structures are skipped rather than replaced by
+coordinate proxies.
 `external/ProTrek` is cloned as a lightweight reference checkout for that next
 split upgrade: once sequence, structure, and function embedding assets are
 available, the splitter should cluster by ProTrek sequence/structure/function
@@ -145,11 +148,14 @@ motif-aware vocabulary.
 Coordinate-native structure losses are implemented in
 `src/toricgt/structure_flow_matching.py`: rectified-flow velocity MSE, contact
 map BCE, distogram CE, and centered RMSD/frame diagnostics.  They are not
-proxies.  The current UniProt/FoT slice reports 917 structure-association
-records and zero coordinate-bearing records, so the full run trains structure
-association through graph/FoT text and lookup hooks while logging
-`toricblm_structure/*`; coordinate-flow losses remain dormant until records
-carry actual coordinate tensors.
+proxies.  The active AFDB run uses
+`src/toricgt/oai_sidecar.py::StructureCoordinateParquetStream` to keep each
+protein row intact, tokenize its sequence/function/structure context, and feed
+real coordinate tensors to a training-only coordinate head in the adapted OAI
+baseline.  The current run
+`toricblm-mup-fot-afdb-structure-20260623T220856Z` logs
+`toricblm_structure/*` and has already emitted nonzero `structure_loss`,
+`structure_rmsd`, and `structure_coords` values from real coordinate batches.
 
 The current OAI route also uses BPB-safe TokenGT-style identifiers without
 inserting extra scored tokens into the SentencePiece stream.  Deterministic

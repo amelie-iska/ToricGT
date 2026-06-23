@@ -3308,14 +3308,18 @@ motifs, nucleotide motifs, GO/EC syntax, residue-pair fields, atom and chain
 labels, coordinate metadata, and dynamics tags.
 
 The same audit distinguishes structure association from coordinate-native
-structure training.  The present train split contains $917$ structure-association
-records and no coordinate-bearing records.  Thus the run can train associations
-between sequence, function, chemistry, and structure lookup hooks through the
-graph LM and FoT/sidecar losses, but coordinate-flow matching, contact-map
-binary cross-entropy, distogram cross-entropy, and frame/RMSD losses are
-dormant until actual coordinate tensors are curated.  The implementation keeps
-these losses coordinate-native: they operate on real batched coordinates and
-masks, and they are not replaced by textual proxies.
+structure training.  The balanced graph/FoT train split contains $917$
+structure-association records and no coordinate tensors, so it trains
+associations between sequence, function, chemistry, and structure lookup hooks
+through the graph LM and FoT/sidecar losses.  Coordinate-native supervision is
+provided by a separate AFDB v6 shard with $256$ AlphaFold mmCIF-derived
+records, split into $239$ train, $7$ validation, and $10$ test examples.  These
+rows carry real CA/backbone coordinate tensors, coordinate masks, pLDDT, and
+graph/FoT structure context.  The adapted OAI baseline trains rectified-flow
+velocity matching, contact-map binary cross-entropy, distogram cross-entropy,
+and centered RMSD/frame diagnostics on those real coordinate batches.  Rows
+without usable AFDB coordinates are skipped rather than filled with proxy
+targets, so the structure losses remain coordinate-native.
 
 \subsection{Normalized record schema}
 

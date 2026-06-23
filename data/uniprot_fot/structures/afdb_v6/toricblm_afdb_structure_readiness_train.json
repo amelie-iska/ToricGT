@@ -1,0 +1,32 @@
+{
+  "avg_fot_edges": 0.0,
+  "avg_fot_nodes": 0.0,
+  "avg_graph_edges": 56.07112970711297,
+  "avg_graph_nodes": 15.514644351464435,
+  "chemistry_records": 0,
+  "coordinate_bearing_records": 239,
+  "coordinate_examples": [
+    "afdb_structure_fot_A0A009IHW8_d33541371b923bbd",
+    "afdb_structure_fot_A0A024SC78_1aa7c101850ccaa4",
+    "afdb_structure_fot_A0A024SH76_2a3631a5211fbd70",
+    "afdb_structure_fot_A0A026W182_6d700664c1505b77",
+    "afdb_structure_fot_A0A059TC02_ab423d7d5a1f5f0d"
+  ],
+  "counts_by_dataset": {
+    "toricblm_afdb_structure_fot": 239
+  },
+  "input": "data/uniprot_fot/structures/afdb_v6/toricblm_afdb_structure_fot_train.parquet",
+  "recommended_training_mode": "enable flow/contact/distogram losses on coordinate-bearing batches",
+  "records": 239,
+  "schema": "toricblm.structure_readiness_report.v1",
+  "structure_association_records": 239,
+  "structure_flow_status": "ready_for_coordinate_losses",
+  "structure_hook_examples": [
+    "afdb_structure_fot_A0A009IHW8_d33541371b923bbd",
+    "afdb_structure_fot_A0A024SC78_1aa7c101850ccaa4",
+    "afdb_structure_fot_A0A024SH76_2a3631a5211fbd70",
+    "afdb_structure_fot_A0A026W182_6d700664c1505b77",
+    "afdb_structure_fot_A0A059TC02_ab423d7d5a1f5f0d"
+  ],
+  "uniprot_records": 0
+}

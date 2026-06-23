@@ -2,6 +2,24 @@
 
 Generated: 2026-06-23T21:41:44Z
 
+Update: 2026-06-23T22:10Z.  The hook-only structure run documented below was
+stopped and superseded by a coordinate-bearing AFDB v6 run:
+
+```text
+tmux session: toricblm_afdb_structure_20260623T220856Z
+run id: toricblm-mup-fot-afdb-structure-20260623T220856Z
+wandb: https://wandb.ai/amelie-iska-math/toricgt-parameter-golf/runs/toricblm-mup-fot-afdb-structure-20260623T220856Z
+structure train shard: data/uniprot_fot/structures/afdb_v6/toricblm_afdb_structure_fot_train.parquet
+coordinate-bearing train records: 239
+status: ready_for_coordinate_losses
+```
+
+The active run now logs real coordinate-native structure losses from AFDB
+coordinate batches.  Early observed values include nonzero `structure_loss`,
+`structure_rmsd`, and `structure_coords:256`; the earlier statement that
+coordinate losses were dormant is retained below only as historical context for
+the superseded run.
+
 ## Current state
 
 The ToricBLM data, documentation, paper updates, and full-run configuration have been implemented and pushed on branch `toricblm-data`.
@@ -136,7 +154,11 @@ average FoT nodes: 26.47
 average FoT edges: 44.75
 ```
 
-Important caveat: the structure losses are implemented and configured, but coordinate losses are dormant in this run because the current curated records contain structure associations and hooks, not actual coordinate tensors. This run trains structure-aware graph/FoT associations; coordinate-native flow/contact/distogram losses become active when coordinate-bearing PDB/AFDB/dynamics data is added.
+Historical caveat for the superseded hook-only run: structure losses were
+implemented and configured, but coordinate losses were not active because that
+run only had structure associations and lookup hooks.  This no longer describes
+the active AFDB run, which uses real coordinate tensors from
+`data/uniprot_fot/structures/afdb_v6`.
 
 Why this was done: the model needs a forward-compatible path into de novo biomolecular design and dynamics training without forcing a restart from scratch later. Adding the loss interface now lets the trainer log readiness and activate true coordinate losses once coordinate fields are present.
 
@@ -260,7 +282,7 @@ bio/FoT graph data
 leakage-aware splitting
 late-stage ToT/FoT graph stream
 coordinate-native structure losses
-the current limitation that coordinate losses are dormant until coordinate-bearing records are added
+AFDB v6 coordinate-native structure training with real coordinate tensors
 ```
 
 LaTeX compile note: I attempted to compile the condensed paper, but the local TeX install is missing `fontspec` / `luaotfload`. This is a system TeX dependency issue, not a confirmed source-level paper error.
@@ -291,26 +313,36 @@ The central constraint was to improve the ToricBLM/ToricGT path without breaking
 1. Keep BPB primary by preserving the OAI baseline adaptation, ConvexTok scoring path, graph-output flattening, and FineWeb stream.
 2. Add biological FoT data as late-stage graph training rather than immediately mixing it into every early BPB update.
 3. Keep ConvexTok-8192 because the audit showed a real token-count improvement over 2048, while avoiding a costly and risky tokenizer retrain before this run.
-4. Implement structure losses now, but accurately log that they are dormant until coordinate-bearing records exist.
+4. Implement structure losses with a strict readiness gate, then activate them
+   only after adding coordinate-bearing AFDB records with real coordinate
+   tensors.
 5. Stage ProTrek for future trimodal leakage control instead of pretending that trimodal leakage splitting has already been performed.
 6. Push documentation and paper updates before relying on the configuration, so the implementation state is reproducible.
 
 ## Current risks and caveats
 
-1. Coordinate-native structure losses are not active yet because coordinate-bearing records are currently zero.
+1. The coordinate-native AFDB shard is active, but still small: 239 train
+   coordinate-bearing examples.  It is enough to verify the loss path and begin
+   structure shaping, not enough for broad structural generalization.
 2. The current leakage split is cluster-aware, but not yet ProTrek/Foldseek-derived.
 3. The biological FoT dataset is still small relative to the intended UniProt/PDB/AFDB/trajectory scale.
 4. ConvexTok-8192 improves tokenization versus 2048, but byte fallback is still high on bio/FoT fields.
-5. The current training run is early. The step-400 train BPB is promising, but validation and later-stage behavior are what matter.
+5. The current AFDB run is early. The first steps show real structure losses
+   and a fast train-BPB drop, but validation and later-stage behavior are what
+   matter.
 
 ## Next recommended actions
 
 1. Let the current 25K-step run continue through at least the first validation checkpoints before making conclusions.
 2. Watch whether train BPB improvements transfer to validation BPB after the early fast drop.
 3. At late-stage activation around step 12000, inspect whether the biological FoT stream destabilizes BPB or improves auxiliary reasoning metrics.
-4. Add coordinate-bearing PDB/AFDB examples next so `structure_flow_loss`, contact, distogram, and RMSD-style metrics become genuinely active.
-5. Run ProTrek/Foldseek-based split refinement once the required model weights and structure tooling are staged.
-6. Design a motif-aware ConvexTok follow-up if tokenizer regret remains high on biological symbols and structure/dynamics annotations.
+4. Expand the coordinate corpus beyond the current AFDB v6 shard and add PDB,
+   UMA, BioEmu, BioKinema, and ConfRover trajectory records as they become
+   available.
+5. Run ProTrek/Foldseek-based split refinement once the coordinate corpus is
+   large enough for meaningful trimodal clustering.
+6. Design a motif-aware ConvexTok follow-up if tokenizer regret remains high on
+   biological symbols and structure/dynamics annotations.
 
 ## Local untracked files intentionally not pushed
 
@@ -322,4 +354,3 @@ final_model.int8.ptz
 ```
 
 They were not committed or pushed because they are generated model artifacts, not source/config/documentation changes for this status update.
-

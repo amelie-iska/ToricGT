@@ -111,7 +111,7 @@ Outputs:
 
 ## Leakage Split, Tokenizer Audit, And Structure Readiness
 
-The current balanced build is:
+The current balanced graph/FoT build is:
 
 ```text
 derived/toricblm_fot_graphified_512_per_dataset_v1.parquet
@@ -131,7 +131,8 @@ Split counts are 2,788 train, 156 validation, and 128 test.  Clusters combine
 sequence sketches, function/annotation shingles, structure lookup hooks, source
 graph histograms, and FoT graph topology.  This is a leakage guard for the data
 available now; coordinate-level Foldseek or ProTrek trimodal clustering should
-be applied after coordinate-bearing PDB/AFDB/dynamics records are added.
+be applied as the AFDB/PDB/dynamics coordinate corpus grows beyond the first
+curated shard.
 
 The ConvexTok audit is recorded in
 `../../planning/TORICBLM-FOT-TOKENIZER-AUDIT.md`.  The current decision is to
@@ -140,10 +141,29 @@ and revisit vocabulary extension when residue, atom, coordinate, trajectory,
 and richer UniProt/PDB fields are included.
 
 `manifests/toricblm_fot_structure_readiness_train_v1.json` reports 917
-structure-association records and zero coordinate-bearing records in the train
-split.  Structure association is therefore trainable now through graph/FoT
-annotations and lookup hooks, while coordinate-native flow/contact/distogram
-losses remain dormant until actual coordinate tensors are curated.
+structure-association records and zero coordinate-bearing records in the
+balanced graph/FoT train split.  That split trains structure association
+through graph/FoT annotations and lookup hooks.
+
+A coordinate-bearing AFDB v6 shard is now built separately:
+
+```text
+structures/afdb_v6/toricblm_afdb_structure_fot_all.parquet
+structures/afdb_v6/toricblm_afdb_structure_fot_train.parquet
+structures/afdb_v6/toricblm_afdb_structure_fot_validation.parquet
+structures/afdb_v6/toricblm_afdb_structure_fot_test.parquet
+structures/afdb_v6/toricblm_afdb_structure_fot_manifest.json
+structures/afdb_v6/toricblm_afdb_structure_readiness_train.json
+```
+
+It contains 256 records with real AlphaFold DB mmCIF-derived coordinates:
+239 train, 7 validation, and 10 test.  Each row carries CA coordinates,
+backbone coordinates, coordinate masks, pLDDT, graph/FoT structure context,
+and source metadata.  Rows without AFDB predictions or usable coordinate
+tensors are skipped, not filled with proxy coordinates.  The training config
+uses `structures/afdb_v6/toricblm_afdb_structure_fot_train.parquet` through
+`TORICBLM_STRUCTURE_TRAIN_GLOB`, making flow/contact/distogram/RMSD structure
+losses active on coordinate-bearing batches.
 
 The late-stage training glob used by the full ToricBLM run is symlink-only:
 
