@@ -602,23 +602,26 @@ def ensure_raw_links(raw_root: Path, output_dir: Path, mode: str) -> list[dict[s
     return links
 
 
-def iter_sample_rows(raw_root: Path, sample_per_dataset: int) -> tuple[str, Path, int, dict[str, Any]]:
+def iter_sample_rows(raw_root: Path, records_per_dataset: int | None) -> tuple[str, Path, int, dict[str, Any]]:
     for dpath in dataset_dirs(raw_root):
         produced = 0
         for path in parquet_files(dpath):
-            if produced >= sample_per_dataset:
+            if records_per_dataset is not None and produced >= records_per_dataset:
                 break
             try:
                 pf = pq.ParquetFile(path)
             except Exception:
                 continue
-            for batch in pf.iter_batches(batch_size=min(512, sample_per_dataset - produced)):
+            batch_size = 512
+            if records_per_dataset is not None:
+                batch_size = min(batch_size, records_per_dataset - produced)
+            for batch in pf.iter_batches(batch_size=batch_size):
                 for row in pa.Table.from_batches([batch]).to_pylist():
                     yield dpath.name, path, produced, row
                     produced += 1
-                    if produced >= sample_per_dataset:
+                    if records_per_dataset is not None and produced >= records_per_dataset:
                         break
-                if produced >= sample_per_dataset:
+                if records_per_dataset is not None and produced >= records_per_dataset:
                     break
 
 
@@ -633,28 +636,47 @@ def build_records(args: argparse.Namespace) -> dict[str, Any]:
     raw_links = ensure_raw_links(raw_root, output_dir, args.raw_link_mode)
     manifest["raw_links"] = raw_links
 
-    records = []
     counts = Counter()
-    for dataset, source_file, source_row_index, row in iter_sample_rows(raw_root, args.sample_per_dataset):
-        rec = graphify_row(
-            dataset=dataset,
-            row=row,
-            source_file=str(source_file),
-            source_row_index=source_row_index,
-            max_sequence_chars=args.max_sequence_chars,
-            max_field_chars=args.max_field_chars,
-        )
-        records.append(rec)
-        counts[dataset] += 1
+    output_prefix = args.output_prefix
+    jsonl_path = output_dir / "derived" / f"{output_prefix}.jsonl"
+    parquet_path = output_dir / "derived" / f"{output_prefix}.parquet"
+    buffer: list[dict[str, Any]] = []
+    writer: pq.ParquetWriter | None = None
+    written = 0
 
-    jsonl_path = output_dir / "derived" / "uniprot_fot_graphified_sample.jsonl"
+    def flush_buffer() -> None:
+        nonlocal buffer, writer
+        if not buffer:
+            return
+        table = pa.Table.from_pylist(buffer, schema=RECORD_SCHEMA)
+        if writer is None:
+            writer = pq.ParquetWriter(parquet_path, RECORD_SCHEMA, compression="zstd", use_dictionary=True)
+        writer.write_table(table)
+        buffer = []
+
     with jsonl_path.open("w", encoding="utf-8") as handle:
-        for rec in records:
+        for dataset, source_file, source_row_index, row in iter_sample_rows(raw_root, args.records_per_dataset):
+            if args.max_total_records is not None and written >= args.max_total_records:
+                break
+            rec = graphify_row(
+                dataset=dataset,
+                row=row,
+                source_file=str(source_file),
+                source_row_index=source_row_index,
+                max_sequence_chars=args.max_sequence_chars,
+                max_field_chars=args.max_field_chars,
+            )
             handle.write(json.dumps(rec, ensure_ascii=True) + "\n")
-
-    parquet_path = output_dir / "derived" / "uniprot_fot_graphified_sample.parquet"
-    table = pa.Table.from_pylist(records, schema=RECORD_SCHEMA)
-    pq.write_table(table, parquet_path, compression="zstd", use_dictionary=True)
+            buffer.append(rec)
+            counts[dataset] += 1
+            written += 1
+            if len(buffer) >= args.parquet_buffer_size:
+                flush_buffer()
+    flush_buffer()
+    if writer is not None:
+        writer.close()
+    elif parquet_path.exists():
+        parquet_path.unlink()
 
     build_manifest = {
         "format_version": "uniprot_fot_graphified_v0",
@@ -662,8 +684,9 @@ def build_records(args: argparse.Namespace) -> dict[str, Any]:
         "derived": {
             "jsonl": str(jsonl_path),
             "parquet": str(parquet_path),
-            "records": len(records),
-            "sample_per_dataset": args.sample_per_dataset,
+            "records": written,
+            "records_per_dataset": args.records_per_dataset,
+            "max_total_records": args.max_total_records,
             "counts_by_dataset": dict(counts),
             "schema": [{"name": field.name, "type": str(field.type)} for field in RECORD_SCHEMA],
         },
@@ -724,7 +747,11 @@ def main() -> None:
     build = subparsers.add_parser("build")
     build.add_argument("--raw-root", default=str(RAW_ROOT))
     build.add_argument("--output-dir", default=str(OUTPUT_DIR))
-    build.add_argument("--sample-per-dataset", type=int, default=8)
+    build.add_argument("--records-per-dataset", type=int, default=8, help="Rows to graphify from each source dataset. Use 0 for all rows.")
+    build.add_argument("--sample-per-dataset", type=int, help="Deprecated alias for --records-per-dataset.")
+    build.add_argument("--max-total-records", type=int)
+    build.add_argument("--output-prefix", default="uniprot_fot_graphified_sample")
+    build.add_argument("--parquet-buffer-size", type=int, default=256)
     build.add_argument("--max-sequence-chars", type=int, default=4096)
     build.add_argument("--max-field-chars", type=int, default=4096)
     build.add_argument("--raw-link-mode", choices=["none", "symlink", "copy", "move"], default="symlink")
@@ -733,6 +760,10 @@ def main() -> None:
     validate.add_argument("--jsonl", default=str(OUTPUT_DIR / "derived" / "uniprot_fot_graphified_sample.jsonl"))
 
     args = parser.parse_args()
+    if getattr(args, "sample_per_dataset", None) is not None:
+        args.records_per_dataset = args.sample_per_dataset
+    if getattr(args, "records_per_dataset", None) == 0:
+        args.records_per_dataset = None
     if args.command == "build":
         result = build_records(args)
     elif args.command == "validate":

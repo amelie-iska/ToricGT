@@ -38,10 +38,14 @@ def write_card(data_dir: Path, destination: Path, repo_id: str) -> None:
         "",
         "## Files",
         "",
-        "- `derived/uniprot_fot_graphified_sample.parquet`",
+        "- `derived/*.parquet` graphified source-data slices",
+        "- `authored/accepted/accepted_records.parquet` when authored records are present",
+        "- `authored/accepted/validation_report.json`",
         "- `manifests/uniprot_fot_build_manifest.json`",
         "- `schema/uniprot_fot_record.schema.json`",
         "- `LOCAL_README.md`",
+        "- `authored/README.md`",
+        "- `authored/progress_log.md`",
         "- `GOAL.md`",
         "",
         "## Current Local Build",
@@ -66,15 +70,25 @@ def write_card(data_dir: Path, destination: Path, repo_id: str) -> None:
 
 
 def upload_plan(data_dir: Path, include_jsonl: bool) -> list[tuple[Path, str]]:
-    files = [
-        (data_dir / "derived" / "uniprot_fot_graphified_sample.parquet", "derived/uniprot_fot_graphified_sample.parquet"),
+    files: list[tuple[Path, str]] = []
+    for parquet_path in sorted((data_dir / "derived").glob("uniprot_fot_graphified*.parquet")):
+        files.append((parquet_path, f"derived/{parquet_path.name}"))
+    files.extend(
+        [
         (data_dir / "manifests" / "uniprot_fot_build_manifest.json", "manifests/uniprot_fot_build_manifest.json"),
         (data_dir / "schema" / "uniprot_fot_record.schema.json", "schema/uniprot_fot_record.schema.json"),
         (data_dir / "README.md", "LOCAL_README.md"),
         (data_dir / "GOAL.md", "GOAL.md"),
-    ]
+        (data_dir / "authored" / "README.md", "authored/README.md"),
+        (data_dir / "authored" / "progress_log.md", "authored/progress_log.md"),
+        (data_dir / "authored" / "accepted" / "accepted_records.parquet", "authored/accepted/accepted_records.parquet"),
+        (data_dir / "authored" / "accepted" / "validation_report.json", "authored/accepted/validation_report.json"),
+        ]
+    )
     if include_jsonl:
-        files.append((data_dir / "derived" / "uniprot_fot_graphified_sample.jsonl", "derived/uniprot_fot_graphified_sample.jsonl"))
+        for jsonl_path in sorted((data_dir / "derived").glob("uniprot_fot_graphified*.jsonl")):
+            files.append((jsonl_path, f"derived/{jsonl_path.name}"))
+        files.append((data_dir / "authored" / "accepted" / "accepted_records.jsonl", "authored/accepted/accepted_records.jsonl"))
     return [(path, repo_path) for path, repo_path in files if path.exists()]
 
 

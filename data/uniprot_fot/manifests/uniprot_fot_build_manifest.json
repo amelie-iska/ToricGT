@@ -270,53 +270,48 @@
       {
         "dataset": "dna_coding_regions_train",
         "path": "data/uniprot_fot/raw_sources/dna_coding_regions_train",
-        "mode": "symlink",
-        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/dna_coding_regions_train"
+        "mode": "existing"
       },
       {
         "dataset": "pubchem10m_selfies_train",
         "path": "data/uniprot_fot/raw_sources/pubchem10m_selfies_train",
-        "mode": "symlink",
-        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/pubchem10m_selfies_train"
+        "mode": "existing"
       },
       {
         "dataset": "rfam_sequence_train",
         "path": "data/uniprot_fot/raw_sources/rfam_sequence_train",
-        "mode": "symlink",
-        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/rfam_sequence_train"
+        "mode": "existing"
       },
       {
         "dataset": "rnacentral_8192_sequence_train",
         "path": "data/uniprot_fot/raw_sources/rnacentral_8192_sequence_train",
-        "mode": "symlink",
-        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/rnacentral_8192_sequence_train"
+        "mode": "existing"
       },
       {
         "dataset": "uniprot_function_text_train",
         "path": "data/uniprot_fot/raw_sources/uniprot_function_text_train",
-        "mode": "symlink",
-        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/uniprot_function_text_train"
+        "mode": "existing"
       },
       {
         "dataset": "uniprot_uniref50_sequence_train",
         "path": "data/uniprot_fot/raw_sources/uniprot_uniref50_sequence_train",
-        "mode": "symlink",
-        "source": "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/uniprot_uniref50_sequence_train"
+        "mode": "existing"
       }
     ]
   },
   "derived": {
-    "jsonl": "data/uniprot_fot/derived/uniprot_fot_graphified_sample.jsonl",
-    "parquet": "data/uniprot_fot/derived/uniprot_fot_graphified_sample.parquet",
-    "records": 48,
-    "sample_per_dataset": 8,
+    "jsonl": "data/uniprot_fot/derived/uniprot_fot_graphified_200_per_dataset.jsonl",
+    "parquet": "data/uniprot_fot/derived/uniprot_fot_graphified_200_per_dataset.parquet",
+    "records": 1200,
+    "records_per_dataset": 200,
+    "max_total_records": null,
     "counts_by_dataset": {
-      "dna_coding_regions_train": 8,
-      "pubchem10m_selfies_train": 8,
-      "rfam_sequence_train": 8,
-      "rnacentral_8192_sequence_train": 8,
-      "uniprot_function_text_train": 8,
-      "uniprot_uniref50_sequence_train": 8
+      "dna_coding_regions_train": 200,
+      "pubchem10m_selfies_train": 200,
+      "rfam_sequence_train": 200,
+      "rnacentral_8192_sequence_train": 200,
+      "uniprot_function_text_train": 200,
+      "uniprot_uniref50_sequence_train": 200
     },
     "schema": [
       {

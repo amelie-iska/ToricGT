@@ -1,0 +1,170 @@
+{
+  "id": "uniprot_fot_000002_zika_polyprotein_modularity",
+  "source": {
+    "reasoning_tree_author": "Codex",
+    "content_creation_mode": "handwritten",
+    "contains_imported_reasoning_trace": false,
+    "grounding_sources": [
+      {
+        "dataset": "uniprot_function_text_train",
+        "entry": "A0A024B7W1",
+        "entry_name": "POLG_ZIKVF",
+        "source_file": "raw_hf_bio_scale/uniprot_function_text_train/default/train/0000.parquet"
+      }
+    ]
+  },
+  "task_family": "viral_polyprotein_annotation_forest",
+  "nodes": [
+    {
+      "id": "n0_problem",
+      "type": "problem",
+      "content": "A UniProt row describes a Zika virus genome polyprotein cleaved into structural and non-structural proteins. Build a reasoning target that teaches a model to avoid flattening the polyprotein into one function.",
+      "latent_coordinates": [-0.07, 0.16, 0.29, -0.12, 0.45, -0.31, 0.22, 0.18],
+      "symbolic_payload": {
+        "entry": "A0A024B7W1",
+        "protein_name": "Genome polyprotein",
+        "organism_context": "Zika virus"
+      }
+    },
+    {
+      "id": "n1_cleavage_evidence",
+      "type": "evidence",
+      "content": "The protein name lists a single genome polyprotein that is cleaved into Capsid C, prM/pr peptide, M, Envelope E, NS1, NS2A, NS2B, NS3, and additional non-structural products.",
+      "latent_coordinates": [0.02, 0.24, 0.34, -0.09, 0.51, -0.22, 0.27, 0.21],
+      "symbolic_payload": {
+        "polyprotein": true,
+        "cleavage_products": ["C", "prM", "pr", "M", "E", "NS1", "NS2A", "NS2B", "NS3"]
+      }
+    },
+    {
+      "id": "n2_structural_tree",
+      "type": "reasoning_tree",
+      "content": "Structural products should be grouped by particle assembly and entry roles: capsid packages RNA, prM/M participates in maturation, and envelope E mediates receptor-facing entry and fusion-relevant behavior.",
+      "latent_coordinates": [0.08, 0.31, 0.38, -0.05, 0.57, -0.18, 0.32, 0.26],
+      "symbolic_payload": {
+        "tree": "structural_module",
+        "module_nodes": ["capsid", "prM/M", "envelope_E"],
+        "training_role": "assembly_and_entry"
+      }
+    },
+    {
+      "id": "n3_nonstructural_tree",
+      "type": "reasoning_tree",
+      "content": "Non-structural products should be grouped by replication and host-modulation roles. NS2B is a regulatory subunit for the NS3 serine protease, while NS3 also carries NTPase/helicase-like enzyme labels in the source name.",
+      "latent_coordinates": [0.11, 0.36, 0.43, 0.02, 0.62, -0.11, 0.37, 0.31],
+      "symbolic_payload": {
+        "tree": "nonstructural_module",
+        "enzyme_hints": ["EC 3.4.21.91", "EC 3.6.1.15", "EC 3.6.4.13"],
+        "training_role": "replication_and_processing"
+      }
+    },
+    {
+      "id": "n4_rejected_single_function",
+      "type": "rejected_branch",
+      "content": "A single-label answer such as 'capsid protein' is wrong for the whole row because it selects one cleavage product and discards the polyprotein organization and the non-structural enzymatic modules.",
+      "latent_coordinates": [-0.29, -0.12, 0.07, -0.33, 0.18, -0.41, 0.04, -0.09],
+      "symbolic_payload": {
+        "rejected_label": "single_cleavage_product_as_whole_function",
+        "failure_mode": "module_collapse"
+      }
+    },
+    {
+      "id": "n5_merge_modular_annotation",
+      "type": "merge",
+      "content": "The useful target is a modular annotation: one source sequence encodes a cleaved polyprotein, and each product has local function. The merge preserves both global precursor identity and product-level specialization.",
+      "latent_coordinates": [0.18, 0.41, 0.51, 0.09, 0.68, -0.05, 0.42, 0.38],
+      "symbolic_payload": {
+        "merge_inputs": ["n2_structural_tree", "n3_nonstructural_tree", "n4_rejected_single_function"],
+        "module_boundary_signal": "cleavage product list"
+      }
+    },
+    {
+      "id": "n6_design_and_safety",
+      "type": "safety_aware_design_condition",
+      "content": "For biomedical training, this record should teach mechanism and modularity, not operational viral engineering. Safe design reasoning can focus on annotation parsing, epitope or inhibitor-target abstraction, and avoiding claims that provide actionable pathogen optimization.",
+      "latent_coordinates": [0.21, 0.43, 0.55, 0.12, 0.71, -0.02, 0.47, 0.42],
+      "symbolic_payload": {
+        "safe_focus": ["annotation parsing", "module boundaries", "host-pathway mechanism", "therapeutic target abstraction"],
+        "avoid": ["pathogen optimization protocol", "infectivity enhancement"]
+      }
+    },
+    {
+      "id": "n7_answer",
+      "type": "answer",
+      "content": "Represent the row as a cleaved viral polyprotein with structural and non-structural function forests: particle assembly/entry modules on one side, replication-processing enzymes on the other, joined by cleavage-product boundaries.",
+      "latent_coordinates": [0.25, 0.47, 0.59, 0.16, 0.74, 0.02, 0.51, 0.46],
+      "symbolic_payload": {
+        "final_label": "cleaved viral genome polyprotein with modular product functions",
+        "forest_roots": ["structural_module", "nonstructural_module", "safety_module"]
+      }
+    }
+  ],
+  "edges": [
+    {"id": "e0", "source": "n0_problem", "target": "n1_cleavage_evidence", "type": "requires_evidence", "directed": true, "causal_semantics": "The problem depends on the source cleavage-product annotation."},
+    {"id": "e1", "source": "n1_cleavage_evidence", "target": "n2_structural_tree", "type": "activates_tree", "directed": true, "causal_semantics": "Structural product names activate the assembly and entry tree."},
+    {"id": "e2", "source": "n1_cleavage_evidence", "target": "n3_nonstructural_tree", "type": "activates_tree", "directed": true, "causal_semantics": "NS product names and EC hints activate the replication-processing tree."},
+    {"id": "e3", "source": "n1_cleavage_evidence", "target": "n4_rejected_single_function", "type": "rejects_branch", "directed": true, "causal_semantics": "The long cleavage list contradicts a single-product interpretation."},
+    {"id": "e4", "source": "n2_structural_tree", "target": "n5_merge_modular_annotation", "type": "merge_input", "directed": true, "causal_semantics": "Structural functions are one side of the modular answer."},
+    {"id": "e5", "source": "n3_nonstructural_tree", "target": "n5_merge_modular_annotation", "type": "merge_input", "directed": true, "causal_semantics": "Non-structural enzymatic functions are the other side."},
+    {"id": "e6", "source": "n4_rejected_single_function", "target": "n5_merge_modular_annotation", "type": "contrastive_input", "directed": true, "causal_semantics": "The rejected branch prevents module collapse."},
+    {"id": "e7", "source": "n5_merge_modular_annotation", "target": "n6_design_and_safety", "type": "safety_filter", "directed": true, "causal_semantics": "Biomedical utility is constrained by safe, non-operational framing."},
+    {"id": "e8", "source": "n6_design_and_safety", "target": "n7_answer", "type": "finalizes_answer", "directed": true, "causal_semantics": "The final answer keeps modularity and safety constraints."}
+  ],
+  "targets": {
+    "answer": "Use a modular polyprotein annotation: structural assembly/entry functions and non-structural replication-processing functions are separate trees merged by cleavage boundaries, with safety constraints on biomedical design use.",
+    "verifier_metadata": {
+      "verifier_type": "modular_annotation_consistency",
+      "must_include": ["polyprotein", "cleavage", "structural", "non-structural", "NS3", "safety"],
+      "must_not_claim": ["single capsid-only function", "patient-specific advice", "pathogen optimization instructions"]
+    },
+    "gflownet_reward_metadata": {
+      "reward_type": "forest_modularity_reward",
+      "terminal_reward": 0.91,
+      "reward_components": {
+        "module_boundary_fidelity": 0.96,
+        "branch_diversity": 0.9,
+        "merge_quality": 0.92,
+        "safety": 0.97,
+        "specificity_without_operationalization": 0.82
+      }
+    },
+    "active_support_nodes": ["n1_cleavage_evidence", "n2_structural_tree", "n3_nonstructural_tree", "n5_merge_modular_annotation", "n6_design_and_safety"]
+  },
+  "metadata": {
+    "domain": "biomedicine",
+    "topic": "viral_polyprotein_modular_annotation",
+    "merge_status": "genuine_merge_across_structural_and_nonstructural_trees",
+    "multiple_viable_solution_status": "multiple_product_level_annotations_under_one_precursor",
+    "continuous_embedding_fields": {
+      "forest_count": 3,
+      "trajectory_type": "sparse_forest_with_safety_filter",
+      "graphcg_axes": ["precursor", "cleavage_boundary", "structural_function", "nonstructural_enzyme", "safety"]
+    },
+    "tokengt_tropical_toric_fields": {
+      "node_token_order": ["n0_problem", "n1_cleavage_evidence", "n2_structural_tree", "n3_nonstructural_tree", "n4_rejected_single_function", "n5_merge_modular_annotation", "n6_design_and_safety", "n7_answer"],
+      "edge_token_order": ["e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"],
+      "tropical_active_support_nodes": ["n1_cleavage_evidence", "n2_structural_tree", "n3_nonstructural_tree", "n5_merge_modular_annotation"],
+      "tropical_margin": 0.37,
+      "toric_phase_basis": "polyprotein_module_boundary_basis"
+    },
+    "quality_flags": {
+      "accepted": true,
+      "hand_inspected": true,
+      "biomedical_safety": "mechanism_focused_non_operational",
+      "contains_rejected_branch": true,
+      "contains_merge": true
+    },
+    "topic_flags": {
+      "biochemistry": true,
+      "biomedicine": true,
+      "protein_design": false,
+      "uniprot_annotation": true,
+      "viral_mechanism": true
+    }
+  },
+  "split_cluster": {
+    "cluster_id": "uniprot_A0A024B7W1_zika_polyprotein",
+    "split": "train",
+    "leakage_resistant_basis": "UniProt entry accession plus viral polyprotein product family"
+  }
+}

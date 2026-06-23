@@ -1,0 +1,171 @@
+{
+  "id": "uniprot_fot_000001_abtir_nadase",
+  "source": {
+    "reasoning_tree_author": "Codex",
+    "content_creation_mode": "handwritten",
+    "contains_imported_reasoning_trace": false,
+    "grounding_sources": [
+      {
+        "dataset": "uniprot_function_text_train",
+        "entry": "A0A009IHW8",
+        "entry_name": "ABTIR_ACIB9",
+        "source_file": "raw_hf_bio_scale/uniprot_function_text_train/default/train/0000.parquet"
+      }
+    ]
+  },
+  "task_family": "uniprot_function_reasoning_forest",
+  "nodes": [
+    {
+      "id": "n0_problem",
+      "type": "problem",
+      "content": "Given a UniProt-style annotation for AbTIR, decide what functional label should be emphasized for training a model that must connect sequence, catalytic activity, product identity, and design constraints.",
+      "latent_coordinates": [0.12, -0.08, 0.31, 0.44, -0.27, 0.19, -0.14, 0.36],
+      "symbolic_payload": {
+        "entry": "A0A009IHW8",
+        "protein_name": "2' cyclic ADP-D-ribose synthase AbTIR",
+        "sequence_length": 269
+      }
+    },
+    {
+      "id": "n1_source_function",
+      "type": "evidence",
+      "content": "The source annotation states that AbTIR is an NAD(+) hydrolase that cleaves NAD(+) into ADP-D-ribose and nicotinamide, and also generates a cyclization variant termed 2'cADPR. It also cleaves NADP(+) but does not cyclize that product.",
+      "latent_coordinates": [0.18, 0.02, 0.41, 0.51, -0.18, 0.21, -0.05, 0.48],
+      "symbolic_payload": {
+        "substrates": ["NAD(+)", "NADP(+)"],
+        "products": ["ADP-D-ribose", "nicotinamide", "2'cADPR"],
+        "negative_product_condition": "NADP(+) cleavage is not cyclized in the source annotation."
+      }
+    },
+    {
+      "id": "n2_branch_hydrolase",
+      "type": "reasoning_branch",
+      "content": "A hydrolase label is strongly supported because the annotation explicitly names NAD(+) hydrolase activity and gives the cleavage products. This branch captures the broad enzyme class and is robust to whether the cyclic product is emphasized.",
+      "latent_coordinates": [0.22, 0.11, 0.38, 0.47, -0.11, 0.29, -0.02, 0.42],
+      "symbolic_payload": {
+        "candidate_label": "NAD(+) hydrolase",
+        "ec_hint": "3.2.2.6",
+        "support": "direct text plus product stoichiometry"
+      }
+    },
+    {
+      "id": "n3_branch_cyclase",
+      "type": "reasoning_branch",
+      "content": "A cyclic ADP-ribose synthase label is also supported, but it is more specific and conditional: it applies to the NAD(+) route where the cyclization variant 2'cADPR is generated, not to the NADP(+) route.",
+      "latent_coordinates": [0.15, 0.22, 0.46, 0.39, -0.09, 0.35, 0.04, 0.51],
+      "symbolic_payload": {
+        "candidate_label": "2'cADPR synthase",
+        "condition": "NAD(+) substrate branch",
+        "limitation": "Do not generalize cyclization to NADP(+)."
+      }
+    },
+    {
+      "id": "n4_rejected_transferase",
+      "type": "rejected_branch",
+      "content": "A transferase or polymerase interpretation is weaker because the source evidence describes bond cleavage and small-molecule products, not transfer of a group to a separate acceptor or template-directed polymerization.",
+      "latent_coordinates": [-0.18, 0.06, -0.21, 0.18, 0.33, -0.16, 0.12, -0.08],
+      "symbolic_payload": {
+        "rejected_label": "transferase_or_polymerase",
+        "rejection_basis": "incompatible with explicit hydrolase cleavage wording"
+      }
+    },
+    {
+      "id": "n5_merge",
+      "type": "merge",
+      "content": "The best training target should merge the broad hydrolase class with the product-specific cyclic ADPR synthase note. This teaches the model that enzyme labels can be nested: the general catalytic family is stable, while product branching carries conditional specificity.",
+      "latent_coordinates": [0.28, 0.16, 0.52, 0.55, -0.07, 0.33, 0.01, 0.57],
+      "symbolic_payload": {
+        "merge_inputs": ["n2_branch_hydrolase", "n3_branch_cyclase", "n4_rejected_transferase"],
+        "training_signal": "prefer conditional multifunction annotation over a single flattened label"
+      }
+    },
+    {
+      "id": "n6_design_implication",
+      "type": "design_condition",
+      "content": "For de novo design or mutational screening, the useful conditional objective is not merely binding NAD(+), but preserving hydrolysis geometry while controlling whether the ADP-ribose product can cyclize. A small model should learn to keep substrate, product, and negative condition in separate slots.",
+      "latent_coordinates": [0.31, 0.19, 0.57, 0.61, -0.04, 0.37, 0.06, 0.63],
+      "symbolic_payload": {
+        "design_axes": ["NAD(+)-binding", "hydrolysis", "cyclization selectivity", "NADP(+) noncyclization"],
+        "safety_note": "educational mechanism reasoning only"
+      }
+    },
+    {
+      "id": "n7_answer",
+      "type": "answer",
+      "content": "Emphasize AbTIR as an NAD(+)/NADP(+) glycohydrolase-like enzyme with NAD(+)-dependent 2'cADPR synthase behavior; represent the NADP(+) branch as cleavage without cyclization.",
+      "latent_coordinates": [0.35, 0.21, 0.62, 0.64, -0.02, 0.41, 0.09, 0.66],
+      "symbolic_payload": {
+        "primary_label": "NAD(+) hydrolase",
+        "secondary_label": "2'cADPR synthase",
+        "negative_condition": "NADP(+) product is not cyclized"
+      }
+    }
+  ],
+  "edges": [
+    {"id": "e0", "source": "n0_problem", "target": "n1_source_function", "type": "requires_evidence", "directed": true, "causal_semantics": "The problem is grounded in the source function text."},
+    {"id": "e1", "source": "n1_source_function", "target": "n2_branch_hydrolase", "type": "supports_branch", "directed": true, "causal_semantics": "Cleavage products support hydrolase classification."},
+    {"id": "e2", "source": "n1_source_function", "target": "n3_branch_cyclase", "type": "supports_branch", "directed": true, "causal_semantics": "The 2'cADPR product supports a conditional cyclase label."},
+    {"id": "e3", "source": "n1_source_function", "target": "n4_rejected_transferase", "type": "rejects_branch", "directed": true, "causal_semantics": "The wording contradicts transferase or polymerase interpretations."},
+    {"id": "e4", "source": "n2_branch_hydrolase", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "The broad enzyme class remains the backbone label."},
+    {"id": "e5", "source": "n3_branch_cyclase", "target": "n5_merge", "type": "merge_input", "directed": true, "causal_semantics": "The specific cyclic product branch adds conditional detail."},
+    {"id": "e6", "source": "n4_rejected_transferase", "target": "n5_merge", "type": "contrastive_input", "directed": true, "causal_semantics": "The rejected branch sharpens the decision boundary."},
+    {"id": "e7", "source": "n5_merge", "target": "n6_design_implication", "type": "derives_design_condition", "directed": true, "causal_semantics": "Merged enzyme logic becomes a conditional design objective."},
+    {"id": "e8", "source": "n6_design_implication", "target": "n7_answer", "type": "finalizes_answer", "directed": true, "causal_semantics": "The final answer preserves the conditional product logic."}
+  ],
+  "targets": {
+    "answer": "AbTIR should be represented as an NAD(+)/NADP(+) hydrolase with NAD(+)-dependent 2'cADPR synthase behavior and a separate NADP(+) noncyclization condition.",
+    "verifier_metadata": {
+      "verifier_type": "source_text_consistency",
+      "must_include": ["NAD(+)", "NADP(+)", "ADP-D-ribose", "nicotinamide", "2'cADPR", "noncyclization"],
+      "must_not_claim": ["patient advice", "NADP(+) cyclization", "polymerase activity"]
+    },
+    "gflownet_reward_metadata": {
+      "reward_type": "posterior_like_annotation_reward",
+      "terminal_reward": 0.93,
+      "reward_components": {
+        "source_fidelity": 0.98,
+        "branch_contrast": 0.89,
+        "merge_quality": 0.94,
+        "design_usefulness": 0.9,
+        "safety": 0.96
+      }
+    },
+    "active_support_nodes": ["n1_source_function", "n2_branch_hydrolase", "n3_branch_cyclase", "n5_merge", "n6_design_implication"]
+  },
+  "metadata": {
+    "domain": "biochemistry",
+    "topic": "enzyme_function_annotation_and_design_constraints",
+    "merge_status": "genuine_merge_with_rejected_branch",
+    "multiple_viable_solution_status": "two_viable_labels_with_conditional_preference",
+    "continuous_embedding_fields": {
+      "forest_count": 3,
+      "trajectory_type": "hybrid_discrete_graph_continuous_proxy",
+      "graphcg_axes": ["substrate", "reaction", "product", "negative_condition", "design_axis"]
+    },
+    "tokengt_tropical_toric_fields": {
+      "node_token_order": ["n0_problem", "n1_source_function", "n2_branch_hydrolase", "n3_branch_cyclase", "n4_rejected_transferase", "n5_merge", "n6_design_implication", "n7_answer"],
+      "edge_token_order": ["e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"],
+      "tropical_active_support_nodes": ["n1_source_function", "n2_branch_hydrolase", "n3_branch_cyclase", "n5_merge"],
+      "tropical_margin": 0.41,
+      "toric_phase_basis": "enzyme_product_condition_basis"
+    },
+    "quality_flags": {
+      "accepted": true,
+      "hand_inspected": true,
+      "biomedical_safety": "educational_not_patient_specific",
+      "contains_rejected_branch": true,
+      "contains_merge": true
+    },
+    "topic_flags": {
+      "biochemistry": true,
+      "biomedicine": false,
+      "protein_design": true,
+      "uniprot_annotation": true
+    }
+  },
+  "split_cluster": {
+    "cluster_id": "uniprot_A0A009IHW8_abtir",
+    "split": "train",
+    "leakage_resistant_basis": "UniProt entry accession plus enzyme annotation family"
+  }
+}

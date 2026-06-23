@@ -23,6 +23,8 @@ data/curated_smoke/
 data/uniprot_fot/raw_sources/
 data/uniprot_fot/full/
 data/uniprot_fot/hf_shards/
+data/uniprot_fot/derived/*.jsonl
+data/uniprot_fot/authored/accepted/*.jsonl
 data/synthetic/*.jsonl
 data/splits/*.jsonl
 *.aux
