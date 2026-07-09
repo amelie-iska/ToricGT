@@ -27,6 +27,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -148,10 +149,115 @@ def load_tar_urls(args: argparse.Namespace) -> list[str]:
     return deduped
 
 
+def aria2c_path() -> str | None:
+    aria2_bin = shutil.which("aria2c")
+    env_aria2 = Path(sys.executable).resolve().parent / "aria2c"
+    if aria2_bin is None and env_aria2.exists():
+        aria2_bin = str(env_aria2)
+    return aria2_bin
+
+
+def gs_url_to_https(url: str) -> str:
+    match = re.match(r"^gs://([^/]+)/(.+)$", url)
+    if not match:
+        raise ValueError(f"not a gs:// URL: {url}")
+    bucket, object_name = match.groups()
+    return f"https://storage.googleapis.com/{quote(bucket, safe='')}/{quote(object_name, safe='/')}"
+
+
+def gs_url_to_json_media(url: str) -> str:
+    match = re.match(r"^gs://([^/]+)/(.+)$", url)
+    if not match:
+        raise ValueError(f"not a gs:// URL: {url}")
+    bucket, object_name = match.groups()
+    return (
+        "https://storage.googleapis.com/storage/v1/b/"
+        f"{quote(bucket, safe='')}/o/{quote(object_name, safe='')}?alt=media"
+    )
+
+
+def gcloud_access_token() -> str:
+    env_token = os.environ.get("AFDB_GCS_BEARER_TOKEN", "").strip()
+    if env_token:
+        return env_token
+    proc = subprocess.run(
+        ["gcloud", "auth", "print-access-token"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=60,
+    )
+    token = proc.stdout.strip()
+    if not token:
+        raise RuntimeError("gcloud returned an empty access token")
+    return token
+
+
+def download_with_aria2(url: str, tmp: Path, *, timeout: int, headers: list[str] | None = None) -> bool:
+    aria2_bin = aria2c_path()
+    if aria2_bin is None:
+        return False
+    connections = os.environ.get("AFDB_ARIA2_CONNECTIONS", "16")
+    split = os.environ.get("AFDB_ARIA2_SPLIT", connections)
+    piece = os.environ.get("AFDB_ARIA2_MIN_SPLIT_SIZE", "8M")
+    cmd = [
+        aria2_bin,
+        "--continue=true",
+        f"--max-connection-per-server={connections}",
+        f"--split={split}",
+        f"--min-split-size={piece}",
+        "--file-allocation=none",
+        "--max-tries=8",
+        "--retry-wait=8",
+        "--connect-timeout=30",
+        "--timeout=120",
+        "--allow-overwrite=true",
+        "--auto-file-renaming=false",
+    ]
+    input_path: Path | None = None
+    if headers:
+        input_file = tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=tmp.parent,
+            prefix=".aria2_input_",
+            suffix=".txt",
+            delete=False,
+        )
+        input_path = Path(input_file.name)
+        try:
+            os.chmod(input_path, 0o600)
+            input_file.write(url + "\n")
+            input_file.write(f"  dir={tmp.parent}\n")
+            input_file.write(f"  out={tmp.name}\n")
+            for header in headers:
+                input_file.write(f"  header={header}\n")
+            input_file.flush()
+        finally:
+            input_file.close()
+        cmd.append(f"--input-file={input_path}")
+    else:
+        cmd.extend([f"--dir={tmp.parent}", f"--out={tmp.name}", url])
+    try:
+        subprocess.run(cmd, check=True, timeout=max(60, timeout))
+    finally:
+        if input_path is not None:
+            input_path.unlink(missing_ok=True)
+    return True
+
+
 def download(url: str, path: Path, *, timeout: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     if url.startswith("gs://"):
+        mode = os.environ.get("AFDB_GCS_DOWNLOAD_MODE", "gcloud").strip().lower()
+        if mode in {"direct_https", "https", "aria2", "aria2c"}:
+            headers = [f"Authorization: Bearer {gcloud_access_token()}"]
+            if download_with_aria2(gs_url_to_json_media(url), tmp, timeout=timeout, headers=headers):
+                tmp.replace(path)
+                return
+            raise RuntimeError("AFDB_GCS_DOWNLOAD_MODE=direct_https requested but aria2c was not found")
         gcloud = shutil.which("gcloud")
         gsutil = shutil.which("gsutil") or "/snap/bin/gsutil"
         if gcloud:
@@ -171,31 +277,7 @@ def download(url: str, path: Path, *, timeout: int) -> None:
             tmp.replace(path)
             return
         raise RuntimeError("gcloud/gsutil not found; install google-cloud-cli before GCS proteome-tar ingestion")
-    aria2_bin = shutil.which("aria2c")
-    env_aria2 = Path(sys.executable).resolve().parent / "aria2c"
-    if aria2_bin is None and env_aria2.exists():
-        aria2_bin = str(env_aria2)
-    if aria2_bin:
-        connections = os.environ.get("AFDB_ARIA2_CONNECTIONS", "8")
-        split = os.environ.get("AFDB_ARIA2_SPLIT", connections)
-        cmd = [
-            aria2_bin,
-            "--continue=true",
-            f"--max-connection-per-server={connections}",
-            f"--split={split}",
-            "--min-split-size=16M",
-            "--file-allocation=none",
-            "--max-tries=8",
-            "--retry-wait=8",
-            "--connect-timeout=30",
-            "--timeout=120",
-            "--allow-overwrite=true",
-            "--auto-file-renaming=false",
-            f"--dir={tmp.parent}",
-            f"--out={tmp.name}",
-            url,
-        ]
-        subprocess.run(cmd, check=True, timeout=max(60, timeout))
+    if download_with_aria2(url, tmp, timeout=timeout):
         tmp.replace(path)
         return
     cmd = ["curl", "-L", "--fail", "--retry", "4", "--retry-delay", "5", "--connect-timeout", "30"]
