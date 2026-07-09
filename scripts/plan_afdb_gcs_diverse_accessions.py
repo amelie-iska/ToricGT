@@ -289,7 +289,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--target-records", type=int, default=5_000_000)
-    parser.add_argument("--enzyme-target-fraction", type=float, default=0.40)
+    parser.add_argument("--enzyme-target-fraction", type=float, default=0.15)
     parser.add_argument("--enzyme-high-fraction", type=float, default=0.50)
     parser.add_argument("--enzyme-mid-fraction", type=float, default=0.25)
     parser.add_argument("--enzyme-low-fraction", type=float, default=0.25)
