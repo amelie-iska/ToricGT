@@ -165,7 +165,13 @@ def report_once(run_dir: Path, log_file: Path) -> None:
 
 
 def monitor(run_dir: Path, log_file: Path, interval: float) -> None:
-    status = latest_step_status(log_file)
+    while True:
+        try:
+            status = latest_step_status(log_file)
+            break
+        except Exception as exc:  # noqa: BLE001
+            print(f"waiting_for_first_step log_file:{log_file} reason:{type(exc).__name__}: {exc}", flush=True)
+            time.sleep(interval)
     bar = tqdm(total=status.total, initial=status.step, unit="step", dynamic_ncols=True)
     try:
         while True:
