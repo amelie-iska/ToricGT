@@ -378,6 +378,12 @@ def iter_input_paths(args: argparse.Namespace) -> list[Path]:
     paths: list[Path] = []
     for pattern in args.local_structure_glob:
         paths.extend(Path(path) for path in sorted(glob.glob(pattern)))
+    for list_path in args.local_structure_list:
+        with list_path.open("r", encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                value = raw.strip()
+                if value:
+                    paths.append(Path(value))
     seen: set[str] = set()
     out: list[Path] = []
     for path in paths:
@@ -487,6 +493,7 @@ def process_structure_path(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--local-structure-glob", action="append", default=[])
+    parser.add_argument("--local-structure-list", action="append", type=Path, default=[], help="text file with one local mmCIF/CIF path per line")
     parser.add_argument("--rcsb-ids", type=Path, default=None, help="optional file with PDB IDs to download as mmCIF")
     parser.add_argument("--rcsb-query-modality", action="append", default=[], help="query RCSB by modality: protein, rna, dna, protein_rna, protein_dna, nucleic_acid, complex, ligand")
     parser.add_argument("--rcsb-query-limit", type=int, default=256, help="maximum RCSB IDs to request per modality; <=0 means all available")

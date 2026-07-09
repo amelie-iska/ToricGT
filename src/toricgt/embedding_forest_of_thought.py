@@ -1,9 +1,12 @@
-"""Embedding-space Forest-of-Thought training head.
+"""Embedding-space Forest-of-Thought training and trace head.
 
 This module adapts Forest-of-Thought (FoT) from textual test-time prompting to
-ToricGT's BPB-facing hidden states.  It is intentionally training-only: the head
-adds auxiliary gradients and diagnostics, but the OAI Parameter-Golf artifact can
-remain the compact baseline model unless an export path explicitly keeps it.
+ToricGT's BPB-facing hidden states.  The reference FoT algorithm runs several
+reasoning trees, sparsely activates useful trees, performs self-correction,
+uses UCB-like exploration, and commits through forest consensus.  Here those
+operations are represented as differentiable objectives over selected hidden
+states, plus an inference/export trace with explicit tree, branch, correction,
+and consensus edges.
 """
 
 from __future__ import annotations
@@ -111,6 +114,75 @@ class EmbeddingForestOfThoughtHead(nn.Module):
             last.append(int(where[-1].item()) if where.numel() else 0)
         return torch.tensor(last, device=tree_ids.device, dtype=torch.long)
 
+    def _forest_topology(self, n_nodes: int, device: torch.device) -> dict[str, Tensor]:
+        """Build a sparse FoT topology over selected hidden positions.
+
+        The selected positions form ``num_trees`` interleaved trees.  Within a
+        tree, nodes are arranged by depth and branch slot.  This is a bounded
+        beam-style forest rather than a full exponential tree, which keeps the
+        training/inference trace compatible with fixed context budgets while
+        still exposing the FoT operations: branch expansion, self-correction,
+        UCB transition scoring, and consensus over tree leaves.
+        """
+
+        num_trees = max(1, min(int(self.config.num_trees), int(n_nodes)))
+        local = torch.arange(n_nodes, device=device, dtype=torch.long)
+        tree_ids = torch.remainder(local, num_trees)
+        tree_slots = torch.div(local, num_trees, rounding_mode="floor")
+        branch_count = max(1, int(self.config.branching))
+        depth_ids = torch.div(tree_slots, branch_count, rounding_mode="floor").clamp(max=max(0, int(self.config.max_depth) - 1))
+        branch_ids = torch.remainder(tree_slots, branch_count)
+
+        parent_by_key: dict[tuple[int, int, int], int] = {}
+        latest_by_tree: dict[int, int] = {}
+        parent_edges: list[tuple[int, int]] = []
+        edge_actions: list[int] = []
+        for node_id in range(n_nodes):
+            tree = int(tree_ids[node_id].item())
+            depth = int(depth_ids[node_id].item())
+            branch = int(branch_ids[node_id].item())
+            parent: int | None = None
+            if depth > 0:
+                parent = parent_by_key.get((tree, depth - 1, branch))
+                if parent is None:
+                    parent = latest_by_tree.get(tree)
+            if parent is not None:
+                parent_edges.append((parent, node_id))
+                edge_actions.append(branch)
+            parent_by_key[(tree, depth, branch)] = node_id
+            latest_by_tree[tree] = node_id
+
+        if parent_edges:
+            edge_index = torch.tensor(parent_edges, device=device, dtype=torch.long)
+            edge_actions_tensor = torch.tensor(edge_actions, device=device, dtype=torch.long)
+        else:
+            edge_index = torch.empty(0, 2, device=device, dtype=torch.long)
+            edge_actions_tensor = torch.empty(0, device=device, dtype=torch.long)
+
+        parent_nodes = edge_index[:, 0] if edge_index.numel() else torch.empty(0, device=device, dtype=torch.long)
+        child_nodes = edge_index[:, 1] if edge_index.numel() else torch.empty(0, device=device, dtype=torch.long)
+        has_child = torch.zeros(n_nodes, device=device, dtype=torch.bool)
+        if parent_nodes.numel():
+            has_child[parent_nodes] = True
+        leaf_indices: list[int] = []
+        for tree in range(num_trees):
+            where = torch.nonzero((tree_ids == tree) & (~has_child), as_tuple=False).flatten()
+            if where.numel() == 0:
+                where = torch.nonzero(tree_ids == tree, as_tuple=False).flatten()
+            leaf_indices.append(int(where[-1].item()) if where.numel() else 0)
+
+        return {
+            "num_trees": torch.tensor(num_trees, device=device, dtype=torch.long),
+            "tree_ids": tree_ids,
+            "depth_ids": depth_ids,
+            "branch_ids": branch_ids,
+            "edge_index": edge_index,
+            "edge_actions": edge_actions_tensor,
+            "parent_nodes": parent_nodes,
+            "child_nodes": child_nodes,
+            "leaf_indices": torch.tensor(leaf_indices, device=device, dtype=torch.long),
+        }
+
     def forward(
         self,
         hidden: Tensor,
@@ -142,9 +214,14 @@ class EmbeddingForestOfThoughtHead(nn.Module):
         else:
             byte_lengths = torch.ones_like(nll)
         batch, n_nodes, _ = nodes.shape
-        num_trees = max(1, min(int(cfg.num_trees), int(n_nodes)))
-        tree_ids = torch.remainder(torch.arange(n_nodes, device=hidden.device), num_trees).long()
-        depth_ids = torch.div(torch.arange(n_nodes, device=hidden.device), num_trees, rounding_mode="floor")
+        topology = self._forest_topology(int(n_nodes), hidden.device)
+        num_trees = int(topology["num_trees"].item())
+        tree_ids = topology["tree_ids"].long()
+        depth_ids = topology["depth_ids"].long()
+        branch_ids = topology["branch_ids"].long()
+        parent_nodes = topology["parent_nodes"].long()
+        child_nodes = topology["child_nodes"].long()
+        edge_actions = topology["edge_actions"].long()
         temperature = max(float(cfg.temperature) * max(float(temperature_multiplier), 1.0e-4), 1.0e-4)
         ucb_exploration = max(float(cfg.ucb_exploration) * max(float(ucb_multiplier), 0.0), 0.0)
 
@@ -178,16 +255,18 @@ class EmbeddingForestOfThoughtHead(nn.Module):
         active_mass = torch.topk(activation_probs, k=topk, dim=-1).values.sum(dim=-1).mean()
         active_tree_count = torch.exp(activation_entropy).detach()
 
-        if n_nodes > 1:
-            f_logits = self.forward_policy(nodes[:, :-1, :]).float().clamp(-30.0, 30.0)
-            b_logits = self.backward_policy(nodes[:, 1:, :]).float().clamp(-30.0, 30.0)
-            actions = torch.remainder(targets[:, 1:], int(cfg.branching))
+        if child_nodes.numel() > 0:
+            parent_hidden = nodes[:, parent_nodes, :]
+            child_hidden = nodes[:, child_nodes, :]
+            f_logits = self.forward_policy(parent_hidden).float().clamp(-30.0, 30.0)
+            b_logits = self.backward_policy(child_hidden).float().clamp(-30.0, 30.0)
+            actions = torch.remainder(edge_actions, int(cfg.branching)).view(1, -1).expand(batch, -1)
             log_pf = F.log_softmax(f_logits, dim=-1).gather(-1, actions.unsqueeze(-1)).squeeze(-1)
             log_pb = F.log_softmax(b_logits, dim=-1).gather(-1, actions.unsqueeze(-1)).squeeze(-1)
-            visits = torch.arange(1, n_nodes, device=hidden.device, dtype=torch.float32).view(1, -1)
-            parent_visits = (visits + num_trees).clamp_min(1.0)
-            child_visits = (1.0 + torch.remainder(torch.arange(1, n_nodes, device=hidden.device), num_trees).float()).view(1, -1)
-            ucb_target_value = values[:, 1:].detach() + ucb_exploration * torch.sqrt(
+            visits = torch.arange(1, child_nodes.numel() + 1, device=hidden.device, dtype=torch.float32).view(1, -1)
+            parent_visits = (depth_ids[parent_nodes].float().view(1, -1) + 1.0) * float(cfg.branching)
+            child_visits = (branch_ids[child_nodes].float().view(1, -1) + 1.0).clamp_min(1.0)
+            ucb_target_value = values[:, child_nodes].detach() + ucb_exploration * torch.sqrt(
                 torch.log(parent_visits + 1.0) / child_visits.clamp_min(1.0)
             )
             ucb_weights = torch.softmax(ucb_target_value / temperature, dim=-1)
@@ -198,13 +277,13 @@ class EmbeddingForestOfThoughtHead(nn.Module):
             ).reshape(batch, -1)
             ucb_loss = (transition_nll * ucb_weights).sum(dim=-1).mean()
 
-            correction = self.correction_head(nodes[:, :-1, :]).float()
-            desired_delta = (nodes[:, 1:, :] - nodes[:, :-1, :]).detach()
+            correction = self.correction_head(parent_hidden).float()
+            desired_delta = (child_hidden - parent_hidden).detach()
             correction_cosine = F.cosine_similarity(correction, desired_delta, dim=-1)
             correction_direction_loss = (1.0 - correction_cosine).mean()
-            corrected_nodes = nodes[:, :-1, :] + float(cfg.correction_scale) * correction
+            corrected_nodes = parent_hidden + float(cfg.correction_scale) * correction
             corrected_value = self.value_head(corrected_nodes).squeeze(-1).float()
-            value_lift = corrected_value - values[:, :-1].detach()
+            value_lift = corrected_value - values[:, parent_nodes].detach()
             correction_lift_loss = F.relu(0.01 - value_lift).mean()
             correction_loss = correction_direction_loss + 0.25 * correction_lift_loss
 
@@ -218,11 +297,11 @@ class EmbeddingForestOfThoughtHead(nn.Module):
                 logits_proj = softcap * torch.tanh(logits_proj / softcap)
                 corrected_ce = F.cross_entropy(
                     logits_proj.float(),
-                    targets[:, :-1].reshape(-1),
+                    targets[:, child_nodes].reshape(-1),
                     reduction="none",
                 ).view(batch, -1)
-                selected_bytes = byte_lengths[:, :-1].clamp_min(1.0)
-                raw_local_byte_nll = (nll[:, :-1].detach() / selected_bytes).mean(dim=1)
+                selected_bytes = byte_lengths[:, child_nodes].clamp_min(1.0)
+                raw_local_byte_nll = (nll[:, child_nodes].detach() / selected_bytes).mean(dim=1)
                 corrected_byte_nll = (corrected_ce / selected_bytes).mean(dim=1)
                 bpb_delta_reward = (raw_local_byte_nll - corrected_byte_nll).clamp(-5.0, 5.0)
                 reward = torch.exp(
@@ -246,12 +325,15 @@ class EmbeddingForestOfThoughtHead(nn.Module):
             ).clamp_min(max(float(cfg.reward_floor), 1.0e-8))
             tb_residual = self.log_z.float() + (log_pf - log_pb).mean(dim=1) - reward.log()
             tb_loss = tb_residual.square().mean()
-            if n_nodes > 3:
+            if child_nodes.numel() > 2:
                 prefix = torch.cumsum(log_pf - log_pb, dim=1)
-                denom = torch.arange(1, nll.shape[1], device=hidden.device, dtype=torch.float32).view(1, -1)
-                prefix_mean_byte_nll = torch.cumsum(nll[:, 1:] / byte_lengths[:, 1:].clamp_min(1.0), dim=1) / denom.clamp_min(1.0)
+                denom = torch.arange(1, child_nodes.numel() + 1, device=hidden.device, dtype=torch.float32).view(1, -1)
+                prefix_mean_byte_nll = torch.cumsum(
+                    nll[:, child_nodes] / byte_lengths[:, child_nodes].clamp_min(1.0),
+                    dim=1,
+                ) / denom.clamp_min(1.0)
                 prefix_reward = torch.exp(-prefix_mean_byte_nll).clamp_min(max(float(cfg.reward_floor), 1.0e-8))
-                prefix_flow = flow_values[:, 1:]
+                prefix_flow = flow_values[:, child_nodes]
                 subtb_residual = prefix_flow + prefix - prefix_reward.log()
                 subtb_loss = subtb_residual.square().mean()
             else:
@@ -271,7 +353,7 @@ class EmbeddingForestOfThoughtHead(nn.Module):
             corrected_ce = nll.detach()
             corrected_byte_nll = (nll / byte_lengths).mean(dim=1)
 
-        leaf_idx = self._tree_last_indices(tree_ids, num_trees)
+        leaf_idx = topology["leaf_indices"].long()
         leaf_nodes = nodes[:, leaf_idx, :]
         leaf_targets = torch.remainder(targets[:, leaf_idx], int(cfg.consensus_buckets))
         leaf_logits = self.consensus_head(leaf_nodes).float().clamp(-30.0, 30.0)
@@ -349,6 +431,8 @@ class EmbeddingForestOfThoughtHead(nn.Module):
                 "oai_fot_log_z": self.log_z.detach(),
                 "oai_fot_num_trees": hidden.new_tensor(float(num_trees)).detach(),
                 "oai_fot_node_count": hidden.new_tensor(float(n_nodes)).detach(),
+                "oai_fot_edge_count": hidden.new_tensor(float(child_nodes.numel())).detach(),
+                "oai_fot_max_depth_observed": depth_ids.max().float().detach(),
                 "oai_fot_topk_trees": hidden.new_tensor(float(topk)).detach(),
                 "oai_fot_enabled": hidden.new_tensor(1.0).detach(),
             }
@@ -356,36 +440,127 @@ class EmbeddingForestOfThoughtHead(nn.Module):
 
     @torch.no_grad()
     def trace_payload(self, hidden: Tensor, target_ids: Tensor, per_token_nll: Tensor) -> dict[str, object]:
-        """Return a compact JSON-serializable forest trace for analysis reports."""
+        """Return a compact JSON-serializable forest trace for inference/reporting."""
         idx = self._selected_indices(int(hidden.shape[1]), hidden.device)
         nodes = self.node_norm(hidden[:, idx, :].float())
         n_nodes = int(nodes.shape[1])
-        num_trees = max(1, min(int(self.config.num_trees), n_nodes))
-        tree_ids = torch.remainder(torch.arange(n_nodes, device=hidden.device), num_trees).long()
+        topology = self._forest_topology(n_nodes, hidden.device)
+        num_trees = int(topology["num_trees"].item())
+        tree_ids = topology["tree_ids"].long()
+        depth_ids = topology["depth_ids"].long()
+        branch_ids = topology["branch_ids"].long()
+        parent_nodes = topology["parent_nodes"].long()
+        child_nodes = topology["child_nodes"].long()
+        leaf_indices = topology["leaf_indices"].long()
         activation = self.activation_head(nodes).squeeze(-1).float()[0]
         value = self.value_head(nodes).squeeze(-1).float()[0]
-        edges = []
-        latest: dict[int, int] = {}
-        for local_id, tree_id in enumerate(tree_ids.tolist()):
-            parent = latest.get(tree_id)
-            if parent is not None:
-                edges.append({"source": parent, "target": local_id, "tree_id": tree_id, "kind": "tree"})
-            latest[tree_id] = local_id
-        return {
-            "schema": "toricgt.embedding_forest_of_thought.trace.v1",
-            "num_trees": num_trees,
-            "node_count": n_nodes,
-            "nodes": [
+        tree_activation = self._tree_reduce_mean(activation.view(1, -1), tree_ids, num_trees)[0]
+        tree_probs = torch.softmax(tree_activation, dim=-1)
+        leaf_nodes = nodes[:, leaf_indices, :]
+        leaf_logits = self.consensus_head(leaf_nodes).float()[0]
+        consensus_logits = (tree_probs.view(-1, 1) * leaf_logits).sum(dim=0)
+        consensus_probs = torch.softmax(consensus_logits, dim=-1)
+        consensus_bucket = int(consensus_probs.argmax().detach().cpu().item())
+
+        edges: list[dict[str, object]] = [{"source": "forest_root", "target": int(i), "tree_id": int(i), "kind": "tree_seed"} for i in range(num_trees)]
+        for parent, child in zip(parent_nodes.tolist(), child_nodes.tolist(), strict=False):
+            edges.append(
+                {
+                    "source": int(parent),
+                    "target": int(child),
+                    "tree_id": int(tree_ids[child].item()),
+                    "branch_id": int(branch_ids[child].item()),
+                    "depth": int(depth_ids[child].item()),
+                    "kind": "tree_expansion",
+                }
+            )
+            edges.append(
+                {
+                    "source": int(parent),
+                    "target": int(child),
+                    "tree_id": int(tree_ids[child].item()),
+                    "branch_id": int(branch_ids[child].item()),
+                    "depth": int(depth_ids[child].item()),
+                    "kind": "self_correction",
+                }
+            )
+        for tree_id, leaf in enumerate(leaf_indices.tolist()):
+            edges.append(
+                {
+                    "source": int(leaf),
+                    "target": "consensus",
+                    "tree_id": int(tree_id),
+                    "kind": "consensus_vote",
+                    "tree_probability": float(tree_probs[tree_id].detach().cpu().item()),
+                }
+            )
+        node_payload: list[dict[str, object]] = [
+            {
+                "id": "forest_root",
+                "type": "forest_root",
+                "tree_id": None,
+                "depth": -1,
+                "branch_id": None,
+                "position": None,
+                "nll": 0.0,
+                "activation": 0.0,
+                "value": 0.0,
+            }
+        ]
+        node_payload.extend(
+            [
                 {
                     "id": int(i),
+                    "type": "thought_state",
                     "tree_id": int(tree_ids[i].item()),
+                    "depth": int(depth_ids[i].item()),
+                    "branch_id": int(branch_ids[i].item()),
                     "position": int(idx[i].item()),
                     "target_id": int(target_ids[0, idx[i]].item()),
                     "nll": float(per_token_nll[0, idx[i]].detach().float().item()),
                     "activation": float(activation[i].detach().cpu().item()),
                     "value": float(value[i].detach().cpu().item()),
+                    "is_leaf": bool(i in set(leaf_indices.tolist())),
                 }
                 for i in range(n_nodes)
+            ]
+        )
+        node_payload.append(
+            {
+                "id": "consensus",
+                "type": "forest_consensus",
+                "tree_id": None,
+                "depth": int(depth_ids.max().detach().cpu().item()) + 1 if n_nodes else 0,
+                "branch_id": None,
+                "position": None,
+                "nll": 0.0,
+                "activation": 0.0,
+                "value": float(consensus_probs.max().detach().cpu().item()),
+                "consensus_bucket": consensus_bucket,
+            }
+        )
+        return {
+            "schema": "toricgt.embedding_forest_of_thought.trace.v1",
+            "reference": "external/Forest-of-Thought",
+            "num_trees": num_trees,
+            "node_count": n_nodes,
+            "edge_count": len(edges),
+            "max_depth": int(depth_ids.max().detach().cpu().item()) if n_nodes else 0,
+            "branching": int(self.config.branching),
+            "consensus": {
+                "bucket": consensus_bucket,
+                "confidence": float(consensus_probs.max().detach().cpu().item()),
+                "entropy": float((-(consensus_probs * consensus_probs.clamp_min(1e-8).log()).sum()).detach().cpu().item()),
+            },
+            "tree_summaries": [
+                {
+                    "tree_id": int(tree_id),
+                    "activation_probability": float(tree_probs[tree_id].detach().cpu().item()),
+                    "leaf_node": int(leaf_indices[tree_id].detach().cpu().item()),
+                    "leaf_value": float(value[leaf_indices[tree_id]].detach().cpu().item()),
+                }
+                for tree_id in range(num_trees)
             ],
+            "nodes": node_payload,
             "edges": edges,
         }

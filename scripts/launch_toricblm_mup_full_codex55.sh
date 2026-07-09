@@ -41,6 +41,36 @@ echo "data_path: ${DATA_PATH:-unset}"
 echo "late_graph_train_glob: ${LATE_GRAPH_TRAIN_GLOB:-unset}"
 echo "mup_base_shapes: ${MUP_BASE_SHAPES:-unset}"
 
+if [[ "${TORICBLM_TRAINING_CORPUS_AUDIT:-1}" == "1" ]]; then
+  AUDIT_PY="${TORICBLM_CORPUS_AUDIT_PYTHON:-/home/iska/miniconda3/envs/iska-net-2/bin/python}"
+  if [[ ! -x "$AUDIT_PY" ]]; then
+    AUDIT_PY="$TOKENGT_PY"
+  fi
+  AUDIT_REPORT="${TORICBLM_TRAINING_CORPUS_AUDIT_REPORT:-$RUN_DIR/toricblm_training_corpus_audit.json}"
+  AUDIT_CMD=(
+    "$AUDIT_PY" "$ROOT/scripts/audit_toricblm_training_corpus.py"
+    --output-json "$AUDIT_REPORT"
+    --sample-files "${TORICBLM_TRAINING_CORPUS_AUDIT_SAMPLE_FILES:-4}"
+    --group "graph_train=${GRAPH_TRAIN_GLOB:-}"
+  )
+  if [[ -n "${PROTEIN_FOT_TRAIN_GLOB:-}" ]]; then
+    AUDIT_CMD+=(--group "protein_fot=${PROTEIN_FOT_TRAIN_GLOB}")
+  fi
+  if [[ -n "${PROTEIN_STRUCTURE_PROTREK_TRAIN_GLOB:-}" ]]; then
+    AUDIT_CMD+=(--group "protein_structure_protrek=${PROTEIN_STRUCTURE_PROTREK_TRAIN_GLOB}")
+  fi
+  if [[ -n "${RAW_BIO_SEQUENCE_TRAIN_GLOB:-}" ]]; then
+    AUDIT_CMD+=(--group "raw_sequence_function_trainable=${RAW_BIO_SEQUENCE_TRAIN_GLOB}")
+  fi
+  if [[ "${TORICBLM_REQUIRE_SEQUENCE_FUNCTION_TRAINABLE:-1}" == "1" ]]; then
+    AUDIT_CMD+=(--require-sequence-function-trainable)
+  fi
+  printf 'training_corpus_audit_command:'
+  printf ' %q' "${AUDIT_CMD[@]}"
+  printf '\n'
+  "${AUDIT_CMD[@]}"
+fi
+
 if [[ "${TORICBLM_REQUIRE_SPLIT_SAFE_BIO:-0}" == "1" ]]; then
   if [[ "${TORICBLM_ALLOW_TRAIN_ONLY_RAW_SEQUENCE:-0}" != "1" && ( "${GRAPH_TRAIN_GLOB:-}" == *"/raw_hf_bio_scale/"* || "${LONG_ENTRY_TRAIN_GLOB:-}" == *"/raw_hf_bio_scale/"* ) ]]; then
     echo "TORICBLM_REQUIRE_SPLIT_SAFE_BIO=1 but a raw_hf_bio_scale path is still in GRAPH_TRAIN_GLOB or LONG_ENTRY_TRAIN_GLOB" >&2

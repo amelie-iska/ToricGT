@@ -17,8 +17,11 @@ OUT_ROOT="${OUT_ROOT:-data/uniprot_fot/structures}"
 MIN_FREE_GB="${MIN_FREE_GB:-30}"
 AFDB_OUT="${AFDB_OUT:-$OUT_ROOT/afdb_v6_full}"
 AFDB_UNIREF_OUT="${AFDB_UNIREF_OUT:-$OUT_ROOT/afdb_uniref50_full}"
+AFDB_EBI_TAR_OUT="${AFDB_EBI_TAR_OUT:-$OUT_ROOT/afdb_ebi_tar_v6}"
 PDB_OUT="${PDB_OUT:-$OUT_ROOT/pdb_modal}"
+PDB_PARALLEL_OUT="${PDB_PARALLEL_OUT:-$OUT_ROOT/pdb_modal_parallel}"
 PUBCHEM_OUT="${PUBCHEM_OUT:-$OUT_ROOT/pubchem3d}"
+PUBCHEM_PARALLEL_OUT="${PUBCHEM_PARALLEL_OUT:-$OUT_ROOT/pubchem3d_parallel}"
 PUBCHEM_CID_FILE="${PUBCHEM_CID_FILE:-$ROOT/data/uniprot_fot/pubchem/pubchem_cids_5m_from_naturelm_cid_smiles.txt}"
 # The launcher writes an inventory manifest by default.  The training launcher
 # independently writes/validates the strict readiness manifest before a run.
@@ -32,6 +35,8 @@ AFDB_MAX_SCAN_ROWS="${AFDB_MAX_SCAN_ROWS:-0}"
 AFDB_SHARD_SIZE="${AFDB_SHARD_SIZE:-1024}"
 AFDB_MAX_RESIDUES="${AFDB_MAX_RESIDUES:-512}"
 AFDB_EMIT_3DI="${AFDB_EMIT_3DI:-1}"
+AFDB_EBI_TAR_MAX_RECORDS="${AFDB_EBI_TAR_MAX_RECORDS:-5000000}"
+AFDB_EBI_TAR_MAX_ARCHIVES="${AFDB_EBI_TAR_MAX_ARCHIVES:-0}"
 
 PDB_QUERY_LIMIT="${PDB_QUERY_LIMIT:-0}"
 PDB_QUERY_PAGE_SIZE="${PDB_QUERY_PAGE_SIZE:-1000}"
@@ -163,9 +168,26 @@ if [[ "$AFDB_EMIT_3DI" == "1" ]]; then
 fi
 "$PY" "${AFDB_UNIREF_ARGS[@]}"
 echo "[toricblm-curation] phase=afdb_uniref50_5m_resume done=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+echo "[toricblm-curation] phase=afdb_ebi_tar_stream start=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+AFDB_EBI_ARGS=(
+  scripts/build_afdb_ebi_tar_structure_fot_dataset.py
+  --out-dir "$AFDB_EBI_TAR_OUT"
+  --use-ebi-index
+  --max-records "$AFDB_EBI_TAR_MAX_RECORDS"
+  --max-archives "$AFDB_EBI_TAR_MAX_ARCHIVES"
+  --max-residues "$AFDB_MAX_RESIDUES"
+  --shard-size "$AFDB_SHARD_SIZE"
+  --min-free-gb "$MIN_FREE_GB"
+  --resume
+  --emit-foldseek-3di
+)
+"$PY" "${AFDB_EBI_ARGS[@]}"
+echo "[toricblm-curation] phase=afdb_ebi_tar_stream done=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 else
   echo "[toricblm-curation] phase=afdb_5m_resume skipped"
   echo "[toricblm-curation] phase=afdb_uniref50_5m_resume skipped"
+  echo "[toricblm-curation] phase=afdb_ebi_tar_stream skipped"
 fi
 
 MANIFEST_INPUTS=(
@@ -175,12 +197,24 @@ MANIFEST_INPUTS=(
   "$AFDB_UNIREF_OUT/train/*.parquet"
   "$AFDB_UNIREF_OUT/validation/*.parquet"
   "$AFDB_UNIREF_OUT/test/*.parquet"
+  "$AFDB_EBI_TAR_OUT/train/*.parquet"
+  "$AFDB_EBI_TAR_OUT/validation/*.parquet"
+  "$AFDB_EBI_TAR_OUT/test/*.parquet"
+  "$AFDB_EBI_TAR_OUT/worker_*/train/*.parquet"
+  "$AFDB_EBI_TAR_OUT/worker_*/validation/*.parquet"
+  "$AFDB_EBI_TAR_OUT/worker_*/test/*.parquet"
   "$PDB_OUT/train/*.parquet"
   "$PDB_OUT/validation/*.parquet"
   "$PDB_OUT/test/*.parquet"
+  "$PDB_PARALLEL_OUT/worker_*/train/*.parquet"
+  "$PDB_PARALLEL_OUT/worker_*/validation/*.parquet"
+  "$PDB_PARALLEL_OUT/worker_*/test/*.parquet"
   "$PUBCHEM_OUT/train/*.parquet"
   "$PUBCHEM_OUT/validation/*.parquet"
   "$PUBCHEM_OUT/test/*.parquet"
+  "$PUBCHEM_PARALLEL_OUT/worker_*/train/*.parquet"
+  "$PUBCHEM_PARALLEL_OUT/worker_*/validation/*.parquet"
+  "$PUBCHEM_PARALLEL_OUT/worker_*/test/*.parquet"
 )
 MANIFEST_ARGS=(scripts/build_toricblm_modality_readiness_manifest.py --output-json "$MANIFEST")
 for pattern in "${MANIFEST_INPUTS[@]}"; do

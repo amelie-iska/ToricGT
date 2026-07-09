@@ -14,8 +14,11 @@ import gzip
 import glob
 import hashlib
 import json
+import os
 import re
 import shutil
+import subprocess
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -235,9 +238,46 @@ def pubchem3d_ftp_filenames(host: str, directory: str) -> list[str]:
     return sorted({name for name in names if name.endswith(".sdf.gz")})
 
 
+def read_ftp_file_list(path: Path) -> list[str]:
+    names: list[str] = []
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        name = raw.strip()
+        if name and name.endswith(".sdf.gz"):
+            names.append(name)
+    return names
+
+
 def download_pubchem3d_ftp_file(host: str, directory: str, filename: str, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
+    aria2_bin = shutil.which("aria2c")
+    env_aria2 = Path(sys.executable).resolve().parent / "aria2c"
+    if env_aria2.exists():
+        aria2_bin = str(env_aria2)
+    if aria2_bin:
+        url = f"ftp://{host}/{directory.strip('/')}/{filename}"
+        connections = os.environ.get("PUBCHEM_ARIA2_CONNECTIONS", "8")
+        split = os.environ.get("PUBCHEM_ARIA2_SPLIT", connections)
+        cmd = [
+            aria2_bin,
+            "--continue=true",
+            f"--max-connection-per-server={connections}",
+            f"--split={split}",
+            "--min-split-size=8M",
+            "--file-allocation=none",
+            "--max-tries=8",
+            "--retry-wait=5",
+            "--connect-timeout=30",
+            "--timeout=120",
+            "--allow-overwrite=true",
+            "--auto-file-renaming=false",
+            f"--dir={path.parent}",
+            f"--out={tmp.name}",
+            url,
+        ]
+        subprocess.run(cmd, check=True, timeout=int(os.environ.get("PUBCHEM_ARIA2_TIMEOUT", "900")))
+        tmp.replace(path)
+        return
     with ftplib.FTP(host, timeout=240) as ftp:
         ftp.login()
         ftp.cwd(directory)
@@ -404,6 +444,7 @@ def main() -> None:
     parser.add_argument("--pubchem3d-ftp-bulk", action="store_true", help="download/process PubChem3D bulk SDF gzip shards from the public FTP mirror")
     parser.add_argument("--ftp-host", default=PUBCHEM3D_FTP_HOST)
     parser.add_argument("--ftp-dir", default=PUBCHEM3D_FTP_DIR)
+    parser.add_argument("--ftp-file-list", type=Path, default=None, help="optional text file with one PubChem3D FTP SDF basename per line")
     parser.add_argument("--ftp-max-files", type=int, default=0, help="maximum number of bulk SDF gzip files to process; 0 means all available")
     parser.add_argument("--ftp-start-after", default="", help="skip bulk files lexicographically <= this basename")
     parser.add_argument(
@@ -432,7 +473,7 @@ def main() -> None:
     if args.pubchem3d_ftp_bulk and (args.max_records <= 0 or existing_record_count + accepted < args.max_records):
         cache = args.ftp_cache_dir or (args.out_dir / "pubchem3d_ftp_sdf")
         cache.mkdir(parents=True, exist_ok=True)
-        names = pubchem3d_ftp_filenames(args.ftp_host, args.ftp_dir)
+        names = read_ftp_file_list(args.ftp_file_list) if args.ftp_file_list else pubchem3d_ftp_filenames(args.ftp_host, args.ftp_dir)
         if args.ftp_start_after:
             names = [name for name in names if name > args.ftp_start_after]
         if args.resume and args.ftp_resume_after_existing_cid and seen_compounds:

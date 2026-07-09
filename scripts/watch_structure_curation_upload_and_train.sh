@@ -19,11 +19,17 @@ PROTREK_REPORT="${PROTREK_REPORT:-$REPORT_DIR/toricblm_protrek_structure_split_r
 PROTREK_SPLIT_DIR="${PROTREK_SPLIT_DIR:-data/uniprot_fot/splits/protrek_structure_current}"
 RUN_PROTREK_SPLIT="${RUN_PROTREK_SPLIT:-1}"
 RUN_HF_UPLOAD="${RUN_HF_UPLOAD:-1}"
+RUN_HF_UPLOAD_IF_NOT_READY="${RUN_HF_UPLOAD_IF_NOT_READY:-0}"
 RUN_TRAIN_IF_READY="${RUN_TRAIN_IF_READY:-1}"
 TARGET_TOTAL_COORDINATE_ROWS="${TARGET_TOTAL_COORDINATE_ROWS:-10000000}"
 TARGET_PROTEIN_STRUCTURES="${TARGET_PROTEIN_STRUCTURES:-5000000}"
 TARGET_SMALL_MOLECULE_STRUCTURES="${TARGET_SMALL_MOLECULE_STRUCTURES:-5000000}"
+PROTREK_MIN_TRIMODAL_RECORDS="${PROTREK_MIN_TRIMODAL_RECORDS:-$TARGET_PROTEIN_STRUCTURES}"
 AFDB_PARALLEL_ROOT="${AFDB_PARALLEL_ROOT:-data/uniprot_fot/structures/afdb_parallel_uniref50_full}"
+AFDB_EBI_TAR_ROOT="${AFDB_EBI_TAR_ROOT:-data/uniprot_fot/structures/afdb_ebi_tar_v6}"
+AFDB_GCS_ROOT="${AFDB_GCS_ROOT:-data/uniprot_fot/structures/afdb_gcs_v4}"
+PDB_PARALLEL_ROOT="${PDB_PARALLEL_ROOT:-data/uniprot_fot/structures/pdb_modal_parallel}"
+PUBCHEM_PARALLEL_ROOT="${PUBCHEM_PARALLEL_ROOT:-data/uniprot_fot/structures/pubchem3d_parallel}"
 
 mkdir -p "$REPORT_DIR" logs
 WATCH_LOG="${WATCH_LOG:-logs/structure_curation_postprocess_$(date -u +%Y%m%dT%H%M%SZ).log}"
@@ -53,8 +59,14 @@ WATCH_LOG="${WATCH_LOG:-logs/structure_curation_postprocess_$(date -u +%Y%m%dT%H
     --input "data/uniprot_fot/structures/afdb_v6_full/train/*.parquet"
     --input "data/uniprot_fot/structures/afdb_uniref50_full/train/*.parquet"
     --input "$AFDB_PARALLEL_ROOT/worker_*/train/*.parquet"
+    --input "$AFDB_EBI_TAR_ROOT/train/*.parquet"
+    --input "$AFDB_EBI_TAR_ROOT/worker_*/train/*.parquet"
+    --input "$AFDB_GCS_ROOT/train/*.parquet"
+    --input "$AFDB_GCS_ROOT/worker_*/train/*.parquet"
     --input "data/uniprot_fot/structures/pdb_modal/train/*.parquet"
+    --input "$PDB_PARALLEL_ROOT/worker_*/train/*.parquet"
     --input "data/uniprot_fot/structures/pubchem3d/train/*.parquet"
+    --input "$PUBCHEM_PARALLEL_ROOT/worker_*/train/*.parquet"
     --require protein_afdb
     --require pdb_protein
     --require pdb_rna
@@ -72,29 +84,41 @@ WATCH_LOG="${WATCH_LOG:-logs/structure_curation_postprocess_$(date -u +%Y%m%dT%H
   echo "[watcher] strict_readiness_exit=$READY_STATUS manifest=$STRICT_MANIFEST"
 
   if [[ "$RUN_PROTREK_SPLIT" == "1" ]]; then
-    "$PROTREK_PY" scripts/split_with_protrek_trimodal.py \
+    "$PROTREK_PY" scripts/split_with_protrek_trimodal_streaming.py \
       --input "data/uniprot_fot/structures/afdb_v6/toricblm_afdb_structure_fot_train.parquet" \
       --input "data/uniprot_fot/structures/afdb_v6_full/train/*.parquet" \
       --input "data/uniprot_fot/structures/afdb_uniref50_full/train/*.parquet" \
       --input "$AFDB_PARALLEL_ROOT/worker_*/train/*.parquet" \
+      --input "$AFDB_EBI_TAR_ROOT/train/*.parquet" \
+      --input "$AFDB_EBI_TAR_ROOT/worker_*/train/*.parquet" \
+      --input "$AFDB_GCS_ROOT/train/*.parquet" \
+      --input "$AFDB_GCS_ROOT/worker_*/train/*.parquet" \
       --input "data/uniprot_fot/structures/pdb_modal/train/*.parquet" \
+      --input "$PDB_PARALLEL_ROOT/worker_*/train/*.parquet" \
       --output-dir "$PROTREK_SPLIT_DIR" \
       --report "$PROTREK_REPORT" \
       --prefix toricblm_protrek_structure_current \
       --batch-size "${PROTREK_BATCH_SIZE:-16}" \
       --max-clusters "${PROTREK_MAX_CLUSTERS:-8192}" \
-      --require-protrek
+      --parquet-batch-rows "${PROTREK_PARQUET_BATCH_ROWS:-128}" \
+      --min-trimodal-records "$PROTREK_MIN_TRIMODAL_RECORDS" \
+      --write-full-rows \
+      --require-protrek \
+      --require-trimodal
     echo "[watcher] protrek_split_done report=$PROTREK_REPORT"
   fi
 
-  if [[ "$RUN_HF_UPLOAD" == "1" ]]; then
+  if [[ "$RUN_HF_UPLOAD" == "1" && ( "$READY_STATUS" == "0" || "$RUN_HF_UPLOAD_IF_NOT_READY" == "1" ) ]]; then
     REPO_ID="${REPO_ID:-AmelieSchreiber/toricblm_fot}" NUM_WORKERS="${HF_UPLOAD_WORKERS:-8}" \
       bash scripts/upload_toricblm_fot_dataset_to_hf.sh
     echo "[watcher] hf_upload_done repo=${REPO_ID:-AmelieSchreiber/toricblm_fot}"
+  elif [[ "$RUN_HF_UPLOAD" == "1" ]]; then
+    echo "[watcher] hf_upload_not_launched; strict readiness failed and RUN_HF_UPLOAD_IF_NOT_READY=0"
   fi
 
   if [[ "$RUN_TRAIN_IF_READY" == "1" && "$READY_STATUS" == "0" ]]; then
     echo "[watcher] strict readiness passed; launching structure training"
+    export PROTREK_STRUCTURE_TRAIN_GLOB="$PROTREK_SPLIT_DIR/train/*.parquet"
     CONFIG_PATH="$ROOT/configs/toricblm_mup_170m_convextok8192_biomed_fot_structure.env" \
       bash scripts/launch_toricblm_mup_full_convextok8192_biomed.sh
   else

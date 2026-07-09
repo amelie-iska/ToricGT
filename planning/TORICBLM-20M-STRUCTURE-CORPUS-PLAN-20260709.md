@@ -159,3 +159,103 @@ data/uniprot_fot/structures/afdb_parallel_uniref50_full/worker_*/train/*.parquet
 ```
 
 The sequential AFDB output directories remain valid and are still included, but the 5M protein target should be met by the parallel UniRef50 pass rather than by a single long-running process.
+
+## 2026-07-09 AFDB EBI/GCS Correction
+
+The per-accession AFDB fallback is real but too slow for a 5M coordinate target.  The official Google DeepMind AFDB documentation states that the full UniProt release is hosted in Google Cloud Storage and that the full dataset is roughly 23 TiB.  The local environment can list the public GCS bucket metadata anonymously, but object downloads return `storage.objects.get` permission errors without a Google Cloud account or service-account credentials.  The current `keys.txt` contains Hugging Face and GitHub tokens only; no Google/GCS credential material is present.  Therefore the full GCS AFDB route cannot be completed non-interactively on this machine until credentials are supplied.
+
+The implemented public-data route now uses EMBL-EBI AFDB v6 proteome tar archives:
+
+```text
+https://ftp.ebi.ac.uk/pub/databases/alphafold/v6/
+```
+
+New implementation:
+
+- `scripts/build_afdb_ebi_tar_structure_fot_dataset.py` streams official AFDB/EBI tar archives, extracts real `model_v6.cif.gz` members into temporary files, parses real CA/backbone coordinates, optionally emits real Foldseek/3Di sequences for ProTrek splitting, writes graph/FoT Parquet shards, and deletes raw archives/CIFs unless explicitly asked to keep them.
+- `scripts/launch_afdb_ebi_tar_curation.sh` partitions the EBI tar set by approximate archive size into worker-specific URL lists and writes worker outputs under `data/uniprot_fot/structures/afdb_ebi_tar_v6/worker_XX`.
+- The downloader prefers conda-installed `aria2c` with resumable multi-connection downloads and falls back to resumable `curl` if `aria2c` is unavailable.
+- The strict watcher, ProTrek split command, structure-flow training glob, and graph-training glob now include both root-level and worker-level EBI AFDB shards.
+
+Operational status:
+
+- The old slow AFDB per-accession parallel session was stopped.
+- A new EBI tar session is active with eight workers and resumable downloads.
+- PubChem3D FTP curation and local all-PDB curation remain active.
+- Training remains blocked by the strict readiness gate until the manifest reports the real required counts.  This is intentional; the run should not resume on a partial corpus and call it full.
+- Hugging Face dataset upload is now also gated on strict readiness by default.  `RUN_HF_UPLOAD_IF_NOT_READY=1` is the explicit override if a partial/diagnostic upload is ever wanted, but the normal path is ready dataset, ProTrek split, Hugging Face upload, training launch.
+
+## 2026-07-09 GCS AFDB Cap, Enzyme Bias, And Strict Trimodal Split Update
+
+The AFDB source strategy has been changed from archive-order mirroring to a
+capped, diversity-selected Google Cloud Storage pull.  The active production
+path is:
+
+1. `scripts/plan_afdb_gcs_diverse_accessions.py`
+   - Scans local UniProt function-text rows and UniRef50 rows.
+   - Selects UniProt accessions only; UniParc-only rows remain trainable as
+     sequence/function records but are not requested from AFDB GCS.
+   - Preserves sequence, function text, organism/taxon evidence, GO labels, EC
+     evidence, protein names, and source row provenance in JSONL worker plans.
+   - Caps the AFDB pull with `AFDB_GCS_TARGET_RECORDS`, currently `5,000,000`.
+   - Upweights enzymes without collapsing the corpus: default enzyme target is
+     40% of selected AFDB structures.  Within the enzyme-positive pool the
+     target is 50% high catalytic/kinetic evidence, 25% medium evidence, and
+     25% low or weakly characterized evidence when enough candidates exist.
+   - The high/mid/low enzyme tiers are audit fields, not labels invented for
+     biology: they are derived from explicit text evidence such as EC numbers,
+     catalytic-activity descriptions, `GO:0003824`, kinetic terms (`kcat`,
+     `Km`, `Vmax`, turnover, catalytic efficiency), and activity qualifiers.
+
+2. `scripts/build_afdb_gcs_structure_fot_dataset.py`
+   - Reads the selected JSONL plan.
+   - Batch-copies only selected files from
+     `gs://public-datasets-deepmind-alphafold-v4`.
+   - Parses real AFDB mmCIF coordinates with the same coordinate graph/FoT
+     schema as the previous AFDB builders.
+   - Emits real Foldseek/3Di strings when `AFDB_EMIT_3DI=1`, so the downstream
+     ProTrek splitter can use an actual structure modality after raw mmCIF
+     cache cleanup.
+   - Writes `enzyme_tier`, `enzyme_evidence_score`, and `selection_json` into
+     every emitted row for later analysis and sampling audits.
+
+3. `scripts/split_with_protrek_trimodal_streaming.py`
+   - Runs actual ProTrek sequence, text, and Foldseek/3Di structure embedding
+     inference on GPU.
+   - Clusters only rows where all three modalities exist.
+   - Writes a split map and, when `--write-full-rows` is set, full
+     train/validation/test Parquet shards that carry the ProTrek split.
+   - Rows with sequence and function but no structure remain trainable through
+     the ordinary protein graph/FoT streams.  They are not counted as trimodal
+     and do not satisfy the protein-structure leakage split target.
+
+4. `scripts/watch_structure_curation_upload_and_train.sh`
+   - Includes AFDB GCS worker outputs in strict readiness.
+   - Requires the streaming ProTrek trimodal report before training launch.
+   - Exports `PROTREK_STRUCTURE_TRAIN_GLOB` so the structure-flow training path
+     can consume full-row ProTrek train shards rather than raw accession-hash
+     AFDB shards.
+
+5. FoT training/inference verification update
+   - `src/toricgt/embedding_forest_of_thought.py` now uses an explicit sparse
+     forest topology rather than a chain-like interleaving of hidden states.
+     The trace contains forest-root, tree-expansion, self-correction, and
+     consensus-vote edges, matching the operating concepts in
+     `external/Forest-of-Thought`.
+   - `amelie-iska/parameter-golf/train_gpt.py` now applies the same FoT head to
+     selected long graph/FoT segments through `LONG_ENTRY_FOT_LOSS_WEIGHT`, so
+     biomedical FoT rows train sparse forest activation, UCB-like branching,
+     correction, trajectory balance, and consensus directly.
+   - `scripts/export_oai_fot_trace.py` exports checkpoint FoT traces for
+     inference/reporting and has a smoke mode for topology tests.
+   - The launcher corpus audit confirms sequence/function-only rows remain
+     trainable even when no structure field is present.  These rows are not
+     counted as trimodal and do not satisfy structure-flow readiness targets.
+
+The slow EBI tar AFDB session was stopped after GCS authentication succeeded,
+because archive-order ingestion is not diversity selected and is not the right
+source for the revised capped `~5M` AFDB requirement.  Partial EBI rows already
+written can remain as supplementary structure examples, but the main AFDB
+protein-structure target is now the GCS-selected corpus.  The active GCS route
+uses the authenticated `gsutil` path, writes a selected-accession worker plan,
+and blocks training until strict readiness plus ProTrek trimodal splitting pass.
