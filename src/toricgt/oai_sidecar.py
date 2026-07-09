@@ -983,6 +983,10 @@ class StructureCoordinateParquetStream:
         self.file_idx = 0
         self.row_idx = 0
         self.rows: list[tuple[str, list[list[float]], list[float] | None]] = []
+        self.file_row_counts: dict[str, int] = {}
+        self.coordinate_file_count = 0
+        self.total_coordinate_candidate_rows = 0
+        self._scan_file_counts()
         self.rows_loaded = 0
         self.rows_coordinate_bearing = 0
         self.rows_skipped = 0
@@ -1007,10 +1011,37 @@ class StructureCoordinateParquetStream:
         if refreshed:
             current = self.files[self.file_idx] if self.files and self.file_idx < len(self.files) else None
             self.files = refreshed
+            self._scan_file_counts()
             if current in self.files:
                 self.file_idx = self.files.index(current)
             else:
                 self.file_idx = min(self.file_idx, max(0, len(self.files) - 1))
+
+    def _scan_file_counts(self) -> None:
+        """Count configured coordinate-bearing rows from Parquet metadata.
+
+        This is intentionally metadata-only.  The actual loader still validates
+        row-level coordinate tensors and skips malformed rows rather than using
+        these counts as ground truth.
+        """
+        import pyarrow.parquet as pq
+
+        self.file_row_counts = {}
+        self.coordinate_file_count = 0
+        self.total_coordinate_candidate_rows = 0
+        for path in self.files:
+            try:
+                schema_names = set(pq.read_schema(path).names)
+                if not any(name in schema_names for name in self.COORD_COLUMNS):
+                    self.file_row_counts[str(path)] = 0
+                    continue
+                rows = int(pq.ParquetFile(path).metadata.num_rows)
+            except Exception:
+                self.file_row_counts[str(path)] = 0
+                continue
+            self.file_row_counts[str(path)] = rows
+            self.coordinate_file_count += 1
+            self.total_coordinate_candidate_rows += rows
 
     def _encode(self, text: str) -> list[int]:
         try:
@@ -1075,9 +1106,14 @@ class StructureCoordinateParquetStream:
         return text
 
     def describe(self) -> str:
+        current = self.files[self.file_idx] if self.files and self.file_idx < len(self.files) else None
+        current_name = current.name if current is not None else "none"
         return (
-            f"files:{len(self.files)} current_rows:{len(self.rows)} "
-            f"coordinate_rows:{self.rows_coordinate_bearing} skipped:{self.rows_skipped} "
+            f"files:{len(self.files)} coord_files:{self.coordinate_file_count} "
+            f"total_candidate_rows:{self.total_coordinate_candidate_rows} "
+            f"current_file:{self.file_idx + 1}/{len(self.files)}:{current_name} "
+            f"current_shard_rows:{len(self.rows)} "
+            f"loaded_coordinate_rows_seen:{self.rows_coordinate_bearing} skipped:{self.rows_skipped} "
             f"max_atoms:{self.max_atoms}"
         )
 

@@ -189,6 +189,9 @@ def main() -> None:
     parser.add_argument("--output-json", type=Path, required=True)
     parser.add_argument("--max-rows-per-file", type=int, default=0)
     parser.add_argument("--require", action="append", default=[], help="Required modality key, e.g. protein_afdb,pdb_rna,pdb_dna,pdb_complex,pubchem_3d_or_ligand")
+    parser.add_argument("--min-coordinate-rows", type=int, default=0, help="Minimum total coordinate-bearing rows required.")
+    parser.add_argument("--min-count", action="append", default=[], help="Minimum modality count as modality=count. May repeat.")
+    parser.add_argument("--allow-shortfall", action="store_true", help="Record target shortfalls without failing the preflight.")
     args = parser.parse_args()
     paths = expand(args.input)
     if not paths:
@@ -210,6 +213,33 @@ def main() -> None:
                     examples[key].append(value)
     required = list(args.require)
     missing_required = [key for key in required if total.get(key, 0) <= 0]
+    minimum_counts: dict[str, int] = {}
+    for raw in args.min_count:
+        if "=" not in raw:
+            raise SystemExit(f"--min-count must be modality=count, got {raw!r}")
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise SystemExit(f"--min-count has empty modality key: {raw!r}")
+        try:
+            minimum_counts[key] = int(value)
+        except ValueError as exc:
+            raise SystemExit(f"invalid --min-count value: {raw!r}") from exc
+    target_shortfalls: dict[str, dict[str, int]] = {}
+    if args.min_coordinate_rows > 0 and total_coordinate_rows < args.min_coordinate_rows:
+        target_shortfalls["total_coordinate_rows"] = {
+            "available": int(total_coordinate_rows),
+            "required": int(args.min_coordinate_rows),
+            "missing": int(args.min_coordinate_rows - total_coordinate_rows),
+        }
+    for key, required_count in minimum_counts.items():
+        available = int(total.get(key, 0))
+        if available < required_count:
+            target_shortfalls[key] = {
+                "available": available,
+                "required": int(required_count),
+                "missing": int(required_count - available),
+            }
     report = {
         "schema": "toricblm.modality_readiness_manifest.v1",
         "inputs": args.input,
@@ -221,7 +251,11 @@ def main() -> None:
         "examples": examples,
         "required_modalities": required,
         "missing_required_modalities": missing_required,
-        "ready": not missing_required,
+        "minimum_coordinate_rows": int(args.min_coordinate_rows),
+        "minimum_modality_counts": minimum_counts,
+        "target_shortfalls": target_shortfalls,
+        "target_shortfall_policy": "allowed_use_maximum_available" if args.allow_shortfall else "strict_fail",
+        "ready": not missing_required and (args.allow_shortfall or not target_shortfalls),
         "policy": "No modality is inferred. Missing required coordinate modalities are reported, not replaced.",
     }
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -229,6 +263,8 @@ def main() -> None:
     print(json.dumps(report, indent=2, sort_keys=True))
     if missing_required:
         raise SystemExit(f"missing required modalities: {', '.join(missing_required)}")
+    if target_shortfalls and not args.allow_shortfall:
+        raise SystemExit("structure target shortfall: " + json.dumps(target_shortfalls, sort_keys=True))
 
 
 if __name__ == "__main__":

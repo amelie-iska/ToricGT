@@ -673,7 +673,9 @@ class SplitShardWriter:
             return
         shard_idx = self.shard_counts[split]
         path = self.out_dir / split / f"{self.prefix}_{split}_{shard_idx:05d}.parquet"
-        pq.write_table(pa.Table.from_pylist(rows), path, compression="zstd")
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        pq.write_table(pa.Table.from_pylist(rows), tmp, compression="zstd")
+        tmp.replace(path)
         self.paths[split].append(str(path))
         self.shard_counts[split] += 1
         self.buffers[split] = []
@@ -720,10 +722,21 @@ def resolve_cif(
     out_dir: Path,
     cache_dir: Path,
     tmp_dir: Path,
+    local_cif_by_accession: dict[str, Path],
     direct_version: int,
     keep_mmcif_cache: bool,
     timeout: int,
 ) -> tuple[dict[str, Any] | None, Path | None, str | None]:
+    local_path = local_cif_by_accession.get(accession.upper())
+    if local_path is not None and local_path.exists():
+        prediction = {
+            "modelEntityId": f"AF-{accession}-F1",
+            "latestVersion": int(direct_version),
+            "cifUrl": str(local_path),
+            "bcifUrl": "",
+            "local_source": True,
+        }
+        return prediction, local_path, None
     direct_url = AFDB_CIF.format(accession=accession, version=int(direct_version))
     target_dir = cache_dir if keep_mmcif_cache else tmp_dir
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -761,6 +774,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--uniprot-function-parquet", type=Path, default=None)
     parser.add_argument("--uniprot-function-glob", type=str, default="/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/uniprot_function_text_train/default/train/*.parquet")
+    parser.add_argument("--input-list", action="append", default=[], help="newline-delimited Parquet path list; may be supplied multiple times")
+    parser.add_argument("--local-cif-glob", action="append", default=[], help="local AFDB mmCIF glob(s), e.g. ../iska-net-2/data/raw/alphafold_db/cif/AF-*-F1-model_v6.cif")
     parser.add_argument("--out-dir", type=Path, default=Path("data/uniprot_fot/structures/afdb_v6"))
     parser.add_argument("--max-records", type=int, default=0, help="0 means no accepted-record cap")
     parser.add_argument("--max-scan-rows", type=int, default=0, help="0 means scan all available rows")
@@ -792,9 +807,37 @@ def main() -> None:
     if args.uniprot_function_parquet is not None:
         input_paths = [args.uniprot_function_parquet]
     else:
-        input_paths = [Path(path) for path in sorted(globlib.glob(args.uniprot_function_glob))]
+        input_paths = []
+        seen_inputs: set[str] = set()
+        for list_file in args.input_list:
+            for raw_line in Path(list_file).read_text(encoding="utf-8", errors="replace").splitlines():
+                raw_path = raw_line.strip()
+                if not raw_path or raw_path.startswith("#"):
+                    continue
+                key = str(Path(raw_path).resolve())
+                if key not in seen_inputs:
+                    seen_inputs.add(key)
+                    input_paths.append(Path(raw_path))
+        for pattern in str(args.uniprot_function_glob or "").split(","):
+            pattern = pattern.strip()
+            if not pattern:
+                continue
+            for raw_path in sorted(globlib.glob(pattern)):
+                key = str(Path(raw_path).resolve())
+                if key not in seen_inputs:
+                    seen_inputs.add(key)
+                    input_paths.append(Path(raw_path))
     if not input_paths:
         raise SystemExit(f"No input Parquet files matched: {args.uniprot_function_parquet or args.uniprot_function_glob}")
+    local_cif_by_accession: dict[str, Path] = {}
+    for pattern in args.local_cif_glob:
+        for raw_path in sorted(globlib.glob(pattern)):
+            path = Path(raw_path)
+            match = re.match(r"AF-([A-Za-z0-9]+)-F\d+-model_v\d+\.cif$", path.name)
+            if match:
+                local_cif_by_accession.setdefault(match.group(1).upper(), path)
+    if local_cif_by_accession:
+        print(f"local_afdb_cif_index entries={len(local_cif_by_accession)}", flush=True)
     convextok_tokens = index_convextok_tokens(load_convextok_tokens(args.convextok_tokenizer, max_token_bytes=96))
     processed = load_processed(progress_path) if args.resume else set()
     writer = SplitShardWriter(args.out_dir, shard_size=args.shard_size, prefix=args.prefix)
@@ -836,6 +879,7 @@ def main() -> None:
                 out_dir=args.out_dir,
                 cache_dir=cache_dir,
                 tmp_dir=tmp_dir,
+                local_cif_by_accession=local_cif_by_accession,
                 direct_version=args.direct_version,
                 keep_mmcif_cache=args.keep_mmcif_cache,
                 timeout=args.download_timeout,

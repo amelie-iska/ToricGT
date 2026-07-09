@@ -76,7 +76,7 @@ def download_rcsb_cif(pdb_id: str, path: Path, *, timeout: int = 60) -> bool:
     return True
 
 
-def rcsb_search_payload(modality: str, *, limit: int) -> dict[str, Any]:
+def rcsb_search_payload(modality: str, *, start: int, rows: int) -> dict[str, Any]:
     """Build a conservative RCSB search query for real coordinate entries."""
     modality = modality.lower().strip()
 
@@ -117,35 +117,60 @@ def rcsb_search_payload(modality: str, *, limit: int) -> dict[str, Any]:
         "query": query,
         "return_type": "entry",
         "request_options": {
-            "paginate": {"start": 0, "rows": int(limit)},
+            "paginate": {"start": int(start), "rows": int(rows)},
             "sort": [{"sort_by": "rcsb_accession_info.initial_release_date", "direction": "desc"}],
             "results_content_type": ["experimental"],
         },
     }
 
 
-def query_rcsb_ids(modalities: list[str], *, limit_per_modality: int, timeout: int) -> list[str]:
+def query_rcsb_ids(
+    modalities: list[str],
+    *,
+    limit_per_modality: int,
+    page_size: int,
+    timeout: int,
+) -> list[str]:
     ids: list[str] = []
     seen: set[str] = set()
+    page_size = max(1, int(page_size))
     for modality in modalities:
-        payload = json.dumps(rcsb_search_payload(modality, limit=limit_per_modality)).encode("utf-8")
-        request = urllib.request.Request(
-            RCSB_SEARCH,
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "ToricGT-RCSB-structure-curator/1.0",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-        for item in data.get("result_set", []):
-            identifier = str(item.get("identifier") or "").strip().lower()
-            if identifier and identifier not in seen:
-                seen.add(identifier)
-                ids.append(identifier)
+        start = 0
+        remaining = int(limit_per_modality)
+        while True:
+            if limit_per_modality > 0 and remaining <= 0:
+                break
+            rows = min(page_size, remaining) if limit_per_modality > 0 else page_size
+            payload = json.dumps(rcsb_search_payload(modality, start=start, rows=rows)).encode("utf-8")
+            request = urllib.request.Request(
+                RCSB_SEARCH,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "ToricGT-RCSB-structure-curator/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            result_set = data.get("result_set", [])
+            if not result_set:
+                break
+            for item in result_set:
+                identifier = str(item.get("identifier") or "").strip().lower()
+                if identifier and identifier not in seen:
+                    seen.add(identifier)
+                    ids.append(identifier)
+            print(
+                f"rcsb_query modality={modality} start={start} rows={len(result_set)} unique_ids={len(ids)}",
+                flush=True,
+            )
+            if len(result_set) < rows:
+                break
+            start += rows
+            if limit_per_modality > 0:
+                remaining -= rows
     return ids
 
 
@@ -309,7 +334,7 @@ def forest_for_record(record_id: str, parsed: dict[str, Any]) -> dict[str, Any]:
 
 
 class SplitShardWriter:
-    def __init__(self, out_dir: Path, *, shard_size: int, prefix: str) -> None:
+    def __init__(self, out_dir: Path, *, shard_size: int, prefix: str, resume: bool = False) -> None:
         self.out_dir = out_dir
         self.shard_size = int(shard_size)
         self.prefix = prefix
@@ -319,6 +344,10 @@ class SplitShardWriter:
         self.paths = {"train": [], "validation": [], "test": []}
         for split in self.buffers:
             (out_dir / split).mkdir(parents=True, exist_ok=True)
+            if resume:
+                existing = sorted((out_dir / split).glob(f"{prefix}_{split}_*.parquet"))
+                self.paths[split] = [str(path) for path in existing]
+                self.shards[split] = len(existing)
 
     def add(self, row: dict[str, Any], split: str) -> None:
         row = dict(row)
@@ -332,7 +361,9 @@ class SplitShardWriter:
         if not self.buffers[split]:
             return
         path = self.out_dir / split / f"{self.prefix}_{split}_{self.shards[split]:05d}.parquet"
-        pq.write_table(pa.Table.from_pylist(self.buffers[split]), path, compression="zstd")
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        pq.write_table(pa.Table.from_pylist(self.buffers[split]), tmp, compression="zstd")
+        tmp.replace(path)
         self.paths[split].append(str(path))
         self.shards[split] += 1
         self.buffers[split] = []
@@ -347,32 +378,6 @@ def iter_input_paths(args: argparse.Namespace) -> list[Path]:
     paths: list[Path] = []
     for pattern in args.local_structure_glob:
         paths.extend(Path(path) for path in sorted(glob.glob(pattern)))
-    if args.rcsb_ids:
-        cache = args.out_dir / "rcsb_tmp_mmcif"
-        cache.mkdir(parents=True, exist_ok=True)
-        for raw in re.split(r"[\s,]+", args.rcsb_ids.read_text(encoding="utf-8")):
-            pdb_id = raw.strip().lower()
-            if not pdb_id:
-                continue
-            path = cache / f"{pdb_id}.cif"
-            if not path.exists() and not download_rcsb_cif(pdb_id, path, timeout=args.download_timeout):
-                continue
-            paths.append(path)
-    if args.rcsb_query_modality:
-        cache = args.out_dir / "rcsb_tmp_mmcif"
-        cache.mkdir(parents=True, exist_ok=True)
-        ids = query_rcsb_ids(
-            args.rcsb_query_modality,
-            limit_per_modality=args.rcsb_query_limit,
-            timeout=args.download_timeout,
-        )
-        ids_path = args.out_dir / "rcsb_query_ids.json"
-        ids_path.write_text(json.dumps({"modalities": args.rcsb_query_modality, "ids": ids}, indent=2, sort_keys=True), encoding="utf-8")
-        for pdb_id in ids:
-            path = cache / f"{pdb_id}.cif"
-            if not path.exists() and not download_rcsb_cif(pdb_id, path, timeout=args.download_timeout):
-                continue
-            paths.append(path)
     seen: set[str] = set()
     out: list[Path] = []
     for path in paths:
@@ -383,12 +388,109 @@ def iter_input_paths(args: argparse.Namespace) -> list[Path]:
     return out
 
 
+def iter_pdb_ids(path: Path) -> Any:
+    for raw in re.split(r"[\s,]+", path.read_text(encoding="utf-8", errors="replace")):
+        pdb_id = raw.strip().lower()
+        if pdb_id:
+            yield pdb_id
+
+
+def existing_structure_ids(out_dir: Path, prefix: str) -> set[str]:
+    ids: set[str] = set()
+    for split in ("train", "validation", "test"):
+        for path in sorted((out_dir / split).glob(f"{prefix}_{split}_*.parquet")):
+            try:
+                table = pq.read_table(path, columns=["structure_id"])
+            except Exception:
+                continue
+            for value in table.column("structure_id").to_pylist():
+                if value:
+                    ids.add(str(value).lower())
+    return ids
+
+
+def free_gb(path: Path) -> float:
+    return shutil.disk_usage(path).free / (1024**3)
+
+
+def process_structure_path(
+    path: Path,
+    *,
+    writer: SplitShardWriter,
+    max_atoms: int,
+    include_ligands: bool,
+    accepted: int,
+    skipped: dict[str, int],
+    modality_counts: dict[str, int],
+    max_records: int,
+) -> int:
+    if max_records > 0 and accepted >= max_records:
+        return accepted
+    try:
+        parsed = parse_structure(path, max_atoms=max_atoms, include_ligands=include_ligands)
+    except Exception as exc:
+        key = f"parse_error:{type(exc).__name__}"
+        skipped[key] = skipped.get(key, 0) + 1
+        return accepted
+    if parsed is None:
+        skipped["no_coordinate_rows"] = skipped.get("no_coordinate_rows", 0) + 1
+        return accepted
+    structure_id = path.stem
+    record_id = f"pdb_modal_structure_{structure_id}_{stable_hash(str(path))}"
+    graph = graph_for_record(record_id, structure_id, parsed, str(path))
+    forest = forest_for_record(record_id, parsed)
+    metadata = {
+        "source": "PDB/mmCIF",
+        "source_path": str(path),
+        "structure_modality": parsed["structure_modality"],
+        "modality_counts": parsed["modality_counts"],
+        "coordinate_residue_count": parsed["coordinate_residue_count"],
+        "source_residue_count": parsed["source_residue_count"],
+        "coordinate_truncated": parsed["coordinate_truncated"],
+    }
+    row = {
+        "record_id": record_id,
+        "dataset": "toricblm_pdb_modal_structure_fot",
+        "task_family": f"{parsed['structure_modality']}_coordinate_training",
+        "structure_id": structure_id,
+        "structure_modality": parsed["structure_modality"],
+        "text": (
+            f"{structure_id} {parsed['structure_modality']} real coordinate structure; "
+            f"components {json.dumps(parsed['modality_counts'], sort_keys=True)}; "
+            f"coordinate residues/atoms {parsed['coordinate_residue_count']}."
+        ),
+        "graph_json": json.dumps(graph, ensure_ascii=True, sort_keys=True),
+        "forest_json": json.dumps(forest, ensure_ascii=True, sort_keys=True),
+        "metadata_json": json.dumps(metadata, ensure_ascii=True, sort_keys=True),
+        "structure_coordinates": parsed["structure_coordinates"],
+        "coordinate_mask": parsed["coordinate_mask"],
+        "residue_names": parsed["residue_names"],
+        "residue_indices": parsed["residue_indices"],
+        "chain_ids": parsed["chain_ids"],
+        "atom_modalities": parsed["atom_modalities"],
+        "b_factors": parsed["b_factors"],
+        "structure_source": "PDB",
+        "structure_file": str(path),
+        "coordinate_residue_count": parsed["coordinate_residue_count"],
+        "source_residue_count": parsed["source_residue_count"],
+        "coordinate_truncated": parsed["coordinate_truncated"],
+        "split_cluster": stable_hash(structure_id, 12),
+    }
+    split = split_for_id(structure_id)
+    writer.add(row, split)
+    accepted += 1
+    modality_counts[parsed["structure_modality"]] = modality_counts.get(parsed["structure_modality"], 0) + 1
+    print(f"accepted {accepted:07d}: {structure_id} modality={parsed['structure_modality']}", flush=True)
+    return accepted
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--local-structure-glob", action="append", default=[])
     parser.add_argument("--rcsb-ids", type=Path, default=None, help="optional file with PDB IDs to download as mmCIF")
     parser.add_argument("--rcsb-query-modality", action="append", default=[], help="query RCSB by modality: protein, rna, dna, protein_rna, protein_dna, nucleic_acid, complex, ligand")
-    parser.add_argument("--rcsb-query-limit", type=int, default=256, help="maximum RCSB IDs to request per modality")
+    parser.add_argument("--rcsb-query-limit", type=int, default=256, help="maximum RCSB IDs to request per modality; <=0 means all available")
+    parser.add_argument("--rcsb-query-page-size", type=int, default=1000, help="RCSB search pagination size")
     parser.add_argument("--out-dir", type=Path, default=Path("data/uniprot_fot/structures/pdb_modal"))
     parser.add_argument("--prefix", default="toricblm_pdb_modal_structure_fot")
     parser.add_argument("--max-records", type=int, default=0)
@@ -396,74 +498,85 @@ def main() -> None:
     parser.add_argument("--shard-size", type=int, default=2048)
     parser.add_argument("--include-ligands", action="store_true")
     parser.add_argument("--download-timeout", type=int, default=60)
+    parser.add_argument("--min-free-gb", type=float, default=0.0)
     parser.add_argument("--remove-downloaded-cache", action="store_true")
+    parser.add_argument("--resume", action="store_true", help="skip PDB IDs already present in output shards and continue shard numbering")
     args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     paths = iter_input_paths(args)
-    if not paths:
-        raise SystemExit("No input structures found. Provide --local-structure-glob or --rcsb-ids.")
-    writer = SplitShardWriter(args.out_dir, shard_size=args.shard_size, prefix=args.prefix)
-    skipped: dict[str, int] = {}
+    if not paths and not args.rcsb_ids and not args.rcsb_query_modality:
+        raise SystemExit("No input structures found. Provide --local-structure-glob, --rcsb-ids, or --rcsb-query-modality.")
+    seen_structures = existing_structure_ids(args.out_dir, args.prefix) if args.resume else set()
+    writer = SplitShardWriter(args.out_dir, shard_size=args.shard_size, prefix=args.prefix, resume=args.resume)
+    skipped: dict[str, int] = {"already_curated": len(seen_structures)} if seen_structures else {}
     accepted = 0
     modality_counts: dict[str, int] = {}
     for path in paths:
         if args.max_records > 0 and accepted >= args.max_records:
             break
-        try:
-            parsed = parse_structure(path, max_atoms=args.max_atoms, include_ligands=args.include_ligands)
-        except Exception as exc:
-            key = f"parse_error:{type(exc).__name__}"
-            skipped[key] = skipped.get(key, 0) + 1
+        if path.stem.lower() in seen_structures:
             continue
-        if parsed is None:
-            skipped["no_coordinate_rows"] = skipped.get("no_coordinate_rows", 0) + 1
+        if args.min_free_gb > 0 and free_gb(args.out_dir) < args.min_free_gb:
+            skipped["disk_guard_free_gb_below_minimum"] = skipped.get("disk_guard_free_gb_below_minimum", 0) + 1
+            break
+        accepted = process_structure_path(
+            path,
+            writer=writer,
+            max_atoms=args.max_atoms,
+            include_ligands=args.include_ligands,
+            accepted=accepted,
+            skipped=skipped,
+            modality_counts=modality_counts,
+            max_records=args.max_records,
+        )
+    cache = args.out_dir / "rcsb_tmp_mmcif"
+    cache.mkdir(parents=True, exist_ok=True)
+    id_sources: list[str] = []
+    if args.rcsb_ids:
+        id_sources.extend(iter_pdb_ids(args.rcsb_ids))
+    if args.rcsb_query_modality:
+        queried_ids = query_rcsb_ids(
+            args.rcsb_query_modality,
+            limit_per_modality=args.rcsb_query_limit,
+            page_size=args.rcsb_query_page_size,
+            timeout=args.download_timeout,
+        )
+        ids_path = args.out_dir / "rcsb_query_ids.json"
+        ids_path.write_text(
+            json.dumps({"modalities": args.rcsb_query_modality, "ids": queried_ids}, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        id_sources.extend(queried_ids)
+    seen_ids: set[str] = set()
+    for pdb_id in id_sources:
+        if args.max_records > 0 and len(seen_structures) >= args.max_records:
+            break
+        pdb_id = pdb_id.strip().lower()
+        if not pdb_id or pdb_id in seen_ids:
             continue
-        structure_id = path.stem
-        record_id = f"pdb_modal_structure_{structure_id}_{stable_hash(str(path))}"
-        graph = graph_for_record(record_id, structure_id, parsed, str(path))
-        forest = forest_for_record(record_id, parsed)
-        metadata = {
-            "source": "PDB/mmCIF",
-            "source_path": str(path),
-            "structure_modality": parsed["structure_modality"],
-            "modality_counts": parsed["modality_counts"],
-            "coordinate_residue_count": parsed["coordinate_residue_count"],
-            "source_residue_count": parsed["source_residue_count"],
-            "coordinate_truncated": parsed["coordinate_truncated"],
-        }
-        row = {
-            "record_id": record_id,
-            "dataset": "toricblm_pdb_modal_structure_fot",
-            "task_family": f"{parsed['structure_modality']}_coordinate_training",
-            "structure_id": structure_id,
-            "structure_modality": parsed["structure_modality"],
-            "text": (
-                f"{structure_id} {parsed['structure_modality']} real coordinate structure; "
-                f"components {json.dumps(parsed['modality_counts'], sort_keys=True)}; "
-                f"coordinate residues/atoms {parsed['coordinate_residue_count']}."
-            ),
-            "graph_json": json.dumps(graph, ensure_ascii=True, sort_keys=True),
-            "forest_json": json.dumps(forest, ensure_ascii=True, sort_keys=True),
-            "metadata_json": json.dumps(metadata, ensure_ascii=True, sort_keys=True),
-            "structure_coordinates": parsed["structure_coordinates"],
-            "coordinate_mask": parsed["coordinate_mask"],
-            "residue_names": parsed["residue_names"],
-            "residue_indices": parsed["residue_indices"],
-            "chain_ids": parsed["chain_ids"],
-            "atom_modalities": parsed["atom_modalities"],
-            "b_factors": parsed["b_factors"],
-            "structure_source": "PDB",
-            "structure_file": str(path),
-            "coordinate_residue_count": parsed["coordinate_residue_count"],
-            "source_residue_count": parsed["source_residue_count"],
-            "coordinate_truncated": parsed["coordinate_truncated"],
-            "split_cluster": stable_hash(structure_id, 12),
-        }
-        split = split_for_id(structure_id)
-        writer.add(row, split)
-        accepted += 1
-        modality_counts[parsed["structure_modality"]] = modality_counts.get(parsed["structure_modality"], 0) + 1
-        print(f"accepted {accepted:07d}: {structure_id} modality={parsed['structure_modality']}", flush=True)
+        seen_ids.add(pdb_id)
+        if pdb_id in seen_structures:
+            continue
+        if args.min_free_gb > 0 and free_gb(args.out_dir) < args.min_free_gb:
+            skipped["disk_guard_free_gb_below_minimum"] = skipped.get("disk_guard_free_gb_below_minimum", 0) + 1
+            break
+        path = cache / f"{pdb_id}.cif"
+        if not path.exists() and not download_rcsb_cif(pdb_id, path, timeout=args.download_timeout):
+            skipped["download_unavailable"] = skipped.get("download_unavailable", 0) + 1
+            continue
+        accepted = process_structure_path(
+            path,
+            writer=writer,
+            max_atoms=args.max_atoms,
+            include_ligands=args.include_ligands,
+            accepted=accepted,
+            skipped=skipped,
+            modality_counts=modality_counts,
+            max_records=args.max_records,
+        )
+        seen_structures.add(pdb_id)
+        if args.remove_downloaded_cache:
+            path.unlink(missing_ok=True)
     report = writer.close()
     manifest = {
         "schema": "toricblm.pdb_modal_structure_fot.v1",

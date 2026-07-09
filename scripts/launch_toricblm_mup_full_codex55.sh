@@ -42,7 +42,7 @@ echo "late_graph_train_glob: ${LATE_GRAPH_TRAIN_GLOB:-unset}"
 echo "mup_base_shapes: ${MUP_BASE_SHAPES:-unset}"
 
 if [[ "${TORICBLM_REQUIRE_SPLIT_SAFE_BIO:-0}" == "1" ]]; then
-  if [[ "${GRAPH_TRAIN_GLOB:-}" == *"/raw_hf_bio_scale/"* || "${LONG_ENTRY_TRAIN_GLOB:-}" == *"/raw_hf_bio_scale/"* ]]; then
+  if [[ "${TORICBLM_ALLOW_TRAIN_ONLY_RAW_SEQUENCE:-0}" != "1" && ( "${GRAPH_TRAIN_GLOB:-}" == *"/raw_hf_bio_scale/"* || "${LONG_ENTRY_TRAIN_GLOB:-}" == *"/raw_hf_bio_scale/"* ) ]]; then
     echo "TORICBLM_REQUIRE_SPLIT_SAFE_BIO=1 but a raw_hf_bio_scale path is still in GRAPH_TRAIN_GLOB or LONG_ENTRY_TRAIN_GLOB" >&2
     exit 1
   fi
@@ -74,7 +74,7 @@ fi
 if [[ "${TORICBLM_REQUIRE_FOT_FORMAT:-0}" == "1" ]]; then
   FOT_COLUMNS="${TORICBLM_FOT_REQUIRED_COLUMNS:-graph_json,forest_json,thought_forest_json,convextok_dag_json,training_views_json}"
   FOT_SAMPLE_LIMIT="${TORICBLM_FOT_PREFLIGHT_SAMPLE_FILES:-32}"
-  "$TOKENGT_PY" - "$GRAPH_TRAIN_GLOB" "$FOT_COLUMNS" "$FOT_SAMPLE_LIMIT" <<'PY'
+  "$TOKENGT_PY" - "$GRAPH_TRAIN_GLOB" "$FOT_COLUMNS" "$FOT_SAMPLE_LIMIT" "${RAW_BIO_SCALE_INPUT_ROOT:-}" "${TORICBLM_ALLOW_TRAIN_ONLY_RAW_SEQUENCE:-0}" <<'PY'
 import glob
 import json
 import sys
@@ -85,6 +85,8 @@ import pyarrow.parquet as pq
 patterns = [item for item in sys.argv[1].split(",") if item]
 required = [item for item in sys.argv[2].split(",") if item]
 limit = int(sys.argv[3])
+raw_root = sys.argv[4]
+allow_raw = sys.argv[5] == "1"
 files = []
 for pattern in patterns:
     files.extend(sorted(glob.glob(pattern)))
@@ -92,10 +94,14 @@ files = [Path(path) for path in files]
 if not files:
     raise SystemExit("TORICBLM_REQUIRE_FOT_FORMAT=1 but GRAPH_TRAIN_GLOB matched no Parquet files")
 checked = 0
+raw_skipped = 0
 errors = []
 for path in files:
     if checked >= limit:
         break
+    if allow_raw and raw_root and raw_root in str(path):
+        raw_skipped += 1
+        continue
     try:
         pf = pq.ParquetFile(path)
         names = set(pf.schema_arrow.names)
@@ -125,7 +131,7 @@ for path in files:
         errors.append({"path": str(path), "error": f"{type(exc).__name__}: {exc}"})
 if errors:
     raise SystemExit("FoT format preflight failed: " + json.dumps(errors[:16], sort_keys=True))
-print("fot_format_preflight:passed", json.dumps({"checked_files": checked, "matched_files": len(files), "required_columns": required}, sort_keys=True))
+print("fot_format_preflight:passed", json.dumps({"checked_files": checked, "matched_files": len(files), "raw_train_only_skipped_files": raw_skipped, "required_columns": required}, sort_keys=True))
 PY
 fi
 
@@ -148,6 +154,16 @@ if [[ "${TORICBLM_PREFLIGHT_READY_CHECK:-0}" == "1" ]]; then
   for modality in "${REQUIRED_MODALITIES[@]}"; do
     [[ -n "$modality" ]] && PREFLIGHT_CMD+=("--require" "$modality")
   done
+  if [[ -n "${TORICBLM_MIN_STRUCTURE_COORDINATE_ROWS:-}" && "${TORICBLM_MIN_STRUCTURE_COORDINATE_ROWS:-0}" != "0" ]]; then
+    PREFLIGHT_CMD+=("--min-coordinate-rows" "$TORICBLM_MIN_STRUCTURE_COORDINATE_ROWS")
+  fi
+  IFS=',' read -r -a MIN_MODALITY_COUNTS <<< "${TORICBLM_MIN_STRUCTURE_MODALITY_COUNTS:-}"
+  for item in "${MIN_MODALITY_COUNTS[@]}"; do
+    [[ -n "$item" ]] && PREFLIGHT_CMD+=("--min-count" "$item")
+  done
+  if [[ "${TORICBLM_ALLOW_STRUCTURE_TARGET_SHORTFALL:-0}" == "1" ]]; then
+    PREFLIGHT_CMD+=("--allow-shortfall")
+  fi
   echo "running ToricBLM structure readiness preflight"
   printf 'preflight_command:'
   printf ' %q' "${PREFLIGHT_CMD[@]}"
