@@ -30,7 +30,8 @@ TARGET_VRAM_GB="${CURRICULUM_TARGET_VRAM_GB:-20}"
 SAMPLE_FILES="${CURRICULUM_TOKEN_SAMPLE_FILES:-48}"
 ROWS_PER_SAMPLE_FILE="${CURRICULUM_ROWS_PER_SAMPLE_FILE:-8}"
 MAX_SELECTED_ROWS="${CURRICULUM_MAX_SELECTED_ROWS:-5000000}"
-MODALITY_ROW_CAPS="${CURRICULUM_MODALITY_ROW_CAPS:-small_molecule_3d=250000}"
+MODALITY_ROW_CAPS="${CURRICULUM_MODALITY_ROW_CAPS:-small_molecule_3d=250000;rna_sequence_or_structure=250000;dna_sequence_or_structure=250000}"
+COMPANION_ENTRY_PATTERNS="${CURRICULUM_COMPANION_ENTRY_PATTERN:-$ROOT/data/toricblm_nonprotein_fot_splits/v2_parallel/dna/train/*.parquet;$ROOT/data/toricblm_nonprotein_fot_splits/v2_parallel/rna/train/*.parquet}"
 MAX_EPOCH_STEPS_STRUCTURE_CURRENT="${CURRICULUM_MAX_EPOCH_STEPS_STRUCTURE_CURRENT:-2000}"
 MAX_EPOCH_STEPS_STRUCTURE_DELTA="${CURRICULUM_MAX_EPOCH_STEPS_STRUCTURE_DELTA:-750}"
 MAX_EPOCH_STEPS_ALL_ENTRIES="${CURRICULUM_MAX_EPOCH_STEPS_ALL_ENTRIES:-2000}"
@@ -126,6 +127,12 @@ run_epoch() {
     IFS=';' read -r -a extra_all_patterns <<< "$CURRICULUM_EXTRA_ALL_PATTERN"
     for pattern in "${extra_all_patterns[@]}"; do
       [[ -n "$pattern" ]] && build_cmd+=(--extra-all-pattern "$pattern")
+    done
+  fi
+  if [[ -n "$COMPANION_ENTRY_PATTERNS" ]]; then
+    IFS=';' read -r -a companion_patterns <<< "$COMPANION_ENTRY_PATTERNS"
+    for pattern in "${companion_patterns[@]}"; do
+      [[ -n "$pattern" ]] && build_cmd+=(--companion-entry-pattern "$pattern")
     done
   fi
 

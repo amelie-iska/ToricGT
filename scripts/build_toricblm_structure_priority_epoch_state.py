@@ -7,8 +7,10 @@ actual graphified ConvexTok token lengths, and emits epoch-specific file lists
 plus safe batch/context settings.
 
 Epoch modes:
-  * structure_current: all currently available coordinate-bearing files.
-  * structure_delta: coordinate-bearing files not present in a previous snapshot.
+  * structure_current: all currently available coordinate-bearing files, plus
+    optional graph/FoT companion files such as RNA and DNA sequence records.
+  * structure_delta: coordinate-bearing files not present in a previous
+    snapshot, plus optional graph/FoT companion files.
   * all_entries: every graphifiable train file, with structures still routed to
     the structure-flow stream.
 """
@@ -74,6 +76,11 @@ ALL_ENTRY_PATTERNS = [
     "data/toricblm_nonprotein_fot_splits/v2_parallel/small_molecule/train/*.parquet",
     "data/toricblm_late_mixed_fot_structure/train/*.parquet",
     "/home/iska/Documents/amelie/bio/iska-net/data/raw_hf_bio_scale/*/default/train/*.parquet",
+]
+
+COMPANION_ENTRY_PATTERNS = [
+    "data/toricblm_nonprotein_fot_splits/v2_parallel/dna/train/*.parquet",
+    "data/toricblm_nonprotein_fot_splits/v2_parallel/rna/train/*.parquet",
 ]
 
 
@@ -447,6 +454,17 @@ def main() -> None:
     parser.add_argument("--extra-structure-pattern", action="append", default=[])
     parser.add_argument("--extra-all-pattern", action="append", default=[])
     parser.add_argument(
+        "--companion-entry-pattern",
+        action="append",
+        default=[],
+        help=(
+            "Graph/FoT files to include in structure_current and structure_delta epochs without "
+            "routing them to the coordinate structure-flow stream. This is intended for RNA/DNA "
+            "sequence records and other non-coordinate modalities that should be represented "
+            "beside protein and small-molecule structure rows."
+        ),
+    )
+    parser.add_argument(
         "--modality-row-cap",
         action="append",
         default=[],
@@ -471,9 +489,13 @@ def main() -> None:
 
     structure_patterns = [str(ROOT / pattern) if not pattern.startswith("/") else pattern for pattern in STRUCTURE_PATTERNS]
     all_patterns = [str(ROOT / pattern) if not pattern.startswith("/") else pattern for pattern in ALL_ENTRY_PATTERNS]
+    companion_patterns = [
+        str(ROOT / pattern) if not pattern.startswith("/") else pattern for pattern in COMPANION_ENTRY_PATTERNS
+    ]
     structure_patterns.extend(args.extra_structure_pattern)
     all_patterns.extend(args.extra_all_pattern)
     all_patterns.extend(structure_patterns)
+    companion_patterns.extend(args.companion_entry_pattern)
 
     structure_infos = [
         info for path in expand_many(structure_patterns) if (info := file_info(path)) and info.get("readable")
@@ -497,6 +519,20 @@ def main() -> None:
             for info in all_infos
             if info.get("graphifiable") and info.get("rows", 0) > 0
         }
+        selected_files = [info for _, info in sorted(selected_by_path.items())]
+
+    if args.mode in {"structure_current", "structure_delta"} and companion_patterns:
+        companion_infos = [
+            info
+            for path in expand_many(companion_patterns)
+            if (info := file_info(path))
+            and info.get("readable")
+            and info.get("graphifiable")
+            and info.get("rows", 0) > 0
+        ]
+        selected_by_path = {str(Path(info["path"]).resolve()): info for info in selected_files}
+        for info in companion_infos:
+            selected_by_path.setdefault(str(Path(info["path"]).resolve()), info)
         selected_files = [info for _, info in sorted(selected_by_path.items())]
 
     modality_row_caps = parse_row_caps(args.modality_row_cap)
@@ -622,6 +658,7 @@ def main() -> None:
         "selected_files_preview": selected_files[:64],
         "structure_patterns": structure_patterns,
         "all_entry_patterns": all_patterns,
+        "companion_entry_patterns": companion_patterns,
         "multimodal_pairing_contract": (
             "Coordinate-bearing Parquet rows remain in GRAPH_TRAIN_GLOB and LONG_ENTRY_TRAIN_GLOB "
             "for structure-priority epochs, so coordinates are trained together with graph_json, "
