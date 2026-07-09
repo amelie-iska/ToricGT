@@ -21,6 +21,7 @@ RUN_PROTREK_SPLIT="${RUN_PROTREK_SPLIT:-1}"
 RUN_HF_UPLOAD="${RUN_HF_UPLOAD:-1}"
 RUN_HF_UPLOAD_IF_NOT_READY="${RUN_HF_UPLOAD_IF_NOT_READY:-0}"
 RUN_TRAIN_IF_READY="${RUN_TRAIN_IF_READY:-1}"
+TRAINING_SESSION="${TRAINING_SESSION:-toricblm_structure_training_$(date -u +%Y%m%dT%H%M%SZ)}"
 TARGET_TOTAL_COORDINATE_ROWS="${TARGET_TOTAL_COORDINATE_ROWS:-10000000}"
 TARGET_PROTEIN_STRUCTURES="${TARGET_PROTEIN_STRUCTURES:-5000000}"
 TARGET_SMALL_MOLECULE_STRUCTURES="${TARGET_SMALL_MOLECULE_STRUCTURES:-5000000}"
@@ -108,20 +109,21 @@ WATCH_LOG="${WATCH_LOG:-logs/structure_curation_postprocess_$(date -u +%Y%m%dT%H
     echo "[watcher] protrek_split_done report=$PROTREK_REPORT"
   fi
 
+  if [[ "$RUN_TRAIN_IF_READY" == "1" && "$READY_STATUS" == "0" ]]; then
+    echo "[watcher] strict readiness passed; launching structure training session=$TRAINING_SESSION"
+    export PROTREK_STRUCTURE_TRAIN_GLOB="$PROTREK_SPLIT_DIR/train/*.parquet"
+    echo "$TRAINING_SESSION" > logs/active_toricblm_training_session.txt
+    tmux new-session -d -s "$TRAINING_SESSION" "cd '$ROOT' && PROTREK_STRUCTURE_TRAIN_GLOB='$PROTREK_STRUCTURE_TRAIN_GLOB' CONFIG_PATH='$ROOT/configs/toricblm_mup_170m_convextok8192_biomed_fot_structure.env' bash scripts/launch_toricblm_mup_full_convextok8192_biomed.sh"
+    echo "[watcher] training_launch_done session=$TRAINING_SESSION"
+  else
+    echo "[watcher] training not launched; strict readiness did not pass or RUN_TRAIN_IF_READY=0"
+  fi
+
   if [[ "$RUN_HF_UPLOAD" == "1" && ( "$READY_STATUS" == "0" || "$RUN_HF_UPLOAD_IF_NOT_READY" == "1" ) ]]; then
     REPO_ID="${REPO_ID:-AmelieSchreiber/toricblm_fot}" NUM_WORKERS="${HF_UPLOAD_WORKERS:-8}" \
       bash scripts/upload_toricblm_fot_dataset_to_hf.sh
     echo "[watcher] hf_upload_done repo=${REPO_ID:-AmelieSchreiber/toricblm_fot}"
   elif [[ "$RUN_HF_UPLOAD" == "1" ]]; then
     echo "[watcher] hf_upload_not_launched; strict readiness failed and RUN_HF_UPLOAD_IF_NOT_READY=0"
-  fi
-
-  if [[ "$RUN_TRAIN_IF_READY" == "1" && "$READY_STATUS" == "0" ]]; then
-    echo "[watcher] strict readiness passed; launching structure training"
-    export PROTREK_STRUCTURE_TRAIN_GLOB="$PROTREK_SPLIT_DIR/train/*.parquet"
-    CONFIG_PATH="$ROOT/configs/toricblm_mup_170m_convextok8192_biomed_fot_structure.env" \
-      bash scripts/launch_toricblm_mup_full_convextok8192_biomed.sh
-  else
-    echo "[watcher] training not launched; strict readiness did not pass or RUN_TRAIN_IF_READY=0"
   fi
 } 2>&1 | tee "$WATCH_LOG"
