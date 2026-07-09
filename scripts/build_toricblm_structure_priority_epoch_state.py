@@ -190,6 +190,89 @@ def prior_structure_paths(manifest_path: Path | None) -> set[str]:
     return paths
 
 
+def parse_row_caps(values: list[str]) -> dict[str, int]:
+    caps: dict[str, int] = {}
+    for raw in values:
+        for piece in re.split(r"[,;]", raw):
+            piece = piece.strip()
+            if not piece:
+                continue
+            if "=" not in piece:
+                raise ValueError(f"row cap must be modality=rows, got {piece!r}")
+            key, value = piece.split("=", 1)
+            key = key.strip()
+            try:
+                cap = int(value.replace("_", "").strip())
+            except ValueError as exc:
+                raise ValueError(f"invalid row cap for {key!r}: {value!r}") from exc
+            if cap < 0:
+                raise ValueError(f"row cap must be nonnegative for {key!r}: {cap}")
+            caps[key] = cap
+    return caps
+
+
+def apply_row_budgets(
+    files: list[dict[str, Any]],
+    *,
+    modality_row_caps: dict[str, int],
+    max_total_rows: int | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Select whole Parquet shards under modality and total row budgets.
+
+    The selection is deterministic and keeps non-capped modalities first so
+    explicit caps, e.g. small_molecule_3d=250000, reduce overrepresented
+    modalities without accidentally dropping protein/PDB structure shards.
+    """
+
+    if not modality_row_caps and (max_total_rows is None or max_total_rows <= 0):
+        return files, {
+            "enabled": False,
+            "modality_row_caps": {},
+            "max_total_rows": max_total_rows,
+            "dropped_file_count": 0,
+            "dropped_rows_by_modality": {},
+        }
+
+    selected: list[dict[str, Any]] = []
+    rows_by_modality: Counter[str] = Counter()
+    dropped_rows_by_modality: Counter[str] = Counter()
+    dropped_files_by_modality: Counter[str] = Counter()
+    total_rows = 0
+    max_total = int(max_total_rows) if max_total_rows and max_total_rows > 0 else None
+
+    def priority(info: dict[str, Any]) -> tuple[int, str, str]:
+        modality = str(info.get("modality", "unknown"))
+        capped = modality in modality_row_caps
+        # Keep all uncapped modalities first; capped modalities fill after them.
+        return (1 if capped else 0, modality, str(info.get("path", "")))
+
+    for info in sorted(files, key=priority):
+        modality = str(info.get("modality", "unknown"))
+        rows = int(info.get("rows", 0))
+        cap = modality_row_caps.get(modality)
+        if cap is not None and rows_by_modality[modality] + rows > cap:
+            dropped_rows_by_modality[modality] += rows
+            dropped_files_by_modality[modality] += 1
+            continue
+        if max_total is not None and total_rows + rows > max_total:
+            dropped_rows_by_modality[modality] += rows
+            dropped_files_by_modality[modality] += 1
+            continue
+        selected.append(info)
+        rows_by_modality[modality] += rows
+        total_rows += rows
+
+    return selected, {
+        "enabled": True,
+        "modality_row_caps": dict(sorted(modality_row_caps.items())),
+        "max_total_rows": max_total,
+        "selected_rows_by_modality": dict(sorted(rows_by_modality.items())),
+        "dropped_rows_by_modality": dict(sorted(dropped_rows_by_modality.items())),
+        "dropped_files_by_modality": dict(sorted(dropped_files_by_modality.items())),
+        "dropped_file_count": int(sum(dropped_files_by_modality.values())),
+    }
+
+
 def write_filelist(path: Path, files: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -296,7 +379,7 @@ def choose_batch_settings(stats: dict[str, Any], *, target_vram_gb: float) -> di
         graph_lm_batch_size = max(2, graph_lm_batch_size // 2)
         structure_batch_size = max(4, structure_batch_size // 2)
 
-    full_context_seq_len = min(16384, max(8192, round_up(min(p95, 16384), 1024)))
+    full_context_seq_len = min(8192, max(4096, round_up(min(p95, 8192), 1024)))
     train_batch_tokens = 786432 if target_vram_gb >= 20 else 589824
     return {
         "train_batch_tokens": int(train_batch_tokens),
@@ -308,7 +391,7 @@ def choose_batch_settings(stats: dict[str, Any], *, target_vram_gb: float) -> di
         "long_entry_max_tokens": int(long_entry_max_tokens),
         "long_entry_max_segments": 0,
         "long_entry_segment_checkpoint": 1,
-        "long_entry_full_context_every": 16,
+        "long_entry_full_context_every": 64,
         "long_entry_full_context_seq_len": int(full_context_seq_len),
         "long_entry_full_context_min_tokens": 2048,
         "toricblm_structure_batch_size": int(structure_batch_size),
@@ -331,6 +414,7 @@ def coverage_steps(
     structure_rows: int,
     settings: dict[str, Any],
     min_steps: int,
+    max_steps: int | None,
 ) -> int:
     long_bs = max(1, int(settings["long_entry_batch_size"]))
     structure_bs = max(1, int(settings["toricblm_structure_batch_size"]))
@@ -343,7 +427,10 @@ def coverage_steps(
         # Epoch 3 trains every entry as full rows and still continues structure
         # flow over the currently available structure subset.
         steps = max(steps, math.ceil(structure_rows / structure_bs))
-    return max(int(min_steps), int(steps))
+    computed = max(int(min_steps), int(steps))
+    if max_steps is not None and max_steps > 0:
+        computed = min(computed, int(max_steps))
+    return computed
 
 
 def main() -> None:
@@ -359,6 +446,24 @@ def main() -> None:
     parser.add_argument("--min-steps", type=int, default=1)
     parser.add_argument("--extra-structure-pattern", action="append", default=[])
     parser.add_argument("--extra-all-pattern", action="append", default=[])
+    parser.add_argument(
+        "--modality-row-cap",
+        action="append",
+        default=[],
+        help="Whole-shard cap in the form modality=rows, e.g. small_molecule_3d=250000.",
+    )
+    parser.add_argument(
+        "--max-selected-rows",
+        type=int,
+        default=0,
+        help="Whole-shard total row cap after modality priority selection; 0 disables.",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=0,
+        help="Hard cap on optimizer steps for this epoch state; 0 disables.",
+    )
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -394,6 +499,23 @@ def main() -> None:
         }
         selected_files = [info for _, info in sorted(selected_by_path.items())]
 
+    modality_row_caps = parse_row_caps(args.modality_row_cap)
+    max_selected_rows = int(args.max_selected_rows) if int(args.max_selected_rows) > 0 else None
+    selected_files, graph_budget_report = apply_row_budgets(
+        selected_files,
+        modality_row_caps=modality_row_caps,
+        max_total_rows=max_selected_rows,
+    )
+    selected_file_paths = {str(Path(info["path"]).resolve()) for info in selected_files}
+    selected_structure = [
+        info for info in selected_structure if str(Path(info["path"]).resolve()) in selected_file_paths
+    ]
+    selected_structure, structure_budget_report = apply_row_budgets(
+        selected_structure,
+        modality_row_caps=modality_row_caps,
+        max_total_rows=max_selected_rows,
+    )
+
     selected_rows = int(sum(int(info.get("rows", 0)) for info in selected_files))
     structure_rows = int(sum(int(info.get("rows", 0)) for info in selected_structure))
     selected_modalities = Counter(str(info.get("modality", "unknown")) for info in selected_files)
@@ -414,6 +536,15 @@ def main() -> None:
         structure_rows=structure_rows,
         settings=settings,
         min_steps=int(args.min_steps) if selected_rows > 0 else 0,
+        max_steps=int(args.max_steps) if int(args.max_steps) > 0 else None,
+    )
+    uncapped_steps = coverage_steps(
+        mode=args.mode,
+        selected_rows=selected_rows,
+        structure_rows=structure_rows,
+        settings=settings,
+        min_steps=int(args.min_steps) if selected_rows > 0 else 0,
+        max_steps=None,
     )
 
     selected_filelist = args.output_dir / "selected_graph_and_long_entry_files.txt"
@@ -470,14 +601,20 @@ def main() -> None:
         "structure_file_count_available_for_structure_flow": len(selected_structure),
         "previous_structure_manifest": str(args.previous_structure_manifest) if args.previous_structure_manifest else None,
         "coverage_steps": steps,
+        "uncapped_coverage_steps": uncapped_steps,
         "coverage_policy": (
             "steps are ceil(row_count / batch_size) for full-row long-entry training, "
-            "with structure-flow rows also covered for coordinate-bearing entries"
+            "with structure-flow rows also covered for coordinate-bearing entries, "
+            "then optionally capped by --max-steps for wall-clock bounded curricula"
         ),
         "selected_rows_by_modality": dict(sorted(selected_rows_by_modality.items())),
         "selected_file_count_by_modality": dict(sorted(selected_modalities.items())),
         "token_stats": token_stats,
         "batch_settings": settings,
+        "row_budget": {
+            "graph_and_long_entry": graph_budget_report,
+            "structure_flow": structure_budget_report,
+        },
         "selected_filelist": str(selected_filelist),
         "structure_filelist": str(structure_filelist),
         "env_overrides": str(env_path),

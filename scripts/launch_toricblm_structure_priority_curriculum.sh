@@ -29,8 +29,13 @@ TOKENIZER_PATH="${TOKENIZER_PATH:?TOKENIZER_PATH must be set by the base config}
 TARGET_VRAM_GB="${CURRICULUM_TARGET_VRAM_GB:-20}"
 SAMPLE_FILES="${CURRICULUM_TOKEN_SAMPLE_FILES:-48}"
 ROWS_PER_SAMPLE_FILE="${CURRICULUM_ROWS_PER_SAMPLE_FILE:-8}"
-VAL_LOSS_EVERY="${CURRICULUM_VAL_LOSS_EVERY:-50000}"
-TRAIN_LOG_EVERY="${CURRICULUM_TRAIN_LOG_EVERY:-100}"
+MAX_SELECTED_ROWS="${CURRICULUM_MAX_SELECTED_ROWS:-5000000}"
+MODALITY_ROW_CAPS="${CURRICULUM_MODALITY_ROW_CAPS:-small_molecule_3d=250000}"
+MAX_EPOCH_STEPS_STRUCTURE_CURRENT="${CURRICULUM_MAX_EPOCH_STEPS_STRUCTURE_CURRENT:-2500}"
+MAX_EPOCH_STEPS_STRUCTURE_DELTA="${CURRICULUM_MAX_EPOCH_STEPS_STRUCTURE_DELTA:-1000}"
+MAX_EPOCH_STEPS_ALL_ENTRIES="${CURRICULUM_MAX_EPOCH_STEPS_ALL_ENTRIES:-2500}"
+VAL_LOSS_EVERY="${CURRICULUM_VAL_LOSS_EVERY:-500}"
+TRAIN_LOG_EVERY="${CURRICULUM_TRAIN_LOG_EVERY:-10}"
 WARMUP_STEPS="${CURRICULUM_WARMUP_STEPS:-20}"
 WARMDOWN_ITERS="${CURRICULUM_WARMDOWN_ITERS:-0}"
 EVAL_INITIAL="${CURRICULUM_EVAL_INITIAL:-0}"
@@ -90,6 +95,24 @@ run_epoch() {
     --rows-per-sample-file "$ROWS_PER_SAMPLE_FILE"
     --target-vram-gb "$TARGET_VRAM_GB"
   )
+  local max_epoch_steps=""
+  case "$mode" in
+    structure_current) max_epoch_steps="$MAX_EPOCH_STEPS_STRUCTURE_CURRENT" ;;
+    structure_delta) max_epoch_steps="$MAX_EPOCH_STEPS_STRUCTURE_DELTA" ;;
+    all_entries) max_epoch_steps="$MAX_EPOCH_STEPS_ALL_ENTRIES" ;;
+  esac
+  if [[ -n "$max_epoch_steps" && "$max_epoch_steps" != "0" ]]; then
+    build_cmd+=(--max-steps "$max_epoch_steps")
+  fi
+  if [[ -n "$MAX_SELECTED_ROWS" && "$MAX_SELECTED_ROWS" != "0" ]]; then
+    build_cmd+=(--max-selected-rows "$MAX_SELECTED_ROWS")
+  fi
+  if [[ -n "$MODALITY_ROW_CAPS" ]]; then
+    IFS=';' read -r -a row_caps <<< "$MODALITY_ROW_CAPS"
+    for cap in "${row_caps[@]}"; do
+      [[ -n "$cap" ]] && build_cmd+=(--modality-row-cap "$cap")
+    done
+  fi
   if [[ -n "$previous_manifest" ]]; then
     build_cmd+=(--previous-structure-manifest "$previous_manifest")
   fi
