@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+PY="${TORICBLM_TOKENGT_PYTHON:-/home/iska/miniconda3/envs/tokengt/bin/python}"
+if [[ ! -x "$PY" ]]; then
+  PY="${PYTHON:-python3}"
+fi
+
 if [[ $# -lt 7 ]]; then
   echo "Usage: $0 EPOCH_PADDED RUN_ID SPECIAL_CHECKPOINT MANIFEST_JSON EPOCH_RUN_DIR CHECKPOINT_DIR SUMMARY_TSV" >&2
   exit 2
@@ -28,7 +33,7 @@ fi
 
 if [[ -z "${HF_TOKEN:-}" && -f "$ROOT/keys.txt" ]]; then
   HF_TOKEN="$(
-    python - "$ROOT/keys.txt" <<'PY'
+    "$PY" - "$ROOT/keys.txt" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -85,11 +90,14 @@ cp "$MANIFEST_JSON" "$state_dir/available_shards.json"
 for cfg in "$EPOCH_RUN_DIR"/dynamic_epoch_*.env; do
   [[ -f "$cfg" ]] && cp "$cfg" "$state_dir/$(basename "$cfg")"
 done
+for cfg in "$EPOCH_RUN_DIR"/structure_priority_epoch_*.env "$EPOCH_RUN_DIR"/epoch_data_overrides.env; do
+  [[ -f "$cfg" ]] && cp "$cfg" "$state_dir/$(basename "$cfg")"
+done
 if [[ -f "$EPOCH_RUN_DIR/train.log" ]]; then
   tail -n 500 "$EPOCH_RUN_DIR/train.log" > "$state_dir/train_log_tail.txt"
 fi
 
-python - "$MANIFEST_JSON" "$RUN_ID" "$EPOCH_PADDED" "$SPECIAL_CHECKPOINT" "$HF_CHECKPOINT_REPO" > "$state_dir/README.md" <<'PY'
+"$PY" - "$MANIFEST_JSON" "$RUN_ID" "$EPOCH_PADDED" "$SPECIAL_CHECKPOINT" "$HF_CHECKPOINT_REPO" > "$state_dir/README.md" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -113,14 +121,21 @@ print("It intentionally stores manifests and audit records rather than duplicati
 print()
 print(f"- Special checkpoint: `{checkpoint}`")
 print(f"- Checkpoint repo: `{checkpoint_repo}`")
-print(f"- Live AFDB glob: `{manifest.get('live_afdb_glob')}`")
-print(f"- Live AFDB shards: `{manifest.get('live_afdb_shards')}`")
-print(f"- Live AFDB size: `{manifest.get('live_afdb_gb', 0):.3f} GB`")
+if manifest.get("schema") == "toricblm.structure_priority_curriculum_epoch_state.v1":
+    print(f"- Curriculum mode: `{manifest.get('mode')}`")
+    print(f"- Selected rows: `{manifest.get('selected_rows')}`")
+    print(f"- Selected files: `{manifest.get('selected_file_count')}`")
+    print(f"- Structure-flow rows: `{manifest.get('structure_rows_available_for_structure_flow')}`")
+    print(f"- Coverage steps: `{manifest.get('coverage_steps')}`")
+else:
+    print(f"- Live AFDB glob: `{manifest.get('live_afdb_glob')}`")
+    print(f"- Live AFDB shards: `{manifest.get('live_afdb_shards')}`")
+    print(f"- Live AFDB size: `{manifest.get('live_afdb_gb', 0):.3f} GB`")
 print()
 print("Files:")
-print("- `available_shards.json`: refreshed live-shard snapshot for this epoch")
+print("- `available_shards.json`: refreshed dataset-state snapshot for this epoch")
 print("- `training_corpus_audit.json`: sampled corpus audit produced before training")
-print("- `dynamic_epoch_*.env`: resolved epoch launch configuration")
+print("- `*_epoch_*.env` / `epoch_data_overrides.env`: resolved epoch launch configuration")
 print("- `dynamic_epoch_summary.tsv`: epoch handoff/checkpoint summary")
 print("- `train_log_tail.txt`: tail of the epoch training log")
 PY
