@@ -1,0 +1,13 @@
+{
+  "name": "forest_of_thought_ten_kras_g12d_binders",
+  "prompt": "You are ToricBLM running embedding-space Forest-of-Thought with GFlowNet-style branch scoring, analogical memory retrieval, and graph-in/graph-out decoding. Target: human KRAS G12D in its active-state switch-II-pocket context. Generate 10 de novo protein binders, each 60-140 residues, with diverse topologies and low pairwise sequence similarity. Use a forest with 6 parallel trees: (1) interface epitope decomposition, (2) scaffold and secondary-structure grammar, (3) hotspot residue placement, (4) negative design against HRAS/NRAS and wild-type KRAS where appropriate, (5) developability and solubility, and (6) structure-flow coordinate refinement. At each reasoning level, keep multiple branches, prune only with explicit evidence, and merge by consensus if the simplex-tree analogical map and vectorized persistence features agree. For every binder emit: compact graph JSON, sequence, predicted secondary structure, interface hotspot table, target pocket contacts, designed Kd target band, specificity rationale, aggregation/liability notes, and a structure-flow request for 24 denoising frames with multi-MODEL PDB export. Rank all 10 by a combined score using predicted interface complementarity, foldability, specificity, and uncertainty. Do not provide experimental protocols; this is computational design and triage only.",
+  "expected_output_modalities": [
+    "graph_json",
+    "forest_of_thought_trace",
+    "protein_binder_sequences",
+    "interface_hotspot_table",
+    "specificity_ranking",
+    "structure_flow_request",
+    "multimodel_pdb_frames_if_structure_head_enabled"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "forest_of_thought_three_enzyme_structure_design",
+  "prompt": "You are ToricBLM running graph-in/graph-out Forest-of-Thought design. Build a parallel forest with 5 trees: (1) catalytic mechanism, (2) fold and scaffold selection, (3) substrate access and dynamics, (4) negative-design and off-target risk, and (5) structure-flow coordinate refinement. Grow each tree for at least 6 reasoning levels, merge duplicate branches by analogical memory retrieval, and emit a consensus graph with token nodes, reaction nodes, residue-role nodes, structure-frame nodes, and verification nodes. Design three de novo enzymes with explicit sequence, active-site rationale, kinetic targets, and a requested structure-flow trajectory export. Enzyme A: PETase-like polyester hydrolase, 250-400 residues, alpha/beta hydrolase fold, Ser-His-Asp catalytic triad, oxyanion-hole residues, PET/MHET access tunnel, target pH 7.5-8.5, target temperature midpoint above 55 C, design target kcat 20-80 s^-1 on PET model oligomer and KM 20-200 uM for soluble analogs. Enzyme B: organophosphate hydrolase/lactonase with metal-coordination or nucleophile-assisted mechanism, 220-380 residues, target kcat 50-300 s^-1 on a non-toxic model phosphate ester and KM 10-100 uM, require specificity constraints and no broad toxicophore optimization. Enzyme C: transaminase or oxidoreductase for a benign chiral amine synthesis task, 250-450 residues, target kcat 5-60 s^-1, KM 25-250 uM, cofactor-binding geometry and stability constraints. For each enzyme: output (a) compact graph JSON, (b) amino-acid sequence with residue numbering, (c) catalytic motif table, (d) predicted fold class and structure-confidence notes, (e) structure-flow generation request with 32 denoising frames, multi-MODEL PDB export requested, and (f) a ranked verification checklist with foldability, catalytic geometry, substrate tunnel, solubility, aggregation, and off-target flags. Do not provide wet-lab protocol steps; keep this as computational design output.",
+  "expected_output_modalities": [
+    "graph_json",
+    "forest_of_thought_trace",
+    "protein_sequences",
+    "enzyme_kinetic_target_table",
+    "structure_flow_request",
+    "multimodel_pdb_frames_if_structure_head_enabled"
+  ]
+}
