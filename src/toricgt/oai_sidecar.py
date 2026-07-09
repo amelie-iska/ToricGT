@@ -28,6 +28,58 @@ from .toric_geometry_tasks import LowRankToricGeometryProbe, ToricGeometryConfig
 from .toric_vector_bundles import ToricVectorBundleConfig, ToricVectorBundleProbe
 
 
+def _expand_parquet_patterns(pattern: str, *, _seen_lists: set[str] | None = None) -> list[Path]:
+    """Expand comma/semicolon globs plus ``@filelist`` manifest references.
+
+    The dynamic ToricBLM curriculum snapshots exact Parquet file sets at epoch
+    boundaries so delta epochs can train only shards that arrived after the
+    prior refresh.  Environment variables cannot safely hold tens of thousands
+    of exact paths, so stream patterns may include entries like
+    ``@runs/.../epoch_002_structure_delta_files.txt``.  Each non-comment line in
+    that file is treated as either an exact path or a glob.
+    """
+
+    pieces = [piece.strip() for piece in re.split(r"[,;]", pattern or "") if piece.strip()]
+    files: list[Path] = []
+    seen: set[str] = set()
+    seen_lists = _seen_lists if _seen_lists is not None else set()
+
+    def add_path(path: Path) -> None:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            files.append(path)
+
+    for piece in pieces or ([pattern] if pattern else []):
+        if piece.startswith("@"):
+            list_path = Path(piece[1:]).expanduser()
+            list_key = str(list_path.resolve()) if list_path.exists() else str(list_path)
+            if list_key in seen_lists:
+                continue
+            seen_lists.add(list_key)
+            try:
+                lines = list_path.read_text(encoding="utf-8").splitlines()
+            except FileNotFoundError:
+                continue
+            nested_pattern = ",".join(
+                line.strip()
+                for line in lines
+                if line.strip() and not line.lstrip().startswith("#")
+            )
+            for path in _expand_parquet_patterns(nested_pattern, _seen_lists=seen_lists):
+                add_path(path)
+            continue
+        expanded = sorted(glob.glob(piece))
+        if expanded:
+            for item in expanded:
+                add_path(Path(item))
+        else:
+            path = Path(piece).expanduser()
+            if path.exists():
+                add_path(path)
+    return files
+
+
 class GraphParquetTokenStream:
     """Stream curated graph rows as tokenizer chunks for graph LM training.
 
@@ -119,17 +171,7 @@ class GraphParquetTokenStream:
 
     @staticmethod
     def _expand_patterns(pattern: str) -> list[Path]:
-        pieces = [piece.strip() for piece in re.split(r"[,;]", pattern) if piece.strip()]
-        files: list[Path] = []
-        seen: set[str] = set()
-        for piece in pieces or [pattern]:
-            for item in sorted(glob.glob(piece)):
-                path = Path(item)
-                key = str(path)
-                if key not in seen:
-                    seen.add(key)
-                    files.append(path)
-        return files
+        return _expand_parquet_patterns(pattern)
 
     def refresh_files(self) -> None:
         refreshed = self._expand_patterns(self.pattern)
@@ -994,17 +1036,7 @@ class StructureCoordinateParquetStream:
 
     @staticmethod
     def _expand_patterns(pattern: str) -> list[Path]:
-        pieces = [piece.strip() for piece in re.split(r"[,;]", pattern) if piece.strip()]
-        files: list[Path] = []
-        seen: set[str] = set()
-        for piece in pieces or [pattern]:
-            for item in sorted(glob.glob(piece)):
-                path = Path(item)
-                key = str(path)
-                if key not in seen:
-                    seen.add(key)
-                    files.append(path)
-        return files
+        return _expand_parquet_patterns(pattern)
 
     def refresh_files(self) -> None:
         refreshed = self._expand_patterns(self.pattern)

@@ -43,13 +43,40 @@ MODALITY_COLUMNS = {
 def expand(patterns: list[str]) -> list[Path]:
     out: list[Path] = []
     seen: set[str] = set()
-    for pattern in patterns:
-        for match in sorted(glob.glob(pattern)):
+    seen_lists: set[str] = set()
+
+    def add_pattern(pattern: str) -> None:
+        pattern = pattern.strip()
+        if not pattern:
+            return
+        if pattern.startswith("@"):
+            list_path = Path(pattern[1:]).expanduser()
+            key = str(list_path.resolve()) if list_path.exists() else str(list_path)
+            if key in seen_lists:
+                return
+            seen_lists.add(key)
+            try:
+                lines = list_path.read_text(encoding="utf-8").splitlines()
+            except FileNotFoundError:
+                return
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    add_pattern(line)
+            return
+        matches = sorted(glob.glob(pattern))
+        if not matches and Path(pattern).exists():
+            matches = [pattern]
+        for match in matches:
             path = Path(match)
             key = str(path.resolve())
             if key not in seen:
                 seen.add(key)
                 out.append(path)
+
+    for pattern in patterns:
+        for piece in pattern.split(","):
+            add_pattern(piece)
     return out
 
 

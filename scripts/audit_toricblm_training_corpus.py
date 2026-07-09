@@ -53,11 +53,37 @@ FUNCTION_COLUMNS = {
 def expand_patterns(patterns: str) -> list[Path]:
     files: list[Path] = []
     seen: set[str] = set()
-    for piece in [part.strip() for part in patterns.split(",") if part.strip()]:
-        for item in sorted(glob.glob(piece)):
+    seen_lists: set[str] = set()
+
+    def add_pattern(piece: str) -> None:
+        piece = piece.strip()
+        if not piece:
+            return
+        if piece.startswith("@"):
+            list_path = Path(piece[1:]).expanduser()
+            key = str(list_path.resolve()) if list_path.exists() else str(list_path)
+            if key in seen_lists:
+                return
+            seen_lists.add(key)
+            try:
+                lines = list_path.read_text(encoding="utf-8").splitlines()
+            except FileNotFoundError:
+                return
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    add_pattern(line)
+            return
+        matches = sorted(glob.glob(piece))
+        if not matches and Path(piece).exists():
+            matches = [piece]
+        for item in matches:
             if item not in seen:
                 files.append(Path(item))
                 seen.add(item)
+
+    for piece in [part.strip() for part in patterns.split(",") if part.strip()]:
+        add_pattern(piece)
     return files
 
 

@@ -117,15 +117,43 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
+def expand_pattern(piece, out, seen, seen_lists):
+    piece = piece.strip()
+    if not piece:
+        return
+    if piece.startswith("@"):
+        list_path = Path(piece[1:]).expanduser()
+        key = str(list_path.resolve()) if list_path.exists() else str(list_path)
+        if key in seen_lists:
+            return
+        seen_lists.add(key)
+        try:
+            lines = list_path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            return
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                expand_pattern(line, out, seen, seen_lists)
+        return
+    matches = sorted(glob.glob(piece))
+    if not matches and Path(piece).exists():
+        matches = [piece]
+    for item in matches:
+        if item not in seen:
+            seen.add(item)
+            out.append(Path(item))
+
 patterns = [item for item in sys.argv[1].split(",") if item]
 required = [item for item in sys.argv[2].split(",") if item]
 limit = int(sys.argv[3])
 raw_root = sys.argv[4]
 allow_raw = sys.argv[5] == "1"
 files = []
+seen = set()
+seen_lists = set()
 for pattern in patterns:
-    files.extend(sorted(glob.glob(pattern)))
-files = [Path(path) for path in files]
+    expand_pattern(pattern, files, seen, seen_lists)
 if not files:
     raise SystemExit("TORICBLM_REQUIRE_FOT_FORMAT=1 but GRAPH_TRAIN_GLOB matched no Parquet files")
 checked = 0
