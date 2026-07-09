@@ -98,7 +98,7 @@ def copy_batch_with_gsutil(batch: list[dict[str, Any]], *, bucket: str, version:
     gsutil = shutil.which("gsutil") or "/snap/bin/gsutil"
     if not Path(gsutil).exists():
         raise RuntimeError("gsutil not found; install google-cloud-cli and authenticate before AFDB GCS ingestion")
-    cmd = [gsutil, "-m", "cp", "-I", str(cache_dir)]
+    cmd = [gsutil, "-m", "cp", "-c", "-I", str(cache_dir)]
     proc = subprocess.run(
         cmd,
         input="\n".join(uris) + "\n",
@@ -109,18 +109,23 @@ def copy_batch_with_gsutil(batch: list[dict[str, Any]], *, bucket: str, version:
     )
     if proc.returncode == 0:
         return
-    # Fallback preserves correctness for mixed batches containing missing AFDB
-    # objects: each existing object is copied, missing ones are handled later.
-    for uri in uris:
-        one = subprocess.run(
-            [gsutil, "cp", uri, str(cache_dir)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=max(60, min(int(timeout), 600)),
-        )
-        if one.returncode != 0:
-            continue
+    copied = sum(1 for item in batch if local_cif(cache_dir, str(item["accession"]), version).exists())
+    if copied > 0:
+        return
+    fatal_markers = (
+        "AccessDeniedException",
+        "Unauthorized",
+        "status=401",
+        "status=403",
+        "ServiceException: 401",
+        "ServiceException: 403",
+        "BucketNotFoundException",
+    )
+    stderr = proc.stderr or ""
+    if any(marker in stderr for marker in fatal_markers):
+        raise RuntimeError(f"gsutil batch copy failed before any object was copied: {stderr[-1200:]}")
+    # If none of this batch exists in AFDB, downstream missing-file checks will
+    # record row-level provenance without forcing a slow serial retry path.
 
 
 def build_record(
