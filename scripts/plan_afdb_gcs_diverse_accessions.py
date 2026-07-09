@@ -326,8 +326,16 @@ def main() -> None:
     accepted = 0
     try:
         for path in inputs:
-            columns = parquet_columns(path)
-            pf = pq.ParquetFile(path)
+            try:
+                columns = parquet_columns(path)
+                pf = pq.ParquetFile(path)
+            except Exception as exc:
+                skipped["unreadable_input_parquet"] += 1
+                print(
+                    f"skip_unreadable_input_parquet path={path} error={type(exc).__name__}:{exc}",
+                    flush=True,
+                )
+                continue
             for batch in pf.iter_batches(batch_size=512, columns=columns):
                 for row in pa.Table.from_batches([batch]).to_pylist():
                     if args.max_scan_rows > 0 and scanned >= args.max_scan_rows:
