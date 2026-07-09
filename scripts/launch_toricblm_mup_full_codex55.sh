@@ -14,6 +14,11 @@ fi
 # shellcheck disable=SC1090
 source "$CONFIG_PATH"
 
+if [[ "${TORICBLM_START_FROM_STEP0:-0}" == "1" || "${START_FROM_STEP0:-0}" == "1" ]]; then
+  export RESUME_CHECKPOINT=""
+  export START_STEP=0
+fi
+
 RUN_STAMP="${RUN_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
 RUN_ID="${RUN_ID:-toricblm-mup-codex55-full-${RUN_STAMP}}"
 RUN_DIR="${RUN_DIR:-$ROOT/runs/oai_sidecar/${RUN_ID}}"
