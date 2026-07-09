@@ -151,6 +151,26 @@ def load_tar_urls(args: argparse.Namespace) -> list[str]:
 def download(url: str, path: Path, *, timeout: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
+    if url.startswith("gs://"):
+        gcloud = shutil.which("gcloud")
+        gsutil = shutil.which("gsutil") or "/snap/bin/gsutil"
+        if gcloud:
+            cmd = [
+                gcloud,
+                "storage",
+                "cp",
+                "--continue-on-error",
+                url,
+                str(tmp),
+            ]
+            subprocess.run(cmd, check=True, timeout=max(60, timeout))
+            tmp.replace(path)
+            return
+        if Path(gsutil).exists():
+            subprocess.run([gsutil, "cp", url, str(tmp)], check=True, timeout=max(60, timeout))
+            tmp.replace(path)
+            return
+        raise RuntimeError("gcloud/gsutil not found; install google-cloud-cli before GCS proteome-tar ingestion")
     aria2_bin = shutil.which("aria2c")
     env_aria2 = Path(sys.executable).resolve().parent / "aria2c"
     if aria2_bin is None and env_aria2.exists():
@@ -211,8 +231,9 @@ def graph_record(
     sequence = sequence_from_coords(coords)
     entry_name = accession
     protein_name = f"AFDB v{version} proteome-tar protein {accession}"
+    source_name = "AlphaFold DB v4 public Google Cloud Storage proteome tar" if archive_url.startswith("gs://") else "AlphaFold DB v6 EBI proteome tar"
     function_text = (
-        f"AlphaFold DB v{version} EBI proteome archive member. "
+        f"{source_name} archive member. "
         "No UniProt functional annotation was bundled in this tar member; train structure coordinates, "
         "confidence, sequence, and source provenance, and merge richer UniProt annotations when available."
     )
@@ -249,7 +270,7 @@ def graph_record(
         split=split,
     )
     graph["source"] = {
-        "name": "AlphaFold DB v6 EBI proteome tar",
+        "name": source_name,
         "contains_imported_reasoning_trace": False,
         "archive_url": archive_url,
         "archive_name": archive_name,
