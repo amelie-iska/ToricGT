@@ -12,3 +12,4 @@
 /home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/codex55_pass02_codex55_tot_train_00003.parquet
 /home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/toricblm_afdb_structure_fot_train.parquet
 /home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/toricblm_fot_leakage_v1_train.parquet
+/home/iska/Documents/amelie/bio/ToricGT/data/toricblm_late_mixed_fot_structure/train/toricblm_protrek_trimodal_split_train.parquet

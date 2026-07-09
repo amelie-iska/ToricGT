@@ -32,13 +32,15 @@ def write_card(data_dir: Path, destination: Path, repo_id: str) -> None:
         "# ToricBLM Bio Forest-of-Thought Graphification for ToricGT",
         "",
         "This repository stores Parquet-first biological graph/FoT curation artifacts for ToricGT/ToricBLM.",
-        "The current upload is an initial deterministic graphification sample, not the final authored reasoning corpus.",
+        "The upload contains deterministic graph/FoT rows plus any locally curated real-coordinate structure shards selected by the publish command.",
         "",
         "Raw upstream Parquet data is not uploaded in this initial push. Local raw sources remain organized by symlink under the ToricGT data tree and require separate license review before redistribution.",
         "",
         "## Files",
         "",
         "- `derived/*.parquet` graphified source-data slices",
+        "- `splits/*/*.parquet` leakage-aware or ProTrek-aware graph/FoT splits when present",
+        "- `structures/*/{train,validation,test}/*.parquet` real coordinate-bearing AFDB/PDB/PubChem3D shards when present",
         "- `authored/accepted/accepted_records.parquet` when authored records are present",
         "- `authored/accepted/validation_report.json`",
         "- `authored/records/*.json` inspectable handwritten source records",
@@ -67,17 +69,28 @@ def write_card(data_dir: Path, destination: Path, repo_id: str) -> None:
         "",
         "## Safety And License Notes",
         "",
-        "Biomedical content is for model-training curation and mechanism-focused annotation reasoning, not patient-specific medical advice. Source licenses and redistribution rights must be reviewed before uploading larger raw-derived corpora.",
+        "Biomedical content is for model-training curation and mechanism-focused annotation reasoning, not patient-specific medical advice. Coordinate-native structure shards are generated only from real AFDB/PDB/PubChem3D records; raw upstream caches such as mmCIF/SDF downloads are not uploaded by this script.",
         "",
     ]
     destination.write_text("\n".join(lines), encoding="utf-8")
 
 
-def upload_plan(data_dir: Path, include_jsonl: bool) -> list[tuple[Path, str]]:
+def upload_plan(data_dir: Path, include_jsonl: bool, include_structures: bool, include_splits: bool) -> list[tuple[Path, str]]:
     files: list[tuple[Path, str]] = []
     for pattern in ("uniprot_fot_graphified*.parquet", "toricblm_fot_graphified*.parquet"):
         for parquet_path in sorted((data_dir / "derived").glob(pattern)):
             files.append((parquet_path, f"derived/{parquet_path.name}"))
+    if include_splits:
+        for parquet_path in sorted((data_dir / "splits").glob("*/*.parquet")):
+            files.append((parquet_path, str(parquet_path.relative_to(data_dir))))
+        for json_path in sorted((data_dir / "splits").glob("*/*.json")):
+            files.append((json_path, str(json_path.relative_to(data_dir))))
+    if include_structures:
+        for parquet_path in sorted((data_dir / "structures").glob("*/*/*.parquet")):
+            # Upload train/validation/test shards, never raw mmCIF/SDF caches.
+            files.append((parquet_path, str(parquet_path.relative_to(data_dir))))
+        for json_path in sorted((data_dir / "structures").glob("*/*.json")):
+            files.append((json_path, str(json_path.relative_to(data_dir))))
     files.extend(
         [
         (data_dir / "manifests" / "uniprot_fot_build_manifest.json", "manifests/uniprot_fot_build_manifest.json"),
@@ -109,12 +122,19 @@ def main() -> None:
     parser.add_argument("--data-dir", default="data/uniprot_fot")
     parser.add_argument("--repo-id", default="AmelieSchreiber/toricblm_fot")
     parser.add_argument("--include-jsonl", action="store_true", help="Also upload inspectable JSONL.")
+    parser.add_argument("--include-structures", action="store_true", help="Upload curated real-coordinate structure Parquet shards and manifests, not raw caches.")
+    parser.add_argument("--include-splits", action="store_true", help="Upload leakage/ProTrek split Parquet files and reports.")
     parser.add_argument("--private", action="store_true", help="Create/update as a private dataset.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
-    files = upload_plan(data_dir, include_jsonl=args.include_jsonl)
+    files = upload_plan(
+        data_dir,
+        include_jsonl=args.include_jsonl,
+        include_structures=args.include_structures,
+        include_splits=args.include_splits,
+    )
     if not files:
         raise SystemExit(f"no uploadable files found under {data_dir}")
 

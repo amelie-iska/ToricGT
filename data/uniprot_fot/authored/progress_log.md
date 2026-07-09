@@ -9,5 +9,8 @@
   cellulolytic synergy, HLA coding-region graph reasoning, RFAM 5S rRNA
   structure reasoning, SELFIES medicinal-chemistry graph scoping, and UniRef GO
   mechanical-protein annotation.
+- Added a 144-row source-anchor pool for the next authored records, balanced
+  across UniProt function text, UniRef50 GO clusters, RFAM, RNAcentral, coding
+  regions, and PubChem SELFIES. These anchors are provenance summaries only.
 - Current target remains iterative batches of 200 authored records, with Parquet
   conversion and Hugging Face push milestones after validation.

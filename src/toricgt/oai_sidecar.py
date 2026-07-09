@@ -40,10 +40,65 @@ class GraphParquetTokenStream:
     to plain unstructured text for this stream.
     """
 
-    TEXT_COLUMNS = ("text", "question", "reasoning", "solution", "answer", "graph_json", "metadata_json")
+    TEXT_COLUMNS = (
+        "text",
+        "question",
+        "reasoning",
+        "solution",
+        "answer",
+        "annotation_text",
+        "graph_json",
+        "metadata_json",
+        "forest_json",
+        "thought_forest_json",
+        "convextok_dag_json",
+        "training_views_json",
+        "sequence",
+        "function",
+        "entry",
+        "entry_name",
+        "protein_name",
+        "id",
+        "name",
+        "updated",
+        "member_count",
+        "common_taxon",
+        "common_taxon_id",
+        "seed_id",
+        "go_mf",
+        "go_bp",
+        "go_cc",
+        "member_ids",
+        "rep_member_id",
+        "rep_member_id_type",
+        "rep_organism",
+        "rep_organism_tax_id",
+        "rep_protein_name",
+        "rep_accessions",
+        "rep_uniparc_id",
+        "rep_uniref90_id",
+        "rep_uniref100_id",
+        "rep_is_seed",
+        "sequence_length",
+        "sequence_crc64",
+        "sequence_xxh128",
+        "accession",
+        "organism",
+        "introns",
+        "exons",
+        "proteins",
+        "SELFIES",
+        "selfies",
+        "family",
+        "clan",
+        "description",
+        "upi",
+        "type",
+    )
 
     def __init__(self, pattern: str, tokenizer: Any, seq_len: int, batch_size: int):
-        self.files = [Path(p) for p in sorted(glob.glob(pattern))]
+        self.pattern = pattern
+        self.files = self._expand_patterns(pattern)
         if not self.files:
             raise FileNotFoundError(f"No graph Parquet files found for pattern: {pattern}")
         self.tokenizer = tokenizer
@@ -55,7 +110,36 @@ class GraphParquetTokenStream:
         self.token_buffer: list[int] = []
         self.policy_counts: dict[str, int] = {}
         self.rows_graphified = 0
+        self.parquet_file: Any = None
+        self.batch_iter: Any = None
+        self.active_columns: list[str] = []
+        self.batch_size_rows = 256
+        self.skipped_files: list[str] = []
         self._load_file()
+
+    @staticmethod
+    def _expand_patterns(pattern: str) -> list[Path]:
+        pieces = [piece.strip() for piece in re.split(r"[,;]", pattern) if piece.strip()]
+        files: list[Path] = []
+        seen: set[str] = set()
+        for piece in pieces or [pattern]:
+            for item in sorted(glob.glob(piece)):
+                path = Path(item)
+                key = str(path)
+                if key not in seen:
+                    seen.add(key)
+                    files.append(path)
+        return files
+
+    def refresh_files(self) -> None:
+        refreshed = self._expand_patterns(self.pattern)
+        if refreshed:
+            current = self.files[self.file_idx] if self.files and self.file_idx < len(self.files) else None
+            self.files = refreshed
+            if current in self.files:
+                self.file_idx = self.files.index(current)
+            else:
+                self.file_idx = min(self.file_idx, max(0, len(self.files) - 1))
 
     def _encode(self, text: str) -> list[int]:
         try:
@@ -95,9 +179,69 @@ class GraphParquetTokenStream:
     @staticmethod
     def _first_present(row: dict[str, Any], keys: tuple[str, ...], default: Any = None) -> Any:
         for key in keys:
-            if key in row and row[key] not in (None, ""):
-                return row[key]
+            if key not in row:
+                continue
+            value = row[key]
+            if value is None:
+                continue
+            if isinstance(value, str) and value == "":
+                continue
+            if isinstance(value, (list, tuple, dict)) and not value:
+                continue
+            return value
         return default
+
+    @staticmethod
+    def _as_list(value: Any, *, limit: int = 32) -> list[Any]:
+        if value is None:
+            return []
+        if hasattr(value, "tolist"):
+            try:
+                value = value.tolist()
+            except Exception:
+                pass
+        if isinstance(value, list):
+            return value[:limit]
+        if isinstance(value, tuple):
+            return list(value[:limit])
+        if isinstance(value, str) and not value:
+            return []
+        return [value]
+
+    @staticmethod
+    def _sequence_chunks(sequence: Any, *, max_chunks: int = 20, chars_per_chunk: int = 420) -> list[dict[str, Any]]:
+        if not isinstance(sequence, str) or not sequence:
+            return []
+        chunks: list[dict[str, Any]] = []
+        for index, start in enumerate(range(0, len(sequence), chars_per_chunk)):
+            if index >= max_chunks:
+                chunks.append(
+                    {
+                        "index": index,
+                        "start": start,
+                        "end": len(sequence),
+                        "length": max(0, len(sequence) - start),
+                        "text": f"remaining sequence omitted from serialized graph node text; length={max(0, len(sequence) - start)}",
+                    }
+                )
+                break
+            end = min(len(sequence), start + chars_per_chunk)
+            chunks.append(
+                {
+                    "index": index,
+                    "start": start,
+                    "end": end,
+                    "length": end - start,
+                    "text": sequence[start:end],
+                }
+            )
+        return chunks
+
+    @staticmethod
+    def _selfies_tokens(value: Any, *, max_tokens: int = 96) -> list[str]:
+        if not isinstance(value, str) or not value:
+            return []
+        return re.findall(r"\[[^\]]+\]", value)[:max_tokens]
 
     @classmethod
     def _node_id(cls, node: Any, index: int) -> str:
@@ -171,6 +315,168 @@ class GraphParquetTokenStream:
                 for idx in range(max(0, len(nodes) - 1))
             ]
         return nodes, edges
+
+    @classmethod
+    def _raw_bio_nodes_edges(cls, row: dict[str, Any], record_id: str) -> tuple[list[dict[str, str]], list[dict[str, str]]] | None:
+        bio_keys = (
+            "sequence",
+            "SELFIES",
+            "selfies",
+            "function",
+            "protein_name",
+            "entry",
+            "entry_name",
+            "go_mf",
+            "go_bp",
+            "go_cc",
+            "introns",
+            "exons",
+            "proteins",
+            "family",
+            "clan",
+            "description",
+            "upi",
+            "accession",
+            "rep_accessions",
+        )
+        if not any(key in row for key in bio_keys):
+            return None
+
+        nodes: list[dict[str, str]] = []
+        edges: list[dict[str, str]] = []
+        seen: set[str] = set()
+        edge_index = 0
+
+        def add_node(node_id: str, node_type: str, text: Any, *, max_chars: int = 900) -> str:
+            safe = cls._safe_attr(node_id, max_chars=72)
+            if safe in seen:
+                base = safe
+                suffix = 1
+                while f"{base}_{suffix}" in seen:
+                    suffix += 1
+                safe = f"{base}_{suffix}"
+            seen.add(safe)
+            nodes.append(
+                {
+                    "id": safe,
+                    "type": cls._safe_attr(node_type, max_chars=48),
+                    "text": cls._payload_text(text, max_chars=max_chars),
+                }
+            )
+            return safe
+
+        def add_edge(src: str, dst: str, edge_type: str, text: Any = "") -> None:
+            nonlocal edge_index
+            if src not in seen or dst not in seen:
+                return
+            edges.append(
+                {
+                    "id": f"e{edge_index}",
+                    "source": src,
+                    "target": dst,
+                    "type": cls._safe_attr(edge_type, max_chars=48),
+                    "text": cls._payload_text(text or edge_type, max_chars=360),
+                }
+            )
+            edge_index += 1
+
+        entry_id = cls._first_present(row, ("entry", "id", "accession", "upi", "seed_id", "rep_member_id", "entry_name", "name"), record_id)
+        root = add_node("record", "biomedical_record", f"record={entry_id}; source={record_id}")
+
+        sequence = row.get("sequence")
+        if isinstance(sequence, str) and sequence:
+            alphabet = set(sequence.upper())
+            if alphabet <= set("ACGTNURYKMSWBDHV.-"):
+                seq_type = "nucleotide_or_rna_sequence"
+            elif alphabet <= set("ACDEFGHIKLMNPQRSTVWYXBZUOJ*-"):
+                seq_type = "protein_sequence"
+            else:
+                seq_type = "mixed_sequence"
+            seq_root = add_node("sequence", seq_type, f"length={len(sequence)}")
+            add_edge(root, seq_root, "has_sequence", f"length={len(sequence)}")
+            previous = seq_root
+            for chunk in cls._sequence_chunks(sequence):
+                chunk_id = add_node(
+                    f"seq_{chunk['index']}",
+                    "sequence_chunk",
+                    f"range={chunk['start']}:{chunk['end']} length={chunk['length']} {chunk['text']}",
+                    max_chars=760,
+                )
+                add_edge(seq_root, chunk_id, "has_sequence_chunk", f"range={chunk['start']}:{chunk['end']}")
+                add_edge(previous, chunk_id, "next_sequence_chunk", f"chunk={chunk['index']}")
+                previous = chunk_id
+
+        selfies = cls._first_present(row, ("SELFIES", "selfies"))
+        if isinstance(selfies, str) and selfies:
+            molecule = add_node("molecule", "selfies_molecule", f"SELFIES length={len(selfies)}")
+            add_edge(root, molecule, "has_molecule")
+            previous = molecule
+            for idx, token in enumerate(cls._selfies_tokens(selfies)):
+                tok = add_node(f"selfies_{idx}", "selfies_token", token, max_chars=96)
+                add_edge(molecule, tok, "has_selfies_token", f"position={idx}")
+                add_edge(previous, tok, "next_selfies_token", f"position={idx}")
+                previous = tok
+
+        scalar_fields = (
+            ("entry_name", "entry_name"),
+            ("protein_name", "protein_name"),
+            ("function", "function_annotation"),
+            ("name", "cluster_name"),
+            ("updated", "updated"),
+            ("member_count", "member_count"),
+            ("common_taxon", "common_taxon"),
+            ("common_taxon_id", "common_taxon_id"),
+            ("seed_id", "seed_id"),
+            ("rep_member_id", "representative_member"),
+            ("rep_member_id_type", "representative_member_type"),
+            ("rep_organism", "representative_organism"),
+            ("rep_organism_tax_id", "representative_organism_tax_id"),
+            ("rep_protein_name", "representative_protein_name"),
+            ("rep_uniparc_id", "representative_uniparc"),
+            ("rep_uniref90_id", "representative_uniref90"),
+            ("rep_uniref100_id", "representative_uniref100"),
+            ("rep_is_seed", "representative_is_seed"),
+            ("sequence_length", "sequence_length"),
+            ("sequence_crc64", "sequence_crc64"),
+            ("sequence_xxh128", "sequence_xxh128"),
+            ("accession", "accession"),
+            ("organism", "organism"),
+            ("family", "rfam_family"),
+            ("clan", "rfam_clan"),
+            ("description", "description"),
+            ("upi", "rnacentral_upi"),
+            ("type", "rna_type"),
+        )
+        for key, node_type in scalar_fields:
+            value = row.get(key)
+            if value in (None, ""):
+                continue
+            node = add_node(key, node_type, value)
+            add_edge(root, node, f"has_{node_type}")
+
+        for key, node_type in (("go_mf", "go_molecular_function"), ("go_bp", "go_biological_process"), ("go_cc", "go_cellular_component")):
+            for idx, value in enumerate(cls._as_list(row.get(key), limit=48)):
+                node = add_node(f"{key}_{idx}", node_type, value, max_chars=180)
+                add_edge(root, node, f"has_{node_type}")
+
+        for idx, value in enumerate(cls._as_list(row.get("rep_accessions"), limit=24)):
+            node = add_node(f"rep_accession_{idx}", "representative_accession", value, max_chars=180)
+            add_edge(root, node, "has_representative_accession")
+
+        for idx, value in enumerate(cls._as_list(row.get("member_ids"), limit=24)):
+            node = add_node(f"member_{idx}", "cluster_member", value, max_chars=180)
+            add_edge(root, node, "has_cluster_member")
+
+        for feature_key, feature_type in (("introns", "intron"), ("exons", "exon"), ("proteins", "translated_protein")):
+            for idx, feature in enumerate(cls._as_list(row.get(feature_key), limit=24)):
+                if isinstance(feature, dict):
+                    label = {key: feature.get(key) for key in ("gene", "start", "end", "sequence") if feature.get(key) not in (None, "")}
+                else:
+                    label = feature
+                node = add_node(f"{feature_key}_{idx}", feature_type, label, max_chars=460)
+                add_edge(root, node, f"has_{feature_type}", f"{feature_key}[{idx}]")
+
+        return (nodes, edges) if nodes else None
 
     @staticmethod
     def _chunk_text(text: str, *, max_nodes: int = 24, chars_per_node: int = 360) -> list[str]:
@@ -267,10 +573,10 @@ class GraphParquetTokenStream:
     @classmethod
     def _graphify_row(cls, row: dict[str, Any], record_id: str) -> tuple[str, str]:
         fallback_parts = []
-        for key in ("text", "question", "reasoning", "solution", "answer", "metadata_json"):
+        for key in cls.TEXT_COLUMNS:
             value = row.get(key)
             if value not in (None, ""):
-                fallback_parts.append(cls._payload_text(value, max_chars=2400))
+                fallback_parts.append(f"{key}: {cls._payload_text(value, max_chars=2400)}")
         fallback_text = "\n".join(part for part in fallback_parts if part)
         graph_raw = row.get("graph_json")
         if graph_raw not in (None, ""):
@@ -281,6 +587,10 @@ class GraphParquetTokenStream:
             if payload is not None:
                 nodes, edges = cls._normalize_nodes_edges(payload, fallback_text)
                 return cls._serialize_graph(nodes, edges, record_id)
+        raw_bio_graph = cls._raw_bio_nodes_edges(row, record_id)
+        if raw_bio_graph is not None:
+            nodes, edges = raw_bio_graph
+            return cls._serialize_graph(nodes, edges, record_id)
         chunks = cls._chunk_text(fallback_text)
         nodes = [{"id": f"n{idx}", "type": "text_span", "text": chunk} for idx, chunk in enumerate(chunks)]
         edges = [
@@ -291,37 +601,74 @@ class GraphParquetTokenStream:
 
     def describe(self) -> str:
         policies = ",".join(f"{key}:{value}" for key, value in sorted(self.policy_counts.items()))
-        return f"files:{len(self.files)} current_rows:{len(self.rows)} graphified_rows:{self.rows_graphified} policies:{policies or 'none'}"
+        return (
+            f"files:{len(self.files)} current_rows:{len(self.rows)} graphified_rows:{self.rows_graphified} "
+            f"skipped_files:{len(self.skipped_files)} policies:{policies or 'none'}"
+        )
 
     def _load_file(self) -> None:
         import pyarrow.parquet as pq
 
+        attempts = 0
+        while attempts < len(self.files):
+            path = self.files[self.file_idx]
+            try:
+                self.parquet_file = pq.ParquetFile(path)
+                schema_names = set(self.parquet_file.schema_arrow.names)
+            except Exception as exc:
+                self.skipped_files.append(f"{path}:{exc}")
+                self.file_idx = (self.file_idx + 1) % len(self.files)
+                attempts += 1
+                continue
+            columns = [name for name in self.TEXT_COLUMNS if name in schema_names]
+            if not columns:
+                self.skipped_files.append(f"{path}:no_graphifiable_columns")
+                self.file_idx = (self.file_idx + 1) % len(self.files)
+                attempts += 1
+                continue
+            self.active_columns = columns
+            self.batch_iter = self.parquet_file.iter_batches(batch_size=self.batch_size_rows, columns=columns)
+            self.rows = []
+            self.row_idx = 0
+            self._load_next_batch()
+            return
+        raise ValueError(f"No readable graph Parquet shards with usable columns for pattern: {self.pattern}")
+
+    def _load_next_batch(self) -> None:
+        import pyarrow as pa
+
+        if self.batch_iter is None:
+            self._load_file()
+            return
         path = self.files[self.file_idx]
-        schema_names = set(pq.read_schema(path).names)
-        columns = [name for name in self.TEXT_COLUMNS if name in schema_names]
-        if not columns:
-            raise ValueError(f"Graph Parquet shard has none of {self.TEXT_COLUMNS}: {path}")
-        table = pq.read_table(path, columns=columns)
-        rows: list[str] = []
-        for idx in range(table.num_rows):
-            row = {name: table[name][idx].as_py() for name in columns}
-            text, policy = self._graphify_row(row, f"{path.name}:{idx}")
-            if text.strip():
-                rows.append(text)
-                self.rows_graphified += 1
-                self.policy_counts[policy] = self.policy_counts.get(policy, 0) + 1
-        if not rows:
-            raise ValueError(f"Graph Parquet shard produced no text rows: {path}")
-        self.rows = rows
-        self.row_idx = 0
+        while True:
+            try:
+                batch = next(self.batch_iter)
+            except StopIteration:
+                self._advance_file()
+                return
+            table = pa.Table.from_batches([batch])
+            rows: list[str] = []
+            offset_base = self.rows_graphified
+            for idx, row in enumerate(table.to_pylist()):
+                text, policy = self._graphify_row(row, f"{path.name}:{offset_base + idx}")
+                if text.strip():
+                    rows.append(text)
+                    self.rows_graphified += 1
+                    self.policy_counts[policy] = self.policy_counts.get(policy, 0) + 1
+            if rows:
+                self.rows = rows
+                self.row_idx = 0
+                return
 
     def _advance_file(self) -> None:
+        self.refresh_files()
         self.file_idx = (self.file_idx + 1) % len(self.files)
         self._load_file()
 
     def _append_next_row(self) -> None:
         if self.row_idx >= len(self.rows):
-            self._advance_file()
+            self._load_next_batch()
         text = self.rows[self.row_idx]
         self.row_idx += 1
         ids = self._encode(text)
@@ -397,6 +744,213 @@ class ScheduledGraphParquetTokenStream:
         return self.base.next_batch(device, step=step)
 
 
+class FullEntryGraphParquetStream:
+    """Stream complete graphified rows for segmented long-entry training.
+
+    This loader preserves row boundaries.  The ordinary graph LM stream is
+    intentionally chunk-oriented for stable BPB training; this stream is the
+    complementary objective for complete records such as UniProt/FoT/structure
+    entries whose tokenized lengths are often thousands to tens of thousands of
+    tokens.  Rows are graphified with the same TokenGT-style serialization as
+    :class:`GraphParquetTokenStream`, then emitted as full token vectors capped
+    by ``max_tokens``.
+    """
+
+    def __init__(
+        self,
+        pattern: str,
+        tokenizer: Any,
+        *,
+        batch_size: int = 1,
+        max_tokens: int = 24576,
+    ) -> None:
+        self.pattern = pattern
+        self.files = GraphParquetTokenStream._expand_patterns(pattern)
+        if not self.files:
+            raise FileNotFoundError(f"No full-entry graph Parquet files found for pattern: {pattern}")
+        self.tokenizer = tokenizer
+        self.batch_size = max(1, int(batch_size))
+        self.max_tokens = max(32, int(max_tokens))
+        self.file_idx = 0
+        self.row_idx = 0
+        self.rows: list[tuple[str, str]] = []
+        self.rows_graphified = 0
+        self.policy_counts: dict[str, int] = {}
+        self.truncated_rows = 0
+        self.total_rows_emitted = 0
+        self.parquet_file: Any = None
+        self.batch_iter: Any = None
+        self.active_columns: list[str] = []
+        self.batch_size_rows = 128
+        self.skipped_files: list[str] = []
+        self._load_file()
+
+    def refresh_files(self) -> None:
+        refreshed = GraphParquetTokenStream._expand_patterns(self.pattern)
+        if refreshed:
+            current = self.files[self.file_idx] if self.files and self.file_idx < len(self.files) else None
+            self.files = refreshed
+            if current in self.files:
+                self.file_idx = self.files.index(current)
+            else:
+                self.file_idx = min(self.file_idx, max(0, len(self.files) - 1))
+
+    def _encode(self, text: str) -> list[int]:
+        try:
+            ids = self.tokenizer.encode(text, out_type=int)
+        except TypeError:
+            ids = self.tokenizer.encode(text)
+        return [int(token_id) for token_id in ids]
+
+    def describe(self) -> str:
+        policies = ",".join(f"{key}:{value}" for key, value in sorted(self.policy_counts.items()))
+        return (
+            f"files:{len(self.files)} current_rows:{len(self.rows)} graphified_rows:{self.rows_graphified} "
+            f"emitted:{self.total_rows_emitted} truncated:{self.truncated_rows} "
+            f"max_tokens:{self.max_tokens} skipped_files:{len(self.skipped_files)} policies:{policies or 'none'}"
+        )
+
+    def _load_file(self) -> None:
+        import pyarrow.parquet as pq
+
+        attempts = 0
+        while attempts < len(self.files):
+            path = self.files[self.file_idx]
+            try:
+                self.parquet_file = pq.ParquetFile(path)
+                schema_names = set(self.parquet_file.schema_arrow.names)
+            except Exception as exc:
+                self.skipped_files.append(f"{path}:{exc}")
+                self.file_idx = (self.file_idx + 1) % len(self.files)
+                attempts += 1
+                continue
+            candidate_columns = tuple(dict.fromkeys(GraphParquetTokenStream.TEXT_COLUMNS + ("forest_json", "thought_forest_json")))
+            columns = [name for name in candidate_columns if name in schema_names]
+            if not columns:
+                self.skipped_files.append(f"{path}:no_graphifiable_columns")
+                self.file_idx = (self.file_idx + 1) % len(self.files)
+                attempts += 1
+                continue
+            self.active_columns = columns
+            self.batch_iter = self.parquet_file.iter_batches(batch_size=self.batch_size_rows, columns=columns)
+            self.rows = []
+            self.row_idx = 0
+            self._load_next_batch()
+            return
+        raise ValueError(f"No readable full-entry graph Parquet shards with usable columns for pattern: {self.pattern}")
+
+    def _load_next_batch(self) -> None:
+        import pyarrow as pa
+
+        if self.batch_iter is None:
+            self._load_file()
+            return
+        path = self.files[self.file_idx]
+        while True:
+            try:
+                batch = next(self.batch_iter)
+            except StopIteration:
+                self._advance_file()
+                return
+            table = pa.Table.from_batches([batch])
+            rows: list[tuple[str, str]] = []
+            offset_base = self.rows_graphified
+            for idx, row in enumerate(table.to_pylist()):
+                text, policy = GraphParquetTokenStream._graphify_row(row, f"{path.name}:{offset_base + idx}")
+                forest = row.get("forest_json") or row.get("thought_forest_json")
+                if forest not in (None, ""):
+                    text = (
+                        text
+                        + "\n<forest_of_thought>"
+                        + GraphParquetTokenStream._payload_text(forest, max_chars=2400)
+                        + "</forest_of_thought>"
+                    )
+                if text.strip():
+                    rows.append((text, policy))
+                    self.rows_graphified += 1
+                    self.policy_counts[policy] = self.policy_counts.get(policy, 0) + 1
+            if rows:
+                self.rows = rows
+                self.row_idx = 0
+                return
+
+    def _load_file_legacy_unused(self) -> None:
+        import pyarrow.parquet as pq
+
+        path = self.files[self.file_idx]
+        schema_names = set(pq.read_schema(path).names)
+        candidate_columns = tuple(dict.fromkeys(GraphParquetTokenStream.TEXT_COLUMNS + ("forest_json", "thought_forest_json")))
+        columns = [name for name in candidate_columns if name in schema_names]
+        if not columns:
+            raise ValueError(f"Full-entry graph Parquet shard has no usable text/graph columns: {path}")
+        table = pq.read_table(path, columns=columns)
+        rows: list[tuple[str, str]] = []
+        for idx in range(table.num_rows):
+            row = {name: table[name][idx].as_py() for name in columns}
+            text, policy = GraphParquetTokenStream._graphify_row(row, f"{path.name}:{idx}")
+            forest = row.get("forest_json") or row.get("thought_forest_json")
+            if forest not in (None, ""):
+                text = (
+                    text
+                    + "\n<forest_of_thought>"
+                    + GraphParquetTokenStream._payload_text(forest, max_chars=2400)
+                    + "</forest_of_thought>"
+                )
+            if text.strip():
+                rows.append((text, policy))
+                self.rows_graphified += 1
+                self.policy_counts[policy] = self.policy_counts.get(policy, 0) + 1
+        if not rows:
+            raise ValueError(f"Full-entry graph Parquet shard produced no rows: {path}")
+        self.rows = rows
+        self.row_idx = 0
+
+    def _advance_file(self) -> None:
+        self.refresh_files()
+        self.file_idx = (self.file_idx + 1) % len(self.files)
+        self._load_file()
+
+    def _next_row_text(self) -> tuple[str, str]:
+        if self.row_idx >= len(self.rows):
+            self._load_next_batch()
+        row = self.rows[self.row_idx]
+        self.row_idx += 1
+        return row
+
+    def next_entries(self, device: torch.device, step: int | None = None) -> dict[str, Any]:
+        del step
+        entries: list[Tensor] = []
+        lengths: list[int] = []
+        original_lengths: list[int] = []
+        policies: list[str] = []
+        truncated: list[bool] = []
+        sep = self._encode("\n\n") or [0]
+        for _ in range(self.batch_size):
+            text, policy = self._next_row_text()
+            ids = self._encode(text) + sep
+            original_len = len(ids)
+            was_truncated = original_len > self.max_tokens + 1
+            if was_truncated:
+                ids = ids[: self.max_tokens + 1]
+                self.truncated_rows += 1
+            if len(ids) < 2:
+                ids = ids + sep
+            tensor = torch.tensor(ids, dtype=torch.int64, device=device)
+            entries.append(tensor)
+            lengths.append(int(tensor.numel()))
+            original_lengths.append(int(original_len))
+            policies.append(policy)
+            truncated.append(bool(was_truncated))
+            self.total_rows_emitted += 1
+        return {
+            "entries": entries,
+            "lengths": lengths,
+            "original_lengths": original_lengths,
+            "policies": policies,
+            "truncated": truncated,
+        }
+
+
 class StructureCoordinateParquetStream:
     """Stream coordinate-bearing graph rows for structure-flow training.
 
@@ -406,7 +960,7 @@ class StructureCoordinateParquetStream:
     synthetic coordinates.
     """
 
-    TEXT_COLUMNS = GraphParquetTokenStream.TEXT_COLUMNS + ("forest_json",)
+    TEXT_COLUMNS = tuple(dict.fromkeys(GraphParquetTokenStream.TEXT_COLUMNS + ("forest_json",)))
     COORD_COLUMNS = ("structure_coordinates", "ca_coordinates")
 
     def __init__(
@@ -418,7 +972,8 @@ class StructureCoordinateParquetStream:
         *,
         max_atoms: int = 128,
     ) -> None:
-        self.files = [Path(p) for p in sorted(glob.glob(pattern))]
+        self.pattern = pattern
+        self.files = self._expand_patterns(pattern)
         if not self.files:
             raise FileNotFoundError(f"No structure Parquet files found for pattern: {pattern}")
         self.tokenizer = tokenizer
@@ -432,6 +987,30 @@ class StructureCoordinateParquetStream:
         self.rows_coordinate_bearing = 0
         self.rows_skipped = 0
         self._load_file()
+
+    @staticmethod
+    def _expand_patterns(pattern: str) -> list[Path]:
+        pieces = [piece.strip() for piece in re.split(r"[,;]", pattern) if piece.strip()]
+        files: list[Path] = []
+        seen: set[str] = set()
+        for piece in pieces or [pattern]:
+            for item in sorted(glob.glob(piece)):
+                path = Path(item)
+                key = str(path)
+                if key not in seen:
+                    seen.add(key)
+                    files.append(path)
+        return files
+
+    def refresh_files(self) -> None:
+        refreshed = self._expand_patterns(self.pattern)
+        if refreshed:
+            current = self.files[self.file_idx] if self.files and self.file_idx < len(self.files) else None
+            self.files = refreshed
+            if current in self.files:
+                self.file_idx = self.files.index(current)
+            else:
+                self.file_idx = min(self.file_idx, max(0, len(self.files) - 1))
 
     def _encode(self, text: str) -> list[int]:
         try:
@@ -534,6 +1113,7 @@ class StructureCoordinateParquetStream:
         self.row_idx = 0
 
     def _advance_file(self) -> None:
+        self.refresh_files()
         attempts = 0
         while attempts < len(self.files):
             self.file_idx = (self.file_idx + 1) % len(self.files)

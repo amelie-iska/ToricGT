@@ -129,10 +129,25 @@ splits/leakage_v1/toricblm_fot_leakage_v1_test.parquet
 
 Split counts are 2,788 train, 156 validation, and 128 test.  Clusters combine
 sequence sketches, function/annotation shingles, structure lookup hooks, source
-graph histograms, and FoT graph topology.  This is a leakage guard for the data
-available now; coordinate-level Foldseek or ProTrek trimodal clustering should
-be applied as the AFDB/PDB/dynamics coordinate corpus grows beyond the first
-curated shard.
+graph histograms, and FoT graph topology.  This leakage split is retained as a
+compact graph/FoT baseline.
+
+The current multimodal split for structure-aware training is the ProTrek v2
+split:
+
+```text
+manifests/toricblm_fot_protrek_split_report_v2.json
+splits/protrek_v2/toricblm_protrek_trimodal_split_v2_train.parquet
+splits/protrek_v2/toricblm_protrek_trimodal_split_v2_validation.parquet
+splits/protrek_v2/toricblm_protrek_trimodal_split_v2_test.parquet
+```
+
+This split was produced by actual GPU ProTrek inference, not hash-only
+signatures.  It contains 14,411 records over 120 clusters: 13,227 train, 373
+validation, and 811 test.  The report records 4,335 trimodal rows with
+sequence, function text, and saved or file-derived structure representation
+present.  Rows missing structure remain trainable as graph/FoT text/sequence
+rows; they are simply not counted as trimodal.
 
 The ConvexTok audit is recorded in
 `../../planning/TORICBLM-FOT-TOKENIZER-AUDIT.md`.  The current decision is to
@@ -140,12 +155,23 @@ keep the fresh ConvexTok-8192 biomedical tokenizer for the immediate full run
 and revisit vocabulary extension when residue, atom, coordinate, trajectory,
 and richer UniProt/PDB fields are included.
 
-`manifests/toricblm_fot_structure_readiness_train_v1.json` reports 917
-structure-association records and zero coordinate-bearing records in the
-balanced graph/FoT train split.  That split trains structure association
-through graph/FoT annotations and lookup hooks.
+`manifests/toricblm_multimodal_structure_readiness.json` is the strict
+coordinate-native training gate.  The current manifest is ready and includes
+real coordinate-bearing train rows for every required modality:
 
-A coordinate-bearing AFDB v6 shard is now built separately:
+```text
+protein_afdb: 4335
+pdb_protein: 292
+pdb_rna: 10
+pdb_dna: 9
+pdb_complex: 59
+pubchem_3d_or_ligand: 82
+```
+
+The launcher refuses a full multimodal run when this manifest lacks any
+required modality.  No missing modality is inferred or replaced.
+
+Coordinate-bearing AFDB v6 shards are built separately:
 
 ```text
 structures/afdb_v6/toricblm_afdb_structure_fot_all.parquet
@@ -154,16 +180,32 @@ structures/afdb_v6/toricblm_afdb_structure_fot_validation.parquet
 structures/afdb_v6/toricblm_afdb_structure_fot_test.parquet
 structures/afdb_v6/toricblm_afdb_structure_fot_manifest.json
 structures/afdb_v6/toricblm_afdb_structure_readiness_train.json
+structures/afdb_v6_full/train/*.parquet
 ```
 
-It contains 256 records with real AlphaFold DB mmCIF-derived coordinates:
-239 train, 7 validation, and 10 test.  Each row carries CA coordinates,
-backbone coordinates, coordinate masks, pLDDT, graph/FoT structure context,
-and source metadata.  Rows without AFDB predictions or usable coordinate
-tensors are skipped, not filled with proxy coordinates.  The training config
-uses `structures/afdb_v6/toricblm_afdb_structure_fot_train.parquet` through
-`TORICBLM_STRUCTURE_TRAIN_GLOB`, making flow/contact/distogram/RMSD structure
-losses active on coordinate-bearing batches.
+The original seed shard contains 256 records with real AlphaFold DB
+mmCIF-derived coordinates: 239 train, 7 validation, and 10 test.  The larger
+resumable AFDB v6 curation under `structures/afdb_v6_full` writes sharded train
+Parquet files as it reaches shard boundaries and saves Foldseek/3Di sequences
+for ProTrek splitting before deleting raw mmCIF caches.  Each row carries real
+coordinates, coordinate masks, pLDDT, graph/FoT structure context, and source
+metadata.  Rows without usable coordinates are skipped, not filled with proxy
+coordinates.
+
+Additional coordinate-native structure shards are present under:
+
+```text
+structures/pdb_modal/{train,validation,test}/*.parquet
+structures/pubchem3d/{train,validation,test}/*.parquet
+```
+
+PDB rows are parsed from real mmCIF files and include protein, RNA, DNA, and
+mixed protein/nucleic-acid complex modalities.  PubChem3D rows are parsed only
+from real 3D SDF conformers; the curation path rejects flat/non-coordinate
+records and does not generate conformers.  The raw PubChem10M SELFIES mirror
+currently uses an older SELFIES dialect with `[Branch]` and `[pop]` symbols
+that the installed `selfies` decoder rejects, so the PubChem3D seed set comes
+from curated biomedical CIDs until a dialect-conversion layer is selected.
 
 The late-stage training glob used by the full ToricBLM run is symlink-only:
 

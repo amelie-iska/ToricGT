@@ -153,7 +153,7 @@ def sequence_analytics(sequence: str, dataset: str) -> dict[str, Any]:
     return analytics
 
 
-def sequence_chunks(sequence: str, chunk_size: int = 256, max_chunks: int = 12) -> list[dict[str, Any]]:
+def sequence_chunks(sequence: str, chunk_size: int = 256, max_chunks: int = 64) -> list[dict[str, Any]]:
     chunks = []
     if not sequence:
         return chunks
@@ -261,6 +261,17 @@ def enrichment_status(dataset: str, row: dict[str, Any], ec_numbers: list[str], 
     text_blob = " ".join(str(v) for v in row.values() if isinstance(v, str))
     has_sites = bool(re.search(r"\b(active site|binding site|site|motif|domain)\b", text_blob, flags=re.IGNORECASE))
     has_kinetics = bool(re.search(r"\b(Km|Kcat|kcat|Vmax|turnover|kinetic)\b", text_blob))
+    has_structure_hook = bool(structure_links)
+    coordinate_columns_present = any(
+        key in row and row.get(key) not in (None, "", [], {})
+        for key in (
+            "structure_coordinates",
+            "ca_coordinates",
+            "backbone_coordinates",
+            "atom_coordinates",
+            "coordinates",
+        )
+    )
     return {
         "dataset": dataset,
         "present": {
@@ -273,18 +284,37 @@ def enrichment_status(dataset: str, row: dict[str, Any], ec_numbers: list[str], 
             "sites_or_domains_in_text": has_sites,
             "kinetic_parameters_in_text": has_kinetics,
             "genomic_features": bool(row.get("exons") or row.get("introns") or row.get("proteins")),
-            "structure_lookup_hooks": bool(structure_links),
+            "structure_lookup_hooks": has_structure_hook,
+            "structure_available": coordinate_columns_present,
+            "coordinate_training_available": coordinate_columns_present,
             "selfies_molecule": bool(row.get("SELFIES")),
         },
         "missing_or_external": {
             "full_uniprotkb_xml_json": "not_present_in_local_raw_hf_bio_scale",
             "pdb_cross_reference_table": "not_present_unless_accession_like_pdb_id_detected",
-            "afdb_coordinates": "not_fetched; URL hook only when accession permits",
+            "afdb_coordinates": "not_fetched_in_graph_stream; URL hook only when accession permits",
             "alphafold_confidence": "not_present",
             "binding_sites": "only text-detected if present upstream",
             "catalytic_activity": "only text-detected if present upstream",
             "kinetic_constants": "only regex-detected if present upstream",
             "variants_pathways_interactions": "not_present_unless upstream field contains text",
+            "coordinate_structure_training_target": (
+                "present_in_this_row"
+                if coordinate_columns_present
+                else "absent_from_this_graphified_row; keep graph/text/FoT training active and route coordinate losses only to coordinate-bearing shards"
+            ),
+            "structure_missing_policy": (
+                "train_all_available_noncoordinate_modalities; do_not_drop_entry; do_not_impute_coordinates"
+                if not coordinate_columns_present
+                else "coordinate-bearing row may be used by structure-flow training"
+            ),
+        },
+        "structure_policy": {
+            "graph_fot_training_requires_coordinates": False,
+            "coordinate_loss_requires_coordinates": True,
+            "missing_structure_action": "train_without_structure_using_all_available_fields",
+            "coordinate_imputation_allowed": False,
+            "structure_lookup_count": len(structure_links),
         },
     }
 
@@ -963,6 +993,7 @@ def graphify_row(
             },
             "graphcg_axes": ["sequence", "function", "structure", "taxonomy", "chemistry", "design_constraints"],
             "tropical_toric": graph_json["metadata"]["tokengt_tropical_toric_fields"],
+            "structure_training_policy": enrich["structure_policy"],
         },
     }
     content_hash = sha256_text(stable_json({"graph": graph_json, "forest": forest_json, "thought_forest": thought_forest_json, "convextok": convextok_view}))
