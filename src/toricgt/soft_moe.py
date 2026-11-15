@@ -9,6 +9,11 @@ from typing import Iterable
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint
+
+
+# Bound the number of query ranks whose dispatch tensors coexist in one call.
+_RANKS_PER_DISPATCH = 32
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,7 @@ class GraphTokenSoftMoE(nn.Module):
     tokens, applies expert MLPs to those slots, and combines the expert-slot
     outputs back into the original token rows. Routing parameters are shared
     across rows, so token relabeling only relabels outputs.
+    With reveal ranks, each slot sees valid tokens at or below its query rank.
     """
 
     def __init__(
@@ -95,10 +101,84 @@ class GraphTokenSoftMoE(nn.Module):
         slot_norm = F.normalize(self.slot_keys, p=2, dim=-1, eps=self.eps)
         return self.logit_scale.exp() * torch.einsum("bld,esd->bles", x_norm, slot_norm)
 
-    def forward(self, x: torch.Tensor, token_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def _expert_slots(
+        self,
+        x: torch.Tensor,
+        logits: torch.Tensor,
+        visible: torch.Tensor,
+        slot_active: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        dispatch = _masked_exp_normalize_over_tokens(logits, visible, self.eps)
+        if slot_active is not None:
+            dispatch = dispatch * slot_active[None, None, :, :].to(dtype=dispatch.dtype)
+        slots = torch.einsum("bles,bld->besd", dispatch, x)
+        outputs = torch.stack([expert(slots[:, i]) for i, expert in enumerate(self.experts)], dim=1)
+        with torch.no_grad():
+            dispatch_safe = dispatch.clamp_min(self.eps)
+            entropy = -(dispatch_safe * dispatch_safe.log()).sum(dim=1).mean(dim=(1, 2))
+        return outputs, entropy
+
+    def _prefix_expert_slots(
+        self,
+        x: torch.Tensor,
+        logits: torch.Tensor,
+        ranks: torch.Tensor,
+        levels: torch.Tensor,
+        slot_active: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        visible = ranks[None, :] <= levels[:, None]
+        return self._expert_slots(x[None], logits[None], visible, slot_active)
+
+    def _causal_mixture(
+        self,
+        x: torch.Tensor,
+        logits: torch.Tensor,
+        combine: torch.Tensor,
+        token_mask: torch.Tensor,
+        causal_rank: torch.Tensor,
+        slot_active: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        output = combine.new_zeros(x.shape)
+        entropy_sum = logits.new_zeros(())
+        for row in range(x.shape[0]):
+            valid_rows = token_mask[row].nonzero(as_tuple=True)[0]
+            if valid_rows.numel() == 0:
+                continue
+            ranks = causal_rank[row, valid_rows]
+            levels, groups, counts = torch.unique(ranks, return_inverse=True, return_counts=True)
+            row_x = x[row, valid_rows]
+            row_logits = logits[row, valid_rows]
+            slots_by_rank = []
+            entropy_by_rank = []
+            for rank_block in levels.split(_RANKS_PER_DISPATCH):
+                args = (row_x, row_logits, ranks, rank_block, slot_active)
+                # Recompute dispatch on backward instead of retaining each prefix matrix.
+                if torch.is_grad_enabled():
+                    slots, entropy = checkpoint(self._prefix_expert_slots, *args, use_reentrant=False)
+                else:
+                    slots, entropy = self._prefix_expert_slots(*args)
+                slots_by_rank.append(slots)
+                entropy_by_rank.append(entropy)
+            slots = torch.cat(slots_by_rank)[groups]
+            values = torch.einsum("tes,tesd->td", combine[row, valid_rows], slots)
+            output[row, valid_rows] = values.to(dtype=output.dtype)
+            entropy_sum = entropy_sum + (torch.cat(entropy_by_rank) * counts).sum()
+        return output, entropy_sum / token_mask.sum().clamp_min(1)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        token_mask: torch.Tensor | None = None,
+        *,
+        causal_rank: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         if token_mask is None:
             token_mask = torch.ones(x.shape[:2], dtype=torch.bool, device=x.device)
         token_mask = token_mask.to(dtype=torch.bool, device=x.device)
+        if causal_rank is not None:
+            if causal_rank.shape != token_mask.shape:
+                raise ValueError("Soft-MoE reveal ranks must match the token mask")
+            causal_rank = causal_rank.to(device=x.device)
 
         logits = self._logits(x)
         slot_active = None
@@ -111,26 +191,19 @@ class GraphTokenSoftMoE(nn.Module):
             )
             slot_active[list(self._active_experts), :] = True
             logits = logits.masked_fill(~slot_active[None, None, :, :], torch.finfo(logits.dtype).min)
-        dispatch = _masked_exp_normalize_over_tokens(logits, token_mask, self.eps)
-        if slot_active is not None:
-            dispatch = dispatch * slot_active[None, None, :, :].to(dtype=dispatch.dtype)
-        slots = torch.einsum("bles,bld->besd", dispatch, x)
-
-        expert_outputs = []
-        for expert_idx, expert in enumerate(self.experts):
-            expert_outputs.append(expert(slots[:, expert_idx, :, :]))
-        out_slots = torch.stack(expert_outputs, dim=1)
-
         combine = torch.softmax(logits.flatten(2), dim=-1).view_as(logits)
         combine = combine * token_mask[:, :, None, None].to(dtype=combine.dtype)
-        y = torch.einsum("bles,besd->bld", combine, out_slots)
-        y = y * token_mask.unsqueeze(-1).to(dtype=y.dtype)
+        if causal_rank is None:
+            out_slots, entropy = self._expert_slots(x, logits, token_mask, slot_active)
+            y = torch.einsum("bles,besd->bld", combine, out_slots)
+            y = y * token_mask.unsqueeze(-1).to(dtype=y.dtype)
+            dispatch_entropy = entropy.mean()
+        else:
+            y, dispatch_entropy = self._causal_mixture(x, logits, combine, token_mask, causal_rank, slot_active)
 
         with torch.no_grad():
             expert_mass = combine.sum(dim=(0, 1, 3)) / token_mask.sum().clamp_min(1).to(combine.dtype)
-            dispatch_safe = dispatch.clamp_min(self.eps)
             combine_safe = combine.flatten(2).clamp_min(self.eps)
-            dispatch_entropy = -(dispatch_safe * dispatch_safe.log()).sum(dim=1).mean(dim=(0, 2))
             valid_combine = combine_safe[token_mask]
             if valid_combine.numel() == 0:
                 combine_entropy = x.new_zeros(())

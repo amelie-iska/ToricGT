@@ -339,10 +339,12 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         mask: torch.Tensor | None = None,
         token_mask: torch.Tensor | None = None,
+        *,
+        causal_rank: torch.Tensor | None = None,
     ) -> torch.Tensor:
         x = x + self.attn(self.ln1(x), mask=mask).output
         if self.uses_soft_moe:
-            x = x + self.ffn(self.ln2(x), token_mask=token_mask)
+            x = x + self.ffn(self.ln2(x), token_mask=token_mask, causal_rank=causal_rank)
         else:
             x = x + self.ffn(self.ln2(x))
         return x

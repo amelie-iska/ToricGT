@@ -293,6 +293,11 @@ class ToricTokenGT(nn.Module):
         memory_trace_top_k: int = 3,
     ) -> dict[str, torch.Tensor | object]:
         tok = self.tokenizer(batch)
+        causal_rank = tok.causal_rank if self.config.use_causal_graph_attention else None
+        if self.config.use_causal_graph_attention and causal_rank is None and any(
+            block.uses_soft_moe for block in self.blocks
+        ):
+            raise ValueError("Causal graph attention with Soft-MoE requires node_causal_rank")
         x = tok.tokens
         input_ids = None
         lm_input = None
@@ -356,18 +361,19 @@ class ToricTokenGT(nn.Module):
                 ).unsqueeze(-1)
             x = x.clone()
             x[:, tok.node_positions, :] = x[:, tok.node_positions, :] + lm_input
-        causal_rank = tok.causal_rank if self.config.use_causal_graph_attention else None
         mask = attention_mask_from_token_mask(tok.token_mask, causal_rank=causal_rank)
         for _ in range(max(1, int(self.config.recurrent_passes))):
             for block in self.blocks:
                 if self.training and self.config.activation_checkpointing:
                     x = checkpoint(
-                        lambda block_x, block=block: block(block_x, mask=mask, token_mask=tok.token_mask),
+                        lambda block_x, block=block: block(
+                            block_x, mask=mask, token_mask=tok.token_mask, causal_rank=causal_rank,
+                        ),
                         x,
                         use_reentrant=False,
                     )
                 else:
-                    x = block(x, mask=mask, token_mask=tok.token_mask)
+                    x = block(x, mask=mask, token_mask=tok.token_mask, causal_rank=causal_rank)
         x = self.norm(x)
 
         node_x = x[:, tok.node_positions, :]
