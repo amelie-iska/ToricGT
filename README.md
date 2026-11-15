@@ -37,6 +37,9 @@ submission link.  The current page bundle includes a best-checkpoint
 ConvexTok, Toric BGG, GUDHI persistence, CAS, toric embedding,
 simplex-trajectory, vector-bundle, and theory-gallery reports.
 
+The [ToricMora review and plan](planning/TORICMORA.md) compares the model and data
+branches and records the structural analogy benchmark and scale-up experiments.
+
 *Note: consider PH disambiguation along decision boundaries or of words with multiple meanings*
 
 **TokenGT base model**

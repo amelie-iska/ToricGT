@@ -2185,18 +2185,147 @@ h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spa
 """
 
 
-def method_report_shell(title: str, eyebrow: str, body: str) -> str:
+def method_report_shell(title: str, eyebrow: str, body: str, *, extra_css: str = "") -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
-<style>{METHOD_CSS}</style></head><body><main>
+<style>{METHOD_CSS}{extra_css}</style></head><body><main>
 <section class="hero"><div class="eyebrow">{html.escape(eyebrow)}</div><h1>{html.escape(title)}</h1></section>
 {body}
 </main></body></html>
 """
 
 
-def write_fot_method_report(docs: Path, copied: dict[str, str]) -> dict[str, str]:
+def render_fot_analogy_example() -> str:
+    # This small hand-authored example is independent of the evaluation fixtures.
+    roles = ("A", "B", "C")
+    source_anchors = ("Sorting", "Review", "Filing")
+    target_anchors = ("Intake", "Inspection", "Storage")
+    source_before = ("Slip S1", "Slip S2", "Slip S3")
+    target_before = ("Crate K7", "Crate K4", "Crate K9")
+    source_after = ("Slip S2", "Slip S1", "Slip S3")
+    target_candidates = (
+        ("Crate K4", "Crate K7", "Crate K9"),
+        ("Crate K9", "Crate K4", "Crate K7"),
+    )
+    # Each permutation records where the payload at an anchor goes.
+    source_moves = tuple(roles[source_after.index(item)] for item in source_before)
+
+    def assignment_rows(anchors: tuple[str, ...], payloads: tuple[str, ...], indices: tuple[int, ...]) -> str:
+        return "".join(
+            f'<li><strong>{roles[i]} · {html.escape(anchors[i])}</strong>'
+            f'<span class="fot-arrow" aria-hidden="true">→</span><span>{html.escape(payloads[i])}</span></li>'
+            for i in indices
+        )
+
+    def view(
+        title: str,
+        anchors: tuple[str, ...],
+        payloads: tuple[str, ...],
+        groups: tuple[tuple[str, tuple[int, ...]], ...],
+        context: str,
+    ) -> str:
+        context_html = f'<p class="fot-context">{html.escape(context)}</p>' if context else ""
+        trees = "".join(
+            f'<div class="fot-tree"><h4>{html.escape(root)}</h4>'
+            f'<ul>{assignment_rows(anchors, payloads, indices)}</ul></div>'
+            for root, indices in groups
+        )
+        return f'<div class="fot-example-view"><h3>{html.escape(title)}</h3>{context_html}{trees}</div>'
+
+    def proof(candidate: tuple[str, ...]) -> str:
+        target_moves = tuple(roles[candidate.index(item)] for item in target_before)
+        rows = "".join(
+            f'<tr><th scope="row">{role}</th><td>{source_dest}</td><td>{target_dest}</td>'
+            f'<td>{"Preserved" if source_dest == target_dest else "Mismatch"}</td></tr>'
+            for role, source_dest, target_dest in zip(roles, source_moves, target_moves)
+        )
+        verdict = "Pass. All three destinations agree." if source_moves == target_moves else (
+            "Fail. The candidate sends payloads to different anchor roles."
+        )
+        return (
+            '<table class="mini-table"><thead><tr><th scope="col">From role</th>'
+            '<th scope="col">Source to</th><th scope="col">Target to</th>'
+            '<th scope="col">Result</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table><p><strong>{verdict}</strong></p>'
+        )
+
+    scopes = (
+        (
+            "Subtree",
+            (("Routing branch", (0, 1, 2)),),
+            (("Sorting branch", (0, 1, 2)),),
+            "Binder → Index and routing branch",
+            "Building → Lobby and sorting branch",
+            "Compare only the branch below the selected root on each side. The index and "
+            "lobby belong to the enclosing trees.",
+        ),
+        (
+            "Tree",
+            (("Dispatch desk", (0, 1, 2)),),
+            (("Depot", (0, 1, 2)),),
+            "",
+            "",
+            "Compare each complete rooted tree. All three anchors share one root on each side.",
+        ),
+        (
+            "Forest",
+            (("Dispatch desk", (0,)), ("Records desk", (1, 2))),
+            (("East depot", (0,)), ("West depot", (1, 2))),
+            "",
+            "",
+            "Compare both rooted trees together. The A ↔ B exchange crosses the two roots "
+            "on both sides and leaves the anchors attached to their original roots.",
+        ),
+    )
+    scope_sections = []
+    for label, source_groups, target_groups, source_context, target_context, explanation in scopes:
+        candidates = "".join(
+            f'<details class="fot-example-result"><summary>{candidate_label}</summary>'
+            f'{view("Target after", target_anchors, payloads, target_groups, target_context)}{proof(payloads)}</details>'
+            for candidate_label, payloads in zip(
+                ("Candidate 1", "Candidate 2 · hard negative"), target_candidates
+            )
+        )
+        open_scope = " open" if label == "Forest" else ""
+        scope_sections.append(
+            f'<details class="fot-example-scope"{open_scope}><summary>{label}</summary>'
+            f'<p>{html.escape(explanation)}</p><div class="grid three">'
+            f'{view("Source before", source_anchors, source_before, source_groups, source_context)}'
+            f'{view("Source after", source_anchors, source_after, source_groups, source_context)}'
+            f'{view("Target before", target_anchors, target_before, target_groups, target_context)}'
+            f'</div>{candidates}</details>'
+        )
+
+    return f"""
+<section class="panel" id="worked-analogy">
+  <h2>A worked Forest-of-Thought analogy</h2>
+  <p>In this hand-authored example, a source routing change exchanges the payloads attached to
+  two anchors. The target uses different anchor names and payloads. Match anchors by their
+  declared roles A, B, and C, then transfer the change to the target.</p>
+  <p>Each card lists a root and its anchors. Each arrow gives the payload attached to that
+  anchor. For each starting role, follow its payload to its new role. A candidate passes when
+  every destination agrees with the source change.</p>
+  {''.join(scope_sections)}
+  <p class="metric-note">Both candidates preserve the roots, the number of attachments, and
+  the branching shape. You need the directed role-to-role correspondence to decide which
+  candidate transfers the source change. The tables are computed from the displayed
+  assignments in the page builder. This is a schematic demonstration.</p>
+  <p class="metric-note">Related work on exemplar prompting, relational correspondence,
+  cross-domain generation, and embedding arithmetic.
+  <a href="https://arxiv.org/abs/2310.01714">Yasunaga et al.</a> ·
+  <a href="https://arxiv.org/abs/2602.01992">Minegishi et al.</a> ·
+  <a href="https://arxiv.org/abs/2605.11258">Shen et al.</a> ·
+  <a href="https://arxiv.org/abs/2505.18651">Korchinski et al.</a></p>
+</section>
+"""
+
+
+def write_fot_method_report(
+    docs: Path,
+    copied: dict[str, str],
+    trace_available: bool = False,
+) -> dict[str, str]:
     out = docs / "page_interactive" / "fot_method"
     out.mkdir(parents=True, exist_ok=True)
     image = "../../" + copied.get("fot_reference", "")
@@ -2282,22 +2411,49 @@ def write_fot_method_report(docs: Path, copied: dict[str, str]) -> dict[str, str
         },
     }
     forest_svg = f"""
-<svg viewBox="0 0 700 390" role="img" aria-label="Forest-of-Thought embedding-space forest diagram">
+<svg viewBox="0 0 700 390" role="img" aria-label="Schematic of Forest-of-Thought branch expansion and consensus">
   <rect x="8" y="8" width="684" height="374" rx="18" fill="#020713" stroke="rgba(70,231,255,.30)"/>
   <defs><marker id="fotArrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#46e7ff"/></marker></defs>
   <g marker-end="url(#fotArrow)">{''.join(edge_svg)}</g>
   <g>{''.join(node_svg)}</g>
 </svg>
 """
+    trace_note = ""
+    if trace_available:
+        trace_note = """
+<section class="panel">
+  <h2>Checkpoint reconstruction</h2>
+  <p>The existing checkpoint audit applies the trained FoT head to selected hidden states.
+  Its node values and policy scores come from that checkpoint evaluation. The renderer
+  assembles the displayed tree edges afterward from those outputs.</p>
+  <p><a href="../branching_reasoning/index.html">Open the branching reasoning report</a> ·
+  <a href="../branching_reasoning/embedding_fot_trace.json">Inspect the trace JSON</a></p>
+</section>
+"""
+    example_css = """
+  .fot-context{font-size:.84rem;color:var(--muted);margin:0 0 6px}
+  .fot-example-scope,.fot-example-result{border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;background:#071421}
+  .fot-example-scope>summary,.fot-example-result>summary{cursor:pointer;font-weight:750;color:var(--cyan)}
+  .fot-example-scope>summary:focus-visible,.fot-example-result>summary:focus-visible{outline:2px solid var(--gold);outline-offset:4px}
+  .fot-example-view{min-width:0;padding:12px;border:1px solid var(--line);border-radius:10px;background:#020713}
+  .fot-example-result .fot-example-view{margin-top:12px}
+  .fot-tree{padding:6px 0}.fot-tree h4{margin:0 0 4px;color:var(--gold)}
+  .fot-tree ul{list-style:none;margin:0;padding:0 0 0 10px;border-left:2px solid var(--line)}
+  .fot-tree li{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 8px;padding:3px 0}
+  .fot-tree li strong{color:var(--text)}.fot-arrow{color:var(--cyan)}
+  @media(max-width:520px){.fot-example-result .mini-table{table-layout:fixed}.fot-example-result th,.fot-example-result td{padding:7px 3px;font-size:.82rem;overflow-wrap:anywhere}}
+"""
     body = f"""
 <section class="panel">
   <p class="lead">Forest-of-Thought (FoT) scales reasoning by running several thought trees, activating promising branches sparsely, correcting weak branches, and using consensus over the forest. In ToricGT the same idea is moved from prompt strings into embedding space: each branch is a graph-valued hidden trajectory, each edge is a graph edit or continuous displacement, and branch rewards are tied to BPB delta, verifier score, topological stability, and toric fan margins.</p>
-  <p><a href="https://arxiv.org/abs/2412.09078">FoT arXiv:2412.09078</a> · <a href="https://github.com/iamhankai/Forest-of-Thought">upstream code</a> · <a href="https://huggingface.co/blog/AmelieSchreiber/toricblm">ToricBLM continuation</a></p>
+  <p><a href="https://arxiv.org/abs/2412.09078">FoT arXiv:2412.09078</a> · <a href="https://github.com/iamhankai/Forest-of-Thought">upstream code</a> · <a href="#worked-analogy">worked analogy</a></p>
 </section>
+{render_fot_analogy_example()}
 <section class="grid two">
   <article class="panel"><h2>FoT Reference Diagram</h2>{f'<img class="source-img" src="{html.escape(image)}" alt="Forest-of-Thought paper diagram">' if image != "../../" else '<p>Local FoT paper image not found.</p>'}</article>
-  <article class="panel"><h2>Embedding-Space Adaptation</h2><p class="metric-note">Click or keyboard-select a vertex to reveal its local thought tree and branch metrics. The SVG is a lightweight projection; the training controller works in the original embedding coordinates.</p>{forest_svg}<div id="fotDetail" class="detail-panel">Click a vertex to reveal the local thought tree, branch role, and training signals for that node.</div></article>
+  <article class="panel"><h2>Embedding-Space Schematic</h2><p class="metric-note">The nodes, edges, and qualitative metrics are hand-authored illustrations. Select a vertex to see an illustrative local tree and its proposed training signals.</p>{forest_svg}<div id="fotDetail" class="detail-panel" aria-live="polite">Select a vertex to reveal an illustrative local tree.</div></article>
 </section>
+{trace_note}
 <section class="grid three">
   <article class="card"><h3>State</h3><p>Each state is <span class="accent">s=(G,H,Σ,μ,M)</span>: a reasoning graph, hidden table, toric/fan chart, moment coordinate, and memory pointer.</p></article>
   <article class="card"><h3>Action</h3><p>Actions add/merge thought nodes, move inside a normal cone, cross a wall, retrieve an analogy, or flatten a graph output for BPB scoring.</p></article>
@@ -2354,12 +2510,15 @@ document.querySelectorAll('[data-node]').forEach(node => {{
 renderFotDetail('root');
 </script>
 """
-    (out / "index.html").write_text(method_report_shell("Forest-of-Thought Reasoning", "Embedding-space reasoning forest", body), encoding="utf-8")
+    (out / "index.html").write_text(
+        method_report_shell("Forest-of-Thought Reasoning", "Embedding-space reasoning forest", body, extra_css=example_css),
+        encoding="utf-8",
+    )
     return {
         "href": "page_interactive/fot_method/index.html",
         "title": "Forest-of-Thought Method",
-        "summary": "Dark-mode FoT explanation and interactive embedding-space forest diagram adapted to ToricGT’s graph-valued hidden trajectories.",
-        "features": "multiple thought trees · sparse activation · self-correction · BPB-delta reward",
+        "summary": "Inspect a worked analogy across subtrees, trees, and forests, with a matched candidate and a hard negative.",
+        "features": "role correspondence · candidate checks · embedding-space schematic",
         "embed": "0",
     }
 
@@ -2719,7 +2878,12 @@ def write_theory_gallery_report(docs: Path) -> dict[str, str]:
 
 def write_method_reports(docs: Path, copied: dict[str, str], best_metrics: dict[str, Any]) -> dict[str, dict[str, str]]:
     reports = {
-        "fot_method": write_fot_method_report(docs, copied),
+        "fot_method": write_fot_method_report(
+            docs, copied, trace_available=(
+                (docs / "page_interactive" / "branching_reasoning" / "index.html").is_file()
+                and (docs / "page_interactive" / "branching_reasoning" / "embedding_fot_trace.json").is_file()
+            ),
+        ),
         "convextok_method": write_convextok_method_report(docs),
         "bgg_category_o": write_bgg_method_report(docs, best_metrics),
         "theory_gallery": write_theory_gallery_report(docs),

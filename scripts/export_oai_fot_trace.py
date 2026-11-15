@@ -5,7 +5,7 @@ This utility is the inference/reporting companion to the OAI FoT training head.
 It can either:
 
 * load a ToricBLM/OAI checkpoint and run a prompt through the adapted baseline,
-  then emit the learned FoT trace; or
+  then reconstruct a FoT diagnostic from teacher-forced hidden states; or
 * run a deterministic smoke trace over synthetic hidden states to validate the
   forest topology without needing a large checkpoint.
 """
@@ -16,6 +16,7 @@ import argparse
 import importlib.util
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -25,14 +26,16 @@ ROOT = Path(__file__).resolve().parents[1]
 PARAMETER_GOLF = ROOT / "amelie-iska" / "parameter-golf"
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
-if str(PARAMETER_GOLF) not in sys.path:
-    sys.path.insert(0, str(PARAMETER_GOLF))
 
 from toricgt.embedding_forest_of_thought import EmbeddingFoTConfig, EmbeddingForestOfThoughtHead
 
 
-def load_train_gpt_module() -> Any:
-    module_path = PARAMETER_GOLF / "train_gpt.py"
+def load_train_gpt_module(parameter_golf: Path) -> Any:
+    parameter_golf = parameter_golf.resolve()
+    module_path = parameter_golf / "train_gpt.py"
+    if not module_path.is_file():
+        raise SystemExit(f"Missing {module_path}. Specify the pinned checkout with --parameter-golf.")
+    sys.path.insert(0, str(parameter_golf))
     spec = importlib.util.spec_from_file_location("toricblm_parameter_golf_train_gpt", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not import {module_path}")
@@ -141,6 +144,7 @@ def smoke_trace(output: Path) -> None:
     target = torch.arange(96).view(1, -1) % 8192
     nll = torch.linspace(0.5, 2.5, 96).view(1, -1)
     trace = head.trace_payload(hidden, target, nll)
+    trace["provenance"] = {"mode": "synthetic_smoke", "seed": 7}
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(trace, indent=2, sort_keys=True), encoding="utf-8")
     print(f"fot_trace_smoke_written:{output} nodes:{trace['node_count']} edges:{trace['edge_count']}")
@@ -150,7 +154,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint")
     parser.add_argument("--tokenizer")
-    parser.add_argument("--prompt", default="Design a thermostable oxidoreductase and explain the catalytic tradeoffs.")
+    parser.add_argument("--parameter-golf", type=Path, default=PARAMETER_GOLF)
+    parser.add_argument(
+        "--hyperparameters-json", type=Path, help="Recorded model settings for legacy checkpoints with empty metadata."
+    )
+    parser.add_argument("--prompt", default="Compare two ways to evaluate the same arithmetic expression.")
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--smoke", action="store_true")
@@ -163,16 +171,29 @@ def main() -> None:
     if not args.checkpoint or not args.tokenizer:
         raise SystemExit("--checkpoint and --tokenizer are required unless --smoke is used")
 
-    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    hparams = dict(ckpt.get("hyperparameters", {})) if isinstance(ckpt, dict) else {}
-    train_gpt = load_train_gpt_module()
+    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+    if not isinstance(ckpt, Mapping) or not ckpt.get("oai_fot"):
+        raise SystemExit("Checkpoint has no trained FoT head. Use --smoke for a synthetic diagnostic.")
+    hparams = ckpt.get("hyperparameters") or {}
+    if args.hyperparameters_json:
+        recorded = json.loads(args.hyperparameters_json.read_text(encoding="utf-8"))
+        if not isinstance(recorded, dict):
+            raise SystemExit("--hyperparameters-json must contain a JSON object")
+        for name, value in hparams.items():
+            if name in recorded and recorded[name] != value:
+                raise SystemExit(f"Recorded hyperparameter conflicts with checkpoint: {name}")
+        hparams = {**recorded, **hparams}
+    required = {"vocab_size", "model_dim", "num_layers", "num_heads", "num_kv_heads"}
+    if missing := required - hparams.keys():
+        raise SystemExit(f"Missing recorded model settings: {', '.join(sorted(missing))}")
+
+    train_gpt = load_train_gpt_module(args.parameter_golf)
     device = torch.device(args.device)
     model = build_model(train_gpt, hparams).to(device)
-    model.load_state_dict(ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt, strict=True)
+    model.load_state_dict(ckpt["model"], strict=True)
     model.eval()
     fot = build_fot_head(hparams).to(device)
-    if isinstance(ckpt, dict) and ckpt.get("oai_fot") is not None:
-        fot.load_state_dict(ckpt["oai_fot"], strict=True)
+    fot.load_state_dict(ckpt["oai_fot"], strict=True)
     fot.eval()
 
     token_ids = encode_prompt(args.tokenizer, args.prompt)
@@ -183,6 +204,12 @@ def main() -> None:
     with torch.no_grad():
         _, hidden, nll = model.forward_aux(x, y, flatten_graph_output=True)
         trace = fot.trace_payload(hidden, y, nll)
+    trace["provenance"] = {
+        "mode": "checkpoint_teacher_forced_reconstruction",
+        "checkpoint_step": ckpt.get("step"),
+        "run_id": ckpt.get("run_id"),
+        "input_tokens": x.numel(),
+    }
     trace["prompt"] = args.prompt
     trace["checkpoint"] = str(args.checkpoint)
     trace["tokenizer"] = str(args.tokenizer)

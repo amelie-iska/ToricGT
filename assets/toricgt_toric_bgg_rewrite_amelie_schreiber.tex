@@ -4115,6 +4115,11 @@ This gives inference-time scaling a geometric search space.  Rather than samplin
 
 The current ToricGT implementation adds a second inference-scaling and training-time search layer inspired by Tree-of-Thought, Graph-of-Thought, and Forest-of-Thought methods \cite{yao2023tree,besta2023graph,bi2024forest}.  The original FoT proposal runs several reasoning trees, activates only relevant branches, revisits flawed states through self-correction, and selects final answers by consensus.  ToricGT imports those operations into hidden space rather than prompt space.  This distinction is important for the Parameter-Golf track: the official scored object remains a byte-level prequential distribution, but the unscored auxiliary heads can train hidden states to support branching, correction, and consensus.
 
+
+The checkpoint visualization reconstructs a bounded forest over teacher-forced hidden states, using token targets and per-token loss. We report it as a diagnostic of the learned head. Evaluation of inference-time search requires prefix-only expansion records, executed corrections, and an independently verified terminal answer at a fixed generation budget.
+
+The accompanying structural analogy fixture transfers a typed attachment change across relabeled rooted subtrees, whole trees, and disjoint forests. Candidate attachments may share the same node and edge counts while assigning the change to the wrong branch. An exact witness specifies the branch mapping and the transported directed edits. A pooled embedding offset serves as a baseline, and a verifier checks the discrete witness independently. Generated-fixture outcomes describe the benchmark and verifier. Held-out model accuracy requires comparisons among actual rollouts at the same budget.
+
 \begin{definition}[Embedding Forest-of-Thought state]
 For a prefix-visible hidden table $H=(h_1,\ldots,h_L)$, an embedding-space FoT state is
 \begin{equation}
@@ -4169,7 +4174,7 @@ The implemented FoT objective is
   +\lambda_{\mathrm{cmp}}\mathcal L_{\mathrm{complexity}} .
 \end{split}
 \end{equation}
-The sparse term controls activation entropy; the UCB term encourages expansion toward branches with high value and uncertainty; the correction term aligns $\delta_i$ with lower-NLL or higher-reward successor directions; the consensus term asks high-reward leaves to agree in a compact decision bucket; trajectory and subtrajectory balance make the forest a reward-proportional sampler; and the complexity term prevents unbounded tree growth.
+The sparse term controls activation entropy; the UCB term encourages expansion toward branches with high value and uncertainty; the correction term aligns $\delta_i$ with lower-NLL or higher-reward successor directions; the consensus term asks high-reward leaves to agree in a compact decision bucket; the balance terms penalize residuals between modeled path weights and rewards; and the complexity term prevents unbounded tree growth.
 \end{definition}
 
 The UCB pressure uses the standard form

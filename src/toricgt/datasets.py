@@ -172,6 +172,7 @@ DATASET_SPECS: tuple[DatasetSpec, ...] = (
         language="en",
         url="https://hf.co/datasets/HuggingFaceH4/MATH-500",
         expected_rows=500,
+        forced_split="test",
     ),
     DatasetSpec(
         name="terrycraddock/Tree_Of_Thoughts_BASE_24k",
@@ -756,7 +757,11 @@ def normalize_record(
     normalized = canonical_text(text)
     content_hash = stable_hash(normalized)
     sim_prefix = simhash_prefix(normalized)
-    group_source = f"{spec.task_family}::{family_key(spec, record, question, answer)}::{sim_prefix}"
+    identity = family_key(spec, record, question, answer)
+    group_source = f"{spec.task_family}::{identity}::{sim_prefix}"
+    # OpenR1 may supply many different traces for the same source problem.
+    if spec.name == "open-r1/OpenR1-Math-220k" and identity:
+        group_source = f"{spec.name}::{identity}"
     group_hash = stable_hash(canonical_text(group_source))
     split = spec.forced_split or assign_split(group_hash)
     record_id = stable_hash(f"{spec.key}::{source_split}::{source_index}::{content_hash}")

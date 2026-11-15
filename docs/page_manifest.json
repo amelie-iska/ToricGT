@@ -58,9 +58,9 @@
     },
     "fot_method": {
       "embed": "0",
-      "features": "multiple thought trees \u00b7 sparse activation \u00b7 self-correction \u00b7 BPB-delta reward",
+      "features": "role correspondence \u00b7 candidate checks \u00b7 embedding-space schematic",
       "href": "page_interactive/fot_method/index.html",
-      "summary": "Dark-mode FoT explanation and interactive embedding-space forest diagram adapted to ToricGT\u2019s graph-valued hidden trajectories.",
+      "summary": "Inspect a worked analogy across subtrees, trees, and forests, with a matched candidate and a hard negative.",
       "title": "Forest-of-Thought Method"
     },
     "gudhi_persistence": {
