@@ -4120,6 +4120,8 @@ The checkpoint visualization reconstructs a bounded forest over teacher-forced h
 
 The accompanying structural analogy fixture transfers a typed attachment change across relabeled rooted subtrees, whole trees, and disjoint forests. Candidate attachments may share the same node and edge counts while assigning the change to the wrong branch. An exact witness specifies the branch mapping and the transported directed edits. A pooled embedding offset serves as a baseline, and a verifier checks the discrete witness independently. Generated-fixture outcomes describe the benchmark and verifier. Held-out model accuracy requires comparisons among actual rollouts at the same budget.
 
+A second symbolic benchmark holds the query and candidate list fixed across three counterfactuals and varies the exemplar edit. It tests right-identity removal in ordered arithmetic trees, in a selected subtree with unchanged surrounding context, and across all matching sites of a forest. The exact verifier accepted exactly one correct candidate in each of 144 cases at seed 17 and rejected all 432 negative candidates. Nearest-neighbor retrieval with hand-engineered node and edge type counts achieved $94.10\%$ tie-adjusted top-1 with the exemplar offset and $18.92\%$ with the unshifted query. These measurements characterize the symbolic fixtures and feature baselines.
+
 \begin{definition}[Embedding Forest-of-Thought state]
 For a prefix-visible hidden table $H=(h_1,\ldots,h_L)$, an embedding-space FoT state is
 \begin{equation}

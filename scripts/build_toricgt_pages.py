@@ -8,6 +8,7 @@ import html
 import json
 import math
 import re
+import runpy
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2321,6 +2322,58 @@ def render_fot_analogy_example() -> str:
 """
 
 
+def render_fot_analogy_benchmark() -> str:
+    benchmark_path = Path(__file__).resolve().parents[1] / "src" / "toricgt" / "toricmora_analogy.py"
+    benchmark = runpy.run_path(str(benchmark_path))
+    seed, groups_per_scope = 17, 16
+    cases = benchmark["generate_identity_analogy_cases"](
+        seed=seed, examples_per_scope=groups_per_scope
+    )
+    metrics = benchmark["evaluate_analogies"](cases)
+    columns = (
+        "offset_top1_expected",
+        "unshifted_top1_expected",
+        "structural_unique_top1",
+        "structural_false_accept_rate",
+    )
+    scope_labels = {"subtree": "Subtree", "tree": "Tree", "forest": "Forest", "all": "All scopes"}
+    rows = []
+    for scope, label in scope_labels.items():
+        result = metrics[scope]
+        rates = "".join(f"<td>{result[key]:.2%}</td>" for key in columns)
+        rows.append(f'<tr><th scope="row">{label}</th><td>{result["cases"]}</td>{rates}</tr>')
+    source_url = f"{REPO_URL}/blob/ToricMora/src/toricgt/toricmora_analogy.py"
+    return f"""
+<section class="panel" id="analogy-benchmark">
+  <h2>Symbolic analogy benchmark</h2>
+  <p>Each group keeps the query C and its candidate list fixed. Changing the exemplar edit A → B
+  changes which candidate is correct. The three edits remove <code>x + 0</code>,
+  <code>x − 0</code>, or <code>x × 1</code>, retaining the left operand in each case.</p>
+  <p>Operand roles matter. When <code>x = 4</code>, <code>x − 0</code> is 4, while
+  <code>0 − x</code> is −4. Replacing <code>0 − x</code> with <code>x</code> changes
+  the value.</p>
+  <div class="fot-benchmark-table">
+    <table class="mini-table">
+      <caption>Seed {seed}, {groups_per_scope} groups per scope</caption>
+      <thead><tr>
+        <th scope="col">Scope</th><th scope="col">Cases</th>
+        <th scope="col">Offset top-1</th><th scope="col">Unshifted top-1</th>
+        <th scope="col">Only gold accepted</th><th scope="col">Negatives accepted</th>
+      </tr></thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table>
+  </div>
+  <p class="metric-note">Both retrieval baselines use hand-engineered counts of node and edge types.
+  Offset retrieval ranks candidates near <code>B − A + C</code>. Unshifted retrieval uses
+  <code>C</code>. Expected top-1 averages over a uniform choice among tied candidates.</p>
+  <p class="metric-note">The exact verifier infers the exemplar edit and checks the resulting directed,
+  typed structure at the requested scope. The last two columns show how often only the gold
+  candidate was accepted and the fraction of negative candidates accepted. The benchmark runs
+  independently of model training. <a href="{html.escape(source_url)}">Benchmark source</a></p>
+</section>
+"""
+
+
 def write_fot_method_report(
     docs: Path,
     copied: dict[str, str],
@@ -2441,6 +2494,7 @@ def write_fot_method_report(
   .fot-tree ul{list-style:none;margin:0;padding:0 0 0 10px;border-left:2px solid var(--line)}
   .fot-tree li{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 8px;padding:3px 0}
   .fot-tree li strong{color:var(--text)}.fot-arrow{color:var(--cyan)}
+  .fot-benchmark-table{overflow-x:auto}.fot-benchmark-table caption{text-align:left;color:var(--muted);padding:6px 9px}
   @media(max-width:520px){.fot-example-result .mini-table{table-layout:fixed}.fot-example-result th,.fot-example-result td{padding:7px 3px;font-size:.82rem;overflow-wrap:anywhere}}
 """
     body = f"""
@@ -2449,6 +2503,7 @@ def write_fot_method_report(
   <p><a href="https://arxiv.org/abs/2412.09078">FoT arXiv:2412.09078</a> · <a href="https://github.com/iamhankai/Forest-of-Thought">upstream code</a> · <a href="#worked-analogy">worked analogy</a></p>
 </section>
 {render_fot_analogy_example()}
+{render_fot_analogy_benchmark()}
 <section class="grid two">
   <article class="panel"><h2>FoT Reference Diagram</h2>{f'<img class="source-img" src="{html.escape(image)}" alt="Forest-of-Thought paper diagram">' if image != "../../" else '<p>Local FoT paper image not found.</p>'}</article>
   <article class="panel"><h2>Embedding-Space Schematic</h2><p class="metric-note">The nodes, edges, and qualitative metrics are hand-authored illustrations. Select a vertex to see an illustrative local tree and its proposed training signals.</p>{forest_svg}<div id="fotDetail" class="detail-panel" aria-live="polite">Select a vertex to reveal an illustrative local tree.</div></article>

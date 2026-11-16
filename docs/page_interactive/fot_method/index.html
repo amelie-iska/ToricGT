@@ -19,6 +19,7 @@ h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spa
   .fot-tree ul{list-style:none;margin:0;padding:0 0 0 10px;border-left:2px solid var(--line)}
   .fot-tree li{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 8px;padding:3px 0}
   .fot-tree li strong{color:var(--text)}.fot-arrow{color:var(--cyan)}
+  .fot-benchmark-table{overflow-x:auto}.fot-benchmark-table caption{text-align:left;color:var(--muted);padding:6px 9px}
   @media(max-width:520px){.fot-example-result .mini-table{table-layout:fixed}.fot-example-result th,.fot-example-result td{padding:7px 3px;font-size:.82rem;overflow-wrap:anywhere}}
 </style></head><body><main>
 <section class="hero"><div class="eyebrow">Embedding-space reasoning forest</div><h1>Forest-of-Thought Reasoning</h1></section>
@@ -47,6 +48,35 @@ h1{font-size:clamp(2.1rem,5vw,4.5rem);line-height:.95;margin:0 0 12px;letter-spa
   <a href="https://arxiv.org/abs/2602.01992">Minegishi et al.</a> ·
   <a href="https://arxiv.org/abs/2605.11258">Shen et al.</a> ·
   <a href="https://arxiv.org/abs/2505.18651">Korchinski et al.</a></p>
+</section>
+
+
+<section class="panel" id="analogy-benchmark">
+  <h2>Symbolic analogy benchmark</h2>
+  <p>Each group keeps the query C and its candidate list fixed. Changing the exemplar edit A → B
+  changes which candidate is correct. The three edits remove <code>x + 0</code>,
+  <code>x − 0</code>, or <code>x × 1</code>, retaining the left operand in each case.</p>
+  <p>Operand roles matter. When <code>x = 4</code>, <code>x − 0</code> is 4, while
+  <code>0 − x</code> is −4. Replacing <code>0 − x</code> with <code>x</code> changes
+  the value.</p>
+  <div class="fot-benchmark-table">
+    <table class="mini-table">
+      <caption>Seed 17, 16 groups per scope</caption>
+      <thead><tr>
+        <th scope="col">Scope</th><th scope="col">Cases</th>
+        <th scope="col">Offset top-1</th><th scope="col">Unshifted top-1</th>
+        <th scope="col">Only gold accepted</th><th scope="col">Negatives accepted</th>
+      </tr></thead>
+      <tbody><tr><th scope="row">Subtree</th><td>48</td><td>100.00%</td><td>33.33%</td><td>100.00%</td><td>0.00%</td></tr><tr><th scope="row">Tree</th><td>48</td><td>93.75%</td><td>23.44%</td><td>100.00%</td><td>0.00%</td></tr><tr><th scope="row">Forest</th><td>48</td><td>88.54%</td><td>0.00%</td><td>100.00%</td><td>0.00%</td></tr><tr><th scope="row">All scopes</th><td>144</td><td>94.10%</td><td>18.92%</td><td>100.00%</td><td>0.00%</td></tr></tbody>
+    </table>
+  </div>
+  <p class="metric-note">Both retrieval baselines use hand-engineered counts of node and edge types.
+  Offset retrieval ranks candidates near <code>B − A + C</code>. Unshifted retrieval uses
+  <code>C</code>. Expected top-1 averages over a uniform choice among tied candidates.</p>
+  <p class="metric-note">The exact verifier infers the exemplar edit and checks the resulting directed,
+  typed structure at the requested scope. The last two columns show how often only the gold
+  candidate was accepted and the fraction of negative candidates accepted. The benchmark runs
+  independently of model training. <a href="https://github.com/amelie-iska/ToricGT/blob/ToricMora/src/toricgt/toricmora_analogy.py">Benchmark source</a></p>
 </section>
 
 <section class="grid two">

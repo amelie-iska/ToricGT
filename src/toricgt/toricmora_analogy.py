@@ -1,7 +1,7 @@
-"""Evaluate payload-exchange analogies in abstract typed trees and forests.
+"""Evaluate analogies on symbolic trees, subtrees and forests.
 
-These fixtures use unordered children with directed, typed edges. The verifier
-recognizes the benchmark grammar and infers a two-payload exchange from A and B.
+Directed edge roles encode operand order in the arithmetic task. An exact
+verifier infers either a payload exchange or a right-identity rewrite from A→B.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from itertools import combinations
 from typing import Literal
 
 Scope = Literal["subtree", "tree", "forest"]
+Task = Literal["exchange", "right-identity"]
 Edge = tuple[str, str, str]  # parent ID, child ID, edge type
 Signature = tuple[str, tuple[tuple[str, "Signature"], ...]]
 SCOPES: tuple[Scope, ...] = ("subtree", "tree", "forest")
@@ -108,10 +109,13 @@ class AnalogyCase:
     query: TypedForest
     candidates: tuple[TypedForest, ...]
     target_index: int
+    task: Task = "exchange"
 
     def __post_init__(self) -> None:
         if self.scope not in SCOPES:
             raise ValueError("unsupported analogy scope")
+        if self.task not in ("exchange", "right-identity"):
+            raise ValueError("unsupported analogy task")
         if not 0 <= self.target_index < len(self.candidates):
             raise ValueError("target_index must designate a candidate")
 
@@ -124,10 +128,41 @@ class AnalogyWitness:
     added_query_edges: tuple[Edge, Edge]
 
 
-def _anchors(forest: TypedForest) -> dict[Signature, tuple[str, Edge]]:
+@dataclass(frozen=True)
+class IdentityWitness:
+    operator: str
+    removed_query_sites: tuple[str, ...]
+    rewritten_query_to_candidate_nodes: dict[str, str]
+
+
+def _scope_nodes(
+    forest: TypedForest, scope: Scope, *, context_kind: str, selected_role: str
+) -> list[str]:
+    roots = list(forest.roots)
+    if scope == "subtree":
+        roots = [
+            child
+            for root in roots
+            if forest._kinds[root] == context_kind
+            for role, child in forest._children[root]
+            if role == selected_role
+        ]
+    if scope in ("subtree", "tree") and len(roots) != 1:
+        return []
+    for node in roots:
+        roots.extend(child for _, child in forest._children[node])
+    return roots
+
+
+def _anchors(
+    forest: TypedForest, scope: Scope = "forest"
+) -> dict[Signature, tuple[str, Edge]]:
+    eligible = set(_scope_nodes(forest, scope, context_kind="context", selected_role="body"))
     anchors = {}
     for parent, branch, role in forest.edges:
-        if role != "part" or forest._kinds[parent] not in {"compute", "routine"}:
+        if parent not in eligible or role != "part":
+            continue
+        if forest._kinds[parent] not in {"compute", "routine"}:
             continue
         if forest._kinds[branch] != "branch":
             continue
@@ -156,10 +191,12 @@ def _exchange(forest: TypedForest, edges: tuple[Edge, Edge]) -> tuple[TypedFores
     return TypedForest(forest.nodes, remaining + added), added
 
 
-def verify_analogy(case: AnalogyCase) -> dict[int, AnalogyWitness]:
-    """Infer a unique anchor exchange, then certify each eligible target."""
-    source_anchors = _anchors(case.source)
-    query_anchors = _anchors(case.query)
+def verify_analogy(case: AnalogyCase) -> dict[int, AnalogyWitness | IdentityWitness]:
+    """Infer a unique edit from the exemplar, then certify each eligible target."""
+    if case.task == "right-identity":
+        return _verify_identity(case)
+    source_anchors = _anchors(case.source, case.scope)
+    query_anchors = _anchors(case.query, case.scope)
     matching_exchanges = []
     for left, right in combinations(source_anchors, 2):
         removed = source_anchors[left][1], source_anchors[right][1]
@@ -274,6 +311,156 @@ def generate_analogy_cases(*, seed: int = 17, examples_per_scope: int = 16) -> l
     return cases
 
 
+IDENTITIES = {"add": "0", "sub": "0", "mul": "1"}
+Expression = str | tuple[str, "Expression", "Expression"]
+
+
+def _identity_sites(
+    forest: TypedForest,
+    scope: Scope,
+    operator: str,
+    *,
+    identity_role: Literal["lhs", "rhs"] = "rhs",
+) -> dict[str, tuple[str, str]]:
+    nodes = _scope_nodes(forest, scope, context_kind="workspace", selected_role="selected")
+    survivor_role = "lhs" if identity_role == "rhs" else "rhs"
+    sites = {}
+    for node in nodes:
+        children = forest._children[node]
+        if forest._kinds[node] != operator or len(children) != 2:
+            continue
+        operands = dict(children)
+        if operands.keys() != {"lhs", "rhs"}:
+            continue
+        identity = operands[identity_role]
+        if forest._kinds[identity] == IDENTITIES[operator] and not forest._children[identity]:
+            sites[node] = operands[survivor_role], identity
+    return sites
+
+
+def _remove_identities(forest: TypedForest, sites: dict[str, tuple[str, str]]) -> TypedForest:
+    # Rewrite all selected original sites once, including nested left operands.
+    dropped = sites.keys() | {right for _, right in sites.values()}
+
+    def surviving_child(child: str) -> str:
+        while child in sites:
+            child = sites[child][0]
+        return child
+
+    return TypedForest(
+        tuple((node, kind) for node, kind in forest.nodes if node not in dropped),
+        tuple(
+            (parent, surviving_child(child), role)
+            for parent, child, role in forest.edges
+            if parent not in dropped
+        ),
+    )
+
+
+def _verify_identity(case: AnalogyCase) -> dict[int, AnalogyWitness | IdentityWitness]:
+    inferred = []
+    for operator in IDENTITIES:
+        sites = _identity_sites(case.source, case.scope, operator)
+        if sites and forest_correspondence(
+            _remove_identities(case.source, sites), case.source_result
+        ) is not None:
+            inferred.append(operator)
+    if len(inferred) != 1:
+        return {}
+
+    operator = inferred[0]
+    sites = _identity_sites(case.query, case.scope, operator)
+    if not sites:
+        return {}
+    rewritten = _remove_identities(case.query, sites)
+    accepted: dict[int, AnalogyWitness | IdentityWitness] = {}
+    for index, candidate in enumerate(case.candidates):
+        mapping = forest_correspondence(rewritten, candidate)
+        if mapping is not None:
+            accepted[index] = IdentityWitness(operator, tuple(sites), mapping)
+    return accepted
+
+
+def _expression_forest(scope: Scope, rng: random.Random, vocabulary: str) -> TypedForest:
+    nodes, edges = [], []
+
+    def append(expr: Expression, parent: str | None = None, role: str = "") -> None:
+        identifier = str(len(nodes))
+        nodes.append((identifier, expr if isinstance(expr, str) else expr[0]))
+        if parent is not None:
+            edges.append((parent, identifier, role))
+        if not isinstance(expr, str):
+            append(expr[1], identifier, "lhs")
+            append(expr[2], identifier, "rhs")
+
+    def expression() -> Expression:
+        symbols = [f"{vocabulary}{number}" for number in rng.sample(range(10, 90), 4)]
+        terms: list[Expression] = [
+            ("add", symbols[0], "0"),
+            ("sub", symbols[1], "0"),
+            ("mul", symbols[2], "1"),
+            ("sub", "0", symbols[3]),
+        ]
+        rng.shuffle(terms)
+        return "mul", ("sub", terms[0], terms[1]), ("add", terms[2], terms[3])
+
+    if scope == "subtree":
+        nodes.append(("0", "workspace"))
+        append(expression(), "0", "selected")
+        append(expression(), "0", "other")
+    else:
+        append(expression())
+        if scope == "forest":
+            append(expression())
+    return TypedForest(tuple(nodes), tuple(edges))
+
+
+def generate_identity_analogy_cases(
+    *, seed: int = 17, examples_per_scope: int = 16
+) -> list[AnalogyCase]:
+    """Create three counterfactuals per query, sharing C and the candidate order."""
+    if not 1 <= examples_per_scope <= 256:
+        raise ValueError("examples_per_scope must be between 1 and 256")
+    rng = random.Random(seed)
+    cases = []
+    for scope in SCOPES:
+        for _ in range(examples_per_scope):
+            source = _expression_forest(scope, rng, "a")
+            query = _expression_forest(scope, rng, "b")
+            query_sites = {op: _identity_sites(query, scope, op) for op in IDENTITIES}
+            outputs = [
+                (op, _remove_identities(query, sites)) for op, sites in query_sites.items()
+            ]
+            if scope == "subtree":
+                outside = _identity_sites(query, "tree", "sub")
+                outputs.append(("escaped-scope", _remove_identities(query, outside)))
+            elif scope == "forest":
+                site = next(iter(query_sites["sub"]))
+                partial = {site: query_sites["sub"][site]}
+                outputs.append(("partial-forest", _remove_identities(query, partial)))
+            else:
+                reversed_sites = _identity_sites(query, scope, "sub", identity_role="lhs")
+                outputs.append(("reversed-operand", _remove_identities(query, reversed_sites)))
+            rng.shuffle(outputs)
+            candidates = tuple(_relabel(result, rng) for _, result in outputs)
+            source_view, query_view = _relabel(source, rng), _relabel(query, rng)
+            for index, (op, _) in enumerate(outputs):
+                if op in IDENTITIES:
+                    result = _remove_identities(source, _identity_sites(source, scope, op))
+                    cases.append(
+                        AnalogyCase(
+                            scope,
+                            source_view,
+                            _relabel(result, rng),
+                            query_view,
+                            candidates,
+                            index,
+                            "right-identity",
+                        )
+                    )
+    return cases
+
+
 ForestEmbedder = Callable[[TypedForest], Sequence[float]]
 
 
@@ -298,7 +485,9 @@ def anchor_payload_sizes(forest: TypedForest) -> tuple[float, ...]:
     return tuple(sizes)
 
 
-def _offset_ranks(case: AnalogyCase, embed: ForestEmbedder | None) -> tuple[int, ...]:
+def _retrieval_choices(
+    case: AnalogyCase, embed: ForestEmbedder | None
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
     forests = (case.source, case.source_result, case.query, *case.candidates)
     if embed is None:
         counts = [_typed_counts(forest) for forest in forests]
@@ -313,11 +502,16 @@ def _offset_ranks(case: AnalogyCase, embed: ForestEmbedder | None) -> tuple[int,
             raise ValueError("embed must return finite values")
     source, source_result, query, *candidates = vectors
     expected = [b - a + c for a, b, c in zip(source, source_result, query)]
-    distances = [math.dist(expected, vector) for vector in candidates]
-    best = min(distances)
-    return tuple(
-        index for index, value in enumerate(distances) if math.isclose(value, best, abs_tol=1e-12)
-    )
+
+    def nearest(probe: Sequence[float]) -> tuple[int, ...]:
+        distances = [math.dist(probe, vector) for vector in candidates]
+        best = min(distances)
+        return tuple(
+            index for index, value in enumerate(distances)
+            if math.isclose(value, best, abs_tol=1e-12)
+        )
+
+    return nearest(expected), nearest(query)
 
 
 @dataclass
@@ -325,6 +519,9 @@ class _Summary:
     cases: int = 0
     offset_credit: float = 0.0
     offset_ties: int = 0
+    unshifted_credit: float = 0.0
+    unshifted_ties: int = 0
+    unique_correct: int = 0
     verified_targets: int = 0
     verified_negatives: int = 0
     negatives: int = 0
@@ -334,6 +531,9 @@ class _Summary:
             "cases": self.cases,
             "offset_top1_expected": self.offset_credit / self.cases,
             "offset_tie_rate": self.offset_ties / self.cases,
+            "unshifted_top1_expected": self.unshifted_credit / self.cases,
+            "unshifted_tie_rate": self.unshifted_ties / self.cases,
+            "structural_unique_top1": self.unique_correct / self.cases,
             "structural_target_recall": self.verified_targets / self.cases,
             "structural_false_accept_rate": self.verified_negatives / max(1, self.negatives),
         }
@@ -342,16 +542,19 @@ class _Summary:
 def evaluate_analogies(
     cases: Iterable[AnalogyCase], embed: ForestEmbedder | None = None
 ) -> dict[str, dict[str, int | float]]:
-    """Compare B - A + C nearest-neighbor retrieval with structural verification."""
+    """Compare offset and unshifted retrieval with exact structural verification."""
     summaries = {"all": _Summary()}
     for case in cases:
-        offset = _offset_ranks(case, embed)
+        offset, unshifted = _retrieval_choices(case, embed)
         verified = verify_analogy(case)
         target_hit = case.target_index in verified
         for summary in (summaries["all"], summaries.setdefault(case.scope, _Summary())):
             summary.cases += 1
             summary.offset_credit += (case.target_index in offset) / len(offset)
             summary.offset_ties += len(offset) > 1
+            summary.unshifted_credit += (case.target_index in unshifted) / len(unshifted)
+            summary.unshifted_ties += len(unshifted) > 1
+            summary.unique_correct += target_hit and len(verified) == 1
             summary.verified_targets += target_hit
             summary.verified_negatives += len(verified) - target_hit
             summary.negatives += len(case.candidates) - 1
@@ -363,7 +566,11 @@ def evaluate_analogies(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=17)
-    parser.add_argument("--examples-per-scope", type=int, default=16)
+    parser.add_argument(
+        "--examples-per-scope", type=int, default=16,
+        help="cases per scope for exchange, or queries per scope for right-identity",
+    )
+    parser.add_argument("--task", choices=("exchange", "right-identity"), default="exchange")
     parser.add_argument(
         "--embedding",
         choices=("typed-counts", "anchor-payload-sizes"),
@@ -372,19 +579,27 @@ def main() -> None:
     )
     parser.add_argument("--include-example", action="store_true", help="include one full case per scope")
     args = parser.parse_args()
+    if args.task == "right-identity" and args.embedding == "anchor-payload-sizes":
+        parser.error("anchor-payload-sizes is specific to the exchange task")
+    generate = (
+        generate_identity_analogy_cases if args.task == "right-identity" else generate_analogy_cases
+    )
     try:
-        cases = generate_analogy_cases(seed=args.seed, examples_per_scope=args.examples_per_scope)
+        cases = generate(seed=args.seed, examples_per_scope=args.examples_per_scope)
     except ValueError as error:
         parser.error(str(error))
     embed = anchor_payload_sizes if args.embedding == "anchor-payload-sizes" else None
     report = {
+        "task": args.task,
         "seed": args.seed,
         "examples_per_scope": args.examples_per_scope,
         "offset_embedding": args.embedding,
         "metrics": evaluate_analogies(cases, embed),
     }
     if args.include_example:
-        report["examples"] = [asdict(case) for case in cases[::args.examples_per_scope]]
+        report["examples"] = [
+            asdict(next(case for case in cases if case.scope == scope)) for scope in SCOPES
+        ]
     print(json.dumps(report, indent=2))
 
 

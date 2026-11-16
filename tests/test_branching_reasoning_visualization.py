@@ -457,7 +457,7 @@ def test_branching_reasoning_report_contains_dual_sliders_and_payloads(tmp_path:
     assert "chiprow" not in html
 
 
-def test_branching_reasoning_report_cli(tmp_path: Path) -> None:
+def test_branching_reasoning_report_cli_requires_embedding_payload(tmp_path: Path) -> None:
     out = tmp_path / "cli_report"
     proc = subprocess.run(
         [
@@ -465,16 +465,6 @@ def test_branching_reasoning_report_cli(tmp_path: Path) -> None:
             "scripts/render_branching_reasoning_trajectory_report.py",
             "--output-dir",
             str(out),
-            "--embedding-dim",
-            "16",
-            "--radius-levels",
-            "5",
-            "--trajectory-levels",
-            "9",
-            "--branch-lanes",
-            "4",
-            "--side-branch-length",
-            "3",
         ],
         cwd=Path(__file__).resolve().parents[1],
         text=True,
@@ -482,12 +472,9 @@ def test_branching_reasoning_report_cli(tmp_path: Path) -> None:
         stderr=subprocess.STDOUT,
         check=False,
     )
-    assert proc.returncode == 0, proc.stdout
-    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schema"] == "toricgt.branching_reasoning_visual_report.v1"
-    assert manifest["source_mode"] == "synthetic_long_branching_fixture"
-    assert (out / "index.html").exists()
-    assert (out / "branching_reasoning_trajectory.html").exists()
+    assert proc.returncode == 2, proc.stdout
+    assert "the following arguments are required: --embedding-payload-npz" in proc.stdout
+    assert not out.exists()
 
 
 def test_branching_payload_static_screenshot_cli(tmp_path: Path) -> None:
