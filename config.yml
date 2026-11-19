@@ -1,0 +1,102 @@
+# ToricMora native symbolic graph training. The shell launcher defaults to check.
+# Two epochs share one cosine/constant LR horizon and restart after epoch one.
+metadata:
+  prepared_launch:
+    # Path to the final audited symbolic stream manifest.
+    manifest: null
+    # SHA-256 pin for exactly the manifest you approved.
+    manifest_sha256: null
+    # A new experiment directory for config, logs, and checkpoints.
+    output: null
+    # Existing advisory lock.
+    gpu_lease: /home/iska/Documents/amelie/fine-tune-reasoners/.gpu-lease.lock
+    # Physical device exposed as cuda:0 to the native trainer.
+    cuda_visible_device: 0
+    # null saves at each epoch boundary; 0 saves only the final checkpoint per segment.
+    checkpoint_every: null
+
+model:
+  # Native attention kernel; options include hybrid, tropical and softmax.
+  attention: tropical_ring
+  # Hidden width. Must be divisible by num_heads.
+  d_model: 192
+  # Number of attention heads.
+  num_heads: 6
+  # Transformer block count per recurrent pass.
+  num_layers: 6
+  # Padded graph node capacity.
+  max_nodes: 256
+  # Padded directed edge-token capacity.
+  max_edges: 1024
+  # Number of passes through the same encoder stack.
+  recurrent_passes: 1
+  # Apply reveal-rank masking in the native encoder.
+  use_causal_graph_attention: false
+  # Recompute block activations to reduce memory.
+  activation_checkpointing: false
+  # Disable Soft-MoE if true.
+  no_soft_moe: false
+  # Otherwise Soft-MoE uses the upper half of the stack.
+  soft_moe_all_layers: false
+  # Number of Soft-MoE feed-forward experts.
+  soft_moe_experts: 4
+  # Dispatch slots per expert.
+  soft_moe_slots: 2
+  # The prepared symbolic stream trains the native graph objective.
+  use_lm_head: false
+  # This graph recipe has no supervised next-token stream.
+  use_lm_token_embeddings: false
+
+training:
+  # Graphs per CUDA microbatch.
+  batch_size: 4
+  # Upper bound; the planner chooses a divisor of batches per epoch.
+  grad_accum_steps: 8
+  # Seed for Python, NumPy and Torch.
+  seed: 29
+  # fp16 uses AMP scaling; bf16 and fp32 are also supported.
+  precision: fp16
+  # AdamW peak learning rate.
+  lr: 0.0003
+  # Decoupled AdamW weight decay.
+  weight_decay: 0.05
+  # cosine or constant across both epochs.
+  lr_schedule: cosine
+  # null uses 10% of updates, capped at 2,000.
+  warmup_steps: null
+  # Cosine schedule floor as a multiple of lr.
+  min_lr_ratio: 0.1
+  # Interval in optimizer-step attempts for scalar logging.
+  log_interval: 20
+  # This recovery recipe records local logs and validation receipts.
+  wandb: false
+  # Positive values enable an emergency checkpoint at this process RSS.
+  max_cpu_rss_gb: 0.0
+  # Optional Python/CUDA cache cleanup interval, disabled at zero.
+  gc_every: 0
+  # The graph-only stream does not supply token targets.
+  fineweb_lm_loss_weight: 0.0
+  # Native auxiliary receives embeddings.
+  gflownet_space: embedding
+  # Weight of the existing native trajectory diagnostic.
+  gflownet_loss_weight: 0.0
+  # Weight of the native graph-of-thought DAG auxiliary.
+  got_dag_loss_weight: 0.0
+  # Weight of native trajectory-memory supervision.
+  trajectory_memory_loss_weight: 0.0
+  # Width of the optional trajectory memory projection.
+  trajectory_memory_projection_dim: 128
+  # DAG term inside trajectory memory.
+  trajectory_memory_dag_weight: 0.2
+  # Derived-category term inside trajectory memory.
+  trajectory_memory_derived_weight: 0.2
+  # Weight of the standalone native derived-category auxiliary.
+  derived_category_loss_weight: 0.0
+  # Per-graph vertex cap for derived-category diagnostics.
+  derived_category_max_vertices: 8
+  # Emit the native certificates in model outputs.
+  output_derived_category_certificates: false
+
+curriculum:
+  # Fixed prepared-stream ordering is used for exact resume.
+  expert_cyclic_curriculum: false

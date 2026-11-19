@@ -1405,6 +1405,8 @@ This checks model shapes, default Soft-MoE routing, tropical-ring attention, emb
 
 ## Training
 
+For the ToricMora reviewed symbolic graph recipe, see the [review handoff](planning/TORICMORA-REVIEW-HANDOFF.md). The shell launcher defaults to checking [config.yml](config.yml). An explicit manifest approval is required for training.
+
 Generate local synthetic curriculum records:
 
 ```bash
