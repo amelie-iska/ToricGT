@@ -26,7 +26,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from .gudhi_persistence import torch_persistence_image, torch_persistence_landscape
+from .gudhi_persistence import simplex_image_status, torch_persistence_image, torch_persistence_landscape
 
 
 @dataclass(frozen=True)
@@ -751,27 +751,22 @@ def _chain_map_matrices(
         if 0 <= int(dst) < target["n"]:
             f0[int(dst), src] = 1
     f1 = np.zeros((len(target["edges"]), len(source["edges"])), dtype=np.uint8)
+    target_simplices = {
+        0: {(vertex,) for vertex in range(target["n"])},
+        1: target["edge_index"],
+        2: target["triangle_set"],
+    }
     valid_edges = 0
-    noncollapsed_edges = 0
-    for col, (i, j) in enumerate(source["edges"]):
-        a, b = int(vertex_map[i]), int(vertex_map[j])
-        if a == b:
-            valid_edges += 1
-            continue
-        noncollapsed_edges += 1
-        edge = tuple(sorted((a, b)))
-        row = target["edge_index"].get(edge)
-        if row is not None:
-            f1[row, col] = 1
-            valid_edges += 1
+    for col, edge in enumerate(source["edges"]):
+        image = tuple(sorted({int(vertex_map[i]) for i in edge}))
+        status = simplex_image_status(image, len(edge), target_simplices)
+        if status == "valid":
+            f1[target["edge_index"][image], col] = 1
+        valid_edges += int(status != "invalid")
     valid_triangles = 0
     for tri in source["triangles"]:
-        mapped = sorted({int(vertex_map[i]) for i in tri})
-        if len(mapped) < 3:
-            valid_triangles += 1
-            continue
-        if tuple(mapped) in target["triangle_set"]:
-            valid_triangles += 1
+        image = tuple(sorted({int(vertex_map[i]) for i in tri}))
+        valid_triangles += int(simplex_image_status(image, len(tri), target_simplices) != "invalid")
     edge_validity = valid_edges / max(1, len(source["edges"]))
     triangle_validity = valid_triangles / max(1, len(source["triangles"]))
     return f0, f1, float(edge_validity), float(triangle_validity)

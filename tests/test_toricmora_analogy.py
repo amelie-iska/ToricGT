@@ -197,3 +197,64 @@ def test_identity_rewrite_uses_original_sites_instead_of_repeating_to_fixed_poin
     assert accepted.keys() == {0}
     assert isinstance(accepted[0], IdentityWitness)
     assert accepted[0].removed_query_sites == ("inner",)
+
+
+def test_relational_distortion_isometry_vs_shift():
+    from toricgt.toricmora_analogy import relational_distortion
+    # 3 points forming a right-angled triangle
+    d_source = [
+        [0.0, 3.0, 4.0],
+        [3.0, 0.0, 5.0],
+        [4.0, 5.0, 0.0],
+    ]
+    # Isomorphic target rotated/reflected with same distances
+    d_target_isometric = [
+        [0.0, 3.0, 4.0],
+        [3.0, 0.0, 5.0],
+        [4.0, 5.0, 0.0],
+    ]
+    # Distorted target where distances change
+    d_target_distorted = [
+        [0.0, 2.0, 6.0],
+        [2.0, 0.0, 4.0],
+        [6.0, 4.0, 0.0],
+    ]
+    corr = ((0, 0), (1, 1), (2, 2))
+    assert relational_distortion(d_source, d_target_isometric, corr) == 0.0
+    assert relational_distortion(d_source, d_target_distorted, corr) > 0.0
+
+
+def test_multi_root_forest_consensus_combines_majority_trees():
+    from toricgt.toricmora_analogy import TypedForest, multi_root_forest_consensus
+
+    tree_alpha = (
+        (("r1", "compute"), ("c1", "op"), ("c2", "leaf")),
+        (("r1", "c1", "body"), ("c1", "c2", "arg")),
+    )
+    tree_beta = (
+        (("r2", "routine"), ("s1", "step")),
+        (("r2", "s1", "next"),),
+    )
+    tree_gamma = (
+        (("r3", "alt"), ("a1", "arg")),
+        (("r3", "a1", "in"),),
+    )
+
+    f1 = TypedForest(tree_alpha[0] + tree_beta[0], tree_alpha[1] + tree_beta[1])
+    f2 = TypedForest(tree_alpha[0] + tree_gamma[0], tree_alpha[1] + tree_gamma[1])
+    f3 = TypedForest(tree_alpha[0] + tree_beta[0], tree_alpha[1] + tree_beta[1])
+
+    # Consensus with min_agreement 0.6 should retain tree_alpha (3/3) and tree_beta (2/3), but reject tree_gamma (1/3)
+    consensus = multi_root_forest_consensus([f1, f2, f3], min_agreement=0.6)
+    assert len(consensus.roots) == 2
+
+
+def test_consensus_counts_each_forest_once():
+    from toricgt.toricmora_analogy import multi_root_forest_consensus
+
+    duplicate_vote = TypedForest((("a", "minority"), ("b", "minority"), ("c", "minority")), ())
+    first = TypedForest((("p", "shared"),), ())
+    second = TypedForest((("q", "shared"),), ())
+    for forests in ([duplicate_vote, first, second], [second, duplicate_vote, first]):
+        consensus = multi_root_forest_consensus(forests, min_agreement=0.6)
+        assert [kind for _, kind in consensus.nodes] == ["shared"]

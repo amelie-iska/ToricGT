@@ -605,3 +605,81 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ==============================================================================
+# FoT Reasoning Extensions: Relational Distortion & Multi-Root Consensus
+# (References: arXiv:2310.01714, 2602.01992, 2605.11258, 2505.18651)
+# ==============================================================================
+
+def relational_distortion(
+    dist_source: Sequence[Sequence[float]],
+    dist_target: Sequence[Sequence[float]],
+    correspondence: Sequence[tuple[int, int]],
+) -> float:
+    """Compute relational edge-length distortion under entity correspondence.
+
+    Addresses arXiv:2602.01992 (Minegishi et al.) & arXiv:2505.18651 (Korchinski et al.):
+    evaluates true structural isometry versus superficial linear vector offsets.
+    """
+    if len(correspondence) < 2:
+        return 0.0
+    diffs: list[float] = []
+    for (i1, j1), (i2, j2) in combinations(correspondence, 2):
+        d_src = dist_source[i1][i2]
+        d_tgt = dist_target[j1][j2]
+        diffs.append(abs(float(d_src) - float(d_tgt)))
+    return sum(diffs) / len(diffs) if diffs else 0.0
+
+
+def multi_root_forest_consensus(
+    forests: Sequence[TypedForest],
+    min_agreement: float = 0.5,
+) -> TypedForest:
+    """Select supported root structures with one vote per input forest.
+
+    If no signature reaches the agreement threshold, retain the strongest
+    candidate and resolve equal support by signature order.
+    """
+    if not forests:
+        raise ValueError("nonempty forest sequence required")
+    if not 0 < min_agreement <= 1:
+        raise ValueError("min_agreement must be in (0, 1]")
+    if len(forests) == 1:
+        return forests[0]
+
+    signature_counts: Counter[Signature] = Counter()
+    representative: dict[Signature, tuple[TypedForest, str]] = {}
+    for forest in forests:
+        votes = set()
+        for root in forest.roots:
+            signature = forest._signatures[root]
+            votes.add(signature)
+            representative.setdefault(signature, (forest, root))
+        signature_counts.update(votes)
+
+    threshold = math.ceil(len(forests) * min_agreement)
+    consensus_roots = sorted(signature for signature, count in signature_counts.items() if count >= threshold)
+    if not consensus_roots:
+        consensus_roots = [min(signature_counts, key=lambda signature: (-signature_counts[signature], signature))]
+
+    nodes: list[tuple[str, str]] = []
+    edges: list[Edge] = []
+    for idx, sig in enumerate(consensus_roots):
+        f, root_id = representative[sig]
+        prefix = f"tree_{idx}_"
+        sub_nodes: set[str] = set()
+        queue = [root_id]
+        while queue:
+            curr = queue.pop(0)
+            sub_nodes.add(curr)
+            for _, child in f._children.get(curr, []):
+                queue.append(child)
+        for n, kind in f.nodes:
+            if n in sub_nodes:
+                nodes.append((f"{prefix}{n}", kind))
+        for p, c, role in f.edges:
+            if p in sub_nodes and c in sub_nodes:
+                edges.append((f"{prefix}{p}", f"{prefix}{c}", role))
+
+    return TypedForest(tuple(nodes), tuple(edges))

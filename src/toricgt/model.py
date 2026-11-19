@@ -153,6 +153,8 @@ class ToricTokenGT(nn.Module):
     def _lm_positions(self, batch: GraphBatch, node_count: int, device: torch.device) -> torch.Tensor:
         if batch.lm_target_positions is not None:
             positions = batch.lm_target_positions[:, :node_count].to(device=device, dtype=torch.long)
+        elif batch.node_identity_ids is not None:
+            positions = batch.node_identity_ids.to(device=device, dtype=torch.long).masked_fill(~batch.node_mask, 0)
         else:
             positions = torch.arange(node_count, device=device, dtype=torch.long).view(1, -1)
             positions = positions.expand(batch.node_features.shape[0], -1)
@@ -164,7 +166,9 @@ class ToricTokenGT(nn.Module):
         beta = 2.0 * math.pi * 1.4142135623730951 * pos
         return torch.stack([torch.sin(theta), torch.cos(theta), torch.sin(beta), torch.cos(beta)], dim=-1)
 
-    def _previous_reveal_tokens(self, input_ids: torch.Tensor, ranks: torch.Tensor | None) -> torch.Tensor:
+    def _previous_reveal_tokens(
+        self, input_ids: torch.Tensor, ranks: torch.Tensor | None, identities: torch.Tensor | None = None
+    ) -> torch.Tensor:
         bos = int(max(0, min(self.config.lm_bos_token_id, self.config.lm_vocab_size - 1)))
         if ranks is None:
             prev = torch.empty_like(input_ids)
@@ -173,7 +177,12 @@ class ToricTokenGT(nn.Module):
                 prev[:, 1:] = input_ids[:, :-1]
             return prev
         valid_rank = ranks.to(device=input_ids.device, dtype=torch.long)
-        order = torch.argsort(valid_rank, dim=1, stable=True)
+        if identities is None:
+            order = torch.argsort(valid_rank, dim=1, stable=True)
+        else:
+            by_identity = torch.argsort(identities, dim=1, stable=True)
+            by_rank = torch.argsort(valid_rank.gather(1, by_identity), dim=1, stable=True)
+            order = by_identity.gather(1, by_rank)
         sorted_inputs = torch.gather(input_ids, 1, order)
         prev_sorted = torch.empty_like(sorted_inputs)
         prev_sorted[:, 0] = bos
@@ -188,10 +197,11 @@ class ToricTokenGT(nn.Module):
         input_ids: torch.Tensor,
         positions: torch.Tensor,
         ranks: torch.Tensor | None,
+        identities: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if self.lm_context_hash is None:
             raise RuntimeError("LM context hash is disabled")
-        prev_reveal = self._previous_reveal_tokens(input_ids, ranks)
+        prev_reveal = self._previous_reveal_tokens(input_ids, ranks, identities)
         if ranks is None:
             ranks_i64 = torch.arange(input_ids.shape[1], device=input_ids.device).view(1, -1).expand_as(input_ids)
         else:
@@ -326,7 +336,14 @@ class ToricTokenGT(nn.Module):
             ) * phase
         if self.lm_context_hash is not None and input_ids is not None:
             positions = self._lm_positions(batch, tok.node_positions.numel(), x.device)
-            hash_ids = self._lm_context_hash_ids(input_ids, positions, node_rank)
+            hash_ranks = node_rank
+            identities = batch.node_identity_ids
+            if identities is not None:
+                identities = identities.to(device=x.device, dtype=torch.long)
+                if hash_ranks is None:
+                    hash_ranks = identities
+                hash_ranks = hash_ranks.masked_fill(~batch.node_mask, 2**30)
+            hash_ids = self._lm_context_hash_ids(input_ids, positions, hash_ranks, identities)
             hashed = self.lm_context_hash(hash_ids)
             lm_input = hashed * float(self.config.lm_context_hash_weight) if lm_input is None else lm_input + float(
                 self.config.lm_context_hash_weight

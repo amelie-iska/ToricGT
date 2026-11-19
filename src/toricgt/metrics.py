@@ -21,6 +21,16 @@ def equivariance_error(y: torch.Tensor, y_permuted: torch.Tensor, permutation: t
     return torch.mean(torch.linalg.vector_norm(y - restored, dim=-1))
 
 
+def covered_target_bytes(lengths: torch.Tensor | None, mask: torch.Tensor) -> torch.Tensor | None:
+    """Return the byte sum only if every scored target has a valid byte length."""
+    if lengths is None:
+        return None
+    selected = lengths.to(device=mask.device, dtype=torch.float32)[mask]
+    if bool((~torch.isfinite(selected) | (selected < 0)).any()):
+        return None
+    return selected.sum()
+
+
 def tropical_margin(scores: torch.Tensor) -> torch.Tensor:
     """Average max-minus-second-max margin of tropical attention scores."""
 

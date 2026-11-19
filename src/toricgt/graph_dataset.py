@@ -166,7 +166,7 @@ def sentencepiece_target_byte_lengths(
                 byte_count += 1
             out[idx] = float(byte_count)
         except Exception:
-            out[idx] = 0.0
+            out[idx] = -1.0
     return out
 
 
@@ -624,6 +624,11 @@ def graph_json_to_item(
         lm_target_positions,
         lm_input_features,
     ) = _lm_tensors_from_tokens(lm_tokens, cfg, tokenizer)
+    byte_accounting_exact = False
+    if tokenizer is not None and lm_mask is not None:
+        raw_ids = np.asarray(lm_tokens).reshape(-1)[: int(lm_mask.sum()) + 1]
+        vocab_size = min(cfg.lm_vocab_size, tokenizer.get_piece_size())
+        byte_accounting_exact = bool((raw_ids >= 0).all() and (raw_ids < vocab_size).all())
     graph = GraphBatch(
         node_features=node_features,
         edge_features=edge_features,
@@ -637,6 +642,7 @@ def graph_json_to_item(
         lm_target_positions=lm_target_positions,
         lm_input_features=lm_input_features,
         node_causal_rank=padded_node_causal_rank,
+        lm_byte_accounting_exact=byte_accounting_exact,
     )
     metadata = {
         "dataset": payload.get("dataset", ""),
@@ -687,7 +693,7 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
             [
                 item.graph.lm_target_byte_lengths
                 if item.graph.lm_target_byte_lengths is not None
-                else torch.zeros_like(items[0].graph.node_mask, dtype=torch.float32)
+                else torch.full_like(items[0].graph.node_mask, -1, dtype=torch.float32)
                 for item in items
             ]
         )
@@ -737,6 +743,10 @@ def collate_graph_items(items: list[GraphTrainingItem]) -> tuple[GraphBatch, tor
         lm_target_positions=lm_target_positions,
         lm_input_features=lm_input_features,
         node_causal_rank=node_causal_rank,
+        lm_byte_accounting_exact=any_lm and all(
+            item.graph.lm_byte_accounting_exact for item in items
+            if item.graph.lm_mask is not None and bool((item.graph.lm_mask & item.graph.node_mask).any())
+        ),
     )
     target = torch.stack([item.target for item in items])
     return graph, target

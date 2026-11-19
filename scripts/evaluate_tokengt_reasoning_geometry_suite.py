@@ -54,7 +54,11 @@ from toricgt.derived_category_metrics import (  # noqa: E402
 from toricgt.got_trajectory import got_dag_metrics  # noqa: E402
 from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items  # noqa: E402
 from toricgt.graph_tokenizer import GraphBatch  # noqa: E402
-from toricgt.gudhi_persistence import GudhiPersistenceConfig, vectorized_point_cloud_signature  # noqa: E402
+from toricgt.gudhi_persistence import (  # noqa: E402
+    GudhiPersistenceConfig,
+    simplex_image_status,
+    vectorized_point_cloud_signature,
+)
 from toricgt.metrics import masked_mse  # noqa: E402
 from toricgt.model import ToricTokenGT  # noqa: E402
 from toricgt.reasoning_geometry import (  # noqa: E402
@@ -1481,24 +1485,22 @@ def _full_trajectory_simplicial_map_audit(
         src = src_all[:src_count]
         dst = dst_all[:dst_count]
         vertex_map = _nearest_vertex_map(src, dst)
+        dst_vertices = {(vertex,) for vertex in range(dst.shape[0])}
+        coverage = float(len(set(vertex_map.tolist())) / len(dst_vertices)) if dst_vertices else 0.0
         for radius_idx, radius in enumerate(radius_grid):
             src_edges, src_triangles, _, _ = _rips_edges_triangles_any(src, float(radius))
             dst_edges, dst_triangles, _, _ = _rips_edges_triangles_any(dst, float(radius))
-            dst_edge_set = {tuple(sorted(edge)) for edge in dst_edges}
-            dst_triangle_set = {tuple(sorted(tri)) for tri in dst_triangles}
+            dst_simplices = {0: dst_vertices, 1: set(dst_edges), 2: set(dst_triangles)}
             valid_edges = 0
-            for src_i, src_j in src_edges:
-                mapped = tuple(sorted((int(vertex_map[src_i]), int(vertex_map[src_j]))))
-                if mapped[0] == mapped[1] or mapped in dst_edge_set:
-                    valid_edges += 1
+            for edge in src_edges:
+                image = tuple(sorted({int(vertex_map[v]) for v in edge}))
+                valid_edges += int(simplex_image_status(image, len(edge), dst_simplices) != "invalid")
             valid_triangles = 0
-            for src_i, src_j, src_k in src_triangles:
-                mapped_vertices = sorted({int(vertex_map[src_i]), int(vertex_map[src_j]), int(vertex_map[src_k])})
-                if len(mapped_vertices) < 3 or tuple(mapped_vertices) in dst_triangle_set:
-                    valid_triangles += 1
+            for tri in src_triangles:
+                image = tuple(sorted({int(vertex_map[v]) for v in tri}))
+                valid_triangles += int(simplex_image_status(image, len(tri), dst_simplices) != "invalid")
             edge_fraction = float(valid_edges / len(src_edges)) if src_edges else 1.0
             triangle_fraction = float(valid_triangles / len(src_triangles)) if src_triangles else 1.0
-            coverage = float(len(set(int(v) for v in vertex_map.tolist())) / max(1, dst.shape[0]))
             if src_edges:
                 edge_scores.append(edge_fraction)
             if src_triangles:

@@ -9,7 +9,7 @@ import json
 import math
 import os
 import random
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import asdict
 from pathlib import Path
 
@@ -32,9 +32,18 @@ from toricgt.gflownet import TrajectoryBatch, trajectory_balance_loss
 from toricgt.got_trajectory import got_dag_metrics
 from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items, expand_dataset_paths
 from toricgt.graph_tokenizer import GraphBatch
-from toricgt.metrics import masked_mse
+from toricgt.metrics import covered_target_bytes, masked_mse
 from toricgt.model import ToricTokenGT
 from toricgt.parameter_golf_export import write_artifact
+from toricgt.prepared_stream import PreparedBatchStream, open_prepared_stream
+from toricgt.synthetic_resume import (
+    atomic_save_checkpoint,
+    capture_synthetic_recovery,
+    configure_prepared_cuda,
+    prepared_resume_plan,
+    restore_synthetic_recovery,
+    synthetic_resume_plan,
+)
 from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload
 
 
@@ -100,6 +109,9 @@ def save_checkpoint(
     train_cfg: TrainConfig,
     step: int,
     extra_metadata: dict | None = None,
+    *,
+    synthetic_recovery: dict | None = None,
+    prepared_recovery: dict | None = None,
 ) -> None:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -111,7 +123,11 @@ def save_checkpoint(
     }
     if extra_metadata:
         payload.update(extra_metadata)
-    torch.save(payload, checkpoint_dir / name)
+    if synthetic_recovery is not None:
+        payload["synthetic_recovery"] = synthetic_recovery
+    if prepared_recovery is not None:
+        payload["prepared_recovery"] = prepared_recovery
+    atomic_save_checkpoint(payload, checkpoint_dir / name)
 
 
 def scheduled_lr(
@@ -135,6 +151,15 @@ def scheduled_lr(
 def set_optimizer_lr(optimizer: AdamW, lr: float) -> None:
     for group in optimizer.param_groups:
         group["lr"] = lr
+
+
+def apply_optimizer_update(parameters, optimizer: AdamW, scaler, clip_grad_norm: float) -> torch.Tensor:
+    scaler.unscale_(optimizer)
+    grad_norm = torch.nn.utils.clip_grad_norm_(parameters, clip_grad_norm)
+    scaler.step(optimizer)
+    scaler.update()
+    optimizer.zero_grad(set_to_none=True)
+    return grad_norm
 
 
 def proc_memory_metrics() -> dict[str, float]:
@@ -237,6 +262,9 @@ def move_batch(batch: GraphBatch, target: torch.Tensor, device: str) -> tuple[Gr
             lm_target_positions=_optional_to_device(batch.lm_target_positions, device),
             lm_input_features=_optional_to_device(batch.lm_input_features, device),
             node_causal_rank=_optional_to_device(batch.node_causal_rank, device),
+            node_identity_ids=_optional_to_device(batch.node_identity_ids, device),
+            edge_identity_ids=_optional_to_device(batch.edge_identity_ids, device),
+            lm_byte_accounting_exact=batch.lm_byte_accounting_exact,
         ),
         target.to(device),
     )
@@ -286,18 +314,12 @@ def fineweb_lm_metrics(out: dict[str, torch.Tensor], batch: GraphBatch) -> dict[
         "bits_per_token": loss / math.log(2.0),
         "tokens": tokens,
     }
-    if batch.lm_target_byte_lengths is not None:
-        byte_lengths = batch.lm_target_byte_lengths.to(device=logits.device, dtype=loss.dtype)[mask]
-        estimated_bytes = byte_lengths.clamp_min(0.0).sum()
-        if bool((estimated_bytes > 0).detach().cpu()):
-            estimated_bits = loss * tokens / math.log(2.0)
-            metrics.update(
-                {
-                    "estimated_bpb": estimated_bits / estimated_bytes.clamp_min(1e-6),
-                    "estimated_bytes": estimated_bytes,
-                    "mean_target_bytes_per_token": estimated_bytes / tokens.clamp_min(1.0),
-                }
-            )
+    target_bytes = covered_target_bytes(batch.lm_target_byte_lengths, mask)
+    if target_bytes is not None:
+        metrics["estimated_bytes"] = target_bytes
+        if bool(target_bytes > 0):
+            metrics["estimated_bpb"] = loss * tokens / (math.log(2.0) * target_bytes)
+            metrics["mean_target_bytes_per_token"] = target_bytes / tokens
     return metrics
 
 
@@ -312,9 +334,12 @@ def evaluate_loader(
     model.eval()
     total = 0.0
     count = 0
+    records = 0
     lm_nll_total = 0.0
     lm_tokens_total = 0.0
     lm_estimated_bytes_total = 0.0
+    lm_byte_tokens_total = 0.0
+    lm_exact_bytes = True
     data_iter = iter(loader)
     for _ in range(max_batches):
         try:
@@ -328,14 +353,17 @@ def evaluate_loader(
             lm = fineweb_lm_metrics(out, batch)
         total += float(loss.detach())
         count += 1
+        records += len(batch.node_mask)
         if lm is not None:
             tokens = float(lm["tokens"].detach().cpu())
             lm_nll_total += float(lm["loss"].detach().cpu()) * tokens
             lm_tokens_total += tokens
             if "estimated_bytes" in lm:
                 lm_estimated_bytes_total += float(lm["estimated_bytes"].detach().cpu())
+                lm_byte_tokens_total += tokens
+            lm_exact_bytes = lm_exact_bytes and batch.lm_byte_accounting_exact
     model.train()
-    metrics = {"masked_mse": total / max(count, 1)}
+    metrics = {"masked_mse": total / max(count, 1), "records": records}
     if lm_tokens_total > 0:
         lm_loss = lm_nll_total / lm_tokens_total
         metrics.update(
@@ -345,11 +373,12 @@ def evaluate_loader(
                 "fineweb_lm_tokens": lm_tokens_total,
             }
         )
-        if lm_estimated_bytes_total > 0:
+        if lm_estimated_bytes_total > 0 and lm_byte_tokens_total == lm_tokens_total:
             metrics.update(
                 {
                     "fineweb_lm_estimated_bpb": (lm_nll_total / math.log(2.0)) / lm_estimated_bytes_total,
                     "fineweb_lm_estimated_bytes": lm_estimated_bytes_total,
+                    "fineweb_lm_exact_byte_accounting": float(lm_exact_bytes),
                     "fineweb_lm_mean_target_bytes_per_token": lm_estimated_bytes_total / lm_tokens_total,
                 }
             )
@@ -438,7 +467,11 @@ def run_artifact_probe(
 
 
 def main() -> None:
-    load_optional_training_tokens()
+    with ExitStack() as resources:
+        run_training_entry(resources)
+
+
+def run_training_entry(resources: ExitStack) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=None, help="YAML file whose keys become CLI defaults.")
     parser.add_argument("--steps", type=int, default=100)
@@ -532,7 +565,19 @@ def main() -> None:
     parser.add_argument("--val-data-path", action="append", default=[], help="Validation Parquet/JSONL path. Can be repeated.")
     parser.add_argument("--eval-every", type=int, default=0, help="Run validation every N optimizer steps; disabled when 0.")
     parser.add_argument("--eval-batches", type=int, default=8)
-    parser.add_argument("--resume", default=None, help="Resume model and optimizer state from a checkpoint.")
+    parser.add_argument("--resume", default=None, help="Resume from a trusted local model/optimizer checkpoint.")
+    parser.add_argument(
+        "--exact-synthetic-resume",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Save/restore exact resume state for generated graphs with offline logging.",
+    )
+    parser.add_argument("--prepared-stream-manifest", help="Reviewed symbolic Parquet manifest for exact recovery.")
+    parser.add_argument("--prepared-stream-sha256", help="Independently pinned SHA-256 of the prepared manifest.")
+    parser.add_argument("--check-prepared-stream", action="store_true", help="Verify input admission and exit.")
+    parser.add_argument(
+        "--schedule-total-steps", type=int, default=None, help="Absolute LR horizon for exact recovery."
+    )
     parser.add_argument("--lr-schedule", choices=["cosine", "constant"], default="cosine")
     parser.add_argument("--warmup-steps", type=int, default=2_000)
     parser.add_argument("--min-lr-ratio", type=float, default=0.1)
@@ -545,6 +590,30 @@ def main() -> None:
     parser.add_argument("--expert-curriculum-distill-weight", type=float, default=0.0)
     apply_yaml_defaults(parser, parse_config_path())
     args = parser.parse_args()
+    using_prepared = args.prepared_stream_manifest is not None
+    if using_prepared != (args.prepared_stream_sha256 is not None) or (args.check_prepared_stream and not using_prepared):
+        parser.error("prepared admission requires a manifest and its SHA-256")
+    shards = runtime = None
+    if using_prepared:
+        if (args.exact_synthetic_resume or args.data_path or args.val_data_path
+                or args.wandb or args.expert_cyclic_curriculum or args.interleave_data_paths):
+            parser.error("prepared admission requires sealed Parquet order, no legacy streams, and offline logging")
+        try:
+            shards, admission = resources.enter_context(
+                open_prepared_stream(args.prepared_stream_manifest, args.prepared_stream_sha256)
+            )
+            if args.check_prepared_stream:
+                print(json.dumps(admission, sort_keys=True))
+                return
+            runtime = configure_prepared_cuda(args.device)
+        except (OSError, TypeError, ValueError, RuntimeError) as exc:
+            parser.error(str(exc))
+    if args.exact_synthetic_resume and (args.data_path or args.val_data_path or args.wandb):
+        parser.error("exact synthetic recovery requires generated graphs and offline logging")
+    if args.exact_synthetic_resume and not args.device.startswith("cuda"):
+        parser.error("exact synthetic recovery requires a CUDA training device")
+    if not args.exact_synthetic_resume and not using_prepared:
+        load_optional_training_tokens()
     set_seed(args.seed)
 
     model_cfg = ModelConfig(
@@ -608,12 +677,30 @@ def main() -> None:
     optimizer = AdamW(model.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.weight_decay)
     scaler = torch.amp.GradScaler("cuda", enabled=args.device.startswith("cuda") and train_cfg.precision == "fp16")
     start_step = 0
+    checkpoint = None
     if args.resume is not None:
-        checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False)
+        map_location = "cpu" if args.exact_synthetic_resume or using_prepared else args.device
+        checkpoint = torch.load(args.resume, map_location=map_location, weights_only=False)
+    try:
+        if using_prepared:
+            schedule_total_steps, recovery_digest = prepared_resume_plan(
+                args, checkpoint, args.prepared_stream_sha256, runtime,
+            )
+        else:
+            if checkpoint is not None and "prepared_recovery" in checkpoint:
+                raise ValueError("prepared checkpoint requires its pinned prepared stream manifest")
+            schedule_total_steps, recovery_digest = synthetic_resume_plan(args, checkpoint)
+    except ValueError as exc:
+        parser.error(str(exc))
+    resume_state = None
+    if checkpoint is not None:
         model.load_state_dict(checkpoint["model"])
         if "optimizer" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer"])
         start_step = int(checkpoint.get("step", 0))
+        if recovery_digest is not None:
+            resume_state = checkpoint["prepared_recovery" if using_prepared else "synthetic_recovery"]
+        del checkpoint
 
     curriculum = None
     curriculum_config = None
@@ -684,7 +771,17 @@ def main() -> None:
                 )
                 subset_loaders.append(subset_loader)
                 subset_iters.append(None)
+    prepared_train = None
     val_loader = None
+    if using_prepared:
+        prepared_train = PreparedBatchStream(shards["train"], model_cfg, train_cfg.batch_size)
+        if resume_state is not None:
+            try:
+                prepared_train.restore(resume_state.get("batches_consumed"), start_step, train_cfg.grad_accum_steps)
+            except ValueError as exc:
+                parser.error(str(exc))
+        if "validation" in shards:
+            val_loader = PreparedBatchStream(shards["validation"], model_cfg, train_cfg.batch_size)
     restricted_fineweb_val_loader = None
     if args.val_data_path:
         val_dataset = CuratedGraphIterableDataset(
@@ -772,6 +869,24 @@ def main() -> None:
     final_step = start_step + args.steps
     pbar = tqdm(range(start_step, final_step), desc="train")
     active_subset_id: int | None = None
+    prepared_validation = None
+
+    def save_run_checkpoint(name: str, step: int, metadata: dict | None = None) -> None:
+        recovery = None
+        if recovery_digest is not None:
+            recovery = capture_synthetic_recovery(scaler, args.device, schedule_total_steps, recovery_digest)
+        if prepared_train is not None:
+            recovery["batches_consumed"] = prepared_train.batches_consumed
+            recovery["manifest_sha256"] = args.prepared_stream_sha256
+            recovery["validation"] = prepared_validation
+        save_checkpoint(
+            ckpt_dir, name, model, optimizer, model_cfg, train_cfg, step, metadata,
+            synthetic_recovery=recovery if prepared_train is None else None,
+            prepared_recovery=recovery if prepared_train is not None else None,
+        )
+
+    if resume_state is not None:
+        restore_synthetic_recovery(resume_state, scaler, args.device)
     for step in pbar:
         assignment: ExpertCurriculumAssignment | None = curriculum.assignment(step) if curriculum is not None else None
         if assignment is not None and assignment.subset_id != active_subset_id:
@@ -786,7 +901,7 @@ def main() -> None:
         lr = scheduled_lr(
             train_cfg.lr,
             step,
-            final_step,
+            schedule_total_steps,
             train_cfg.warmup_steps,
             args.min_lr_ratio,
             args.lr_schedule,
@@ -803,6 +918,8 @@ def main() -> None:
         fineweb_lm_nll_value = 0.0
         fineweb_lm_tokens_value = 0.0
         fineweb_lm_estimated_bytes_value = 0.0
+        fineweb_lm_byte_tokens_value = 0.0
+        fineweb_lm_exact_bytes = True
         derived_category_loss_value = 0.0
         got_metric_sums: dict[str, float] = {}
         trajectory_metric_sums: dict[str, float] = {}
@@ -814,7 +931,9 @@ def main() -> None:
         last_node_embeddings_for_examples: torch.Tensor | None = None
         last_per_node_mse_for_examples: torch.Tensor | None = None
         for accum_idx in range(train_cfg.grad_accum_steps):
-            if data_iter is None and not subset_loaders:
+            if prepared_train is not None:
+                batch, target = move_batch(*prepared_train.next_batch(), device=args.device)
+            elif data_iter is None and not subset_loaders:
                 batch, target = synthetic_batch(model_cfg, train_cfg.batch_size, args.device)
             elif assignment is not None:
                 subset_id = assignment.subset_id
@@ -921,6 +1040,8 @@ def main() -> None:
                 fineweb_lm_tokens_value += lm_tokens
                 if "estimated_bytes" in fineweb_lm:
                     fineweb_lm_estimated_bytes_value += float(fineweb_lm["estimated_bytes"].detach().cpu())
+                    fineweb_lm_byte_tokens_value += lm_tokens
+                fineweb_lm_exact_bytes = fineweb_lm_exact_bytes and batch.lm_byte_accounting_exact
             if got_metrics is not None:
                 got_dag_loss_value += float(got_metrics["got_dag_loss"].detach())
                 for key, value in got_metrics.items():
@@ -946,11 +1067,7 @@ def main() -> None:
             graph_tokens_value += int(out["token_mask"].sum().detach().cpu())
             scaler.scale(loss).backward()
 
-        scaler.unscale_(optimizer)
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), train_cfg.clip_grad_norm)
-        scaler.step(optimizer)
-        scaler.update()
-        optimizer.zero_grad(set_to_none=True)
+        grad_norm = apply_optimizer_update(model.parameters(), optimizer, scaler, train_cfg.clip_grad_norm)
         mean_loss = raw_loss_value / train_cfg.grad_accum_steps
         mean_supervised_loss = supervised_loss_value / train_cfg.grad_accum_steps
         mean_gflownet_loss = gflownet_loss_value / max(train_cfg.grad_accum_steps, 1)
@@ -961,14 +1078,17 @@ def main() -> None:
         mean_trajectory_memory_dag_similarity = trajectory_memory_dag_similarity_value / max(train_cfg.grad_accum_steps, 1)
         mean_fineweb_lm_loss = fineweb_lm_nll_value / fineweb_lm_tokens_value if fineweb_lm_tokens_value > 0 else 0.0
         mean_fineweb_lm_bits_per_token = mean_fineweb_lm_loss / math.log(2.0) if fineweb_lm_tokens_value > 0 else 0.0
+        complete_fineweb_bytes = (
+            fineweb_lm_estimated_bytes_value > 0 and fineweb_lm_byte_tokens_value == fineweb_lm_tokens_value
+        )
         mean_fineweb_lm_estimated_bpb = (
             (fineweb_lm_nll_value / math.log(2.0)) / fineweb_lm_estimated_bytes_value
-            if fineweb_lm_estimated_bytes_value > 0
+            if complete_fineweb_bytes
             else 0.0
         )
         mean_fineweb_lm_bytes_per_token = (
             fineweb_lm_estimated_bytes_value / fineweb_lm_tokens_value
-            if fineweb_lm_tokens_value > 0 and fineweb_lm_estimated_bytes_value > 0
+            if complete_fineweb_bytes
             else 0.0
         )
         mean_derived_category_loss = derived_category_loss_value / max(train_cfg.grad_accum_steps, 1)
@@ -978,7 +1098,8 @@ def main() -> None:
         global_step = step + 1
         pbar.set_postfix(loss=f"{mean_loss:.4f}", params=model.parameter_count())
         artifact_metrics: dict[str, float] = {}
-        if _artifact_probe_due(step, start_step, args.artifact_probe_every, args.artifact_probe_at_start):
+        probe_start = 0 if recovery_digest is not None else start_step
+        if _artifact_probe_due(step, probe_start, args.artifact_probe_every, args.artifact_probe_at_start):
             artifact_metrics = run_artifact_probe(model, model_cfg, ckpt_dir, global_step, args)
             artifact_metrics["trainer/step"] = global_step
             artifact_metrics["train/step"] = global_step
@@ -1038,7 +1159,7 @@ def main() -> None:
                         "train/fineweb_lm_tokens": fineweb_lm_tokens_value,
                     }
                 )
-                if fineweb_lm_estimated_bytes_value > 0:
+                if complete_fineweb_bytes:
                     metrics.update(
                         {
                             "tokengt/train_graph_node_sp1024_estimated_bpb": mean_fineweb_lm_estimated_bpb,
@@ -1046,7 +1167,8 @@ def main() -> None:
                             "tokengt/train_graph_node_sp1024_mean_target_bytes_per_token": mean_fineweb_lm_bytes_per_token,
                         }
                     )
-                    if model_cfg.use_causal_graph_attention and model_cfg.use_lm_token_embeddings:
+                    if (model_cfg.use_causal_graph_attention and model_cfg.use_lm_token_embeddings
+                            and fineweb_lm_exact_bytes):
                         metrics.update(
                             {
                                 "tokengt/train_graph_node_sp1024_causal_bpb": mean_fineweb_lm_estimated_bpb,
@@ -1194,6 +1316,10 @@ def main() -> None:
             if assignment is not None:
                 model.set_active_soft_moe_experts([assignment.active_expert])
             val_loss = float(val_metrics.get("masked_mse", 0.0))
+            if prepared_train is not None and val_loader is not None:
+                prepared_validation = {
+                    "step": step + 1, "records": val_metrics["records"], "masked_mse": val_loss,
+                }
             message = f"validation step={step + 1} masked_mse={val_loss:.6f}"
             if "fineweb_lm_bits_per_token" in val_metrics:
                 message += f" tokengt_sp1024_bpt={val_metrics['fineweb_lm_bits_per_token']:.6f}"
@@ -1241,7 +1367,9 @@ def main() -> None:
                     restricted_bpt = float(restricted_fineweb_metrics["fineweb_lm_bits_per_token"])
                     restricted_tokens = float(restricted_fineweb_metrics["fineweb_lm_tokens"])
                     causal_tokengt_bpb_available = bool(
-                        model_cfg.use_causal_graph_attention and model_cfg.use_lm_token_embeddings
+                        model_cfg.use_causal_graph_attention
+                        and model_cfg.use_lm_token_embeddings
+                        and restricted_fineweb_metrics.get("fineweb_lm_exact_byte_accounting")
                     )
                     payload.update(
                         {
@@ -1285,26 +1413,16 @@ def main() -> None:
                             )
                 run.log(organize_wandb_payload(payload))
         if args.checkpoint_every > 0 and (step + 1) % args.checkpoint_every == 0:
-            save_checkpoint(
-                ckpt_dir,
+            save_run_checkpoint(
                 f"toricgt_step_{step + 1:08d}.pt",
-                model,
-                optimizer,
-                model_cfg,
-                train_cfg,
                 step + 1,
                 {"expert_curriculum": curriculum_config} if curriculum_config is not None else None,
             )
         memory_now = proc_memory_metrics()
         if args.max_cpu_rss_gb > 0 and memory_now.get("cpu_rss_gb", 0.0) >= args.max_cpu_rss_gb:
             emergency_name = f"toricgt_emergency_step_{step + 1:08d}.pt"
-            save_checkpoint(
-                ckpt_dir,
+            save_run_checkpoint(
                 emergency_name,
-                model,
-                optimizer,
-                model_cfg,
-                train_cfg,
                 step + 1,
                 {"expert_curriculum": curriculum_config, "cpu_memory_guard": memory_now}
                 if curriculum_config is not None
@@ -1326,13 +1444,8 @@ def main() -> None:
         maybe_collect_memory(step + 1, args.gc_every, cuda=args.device.startswith("cuda"))
 
     model.set_active_soft_moe_experts(None)
-    save_checkpoint(
-        ckpt_dir,
+    save_run_checkpoint(
         "toricgt_final.pt",
-        model,
-        optimizer,
-        model_cfg,
-        train_cfg,
         final_step,
         {"expert_curriculum": curriculum_config} if curriculum_config is not None else None,
     )

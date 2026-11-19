@@ -31,6 +31,7 @@ from .gudhi_persistence import (
     persistence_diagrams,
     radius_grid,
     sample_points,
+    simplex_image_status,
     simplex_sets,
     standardize_points,
     vectorized_diagram_metrics,
@@ -978,9 +979,10 @@ def _simplicial_map_payload(
     source_tree_exact = build_rips_simplex_tree(source, float(radius), max_dimension=2)
     target_tree_exact = build_rips_simplex_tree(target, float(radius), max_dimension=2)
     source_sets = simplex_sets(source_tree_exact, max_dimension=2)
-    target_sets = simplex_sets(target_tree_exact, max_dimension=2)
-    target_edges = set(target_sets.get(1, []))
-    target_triangles = set(target_sets.get(2, []))
+    target_simplices = {
+        dim: set(simplices)
+        for dim, simplices in simplex_sets(target_tree_exact, max_dimension=2).items()
+    }
     cross = np.linalg.norm(source[:, None, :] - target[None, :, :], axis=-1)
     vertex_map_array = np.argmin(cross, axis=1).astype(int)
     vertex_map = vertex_map_array.tolist()
@@ -996,7 +998,7 @@ def _simplicial_map_payload(
     for edge in source_sets.get(1, []):
         source_edge_count += 1
         image = mapped(edge)
-        status = "collapsed" if len(image) <= 1 else ("valid" if image in target_edges else "invalid")
+        status = simplex_image_status(image, len(edge), target_simplices)
         edge_status_counts[status] += 1
         padded = list(image) + [-1 for _ in range(max(0, 2 - len(image)))]
         if len(rendered_edge_images) < int(max_image_records):
@@ -1007,7 +1009,7 @@ def _simplicial_map_payload(
     for tri in source_sets.get(2, []):
         source_triangle_count += 1
         image = mapped(tri)
-        status = "collapsed" if len(image) <= 2 else ("valid" if image in target_triangles else "invalid")
+        status = simplex_image_status(image, len(tri), target_simplices)
         triangle_status_counts[status] += 1
         padded = list(image) + [-1 for _ in range(max(0, 3 - len(image)))]
         if len(rendered_triangle_images) < int(max_image_records):

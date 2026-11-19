@@ -15,9 +15,10 @@ import shutil
 import subprocess
 import tempfile
 import warnings
+from collections.abc import Container, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -111,6 +112,17 @@ def simplex_sets(simplex_tree: Any, max_dimension: int = 2) -> dict[int, list[tu
     for dim in out:
         out[dim] = sorted(set(out[dim]))
     return out
+
+
+def simplex_image_status(
+    image: tuple[int, ...],
+    source_size: int,
+    target_simplices: Mapping[int, Container[tuple[int, ...]]],
+) -> Literal["valid", "collapsed", "invalid"]:
+    """Classify a sorted, deduplicated image by membership in the target complex."""
+    if image not in target_simplices.get(len(image) - 1, ()):
+        return "invalid"
+    return "collapsed" if len(image) < source_size else "valid"
 
 
 def simplex_birth_bidegrees(
@@ -751,21 +763,17 @@ def simplex_map_audit(source: Any, target: Any, vertex_map: dict[int, int] | Non
     counts: dict[str, float] = {}
     total_valid = 0
     total = 0
-    for dim in range(1, max_dimension + 1):
-        dim_total = 0
+    for dim, simplices in src.items():
+        dim_total = len(simplices)
         dim_valid = 0
         dim_collapsed = 0
-        for simplex in src.get(dim, []):
-            mapped = tuple(sorted(set(int(vertex_map.get(v, v)) for v in simplex)))
-            dim_total += 1
-            total += 1
-            if len(mapped) <= 1:
-                dim_valid += 1
-                total_valid += 1
-                dim_collapsed += 1
-            elif mapped in tgt_sets.get(len(mapped) - 1, set()):
-                dim_valid += 1
-                total_valid += 1
+        for simplex in simplices:
+            mapped = tuple(sorted({int(vertex_map.get(v, v)) for v in simplex}))
+            status = simplex_image_status(mapped, len(simplex), tgt_sets)
+            dim_valid += int(status != "invalid")
+            dim_collapsed += int(status == "collapsed")
+        total += dim_total
+        total_valid += dim_valid
         label = f"dim{dim}"
         counts[f"{label}_simplices"] = float(dim_total)
         counts[f"{label}_valid"] = float(dim_valid)

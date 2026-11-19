@@ -35,6 +35,7 @@ from toricgt.cli_config import flatten_cli_config, load_yaml_config  # noqa: E40
 from toricgt.config import ModelConfig  # noqa: E402
 from toricgt.graph_dataset import CuratedGraphIterableDataset, collate_graph_items  # noqa: E402
 from toricgt.graph_tokenizer import GraphBatch  # noqa: E402
+from toricgt.metrics import covered_target_bytes  # noqa: E402
 from toricgt.model import ToricTokenGT  # noqa: E402
 from toricgt.wandb_organization import configure_wandb_metrics, organize_wandb_payload  # noqa: E402
 
@@ -105,6 +106,7 @@ def move_batch(batch: GraphBatch, device: str) -> GraphBatch:
         lm_target_positions=batch.lm_target_positions.to(device) if batch.lm_target_positions is not None else None,
         lm_input_features=batch.lm_input_features.to(device) if batch.lm_input_features is not None else None,
         node_causal_rank=batch.node_causal_rank.to(device) if batch.node_causal_rank is not None else None,
+        lm_byte_accounting_exact=batch.lm_byte_accounting_exact,
     )
 
 
@@ -167,6 +169,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     total_nll = 0.0
     total_tokens = 0.0
     total_estimated_bytes = 0.0
+    byte_covered_tokens = 0.0
+    exact_accounting = True
     batches = 0
     max_batches = max(1, int(args.batches))
     with torch.no_grad():
@@ -188,9 +192,11 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 targets = batch.lm_target_ids.to(device=logits.device, dtype=torch.long).clamp(0, logits.shape[-1] - 1)
                 loss = F.cross_entropy(logits.float()[mask], targets[mask])
                 tokens = float(mask.sum().detach().cpu())
-                if batch.lm_target_byte_lengths is not None:
-                    byte_lengths = batch.lm_target_byte_lengths.to(device=logits.device, dtype=logits.float().dtype)[mask]
-                    total_estimated_bytes += float(byte_lengths.clamp_min(0.0).sum().detach().cpu())
+                target_bytes = covered_target_bytes(batch.lm_target_byte_lengths, mask)
+                if target_bytes is not None:
+                    total_estimated_bytes += float(target_bytes)
+                    byte_covered_tokens += tokens
+                exact_accounting = exact_accounting and batch.lm_byte_accounting_exact
             total_nll += float(loss.detach().cpu()) * tokens
             total_tokens += tokens
             batches += 1
@@ -201,10 +207,12 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         return unavailable_summary(checkpoint_path, "no FineWeb LM target tokens were found during evaluation")
     loss_value = total_nll / total_tokens
     bits_per_token = loss_value / math.log(2.0)
-    estimated_bpb = (total_nll / math.log(2.0)) / total_estimated_bytes if total_estimated_bytes > 0 else None
-    mean_bytes_per_token = total_estimated_bytes / total_tokens if total_estimated_bytes > 0 else None
+    complete_bytes = byte_covered_tokens == total_tokens and total_estimated_bytes > 0
+    estimated_bpb = (total_nll / math.log(2.0)) / total_estimated_bytes if complete_bytes else None
+    mean_bytes_per_token = total_estimated_bytes / total_tokens if complete_bytes else None
     step = int(payload.get("step", 0) or 0)
-    causal_tokengt_bpb_available = bool(cfg.use_causal_graph_attention and cfg.use_lm_token_embeddings)
+    causal_graph_route = bool(cfg.use_causal_graph_attention and cfg.use_lm_token_embeddings)
+    causal_tokengt_bpb_available = causal_graph_route and complete_bytes and exact_accounting
     summary: dict[str, Any] = {
         "checkpoint": str(checkpoint_path),
         "step": step,
@@ -213,12 +221,12 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "note": (
             "Causal TokenGT SP1024 next-token BPB with OAI SentencePiece byte accounting."
             if causal_tokengt_bpb_available
-            else "TokenGT graph-node SP1024 next-token bits/token; byte-normalized BPB is a proxy unless causal graph attention and learned LM token embeddings are enabled."
+            else "TokenGT graph-node SP1024 diagnostic. Causal byte-level BPB requires learned LM token embeddings, causal graph attention, and complete tokenizer-backed byte accounting."
         ),
-        "oai_competition/available": 1.0 if causal_tokengt_bpb_available else 0.0,
+        "oai_competition/available": float(causal_graph_route),
         "oai_competition/bpb_available": 1.0 if causal_tokengt_bpb_available else 0.0,
         "oai_competition/bpb": float(estimated_bpb) if estimated_bpb is not None and causal_tokengt_bpb_available else None,
-        "oai_competition/loss": float(loss_value) if causal_tokengt_bpb_available else None,
+        "oai_competition/loss": float(loss_value) if causal_graph_route else None,
         "oai_competition/source_sp1024_graph_nodes": 1.0,
         "oai_competition/official_byte_level_bpb_available": 1.0 if causal_tokengt_bpb_available else 0.0,
         "oai_competition/eval_scope": (
@@ -248,7 +256,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "03_validation/tokengt_fineweb_graph_node_sp1024_loss": float(loss_value),
         "03_validation/tokengt_fineweb_graph_node_sp1024_bpt": float(bits_per_token),
         "03_validation/tokengt_fineweb_graph_node_sp1024_tokens": float(total_tokens),
-        "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_available": 0.0,
+        "03_validation/oai_parameter_golf_restricted_fineweb_official_byte_bpb_available": float(
+            causal_tokengt_bpb_available
+        ),
     }
     if estimated_bpb is not None and mean_bytes_per_token is not None:
         summary.update(

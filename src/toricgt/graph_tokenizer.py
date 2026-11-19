@@ -13,8 +13,11 @@ from torch import nn
 class GraphBatch:
     """Dense padded graph batch.
 
-    ``edge_index`` stores endpoint ids for edge tokens and has shape
-    ``[batch, max_edges, 2]``. Padding masks are true for valid items.
+    ``edge_index`` stores endpoint row indices with shape ``[batch, max_edges, 2]``.
+    Padding masks are true for valid items. Optional identity IDs travel with
+    the corresponding rows under a permutation. They index the existing
+    embedding tables and must be unique within each graph and token type.
+    Omitted IDs use row positions.
     """
 
     node_features: torch.Tensor
@@ -29,6 +32,9 @@ class GraphBatch:
     lm_target_positions: Optional[torch.Tensor] = None
     lm_input_features: Optional[torch.Tensor] = None
     node_causal_rank: Optional[torch.Tensor] = None
+    node_identity_ids: Optional[torch.Tensor] = None
+    edge_identity_ids: Optional[torch.Tensor] = None
+    lm_byte_accounting_exact: bool = False
 
 
 @dataclass
@@ -74,6 +80,20 @@ class GraphTokenizer(nn.Module):
         angles = 2.0 * torch.pi * theta * idx * freqs
         return torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
 
+    @staticmethod
+    def _identity_indices(
+        ids: torch.Tensor, mask: torch.Tensor, capacity: int, label: str, device: torch.device
+    ) -> torch.Tensor:
+        if ids.shape != mask.shape or ids.dtype not in (torch.int32, torch.int64):
+            raise ValueError(f"{label} identity IDs must be integer tensors aligned with the padding mask")
+        indices = ids.to(device=device, dtype=torch.long).masked_fill(~mask, 0)
+        if bool((((indices < 0) | (indices >= capacity)) & mask).any()):
+            raise ValueError(f"{label} identity ID outside the configured embedding table")
+        sorted_ids = indices.masked_fill(~mask, capacity).sort(dim=1).values
+        if bool(((sorted_ids[:, 1:] == sorted_ids[:, :-1]) & (sorted_ids[:, 1:] < capacity)).any()):
+            raise ValueError(f"{label} identity IDs must be unique within a graph")
+        return indices
+
     def forward(self, batch: GraphBatch) -> TokenBatch:
         bsz, n_nodes, _ = batch.node_features.shape
         _, n_edges, _ = batch.edge_features.shape
@@ -81,7 +101,9 @@ class GraphTokenizer(nn.Module):
             raise ValueError("batch exceeds configured max_nodes/max_edges")
 
         device = batch.node_features.device
-        if batch.edge_mask.numel() > 0:
+        if batch.edge_identity_ids is not None:
+            active_edges = n_edges  # Explicit identities permit padded slots to move among real rows.
+        elif batch.edge_mask.numel() > 0:
             active_edges = int(batch.edge_mask.long().sum(dim=1).max().detach().cpu().item())
             active_edges = max(1, min(active_edges, n_edges))
         else:
@@ -92,15 +114,24 @@ class GraphTokenizer(nn.Module):
         n_edges = active_edges
         node_ids = torch.arange(n_nodes, device=device).expand(bsz, n_nodes)
         edge_ids = torch.arange(n_edges, device=device).expand(bsz, n_edges)
+        toric_features = self.torus_freq[:n_nodes].to(device).unsqueeze(0)
+        if batch.node_identity_ids is not None:
+            node_ids = self._identity_indices(batch.node_identity_ids, batch.node_mask, self.max_nodes, "node", device)
+            toric_features = self.torus_freq.to(device)[node_ids]
+        if batch.edge_identity_ids is not None:
+            edge_ids = self._identity_indices(batch.edge_identity_ids, edge_mask, self.max_edges, "edge", device)
 
         node_tok = self.node_proj(batch.node_features)
         node_tok = node_tok + self.type_emb(torch.zeros_like(node_ids)) + self.node_id(node_ids)
-        toric = self.toric_proj(self.torus_freq[:n_nodes].to(device)).unsqueeze(0)
-        node_tok = node_tok + toric
+        node_tok = node_tok + self.toric_proj(toric_features)
 
         endpoints = edge_index.clamp(min=0, max=max(n_nodes - 1, 0))
-        src = self.node_id(endpoints[..., 0])
-        dst = self.node_id(endpoints[..., 1])
+        src_ids, dst_ids = endpoints.unbind(dim=-1)
+        if batch.node_identity_ids is not None:
+            src_ids = node_ids.gather(1, src_ids)
+            dst_ids = node_ids.gather(1, dst_ids)
+        src = self.node_id(src_ids)
+        dst = self.node_id(dst_ids)
         edge_tok = self.edge_proj(edge_features)
         edge_tok = edge_tok + self.type_emb(torch.ones_like(edge_ids)) + self.edge_id(edge_ids)
         edge_tok = edge_tok + self.endpoint_proj(torch.cat([src, dst], dim=-1))
