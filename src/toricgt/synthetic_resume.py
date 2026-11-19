@@ -14,6 +14,23 @@ from zipfile import ZipFile
 import numpy as np
 import torch
 
+from .config import ModelConfig, TrainConfig
+
+
+# Omitting default values for later options preserves existing exact-resume digests.
+ADDED_RECIPE_DEFAULTS = {
+    "dropout": ModelConfig.dropout,
+    "ffn_multiplier": ModelConfig.ffn_multiplier,
+    "ring_block_size": ModelConfig.ring_block_size,
+    "torus_rank": ModelConfig.torus_rank,
+    "theta": ModelConfig.theta,
+    "soft_moe_residual_scale": ModelConfig.soft_moe_residual_scale,
+    "clip_grad_norm": TrainConfig.clip_grad_norm,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.999,
+    "adam_eps": 1e-8,
+}
+
 
 def atomic_save_checkpoint(payload: dict, path: Path) -> None:
     """Verify the serialized checkpoint before replacing the destination."""
@@ -67,7 +84,10 @@ def _check_plan_digest(args, horizon, recovery, label, **extra):
         "resume", "steps", "checkpoint_dir", "config", "schedule_total_steps",
         "prepared_stream_manifest", "prepared_stream_sha256", "check_prepared_stream",
     }
-    settings = {key: value for key, value in vars(args).items() if key not in invocation_keys}
+    settings = {
+        key: value for key, value in vars(args).items()
+        if key not in invocation_keys and (key not in ADDED_RECIPE_DEFAULTS or value != ADDED_RECIPE_DEFAULTS[key])
+    }
     settings.update(schedule_total_steps=horizon, torch_version=str(torch.__version__), **extra)
     encoded = json.dumps(settings, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     digest = hashlib.sha256(encoded).hexdigest()

@@ -525,10 +525,20 @@ def run_training_entry(resources: ExitStack) -> None:
     parser.add_argument("--num-layers", type=int, default=6)
     parser.add_argument("--max-nodes", type=int, default=256)
     parser.add_argument("--max-edges", type=int, default=1024)
+    parser.add_argument("--dropout", type=float, default=ModelConfig.dropout)
+    parser.add_argument("--ffn-multiplier", type=int, default=ModelConfig.ffn_multiplier)
+    parser.add_argument("--ring-block-size", type=int, default=ModelConfig.ring_block_size)
+    parser.add_argument("--torus-rank", type=int, default=ModelConfig.torus_rank)
+    parser.add_argument("--theta", type=float, default=ModelConfig.theta)
+    parser.add_argument("--soft-moe-residual-scale", type=float, default=ModelConfig.soft_moe_residual_scale)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--grad-accum-steps", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=0.05)
+    parser.add_argument("--clip-grad-norm", type=float, default=TrainConfig.clip_grad_norm)
+    parser.add_argument("--adam-beta1", type=float, default=0.9)
+    parser.add_argument("--adam-beta2", type=float, default=0.999)
+    parser.add_argument("--adam-eps", type=float, default=1e-8)
     parser.add_argument("--precision", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--checkpoint-every", type=int, default=0)
@@ -623,6 +633,12 @@ def run_training_entry(resources: ExitStack) -> None:
         num_layers=args.num_layers,
         max_nodes=args.max_nodes,
         max_edges=args.max_edges,
+        dropout=args.dropout,
+        ffn_multiplier=args.ffn_multiplier,
+        ring_block_size=args.ring_block_size,
+        torus_rank=args.torus_rank,
+        theta=args.theta,
+        soft_moe_residual_scale=args.soft_moe_residual_scale,
         use_soft_moe=not args.no_soft_moe,
         soft_moe_num_experts=args.soft_moe_experts,
         soft_moe_slots_per_expert=args.soft_moe_slots,
@@ -668,13 +684,17 @@ def run_training_entry(resources: ExitStack) -> None:
         grad_accum_steps=args.grad_accum_steps,
         lr=args.lr,
         weight_decay=args.weight_decay,
+        clip_grad_norm=args.clip_grad_norm,
         warmup_steps=args.warmup_steps,
         max_steps=args.steps,
         precision=args.precision,
         log_interval=args.log_interval,
     )
     model = ToricTokenGT(model_cfg).to(args.device)
-    optimizer = AdamW(model.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.weight_decay)
+    optimizer = AdamW(
+        model.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.weight_decay,
+        betas=(args.adam_beta1, args.adam_beta2), eps=args.adam_eps,
+    )
     scaler = torch.amp.GradScaler("cuda", enabled=args.device.startswith("cuda") and train_cfg.precision == "fp16")
     start_step = 0
     checkpoint = None

@@ -126,3 +126,10 @@ def test_atomic_save_retains_existing_checkpoint_on_failure(tmp_path, monkeypatc
         atomic_save_checkpoint({"step": 2}, target)
     assert target.read_bytes() == original
     assert list(tmp_path.iterdir()) == [target]
+
+
+def test_default_extended_knobs_keep_the_old_resume_digest():
+    from toricgt.synthetic_resume import ADDED_RECIPE_DEFAULTS
+
+    assert synthetic_resume_plan(options(**ADDED_RECIPE_DEFAULTS)) == synthetic_resume_plan(options())
+    assert synthetic_resume_plan(options(adam_beta1=0.8)) != synthetic_resume_plan(options())

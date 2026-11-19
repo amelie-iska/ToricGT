@@ -28,6 +28,18 @@ model:
   max_nodes: 256
   # Padded directed edge-token capacity.
   max_edges: 1024
+  # Dropout probability in native encoder blocks.
+  dropout: 0.1
+  # Feed-forward hidden dimension as a multiple of d_model.
+  ffn_multiplier: 4
+  # Query block size for tropical ring attention.
+  ring_block_size: 256
+  # Number of toric positional frequencies per node.
+  torus_rank: 2
+  # Phase increment for toric position features, in cycles per identity.
+  theta: 0.6180339887498948
+  # Residual scale of the native Soft-MoE update.
+  soft_moe_residual_scale: 0.1
   # Number of passes through the same encoder stack.
   recurrent_passes: 1
   # Apply reveal-rank masking in the native encoder.
@@ -60,6 +72,14 @@ training:
   lr: 0.0003
   # Decoupled AdamW weight decay.
   weight_decay: 0.05
+  # Maximum global gradient norm after AMP unscaling.
+  clip_grad_norm: 1.0
+  # AdamW first-moment decay factor.
+  adam_beta1: 0.9
+  # AdamW second-moment decay factor.
+  adam_beta2: 0.999
+  # AdamW denominator stabilizer.
+  adam_eps: 1.0e-8
   # cosine or constant across both epochs.
   lr_schedule: cosine
   # null uses 10% of updates, capped at 2,000.

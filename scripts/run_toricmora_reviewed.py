@@ -59,6 +59,7 @@ def _read_recipe(config: Path):
     positive = (
         "d_model", "num_heads", "num_layers", "max_nodes", "max_edges", "batch_size", "grad_accum_steps",
         "soft_moe_experts", "soft_moe_slots", "recurrent_passes", "log_interval",
+        "ffn_multiplier", "ring_block_size", "torus_rank",
     )
     for name in positive:
         if type(settings.get(name)) is not int or settings[name] < 1:
@@ -73,12 +74,17 @@ def _read_recipe(config: Path):
         value = settings.get(name, 0.0)
         if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
             raise ValueError(f"{name} must be a finite nonnegative number")
-    for name in ("lr", "weight_decay", "min_lr_ratio"):
+    for name in ("lr", "weight_decay", "min_lr_ratio", "dropout", "theta", "soft_moe_residual_scale",
+                 "clip_grad_norm", "adam_beta1", "adam_beta2", "adam_eps"):
         value = settings.get(name)
         if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
             raise ValueError(f"{name} must be a finite nonnegative number")
-    if settings["lr"] == 0 or settings["min_lr_ratio"] > 1:
-        raise ValueError("learning rate must be positive and min_lr_ratio at most one")
+    if settings["min_lr_ratio"] > 1:
+        raise ValueError("min_lr_ratio must be at most one")
+    if any(settings[name] == 0 for name in ("lr", "adam_eps", "clip_grad_norm")):
+        raise ValueError("learning rate, adam_eps and clip_grad_norm must be positive")
+    if any(settings[name] >= 1 for name in ("dropout", "adam_beta1", "adam_beta2")):
+        raise ValueError("dropout and AdamW beta values must be less than one")
     if type(settings.get("seed")) is not int or not 0 <= settings["seed"] <= 2**32 - 1:
         raise ValueError("seed must be an unsigned 32-bit integer")
     warmup = settings.get("warmup_steps")
